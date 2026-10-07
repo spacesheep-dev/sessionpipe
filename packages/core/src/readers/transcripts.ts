@@ -81,7 +81,21 @@ const textParts = (c: unknown, kinds: string[]): string => {
     .join("\n");
 };
 
-/** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin}. */
+/** A message the person sent while a turn was running, absorbed by that turn. Claude Code
+ *  writes it as an attachment, never as a `user` record: {type:"attachment",
+ *  attachment:{type:"queued_command", prompt, commandMode:"prompt", origin:{kind:"human"}}}.
+ *  Task notifications and other sessions' messages share the record with another
+ *  `commandMode` or `origin.kind`; older versions wrote no origin. */
+const queuedPrompt = (a: unknown): string => {
+  if (!a || typeof a !== "object") return "";
+  const q = a as { type?: unknown; commandMode?: unknown; origin?: { kind?: string }; prompt?: unknown };
+  if (q.type !== "queued_command" || (q.commandMode ?? "prompt") !== "prompt") return "";
+  if (q.origin?.kind && q.origin.kind !== "human") return "";
+  return textParts(q.prompt, ["text"]).trim();
+};
+
+/** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},
+ *  plus the person's mid-turn messages (queuedPrompt). */
 export function readClaude(lines: string[], from: number): TranscriptRead {
   const msgs: Msg[] = [];
   for (let i = from; i < lines.length; i++) {
@@ -102,6 +116,9 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     } else if (j.type === "assistant" && Array.isArray(c)) {
       const text = textParts(c, ["text"]).trim();
       if (text) msgs.push({ role: "assistant", text, at, line: i });
+    } else if (j.type === "attachment") {
+      const text = queuedPrompt(j.attachment);
+      if (text && !isInjected(text)) msgs.push({ role: "user", text, at, line: i });
     }
   }
   return pairTurns(msgs, endOf(lines));

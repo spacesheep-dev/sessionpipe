@@ -9,6 +9,9 @@
 - `delivery/*.json` — receiver scenarios: dedup, 413 split, 403 tier, retry, forget, control, pairing renewal.
   A control scenario's `enqueue` step is the receiver's own test door: the runner signs
   the message with a test key it enrolled there, and `{run}` / `{run12}` are the run id.
+- `transcripts/<harness>/*.jsonl` — transcript files as the harness writes them, scrubbed, for what
+  a reader must keep and skip (spec/ADAPTERS.md, the Transcript row). Read by
+  `packages/core/test/transcripts.test.ts`.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; regenerate with `npm run vectors`.

@@ -29,6 +29,18 @@ const assistant = (text: string, extra: Record<string, unknown> = {}) =>
 const COMPACTION = readFileSync(new URL("./fixtures/claude-mid-turn-compaction.jsonl", import.meta.url), "utf8")
   .trimEnd()
   .split("\n");
+// A message the person sends while a turn is running is not a `user` record. Claude Code
+// (2.1.293, 2026-10-07) writes it as a `queued_command` attachment that the running turn
+// absorbs, so a reader of `user` records alone drops the person's words. The same record
+// carries task notifications and other sessions' messages (`origin.kind`
+// task-notification / peer); older versions wrote it with no origin.
+const QUEUED = readFileSync(
+  new URL("../../../conformance/transcripts/claude-code/queued-command.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n");
+const atQ = (s: number) => Date.UTC(2026, 9, 7, 22, 0, s);
 const COMPACTED_TURN = {
   user: "Run experiment 3 and report back.",
   assistant: "Starting experiment 3.\n\nThe plan is ready; writing the scheduler.\n\nWriting the evaluation app now.",
@@ -200,6 +212,69 @@ describe("readClaude", () => {
     expect(r.turns[0]?.at).toBeGreaterThanOrEqual(before);
     expect(readClaude([user("x", { origin: {} }), assistant("y")], 0).turns[0]?.user).toBe("x");
     expect(readClaude([JSON.stringify({ type: "user" }), assistant("y")], 0).turns[0]?.user).toBe("");
+  });
+});
+
+describe("readClaude: the person's mid-turn messages", () => {
+  // "and the docs" was written before Claude Code recorded an origin; "this screenshot…" came with an image.
+  it("keeps a message sent mid-turn, with what was said after it; one sent before any reply joins the ask", () => {
+    expect(readClaude(QUEUED, 0).turns).toEqual([
+      { user: "fix the build", assistant: "Looking at the build first.", at: atQ(0), endLine: 1 },
+      {
+        user: "also run the tests\n\nand the docs",
+        assistant: "The build is fixed, the tests pass, and the docs are updated.",
+        at: atQ(3),
+        endLine: 8,
+      },
+      {
+        user: "ship it\n\nthis screenshot shows the bug",
+        assistant: "Shipped, with the fix from the screenshot.",
+        at: atQ(9),
+        endLine: 15,
+      },
+    ]);
+  });
+
+  it("skips task notifications, other sessions' messages, wrappers sent as a queued command, other attachments", () => {
+    const all = readClaude(QUEUED, 0);
+    const words = [...all.turns.flatMap((t) => [t.user, t.assistant]), all.open?.user ?? ""].join("\n");
+    expect(words).not.toMatch(/task-notification|another session|cross-session-message|hello/);
+  });
+
+  it("holds the cursor before a mid-turn message that has no reply yet, and numbers it as the transcript will", () => {
+    const read = readClaude(QUEUED, 0);
+    expect(read.open).toEqual({ user: "one more thing", at: atQ(16) });
+    expect(read.line).toBe(16);
+    // turn.progress shows it as turn 3, and turn.transcript delivers turn 3 once the reply lands.
+    expect(openTurn(read, { base: 0, at: atQ(17) })).toEqual({
+      turn: 3,
+      user: "one more thing",
+      assistant: "",
+      at: atQ(16),
+    });
+    const later = readClaude([...QUEUED, assistant("Also done.")], read.line);
+    expect(later.turns).toEqual([{ user: "one more thing", assistant: "Also done.", at: atQ(16), endLine: 17 }]);
+    expect(later.line).toBe(18);
+    expect(later.open).toBeUndefined();
+  });
+
+  it("an attachment with no body, a body that is not an object, a blank prompt, a sidechain", () => {
+    const q = (attachment: unknown, extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ type: "attachment", attachment, timestamp: T0, ...extra });
+    const r = readClaude(
+      [
+        user("hello"),
+        JSON.stringify({ type: "attachment", timestamp: T0 }),
+        q("queued_command"),
+        q({ type: "queued_command", prompt: "   " }),
+        q({ type: "queued_command", prompt: "side", origin: { kind: "human" } }, { isSidechain: true }),
+        q({ type: "queued_command", prompt: [{ type: "image" }] }),
+        assistant("hi"),
+        "",
+      ],
+      0,
+    );
+    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 6 }], line: 7 });
   });
 });
 
