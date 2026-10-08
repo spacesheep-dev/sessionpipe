@@ -5,9 +5,10 @@
 // account, a file too big to read whole), the per-pid registry and backfill. All of it
 // in a temp home; the real ~/.claude is never read for a fact or written at all.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetClaudeCaches,
@@ -98,7 +99,8 @@ describe("claude-code fromHook", () => {
     expect(hook("Stop", "{}")).toBeNull();
     expect(hook("Stop", "null")).toBeNull();
     expect(hook("SomethingNew", {})).toBeNull();
-    expect(hook("Stop", '{"sessionId":"alt"}')?.session.id).toBe("alt");
+    const alt = "3f2a1b0c-9d8e-4f7a-b6c5-d4e3f2a1b0c9";
+    expect(hook("Stop", `{"sessionId":"${alt}"}`)?.session.id).toBe(alt);
   });
   it("session: cwd from the payload or argv, the model, a subagent's call marks the parent unknown", () => {
     const r = hook("PreToolUse", { cwd: "/w", model: "m", agent_id: "a1", tool_name: "Bash", transcript_path: "/t" });
@@ -469,5 +471,55 @@ describe("claude-code transcript and backfill", () => {
     expect(rows[0]?.session).not.toHaveProperty("first_ask");
     expect(rows[0]?.session).not.toHaveProperty("harness_version");
     expect(file).toContain(SID);
+  });
+});
+
+describe("claude-code: a payload another harness ran", () => {
+  // Devin imports ~/.claude/settings.json hooks (read_config_from.claude, on by
+  // default), so our claude-code entries there can be run by Devin. Its payload has no
+  // transcript_path and its session id is a word-word slug: reporting that as a Claude
+  // Code session would invent one that does not exist.
+  it("is dropped when it names no transcript and its session id is not a UUID", () => {
+    const devinish = JSON.stringify({
+      hook_event_name: "SessionStart",
+      session_id: "frill-vulture",
+      source: "startup",
+    });
+    expect(
+      claudeCode.fromHook({ argv: ["claude-code", "SessionStart"], stdin: devinish, env: {}, cwd: "/" }),
+    ).toBeNull();
+    // A real Claude Code payload is untouched.
+    const real = JSON.stringify({
+      session_id: "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+      transcript_path: "/Users/x/.claude/projects/p/ed6c7665-589f-40c7-b7b4-e38ee662b7bc.jsonl",
+      source: "startup",
+    });
+    expect(
+      claudeCode.fromHook({ argv: ["claude-code", "SessionStart"], stdin: real, env: {}, cwd: "/" })?.session.id,
+    ).toBe("ed6c7665-589f-40c7-b7b4-e38ee662b7bc");
+  });
+
+  it("keeps every recorded Claude Code fixture: each names a transcript and a UUID", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const dir = path.resolve(here, "../../../conformance/harness/claude-code");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBeGreaterThan(10);
+    for (const f of files) {
+      const fx = JSON.parse(readFileSync(path.join(dir, f), "utf8")) as {
+        input: { argv: string[]; stdin: string; env?: Record<string, string>; cwd?: string };
+      };
+      const s = JSON.parse(fx.input.stdin) as { session_id: string; transcript_path?: string };
+      expect(typeof s.transcript_path, f).toBe("string");
+      expect(s.session_id, f).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(
+        claudeCode.fromHook({
+          argv: fx.input.argv,
+          stdin: fx.input.stdin,
+          env: fx.input.env ?? {},
+          cwd: fx.input.cwd ?? "/",
+        }),
+        f,
+      ).not.toBeNull();
+    }
   });
 });

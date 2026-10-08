@@ -119,6 +119,7 @@ export const claudeCode: Adapter = {
     } catch {}
     const id = (s.session_id ?? s.sessionId) as string | undefined;
     if (!id) return null;
+    if (notClaudeCode(String(id), s)) return null;
     const session: HookResult["session"] = { id: String(id), cwd: typeof s.cwd === "string" ? s.cwd : input.cwd };
     if (typeof s.model === "string") session.model = s.model;
     if (typeof s.agent_id === "string" && event.startsWith("Subagent") === false && s.agent_id)
@@ -302,6 +303,15 @@ export const claudeCode: Adapter = {
 function prune<T extends Record<string, unknown>>(o: T): T {
   for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
   return o;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Another harness reading this settings file, not Claude Code. Several harnesses
+ *  import `~/.claude/settings.json` hooks, so our entries there can be run by a tool
+ *  that has its own adapter: it would arrive under the wrong name, with ids that mean
+ *  nothing to a Claude Code reader. Every Claude Code payload names a transcript and a
+ *  UUID session (all 21 recorded fixtures do); a payload with neither is somebody else's. */
+export function notClaudeCode(id: string, s: Record<string, unknown>): boolean {
+  return typeof s.transcript_path !== "string" && !UUID.test(id);
 }
 function pickSource(v: unknown): string {
   return typeof v === "string" && ["startup", "resume", "clear", "compact", "fork"].includes(v) ? v : "unknown";

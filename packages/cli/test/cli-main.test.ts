@@ -1279,6 +1279,9 @@ describe.skipIf(process.platform === "win32")("update", () => {
   });
 });
 
+// A Claude Code session id is a UUID; the adapter drops a payload with any other shape
+// and no transcript_path as another harness's (claude-code.ts notClaudeCode).
+const JOB_SESSION = "7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f";
 describe.skipIf(process.platform === "win32")("worker", () => {
   it("runs one queued job from its file and removes the file", async () => {
     expect((await run("worker")).lines).toEqual([]);
@@ -1287,14 +1290,14 @@ describe.skipIf(process.platform === "win32")("worker", () => {
       harness: "claude-code",
       event: "SessionStart",
       argv: ["claude-code", "SessionStart"],
-      stdin: JSON.stringify({ session_id: "job-session", hook_event_name: "SessionStart", cwd: tmp }),
+      stdin: JSON.stringify({ session_id: JOB_SESSION, hook_event_name: "SessionStart", cwd: tmp }),
       cwd: tmp,
       env: {},
       at: Date.now(),
     });
     await run("worker", file);
     expect(existsSync(file)).toBe(false);
-    expect(new Outbox(state).sessions()).toEqual([{ harness: "claude-code", session: "job-session" }]);
+    expect(new Outbox(state).sessions()).toEqual([{ harness: "claude-code", session: JOB_SESSION }]);
   });
 
   it.skipIf(process.getuid?.() === 0)("a job file it can't remove is still run", async () => {
