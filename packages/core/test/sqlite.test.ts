@@ -85,6 +85,26 @@ const DB = "/some/sessions.db";
 const sq = (m: Mod, engine: "node" | "child" | "cli" | "auto", sql = "SELECT 1", params: (string | number)[] = []) =>
   m.querySqlite(DB, sql, params, { engine });
 
+describe("sqlite: the warning the reader keeps off the terminal", () => {
+  it("swallows Node's experimental-SQLite warning in either spelling, passes every other on, and puts the emitter back", async () => {
+    const { quiet } = await import("../src/readers/sqlite.js");
+    const original = process.emitWarning;
+    const passed = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
+    const r = quiet(() => {
+      process.emitWarning("SQLite is an experimental feature", "ExperimentalWarning");
+      process.emitWarning("SQLite is an experimental feature", { type: "ExperimentalWarning" });
+      process.emitWarning("something else", "DeprecationWarning");
+      process.emitWarning("no type at all");
+      return 42;
+    });
+    expect(r).toBe(42);
+    expect(passed.mock.calls.map((c) => c[0])).toEqual(["something else", "no type at all"]);
+    expect(process.emitWarning).toBe(passed);
+    passed.mockRestore();
+    expect(process.emitWarning).toBe(original);
+  });
+});
+
 describe("sqlite: the in-process way in", () => {
   it("a Node without node:sqlite, or with one that has no DatabaseSync, has no in-process engine", async () => {
     const gone = await load({

@@ -39,6 +39,25 @@ interface Db {
 }
 type DbCtor = new (path: string, options?: Record<string, unknown>) => Db;
 
+/** `node:sqlite` is still experimental, and Node says so on stderr the first time it is
+ *  used. A reader has no business writing to a harness's terminal, so that one warning
+ *  is swallowed while the module is loaded and used — nothing else is, and the original
+ *  emitter is back before this returns. (The child path passes --no-warnings instead.)
+ *  Exported for its test: Node emits that warning once per process. */
+export function quiet<T>(fn: () => T): T {
+  const original = process.emitWarning;
+  try {
+    process.emitWarning = ((warning: unknown, ...rest: unknown[]) => {
+      const kind = typeof rest[0] === "string" ? rest[0] : (rest[0] as { type?: string } | undefined)?.type;
+      if (kind === "ExperimentalWarning" && /sqlite/i.test(String(warning))) return;
+      (original as (...a: unknown[]) => void).call(process, warning, ...rest);
+    }) as typeof process.emitWarning;
+    return fn();
+  } finally {
+    process.emitWarning = original;
+  }
+}
+
 let ctorCache: DbCtor | null | undefined;
 /** `node:sqlite` if this Node has it; null if it does not (Node 20, or 22.x unflagged). */
 function dbCtor(): DbCtor | null {
@@ -46,7 +65,7 @@ function dbCtor(): DbCtor | null {
   ctorCache = null;
   try {
     const req = createRequire(import.meta.url);
-    const m = req("node:sqlite") as { DatabaseSync?: unknown };
+    const m = quiet(() => req("node:sqlite")) as { DatabaseSync?: unknown };
     if (typeof m?.DatabaseSync === "function") ctorCache = m.DatabaseSync as DbCtor;
   } catch {}
   return ctorCache;
@@ -78,7 +97,7 @@ function viaNode(file: string, sql: string, params: SqliteParam[], o: Required<S
   if (!C) return null;
   let db: Db;
   try {
-    db = new C(file, { readOnly: true, timeout: o.timeoutMs });
+    db = quiet(() => new C(file, { readOnly: true, timeout: o.timeoutMs }));
   } catch {
     return null;
   }
@@ -86,7 +105,7 @@ function viaNode(file: string, sql: string, params: SqliteParam[], o: Required<S
     try {
       db.exec(`PRAGMA busy_timeout = ${Math.round(o.timeoutMs)}`);
     } catch {}
-    return rows(db.prepare(sql).all(...params));
+    return quiet(() => rows(db.prepare(sql).all(...params)));
   } catch {
     return null;
   } finally {
