@@ -1,0 +1,41 @@
+{
+  "harness": "devin",
+  "event": "Stop",
+  "recorded": {
+    "at": "2026-10-08T22:23:25.000Z",
+    "harness_version": "3000.11.3",
+    "how": "devin --respect-workspace-trust false --model swe-2-medium -p with a recording hook in .devin/hooks.v1.json"
+  },
+  "input": {
+    "argv": [
+      "devin",
+      "Stop"
+    ],
+    "stdin": "{\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"alpha-token-marker-42\",\"prompt_id\":\"715ae593-e501-4349-b11f-ed487c21047f\",\"session_id\":\"frill-vulture\",\"stop_hook_active\":false}",
+    "env": {
+      "DEVIN_PROJECT_DIR": "/tmp/rec/devin-proj"
+    },
+    "cwd": "/tmp/rec/devin-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "devin",
+        "event": "Stop"
+      },
+      "session": {
+        "id": "frill-vulture",
+        "cwd": "/tmp/rec/devin-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+        "reason": "stop"
+      }
+    }
+  ]
+}

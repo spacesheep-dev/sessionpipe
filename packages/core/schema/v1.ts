@@ -60,6 +60,7 @@ export const HARNESS_NAMES = [
   "codex",
   "gemini-cli",
   "antigravity",
+  "devin",
   "cursor",
   "copilot-cli",
   "droid",

@@ -328,10 +328,11 @@ export async function runJob(
       learned = rest;
       if (harness_version) facts.save(job.harness, id, { harness_version });
       facts.save(job.harness, id, { session: { ...(mem.session as object), ...learned } });
-      // Antigravity's transcript never says which folder a conversation runs in; the
-      // hooks do. Kept raw (this file is the machine's own, 0600), so the control
+      // Antigravity's transcript never says which folder a conversation runs in, and
+      // Devin's payload names none either (only DEVIN_PROJECT_DIR in the hook's env);
+      // the hooks do. Kept raw (this file is the machine's own, 0600), so the control
       // daemon still knows where to resume it after a restart.
-      if (job.harness === "antigravity" && r.session.cwd && path.isAbsolute(r.session.cwd))
+      if (CWD_FROM_HOOKS.has(job.harness) && r.session.cwd && path.isAbsolute(r.session.cwd))
         facts.save(job.harness, id, { cwd: r.session.cwd });
     }
     const known = (mem.session as Partial<Session> | undefined) ?? {};
@@ -528,6 +529,9 @@ function clearBackoff(state: string, sink: string): void {
 
 /** How long a job waits for its session's lock before it goes back to the queue. */
 const LOCK_WAIT_MS = 6000;
+/** Harnesses whose own files do not name the session's folder: the hooks' cwd is kept. */
+const CWD_FROM_HOOKS = new Set(["antigravity", "devin"]);
+
 const BATCH = 50;
 const MAX_PER_RUN = 500;
 

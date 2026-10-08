@@ -57,7 +57,11 @@ export function kindPath(
     case "prompt":
       return "prompt";
     case "permission.answer":
-      return harness === "gemini-cli" ? { unsupported: "Gemini CLI has no permission answer channel" } : "permission";
+      return harness === "gemini-cli"
+        ? { unsupported: "Gemini CLI has no permission answer channel" }
+        : harness === "devin"
+          ? { unsupported: "Devin has no permission answer channel" }
+          : "permission";
     case "cancel":
       return "cancel";
     case "start":

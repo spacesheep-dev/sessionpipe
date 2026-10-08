@@ -1,0 +1,40 @@
+{
+  "harness": "devin",
+  "event": "SessionStart",
+  "recorded": {
+    "at": "2026-10-08T22:22:23.000Z",
+    "harness_version": "3000.11.3",
+    "how": "devin --respect-workspace-trust false --model swe-2-medium -p with a recording hook in .devin/hooks.v1.json"
+  },
+  "input": {
+    "argv": [
+      "devin",
+      "SessionStart"
+    ],
+    "stdin": "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"fluttering-steam\",\"source\":\"startup\"}",
+    "env": {
+      "DEVIN_PROJECT_DIR": "/tmp/rec/devin-proj"
+    },
+    "cwd": "/tmp/rec/devin-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "session.started",
+      "harness": {
+        "name": "devin",
+        "event": "SessionStart"
+      },
+      "session": {
+        "id": "fluttering-steam",
+        "cwd": "/tmp/rec/devin-proj",
+        "seq": "*"
+      },
+      "data": {
+        "source": "startup"
+      }
+    }
+  ]
+}

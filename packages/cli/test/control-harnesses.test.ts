@@ -201,6 +201,11 @@ describe("which kinds go where", () => {
     expect(kindPath("start", "claude-code")).toBe("start");
     expect(kindPath("start", "gemini-cli")).toHaveProperty("unsupported");
   });
+  it("a permission answer goes to the hook, except where the hook never prints", () => {
+    expect(kindPath("permission.answer", "claude-code")).toBe("permission");
+    expect(kindPath("permission.answer", "gemini-cli")).toHaveProperty("unsupported");
+    expect(kindPath("permission.answer", "devin")).toHaveProperty("unsupported");
+  });
 });
 
 describe.runIf(unix)("Codex (codex exec)", () => {

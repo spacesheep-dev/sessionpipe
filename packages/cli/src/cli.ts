@@ -183,7 +183,7 @@ function help(): void {
 Usage:
   sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
                                   (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
+  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
   sessionpipe uninstall [--keep-state]
   sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--name N]
   sessionpipe sink list | remove <name> | test <name>
@@ -235,7 +235,7 @@ async function install(): Promise<void> {
   const adapters = selectedAdapters();
   if (!adapters.length) {
     out(
-      "  No supported harness found on this machine (Claude Code, Codex, Gemini CLI, Antigravity). Pass --<harness> to force one.",
+      "  No supported harness found on this machine (Claude Code, Codex, Gemini CLI, Antigravity, Devin). Pass --<harness> to force one.",
     );
     return;
   }
@@ -287,6 +287,10 @@ function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: C
     cfg.harnesses[a.name] = { enabled: true, ...(created.size ? { created: [...created] } : {}) };
     if (a.name === "gemini-cli")
       out("    note: Gemini CLI's own telemetry defaults logPrompts on; that is Google's setting, not sessionpipe's.");
+    if (a.name === "devin" && !reports.some((r) => r.skipped))
+      out(
+        "    note: Devin ignores a hooks file whole if it holds one event name it doesn't know; run `/hooks` in `devin` to see what loaded.",
+      );
     if (a.name === "codex" && !reports.some((r) => r.skipped))
       out(
         "    note: Codex runs non-managed hooks only after you approve them: start `codex` and accept the hook review. The notify fallback reports turn ends meanwhile.",
@@ -321,7 +325,7 @@ async function connect(): Promise<void> {
   const adapters = ADAPTERS.filter((a) => a.detect());
   if (!adapters.length)
     out(
-      "  ! No coding agent here yet (Claude Code, Codex, Gemini CLI, Antigravity): run `sessionpipe install` once you have one.",
+      "  ! No coding agent here yet (Claude Code, Codex, Gemini CLI, Antigravity, Devin): run `sessionpipe install` once you have one.",
     );
   else installHarnesses(adapters, cfg, tier < 1);
   writeConfig(cfg);

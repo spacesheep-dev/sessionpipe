@@ -25,6 +25,7 @@ documentation URL per harness is in its row.
 | `codex` | Codex CLI (OpenAI) | learn.chatgpt.com/docs/hooks | yes | yes | M2 |
 | `gemini-cli` | Gemini CLI (Google) | geminicli.com/docs/hooks/reference | yes | yes (AfterAgent) | M2 |
 | `antigravity` | Antigravity (Google) | antigravity.google/docs/hooks | **no** | no | M2 |
+| `devin` | Devin CLI (Cognition) | docs.devin.ai/cli/extensibility/hooks/overview | yes | yes (exit 2) | M2 |
 | `cursor` | Cursor | cursor.com/docs/hooks | yes | yes (`followup_message`) | M7 |
 | `copilot-cli` | GitHub Copilot CLI | docs.github.com/en/copilot/reference/hooks-reference | yes | yes | M7 |
 | `droid` | Droid (Factory) | docs.factory.ai/reference/hooks-reference | yes | yes | M7 |
@@ -126,6 +127,26 @@ machine.)*
 
 Fixtures: *(recording pending: a recorder hook is installed on the recording
 machine; the next conversation fills them.)*
+
+## Devin (`devin`) — M2
+
+| | |
+|---|---|
+| Config | The `hooks` key of the **user config file**: `~/.config/devin/config.json` (`$XDG_CONFIG_HOME/devin/config.json` when set; `%APPDATA%\devin\config.json` on Windows). Claude-shaped; `matcher` is a **regex** on the tool name, not a glob; timeouts in **seconds**. `.devin/hooks.v1.json` is project-level only, so there is nothing to write outside the config file. Devin reads **exactly eight** event names and rejects the WHOLE file on one it does not know (`unknown variant ... expected one of PreToolUse, PostToolUse, UserPromptSubmit, Stop, PostCompaction, SessionStart, SessionEnd, PermissionRequest`), which disables every hook in it: the adapter registers those eight and nothing else. The config file is documented as JSON *with comment support*; one with comments is never written back (the install is `skipped` and says why). `/hooks` inside `devin` lists what loaded. |
+| Hook shape | `{"hooks":{"<Event>":[{"matcher":"","hooks":[{"type":"command","command":"…","timeout":5}]}]}}`; the matcher is only present on tool and permission events. |
+| Mapping | `SessionStart` → `session.started` (`source`: `startup` · `resume`) · `UserPromptSubmit` → `turn.started` (`turn_id` ← `prompt_id`, `prompt_chars`) · `PreToolUse` → `tool.started` · `PostToolUse` → `tool.ended` (`ok` ← `tool_response.success`, `error` ← `tool_response.error`, `output` ← `tool_response.output`) · `PermissionRequest` → `attention.needed` permission (`attention_id` ← `tool_use_id`, which this payload does carry) · `Stop` → `turn.ended` stop · `PostCompaction` → `context.compacted` auto (Devin has no pre-compaction event) · `SessionEnd` → `session.ended`. |
+| Ids in stdin | `hook_event_name`, `session_id` (a word-word slug such as `frill-vulture`, **not** a UUID; it is the primary key of the session store), `prompt_id` (a UUID, per turn, absent from `SessionStart`), `tool_name`, `tool_input`, `tool_use_id` (`call_<24 hex>#<32 hex>`), `tool_response.{success,output,error}`, `prompt`, `last_assistant_message`, `stop_hook_active`, `source`, `reason`. **No `cwd`, no `transcript_path`, no `model`, no `permission_mode`.** |
+| Env | `DEVIN_PROJECT_DIR` — the folder; the only thing in a Devin hook invocation that names it, so `session.cwd` comes from there and the worker keeps it (as it does for Antigravity). |
+| stdout | **Nothing**, for every event. Devin reads a decision from stdout; silence with exit 0 is "carry on". Printing nothing, printing `{}`, exiting 1 and exceeding the timeout were each measured against a real tool call and none blocked it — only exit 2 or an explicit `{"decision":"block"}` blocks. |
+| Transcript (tier 2) | One SQLite database for every session: `~/.local/share/devin/cli/sessions.db` (`$XDG_DATA_HOME/devin/cli/sessions.db`; `%APPDATA%\devin\cli\sessions.db` on Windows), read **read-only**. There is no per-session file, so the adapter addresses a session as `<database>#<session id>`. `message_nodes` is a forest that keeps abandoned branches (27 nodes for a two-turn session): the transcript is the one chain ending at `sessions.main_chain_id`, walked up through `parent_node_id` (a recursive CTE), never every node. `chat_message` is JSON: `role: "user"` with `metadata.is_user_input` true is the person, `role: "assistant"` with non-empty `content` is the reply; `role: "system"` (Cognition's own prompt, the subagent profiles, the skills manifest, the generated `system_info`) and `role: "tool"` are skipped at every tier. `node_id` is the cursor. |
+| Facts | Title: the earliest non-shell `prompt_history.content` (`first-ask`, 80 chars) — `sessions.title` is the titler's own output and holds a backticked command, or a raw `functions.Shell:0{…}` mid-turn. Model: `sessions.model` (the slug, e.g. `swe-2-medium`). `cwd`: `sessions.working_directory`. Times: `sessions.created_at` / `last_activity_at`, which are unix **seconds**. Version: the `_versions/current` symlink under the data directory. Account: `devin.org_id` from the user config — the only account id Devin keeps in a plain local file (`devin auth status` would name the user, but that is a subprocess, and `credentials.toml` is never read). |
+| Quirks | Every `devin -p` starts a **new** session with a new slug; `-c` / `-r <id>` reuse the id and fire `SessionStart` again with `source: "resume"`. `Stop` is **not** guaranteed — a turn whose tool was rejected went `UserPromptSubmit` → `PreToolUse` → `PermissionRequest` → `SessionEnd` with no `Stop`; `SessionEnd` fired on every run, and `session.ended` is therefore not "the session is over for good". `PermissionRequest` fires **after** `PreToolUse` for the same `tool_use_id`. Devin also imports `~/.claude/settings.json` hooks (`read_config_from.claude`, on by default), so a Claude Code entry there can be run by Devin: the `claude-code` adapter drops a payload with no `transcript_path` and a non-UUID session id for exactly that reason. |
+| Control | None yet. Devin has `-p`, `-c` and `-r <id>`, so a headless driver is possible, but it is not in `HEADLESS` and a `permission.answer` for a `devin` session is refused (the hook never prints). |
+
+Fixtures recorded 2026-10-08 on Devin CLI 3000.11.3 (seven `devin --model swe-2-medium -p`
+runs with a recording hook): `SessionStart` (`startup` and `resume`), `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `SessionEnd`. Still pending a real
+payload: `PostCompaction` *(recording pending)* — the runs were far too short to compact.
 
 ## Cursor (`cursor`) — M7
 

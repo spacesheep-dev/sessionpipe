@@ -1,7 +1,7 @@
 {
   "name": "sessionpipe",
   "version": "0.8.0",
-  "description": "sessionpipe: an open protocol for what your coding agents are doing. One install hooks Claude Code, Codex, Gemini CLI, Antigravity and more; four privacy tiers; secrets removed on your machine; sent to your server or to none.",
+  "description": "sessionpipe: an open protocol for what your coding agents are doing. One install hooks Claude Code, Codex, Gemini CLI, Antigravity, Devin and more; four privacy tiers; secrets removed on your machine; sent to your server or to none.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -21,6 +21,7 @@
     "claude-code",
     "codex",
     "gemini-cli",
+    "devin",
     "hooks",
     "observability",
     "protocol"

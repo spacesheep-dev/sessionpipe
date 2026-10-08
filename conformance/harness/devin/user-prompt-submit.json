@@ -1,0 +1,41 @@
+{
+  "harness": "devin",
+  "event": "UserPromptSubmit",
+  "recorded": {
+    "at": "2026-10-08T22:23:16.000Z",
+    "harness_version": "3000.11.3",
+    "how": "devin --respect-workspace-trust false --model swe-2-medium -p with a recording hook in .devin/hooks.v1.json"
+  },
+  "input": {
+    "argv": [
+      "devin",
+      "UserPromptSubmit"
+    ],
+    "stdin": "{\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"Read the file sample.txt and reply with only its first line\",\"prompt_id\":\"715ae593-e501-4349-b11f-ed487c21047f\",\"session_id\":\"frill-vulture\"}",
+    "env": {
+      "DEVIN_PROJECT_DIR": "/tmp/rec/devin-proj"
+    },
+    "cwd": "/tmp/rec/devin-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.started",
+      "harness": {
+        "name": "devin",
+        "event": "UserPromptSubmit"
+      },
+      "session": {
+        "id": "frill-vulture",
+        "cwd": "/tmp/rec/devin-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+        "prompt_chars": 59
+      }
+    }
+  ]
+}

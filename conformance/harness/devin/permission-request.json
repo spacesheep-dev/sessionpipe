@@ -1,0 +1,42 @@
+{
+  "harness": "devin",
+  "event": "PermissionRequest",
+  "recorded": {
+    "at": "2026-10-08T22:26:36.000Z",
+    "harness_version": "3000.11.3",
+    "how": "devin --respect-workspace-trust false --model swe-2-medium -p with a recording hook in .devin/hooks.v1.json"
+  },
+  "input": {
+    "argv": [
+      "devin",
+      "PermissionRequest"
+    ],
+    "stdin": "{\"hook_event_name\":\"PermissionRequest\",\"prompt_id\":\"24def98c-90f4-4686-84da-9b01d9a42465\",\"session_id\":\"scientific-roquefort\",\"tool_input\":{\"command\":\"printf 'hello-perm\\\\n' > out.txt && cat out.txt\"},\"tool_name\":\"exec\",\"tool_use_id\":\"call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57\"}",
+    "env": {
+      "DEVIN_PROJECT_DIR": "/tmp/rec/devin-proj"
+    },
+    "cwd": "/tmp/rec/devin-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "attention.needed",
+      "harness": {
+        "name": "devin",
+        "event": "PermissionRequest"
+      },
+      "session": {
+        "id": "scientific-roquefort",
+        "cwd": "/tmp/rec/devin-proj",
+        "seq": "*"
+      },
+      "data": {
+        "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+        "kind": "permission",
+        "tool": "exec"
+      }
+    }
+  ]
+}

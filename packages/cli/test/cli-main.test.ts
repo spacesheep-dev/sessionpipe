@@ -337,6 +337,18 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(text).toContain("✓ Backfill: 1 session from the last 30 days");
   });
 
+  it("devin: the note about a hooks file Devin drops whole, unless its config was skipped", async () => {
+    const devinConfig = path.join(home, ".config", "devin", "config.json");
+    put(devinConfig, {});
+    const { text } = await run("install", "--devin", "--backfill", "0");
+    expect(text).toMatch(/✓ devin: /);
+    expect(text).toContain("Devin ignores a hooks file whole");
+    put(devinConfig, "{not json");
+    const again = await run("install", "--devin", "--backfill", "0");
+    expect(again.text).toMatch(/! devin: .*config\.json — .*not touched/);
+    expect(again.text).not.toContain("Devin ignores a hooks file whole");
+  });
+
   it("with no harness here it says so and writes nothing", async () => {
     const { text } = await run("install");
     expect(text).toContain("No supported harness found on this machine");

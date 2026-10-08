@@ -1,7 +1,7 @@
 # sessionpipe
 
 **An open protocol, and a client, for what your coding agents are doing.** One
-install hooks Claude Code, Codex, Gemini CLI, Antigravity and more; every event is
+install hooks Claude Code, Codex, Gemini CLI, Antigravity, Devin and more; every event is
 filtered to a privacy tier you choose per destination, secrets are removed on your
 machine before anything leaves it, and it goes to your server, to a file, or nowhere
 at all.

@@ -4,7 +4,7 @@
 
 ## 1. What this is
 
-A coding-agent harness (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, …) fires
+A coding-agent harness (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Cursor, …) fires
 hooks as a session runs. sessionpipe turns those hooks into a small, uniform stream of
 **events** about the session — started, working on a tool, needs you, ended — filtered
 to a **privacy tier** the person chose per destination, and delivers them to any
@@ -56,7 +56,7 @@ generated from the reference implementation's types.
 | `type` | string | yes | Dotted, lowercase (`^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`), or the literal `native`. From §4. A receiver MUST accept and store an unknown type; it MUST NOT reject the batch for it. |
 | `time` | RFC 3339 | yes | The sender's clock, UTC, millisecond precision (`…Z`). Receivers MUST also stamp their own arrival time. |
 | `tier` | 0–3 | yes | The tier the event was filtered to. A receiver MUST answer 403 to an event above its `max_tier` and MUST NOT silently keep it. |
-| `harness` | object | yes | `name` from the registry in ADAPTERS.md (`claude-code`, `codex`, `gemini-cli`, `antigravity`, `cursor`, `copilot-cli`, `droid`, `kiro`, `opencode`; other `[a-z0-9-]` names allowed); `version` and `event` (the harness's own event name) optional. |
+| `harness` | object | yes | `name` from the registry in ADAPTERS.md (`claude-code`, `codex`, `gemini-cli`, `antigravity`, `devin`, `cursor`, `copilot-cli`, `droid`, `kiro`, `opencode`; other `[a-z0-9-]` names allowed); `version` and `event` (the harness's own event name) optional. |
 | `session` | object | yes | §3. `id` and `seq` required, the rest optional. |
 | `privacy` | object | yes | `rulesets`: the redaction rulesets that ran (`secrets@1` MUST be present above tier 0); `pii`: whether `pii@1` ran. |
 | `data` | object | yes | Per type, §4. Extra keys are allowed; a receiver MUST keep them. |

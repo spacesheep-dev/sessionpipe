@@ -7,16 +7,18 @@ import { claudeCode } from "./claude-code.js";
 import { findClaude } from "./claude-code-control.js";
 import { codex } from "./codex.js";
 import { findCodex } from "./codex-control.js";
+import { devin } from "./devin.js";
 import { geminiCli } from "./gemini-cli.js";
 import type { Adapter } from "./types.js";
 
-export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity];
+export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity, devin];
 export const adapterByName = (name: string): Adapter | undefined => ADAPTERS.find((a) => a.name === name);
 export { AG_STALE_PRETOOL, antigravityAnswer } from "./antigravity.js";
 export * as antigravityControl from "./antigravity-control.js";
 export { claudeAccounts, claudeDirs, notClaudeCode } from "./claude-code.js";
 export * as claudeControl from "./claude-code-control.js";
 export * as codexControl from "./codex-control.js";
+export { DEVIN_EVENTS, devinConfigDir, devinDataDir, readDevinChain } from "./devin.js";
 export {
   deniedNote,
   JOB_TIMEOUT_MS,
@@ -50,4 +52,4 @@ export type {
   TranscriptRead,
   Turn,
 } from "./types.js";
-export { antigravity, claudeCode, codex, geminiCli };
+export { antigravity, claudeCode, codex, devin, geminiCli };

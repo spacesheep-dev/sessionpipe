@@ -1,0 +1,47 @@
+{
+  "harness": "devin",
+  "event": "PostToolUse",
+  "recorded": {
+    "at": "2026-10-08T22:23:21.000Z",
+    "harness_version": "3000.11.3",
+    "how": "devin --respect-workspace-trust false --model swe-2-medium -p with a recording hook in .devin/hooks.v1.json"
+  },
+  "input": {
+    "argv": [
+      "devin",
+      "PostToolUse"
+    ],
+    "stdin": "{\"hook_event_name\":\"PostToolUse\",\"prompt_id\":\"715ae593-e501-4349-b11f-ed487c21047f\",\"session_id\":\"frill-vulture\",\"tool_input\":{\"command\":\"head -1 sample.txt\"},\"tool_name\":\"exec\",\"tool_response\":{\"error\":null,\"output\":\"Output from command in shell e4cfe5:\\nalpha-token-marker-42\\n\\n\\nExit code: 0\",\"success\":true},\"tool_use_id\":\"call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede\"}",
+    "env": {
+      "DEVIN_PROJECT_DIR": "/tmp/rec/devin-proj"
+    },
+    "cwd": "/tmp/rec/devin-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "tool.ended",
+      "harness": {
+        "name": "devin",
+        "event": "PostToolUse"
+      },
+      "session": {
+        "id": "frill-vulture",
+        "cwd": "/tmp/rec/devin-proj",
+        "seq": "*"
+      },
+      "data": {
+        "tool": "exec",
+        "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+        "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+        "ok": true,
+        "input": {
+          "command": "head -1 sample.txt"
+        },
+        "output": "Output from command in shell e4cfe5:\nalpha-token-marker-42\n\n\nExit code: 0"
+      }
+    }
+  ]
+}
