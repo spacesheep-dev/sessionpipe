@@ -265,7 +265,13 @@ export async function runJob(
   const state = opts.state ?? stateDir();
   const cfg = readConfig();
   const adapter = adapterByName(job.harness);
-  if (!adapter) return { events: [], delivered: {} };
+  // A hooks file can outlive the build that wrote it (an update to a sessionpipe without
+  // that adapter, a hand-written entry): without this line the events are dropped in
+  // silence, with nothing on the machine to say so.
+  if (!adapter) {
+    log(state, `${job.harness} ${job.event}: no adapter for harness "${job.harness}"; event dropped`);
+    return { events: [], delivered: {} };
+  }
   const r = adapter.fromHook({ argv: job.argv, stdin: job.stdin, env: { ...process.env, ...job.env }, cwd: job.cwd });
   if (!r || !r.session.id) return { events: [], delivered: {} };
   // A session the control daemon started goes by the id its start command named, not
