@@ -433,6 +433,40 @@ describe.skipIf(process.platform === "win32")("uninstall", () => {
     expect(again.text).toMatch(/! claude-code: .*settings\.json — /);
     expect(again.text).not.toContain("Outbox and state kept");
   });
+
+  it("names a harness: only that one goes; the launcher and the rest stay", async () => {
+    put(path.join(home, ".claude", "settings.json"), {});
+    await run("install", "--claude-code", "--devin", "--backfill", "0");
+    const { text } = await run("uninstall", "--devin");
+    expect(text).toMatch(/✓ devin: /);
+    expect(text).toContain("Still installed: claude-code.");
+    expect(Object.keys(cfg().harnesses)).toEqual(["claude-code"]);
+    expect(existsSync(path.join(tmp, "data", "sessionpipe-hook"))).toBe(true);
+    expect(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).toContain("sessionpipe-hook");
+    expect((await run("uninstall", "--claude-code")).text).toContain("Still installed: nothing.");
+  });
+
+  it("refuses every harness at once while an isolation var leaves one on the real home; --all, or no such vars, go ahead", async () => {
+    put(path.join(home, ".claude", "settings.json"), {});
+    await run("install", "--claude-code", "--backfill", "0");
+    // SESSIONPIPE_CONFIG/STATE say "not this machine", but codex would still read ~/.codex.
+    vi.stubEnv("CODEX_HOME", undefined as never);
+    const r = await run("uninstall");
+    expect(r.text).toContain("Refusing an uninstall of every harness");
+    expect(r.text).toContain("Name what to remove (--codex)");
+    expect(process.exitCode).toBe(2);
+    expect(cfg().harnesses["claude-code"]).toBeDefined();
+    process.exitCode = undefined;
+    expect((await run("uninstall", "--all")).text).toMatch(/✓ claude-code: /);
+    expect(cfg().harnesses).toEqual({});
+    // With neither isolation var set there is nothing to be outside of: HOME is the sandbox.
+    await run("install", "--claude-code", "--backfill", "0");
+    vi.stubEnv("SESSIONPIPE_CONFIG", undefined as never);
+    vi.stubEnv("SESSIONPIPE_STATE", undefined as never);
+    const plain = await run("uninstall");
+    expect(plain.text).not.toContain("Refusing");
+    expect(plain.text).toMatch(/✓ claude-code: /);
+  });
 });
 
 describe.skipIf(process.platform === "win32")("sink add | list | remove | test", () => {
