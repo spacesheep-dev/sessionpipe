@@ -106,11 +106,15 @@ export interface Adapter {
   installed(cmd: HookCommand, env?: NodeJS.ProcessEnv, opts?: InstallOptions): InstalledReport[];
   fromHook(input: HookInput): HookResult | null;
   readTranscript(file: string, fromLine: number): TranscriptRead;
+  /** `env` is the hook's own environment, not necessarily this process's: a job swept
+   *  by a worker that a different harness's hook spawned has to resolve the harness's
+   *  home from the job, the way `install` and `backfill` already do. */
   facts(
     session: { id: string } & Partial<Session>,
     transcript: string | undefined,
     hints: Record<string, unknown>,
     state: FactsState,
+    env?: NodeJS.ProcessEnv,
   ): SessionFacts;
   backfill(sinceMs: number, env?: NodeJS.ProcessEnv): BackfillRow[];
 }

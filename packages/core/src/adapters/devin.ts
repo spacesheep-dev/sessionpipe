@@ -57,6 +57,18 @@ const INSTALL_NOTE =
 const CLAUDE_NOTE =
   "Devin also reads ~/.claude/settings.json hooks (read_config_from.claude); a Claude-only event name there makes it ignore that file whole";
 
+const deadFileNote = (bad: string) =>
+  `Devin loads NO hooks from this file: "${bad}" is not one of its event names and it rejects the file whole — remove that key (\`/hooks\` in \`devin\` lists what loaded)`;
+
+/** The first `hooks` key in the file that Devin does not accept, if there is one.
+ *  One such key disables every hook in the file, ours and any other tool's. */
+export function foreignEvent(file: string): string | undefined {
+  const hooks = readJson(file).hooks;
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return undefined;
+  const ok = DEVIN_EVENTS as readonly string[];
+  return Object.keys(hooks).find((k) => !ok.includes(k));
+}
+
 const homeOf = (env: NodeJS.ProcessEnv) => env.HOME || HOME;
 const appData = (env: NodeJS.ProcessEnv) => env.APPDATA || path.join(homeOf(env), "AppData", "Roaming");
 /** `~/.config/devin`, `$XDG_CONFIG_HOME/devin`, or `%APPDATA%\devin`. */
@@ -95,19 +107,24 @@ export const devin: Adapter = {
   detect: (env = process.env) => existsSync(devinConfigDir(env)) || existsSync(devinDataDir(env)),
   configFiles: (env = process.env) => [configFile(env)],
   install: (cmd, env = process.env, opts: InstallOptions = {}) => {
-    const r = installClaudeShaped(configFile(env), NAME, eventsFor(opts.lean), cmd, OPTS);
-    return [r.skipped ? r : { ...r, note: INSTALL_NOTE }];
+    const file = configFile(env);
+    const r = installClaudeShaped(file, NAME, eventsFor(opts.lean), cmd, OPTS);
+    if (r.skipped) return [r];
+    const bad = foreignEvent(file);
+    return [{ ...r, note: bad ? deadFileNote(bad) : INSTALL_NOTE }];
   },
   uninstall: (env = process.env, opts: InstallOptions = {}) => [
     uninstallClaudeShaped(configFile(env), DEVIN_EVENTS, { created: opts.created?.includes(configFile(env)) }),
   ],
-  installed: (cmd, env = process.env, opts: InstallOptions = {}) => [
-    {
-      file: configFile(env),
-      state: installedClaudeShaped(configFile(env), NAME, eventsFor(opts.lean), cmd, OPTS),
-      note: CLAUDE_NOTE,
-    },
-  ],
+  installed: (cmd, env = process.env, opts: InstallOptions = {}) => {
+    const file = configFile(env);
+    const state = installedClaudeShaped(file, NAME, eventsFor(opts.lean), cmd, OPTS);
+    // Our entries can be present and current and still report nothing: one event name
+    // Devin does not know makes it drop the whole file, ours with it. `status` has to
+    // say so, or it tells the person reporting is on while it is dead.
+    const bad = state === "missing" ? undefined : foreignEvent(file);
+    return [{ file, state: bad ? "inactive" : state, note: bad ? deadFileNote(bad) : CLAUDE_NOTE }];
+  },
 
   fromHook(input: HookInput): HookResult | null {
     const event = input.argv[1] ?? "";
@@ -124,9 +141,13 @@ export const devin: Adapter = {
     const turn_id = typeof s.prompt_id === "string" ? s.prompt_id : undefined;
     const tool = validTool(s.tool_name) ? s.tool_name : undefined;
     const call_id = typeof s.tool_use_id === "string" ? s.tool_use_id : undefined;
-    const response = (s.tool_response ?? undefined) as
-      | { success?: unknown; output?: unknown; error?: unknown }
-      | undefined;
+    // Every recorded payload has an object here, but the field is free-form: a Devin
+    // version or an MCP-style tool could send a bare string, and then there is no
+    // `success` and no `output` to read — the whole value IS the output.
+    const response =
+      s.tool_response && typeof s.tool_response === "object" && !Array.isArray(s.tool_response)
+        ? (s.tool_response as { success?: unknown; output?: unknown; error?: unknown })
+        : undefined;
     // The same prompt must always name the same attention (CONTROL.md §6). Devin's
     // PermissionRequest does carry tool_use_id; the hash is the fallback for one that
     // doesn't, and is the bytes ADAPTERS.md's common conventions prescribe.
@@ -160,6 +181,8 @@ export const devin: Adapter = {
               tool,
               call_id,
               turn_id,
+              // `ok` is required on tool.ended (PROTOCOL.md §events), so a response
+              // that carries no success flag at all reads as "nothing said it failed".
               ok: response?.success !== false,
               error: errText(response?.error),
               input: s.tool_input,
@@ -197,13 +220,13 @@ export const devin: Adapter = {
     return readDevinChain(ref.db, ref.session, fromLine);
   },
 
-  facts(session, transcript): SessionFacts {
+  facts(session, transcript, _hints, _state, env = process.env): SessionFacts {
     const out: SessionFacts = {};
-    const version = devinVersion();
+    const version = devinVersion(env);
     if (version) out.harness_version = version;
-    const account = devinAccount();
+    const account = devinAccount(env);
     if (account) out.account_id = account;
-    const ref = splitRef(transcript) ?? { db: sessionsDb(process.env), session: session.id };
+    const ref = splitRef(transcript) ?? { db: sessionsDb(env), session: session.id };
     if (!SESSION_ID.test(ref.session)) return out;
     const rows = querySqlite(ref.db, SESSION_SQL, [ref.session]);
     const row = rows?.[0];
@@ -249,14 +272,21 @@ export function splitRef(ref: string | undefined): { db: string; session: string
 /** `message_nodes` is a forest: it keeps abandoned branches too (27 nodes for a
  *  two-turn session). The transcript is the one chain that ends at
  *  `sessions.main_chain_id`, walked up through `parent_node_id` — never every node. */
-const CHAIN_SQL = `WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at) AS (
+/** The walk stops at the cursor (`m.node_id >= ?`): everything below it has been read
+ *  already, and without that bound every Stop pulled `chat_message` for every ancestor
+ *  — the root of a real chain carries a 17 kB system prompt and four more system
+ *  blocks, re-read on every event, and past 32 MB the child and CLI engines give up
+ *  and return nothing. The cap keeps the NEWEST rows (`DESC`), re-sorted below: an
+ *  ascending cap would have kept the oldest and delivered no new turn ever again. */
+const CHAIN_LIMIT = 4000;
+export const CHAIN_SQL = `WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at) AS (
   SELECT node_id, parent_node_id, chat_message, created_at FROM message_nodes
    WHERE session_id = ? AND node_id = (SELECT main_chain_id FROM sessions WHERE id = ?)
   UNION ALL
   SELECT m.node_id, m.parent_node_id, m.chat_message, m.created_at FROM message_nodes m
-    JOIN chain c ON m.node_id = c.parent_node_id AND m.session_id = ?
+    JOIN chain c ON m.node_id = c.parent_node_id AND m.session_id = ? AND m.node_id >= ?
 )
-SELECT node_id, chat_message, created_at FROM chain ORDER BY node_id LIMIT 4000`;
+SELECT node_id, chat_message, created_at FROM chain ORDER BY node_id DESC LIMIT ${CHAIN_LIMIT}`;
 
 /** Times are unix SECONDS in this store. The first ask comes from `prompt_history`,
  *  because `sessions.title` holds whatever the titler last produced — a backticked
@@ -304,7 +334,8 @@ interface ChatMessage {
  *  tier, as is `role: "tool"`. */
 export function readDevinChain(db: string, session: string, fromLine: number): TranscriptRead {
   if (!SESSION_ID.test(session)) return { turns: [], line: fromLine };
-  const rows = querySqlite(db, CHAIN_SQL, [session, session, session]);
+  const floor = Number.isFinite(fromLine) && fromLine > 0 ? Math.floor(fromLine) : 0;
+  const rows = querySqlite(db, CHAIN_SQL, [session, session, session, floor]);
   if (!rows?.length) return { turns: [], line: fromLine };
   const msgs: { role: "user" | "assistant"; text: string; at: number; line: number }[] = [];
   let end = fromLine;
@@ -321,14 +352,25 @@ export function readDevinChain(db: string, session: string, fromLine: number): T
     }
     const text = typeof j.content === "string" ? j.content.trim() : "";
     if (!text) continue;
+    // The message's own time, not the row's. `message_nodes.created_at` is when the row
+    // batch was last WRITTEN: Devin rewrites it on every save of the chain, so every
+    // node of a chain usually carries one identical value, and it is not even monotonic
+    // along the chain. Measured on a live store 2026-10-08: a two-turn session had all
+    // four of its chain nodes at 23:33:10 while their own `metadata.created_at` read
+    // 23:32:29, :34, 23:33:08 and :10 (turn 1 reported 41 s late, both turns at the same
+    // instant); one node's row time was rewritten 12 s later between two reads; and a
+    // descendant's row time was 27 s EARLIER than its ancestor's. The column is only the
+    // fallback for a row whose message has no time of its own.
     const secs = Number(row.created_at);
     const at =
-      (Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 0) ||
       Date.parse(String(j.metadata?.created_at ?? "")) ||
+      (Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 0) ||
       Date.now();
     if (j.role === "user" && j.metadata?.is_user_input === true) msgs.push({ role: "user", text, at, line: node });
     else if (j.role === "assistant") msgs.push({ role: "assistant", text, at, line: node });
   }
+  // The rows come newest first (the cap keeps the newest); a transcript runs the other way.
+  msgs.sort((a, b) => a.line - b.line);
   return pairTurns(msgs, end);
 }
 
