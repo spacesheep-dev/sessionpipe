@@ -2,7 +2,16 @@
 // The Devin adapter: where its hooks go, which events it may register, how a payload
 // maps, and the session store it reads for tier 2 and for facts.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -12,9 +21,12 @@ import {
   DEVIN_EVENTS,
   devin,
   devinAccount,
+  devinConfigDir,
+  devinDataDir,
   devinVersion,
   foreignEvent,
   readDevinChain,
+  splitRef,
 } from "../src/adapters/devin.js";
 import type { HookCommand } from "../src/adapters/types.js";
 import { inlineParams, querySqlite, sqliteInProcess } from "../src/readers/sqlite.js";
@@ -152,6 +164,11 @@ describe("devin: install / uninstall / installed", () => {
     expect(foreignEvent(configFile)).toBeUndefined();
   });
 
+  it("a hooks key that is not an object holds no event name to object to", () => {
+    writeFileSync(configFile, JSON.stringify({ hooks: [] }));
+    expect(foreignEvent(configFile)).toBeUndefined();
+  });
+
   it("never writes a config file with comments (Devin's are JSON-with-comments)", () => {
     const text = '{\n  // my setup\n  "version": 1\n}\n';
     writeFileSync(configFile, text);
@@ -250,6 +267,22 @@ describe("devin: fromHook", () => {
     expect(other?.events[0]?.data.attention_id).not.toBe(a?.events[0]?.data.attention_id);
   });
 
+  it("a tool_response error given as an object, or as nothing readable, still reads", () => {
+    const err = (tool_response: unknown) =>
+      hook("PostToolUse", { session_id: "s1", tool_name: "exec", tool_response })?.events[0]?.data;
+    expect(err({ success: false, error: { message: "boom" } })).toMatchObject({ ok: false, error: "boom" });
+    expect(err({ success: false, error: { error: "nested" } })).toMatchObject({ ok: false, error: "nested" });
+    expect(err({ success: false, error: { message: "", error: 5 } })?.error).toBeUndefined();
+    expect(err({ success: false, error: 7 })?.error).toBeUndefined();
+    expect(err({ success: false, error: "" })?.error).toBeUndefined();
+  });
+
+  it("a PermissionRequest with no turn, no tool and no input still names one attention", () => {
+    const a = hook("PermissionRequest", { session_id: "s1" });
+    expect(a?.events[0]?.data.attention_id).toMatch(/^perm-[0-9a-f]{16}$/);
+    expect(a?.events[0]?.data.tool).toBeUndefined();
+  });
+
   it("an unknown SessionStart source and an unknown SessionEnd reason fall back", () => {
     expect(hook("SessionStart", { session_id: "s1", source: "wormhole" })?.events[0]?.data.source).toBe("unknown");
     expect(hook("SessionStart", { session_id: "s1", source: "resume" })?.events[0]?.data.source).toBe("resume");
@@ -313,13 +346,17 @@ function execSql(file: string, stmts: string[]): boolean {
       DatabaseSync: new (p: string) => { exec(s: string): void; close(): void };
     };
     const db = new DatabaseSync(file);
+    // One transaction: a commit per statement is thousands of fsyncs, which took the
+    // 4300-node fixture past a minute on Windows.
+    db.exec("BEGIN");
     for (const s of stmts) db.exec(s);
+    db.exec("COMMIT");
     db.close();
     return true;
   }
   if (!sqlite3Cli) return false;
   execFileSync("sqlite3", [file], {
-    input: `${stmts.map((s) => `${s};`).join("\n")}\n`,
+    input: `BEGIN;\n${stmts.map((s) => `${s};`).join("\n")}\nCOMMIT;\n`,
     stdio: ["pipe", "ignore", "ignore"],
     timeout: 30_000,
   });
@@ -464,6 +501,100 @@ describe.runIf(canMakeDb)("devin: the session store", () => {
     expect(devin.backfill((T + 3600) * 1000, env)).toEqual([]);
   });
 
+  it("readTranscript takes the <db>#<session> address, and facts without one fall back to the store under the env", () => {
+    expect(devin.readTranscript(`${dbFile}#frill-vulture`, 0).turns).toHaveLength(1);
+    const state = { get: () => ({}), save: () => {} };
+    expect(devin.facts({ id: "frill-vulture" }, undefined, {}, state, env).model).toBe("swe-2-medium");
+    // A session id that is not one never reaches the query.
+    expect(devin.facts({ id: "../etc/passwd" }, undefined, {}, state, env)).toEqual({});
+    expect(splitRef(undefined)).toBeNull();
+    expect(splitRef("#frill-vulture")).toBeNull();
+    expect(splitRef(`${dbFile}#not a session`)).toBeNull();
+  });
+
+  it("rows that say nothing: no model, a relative folder, zero times, no ask or a blank one, an id that is not one", () => {
+    expect(
+      execSql(dbFile, [
+        `INSERT INTO sessions VALUES ('bare-one','relative/dir','windsurf','','normal',0,0,NULL,1,0,'{}')`,
+        `INSERT INTO sessions VALUES ('blank-ask','/work/proj','windsurf','m','normal',${T - 5},${T - 5},NULL,1,0,'{}')`,
+        `INSERT INTO prompt_history (content,timestamp,session_id,is_shell) VALUES ('\n  \n',${T},'blank-ask',0)`,
+        `INSERT INTO sessions VALUES ('not a session id','/work/proj','windsurf','m','normal',${T - 5},${T - 5},NULL,1,0,'{}')`,
+        `INSERT INTO sessions VALUES (x'00','/work/proj','windsurf','m','normal',${T - 5},${T - 5},NULL,1,0,'{}')`,
+        `INSERT INTO sessions VALUES ('long-ask','/work/proj','windsurf','m','normal',${T - 6},${T - 6},NULL,1,0,'{}')`,
+        `INSERT INTO prompt_history (content,timestamp,session_id,is_shell) VALUES (${lit(`${"a word ".repeat(20)}end`)},${T},'long-ask',0)`,
+      ]),
+    ).toBe(true);
+    const state = { get: () => ({}), save: () => {} };
+    expect(devin.facts({ id: "bare-one" }, `${dbFile}#bare-one`, {}, state, env)).toEqual({});
+    const blank = devin.facts({ id: "blank-ask" }, `${dbFile}#blank-ask`, {}, state, env);
+    expect(blank.title).toBeUndefined();
+    expect(blank.model).toBe("m");
+    // A long first ask is cut at a word, 80 characters and an ellipsis.
+    const long = devin.facts({ id: "long-ask" }, `${dbFile}#long-ask`, {}, state, env);
+    expect(long.title).toMatch(/^a word .*\S…$/);
+    expect(long.title).not.toContain("end");
+    expect(long.title?.length).toBeLessThanOrEqual(81);
+    // Backfill skips what it cannot place: no times, or no id a session ref could carry.
+    expect(devin.backfill(0, env).map((r) => r.session.id)).toEqual(["frill-vulture", "blank-ask", "long-ask"]);
+  });
+
+  it("the version and the account ride along with the store's facts, and alone when the session is not in it", () => {
+    writeFileSync(configFile, JSON.stringify({ version: 1, devin: { org_id: "org-f6a1d67f" } }));
+    if (process.platform !== "win32") {
+      const versions = path.join(path.dirname(dbFile), "_versions");
+      mkdirSync(path.join(versions, "3000.11.3"), { recursive: true });
+      symlinkSync("3000.11.3", path.join(versions, "current"));
+    }
+    const state = { get: () => ({}), save: () => {} };
+    const f = devin.facts({ id: "frill-vulture" }, `${dbFile}#frill-vulture`, {}, state, env);
+    expect(f.account_id).toBe("org-f6a1d67f");
+    expect(f.model).toBe("swe-2-medium");
+    if (process.platform !== "win32") expect(f.harness_version).toBe("3000.11.3");
+    const none = devin.facts({ id: "no-such-session" }, `${dbFile}#no-such-session`, {}, state, env);
+    expect(none.account_id).toBe("org-f6a1d67f");
+    expect(none.model).toBeUndefined();
+  });
+
+  it("a chain whose nodes are not what the schema promises is skipped node by node, never thrown on", () => {
+    const row = (session: string, id: string, parent: string, chat: string, at: number) =>
+      `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('${session}',${id},${parent},${lit(chat)},${at})`;
+    expect(
+      execSql(dbFile, [
+        `INSERT INTO sessions VALUES ('odd-nodes','/work/proj','windsurf','m','normal',${T},${T},NULL,'abc',0,'{}')`,
+        row("odd-nodes", "'abc'", "NULL", msg(1, "assistant", "unreachable"), T),
+        `INSERT INTO sessions VALUES ('bad-json','/work/proj','windsurf','m','normal',${T},${T},NULL,5,0,'{}')`,
+        row(
+          "bad-json",
+          "1",
+          "NULL",
+          JSON.stringify({ role: "user", content: 5, metadata: { is_user_input: true } }),
+          T,
+        ),
+        row("bad-json", "2", "1", "not json", T),
+        row(
+          "bad-json",
+          "3",
+          "2",
+          JSON.stringify({ role: "user", content: "hi", metadata: { is_user_input: true } }),
+          0,
+        ),
+        row("bad-json", "4", "3", JSON.stringify({ role: "assistant", content: "hello" }), T),
+        // A blob where the JSON should be: the reader reads it as null.
+        `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('bad-json',5,4,x'00',${T})`,
+      ]),
+    ).toBe(true);
+    // A node id that is not a number is no cursor.
+    expect(readDevinChain(dbFile, "odd-nodes", 0).turns).toEqual([]);
+    const before = Date.now();
+    const r = readDevinChain(dbFile, "bad-json", 0);
+    expect(r.turns).toHaveLength(1);
+    expect(r.turns[0]?.user).toBe("hi");
+    expect(r.turns[0]?.assistant).toBe("hello");
+    // No time in the message and none on the row: now, rather than 1970.
+    expect(r.turns[0]?.at).toBeGreaterThanOrEqual(before);
+    expect(r.line).toBe(6);
+  });
+
   it("a missing, unreadable or wrongly addressed store costs an empty read, never a throw", () => {
     expect(readDevinChain(path.join(home, "nope.db"), "frill-vulture", 4).line).toBe(4);
     expect(readDevinChain(dbFile, "no-such-session", 0).turns).toEqual([]);
@@ -472,7 +603,8 @@ describe.runIf(canMakeDb)("devin: the session store", () => {
     const notADb = path.join(home, "text.db");
     writeFileSync(notADb, "this is not a database");
     expect(readDevinChain(notADb, "frill-vulture", 0).turns).toEqual([]);
-    expect(devin.backfill(0, { ...env, XDG_DATA_HOME: path.join(home, "gone") })).toEqual([]);
+    const gone = path.join(home, "gone");
+    expect(devin.backfill(0, { ...env, XDG_DATA_HOME: gone, APPDATA: gone })).toEqual([]);
   });
 
   // The CI matrix runs Node 20, where node:sqlite does not exist and the child path
@@ -565,6 +697,15 @@ describe("devin: version and account", () => {
     mkdirSync(path.join(versions, "3000.11.3"), { recursive: true });
     symlinkSync("3000.11.3", path.join(versions, "current"));
     expect(devinVersion(env)).toBe("3000.11.3");
+    // A link to something that is not a version number names none.
+    unlinkSync(path.join(versions, "current"));
+    symlinkSync("latest", path.join(versions, "current"));
+    expect(devinVersion(env)).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")("without XDG_* the config and the store live under the home", () => {
+    expect(devinConfigDir({ HOME: home })).toBe(path.join(home, ".config", "devin"));
+    expect(devinDataDir({ HOME: home })).toBe(path.join(home, ".local", "share", "devin", "cli"));
   });
 
   it("the account id is the org from the user config, never an email or a credential", () => {

@@ -176,6 +176,8 @@ describe("runJob", () => {
         stdin: JSON.stringify({ session_id: "frill-vulture", source: "startup" }),
         cwd: tmp,
         env: {
+          // Windows resolves both through %APPDATA%; the others through XDG.
+          APPDATA: path.join(other, "config"),
           XDG_CONFIG_HOME: path.join(other, "config"),
           XDG_DATA_HOME: path.join(other, "data"),
           DEVIN_PROJECT_DIR: tmp,
