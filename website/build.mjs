@@ -438,11 +438,11 @@ const publicCommands = Object.keys(usage).filter(
 const FAQ = [
   [
     "What is sessionpipe?",
-    "An open protocol, and a small client, that turns the hooks coding agents already fire (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot CLI and more) into one uniform stream of session events: started, working on a tool, needs you, ended. You choose per destination how much leaves your machine.",
+    "An open protocol, and a small client, that turns the hooks coding agents already fire (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Cursor, Copilot CLI and more) into one uniform stream of session events: started, working on a tool, needs you, ended. You choose per destination how much leaves your machine.",
   ],
   [
     "Does it work with Claude Code hooks?",
-    "Yes. <code>sessionpipe install</code> writes Claude Code's SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Notification, Stop, Subagent and Compact hooks into every config dir on the machine, and maps them to protocol events. Codex hooks, Gemini CLI hooks and Antigravity hooks work the same way.",
+    "Yes. <code>sessionpipe install</code> writes Claude Code's SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Notification, Stop, Subagent and Compact hooks into every config dir on the machine, and maps them to protocol events. Codex hooks, Gemini CLI hooks, Antigravity hooks and Devin CLI hooks work the same way.",
   ],
   [
     "What are the privacy tiers?",
@@ -527,7 +527,7 @@ const FAQ = [
         url: SITE,
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
         description:
-          "Hooks for Claude Code, Codex, Gemini CLI, Antigravity and other coding agents; four privacy tiers; secrets removed on your machine; sends to your server or to none.",
+          "Hooks for Claude Code, Codex, Gemini CLI, Antigravity, Devin and other coding agents; four privacy tiers; secrets removed on your machine; sends to your server or to none.",
       },
       {
         "@type": "FAQPage",
@@ -545,7 +545,7 @@ const FAQ = [
       jsonld,
       title: "sessionpipe — an open protocol for what your coding agents are doing",
       description:
-        "One install hooks Claude Code, Codex, Gemini CLI, Antigravity and more. Four privacy tiers, secrets removed on your machine, sent to your server or to none.",
+        "One install hooks Claude Code, Codex, Gemini CLI, Antigravity, Devin and more. Four privacy tiers, secrets removed on your machine, sent to your server or to none.",
       body: home,
       pathname: "/",
     }),
@@ -586,7 +586,7 @@ const mdLink = (p, t, note) => `- [${t}](${SITE}${p}index.md)${note ? `: ${note}
 const llms = [
   "# sessionpipe",
   "",
-  "> An open protocol and client for what your coding agents are doing: hooks for Claude Code, Codex, Gemini CLI, Antigravity and more; four privacy tiers; secrets removed on the person's machine; events sent to a server of their choosing or to none. Apache-2.0 code, CC BY 4.0 spec.",
+  "> An open protocol and client for what your coding agents are doing: hooks for Claude Code, Codex, Gemini CLI, Antigravity, Devin and more; four privacy tiers; secrets removed on the person's machine; events sent to a server of their choosing or to none. Apache-2.0 code, CC BY 4.0 spec.",
   "",
   "Every page below is Markdown. An agent helping someone set sessionpipe up should read the first link before running anything.",
   "",
