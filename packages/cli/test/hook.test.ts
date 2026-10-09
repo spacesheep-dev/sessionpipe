@@ -77,7 +77,10 @@ const run = (
   env: NodeJS.ProcessEnv = {},
   stdout?: (t: string) => void,
 ) => hookMain(argv, { ...base, ...env }, io(stdin, stdout));
-const claude = (extra: Record<string, unknown> = {}) => JSON.stringify({ session_id: "s-1", ...extra });
+// A Claude Code session id is a UUID: the control wait refuses a payload with any other
+// shape and no transcript_path (another harness running our settings.json entry).
+const SID = "0b4a6e3c-1d2f-4a5b-8c6d-7e8f9a0b1c2d";
+const claude = (extra: Record<string, unknown> = {}) => JSON.stringify({ session_id: SID, ...extra });
 
 /** Run `f` with process.platform reported as `p`; the real value is put back after. */
 async function onPlatform<T>(p: NodeJS.Platform, f: () => Promise<T>): Promise<T> {
@@ -198,7 +201,7 @@ describe("the heartbeat throttle: a tool event is a job once a minute when no si
     await tool();
     expect(jobs()).toHaveLength(1);
     expect(timing().map((t) => t.spawned)).toEqual([true, false]);
-    const stamp = path.join(state, "beats", "claude-code-s-1");
+    const stamp = path.join(state, "beats", `claude-code-${SID}`);
     expect(existsSync(stamp)).toBe(true);
     const old = new Date(Date.now() - 2 * 60_000);
     utimesSync(stamp, old, old);
@@ -285,9 +288,11 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
       await run(["claude-code", "Stop"], claude(), { SESSIONPIPE_CONTROL_JOB: "job-1" });
       await run(["claude-code", "Stop"], "not json");
       await run(["claude-code", "Stop"], JSON.stringify({ session_id: 7 }));
+      // Another harness running our settings.json entry: no transcript, no UUID.
+      await run(["claude-code", "Stop"], JSON.stringify({ session_id: "zest-lantana" }));
       expect(d.asked).toEqual([]);
       expect(out).toEqual([]);
-      expect(jobs()).toHaveLength(4);
+      expect(jobs()).toHaveLength(5);
     } finally {
       await d.close();
     }
@@ -298,12 +303,12 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
     const d = await daemon(sock, () => reply);
     try {
       await run(["claude-code", "Stop"], claude({ stop_hook_active: true }));
-      expect(d.asked).toEqual([{ op: "stop", session: "claude-code:s-1", active: true }]);
+      expect(d.asked).toEqual([{ op: "stop", session: `claude-code:${SID}`, active: true }]);
       expect(out).toEqual([`${JSON.stringify({ decision: "block", reason: "Do the thing" })}\n`]);
       expect(jobs()).toHaveLength(1);
       reply = { op: "none" };
       await run(["claude-code", "Stop"], claude());
-      expect(d.asked[1]).toEqual({ op: "stop", session: "claude-code:s-1", active: false });
+      expect(d.asked[1]).toEqual({ op: "stop", session: `claude-code:${SID}`, active: false });
       expect(out).toHaveLength(1);
       expect(jobs()).toHaveLength(2);
     } finally {
@@ -363,7 +368,7 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
       expect(d.asked).toEqual([
         {
           op: "permission",
-          session: "claude-code:s-1",
+          session: `claude-code:${SID}`,
           attention: attention("p1", "Bash", { command: "ls" }),
           tool: "Bash",
         },
@@ -405,8 +410,8 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
       await perm({ tool_name: "Bash; rm -rf /" });
       await perm({ tool_name: 5, tool_input: null });
       expect(d.asked).toEqual([
-        { op: "permission", session: "claude-code:s-1", attention: attention("", "", null) },
-        { op: "permission", session: "claude-code:s-1", attention: attention("", "", null) },
+        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null) },
+        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null) },
       ]);
       expect(out).toEqual([]);
     } finally {

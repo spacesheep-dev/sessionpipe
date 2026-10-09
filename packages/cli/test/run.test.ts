@@ -130,6 +130,64 @@ describe("runJob", () => {
     const { events } = new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100);
     expect(events.some((e) => e.type === "session.ended")).toBe(true);
   });
+
+  // Several harnesses import ~/.claude/settings.json, so our entry there arrives under
+  // the claude-code name with a payload Claude Code never sent. The adapter refuses it
+  // (claude-code.ts notClaudeCode) and the event IS dropped — but the log has to say
+  // so, or the machine holds no trace of a harness reporting nothing.
+  it("says in the log when an adapter would not claim the payload", async () => {
+    const state = path.join(tmp, "unclaimed");
+    const r = await runJob(
+      {
+        harness: "claude-code",
+        event: "PermissionRequest",
+        argv: ["claude-code", "PermissionRequest"],
+        // Devin's shape: a word-word session id and no transcript_path.
+        stdin: JSON.stringify({ session_id: "zest-lantana", prompt_id: "p1", tool_name: "exec" }),
+        cwd: tmp,
+        env: {},
+        at: Date.now(),
+      },
+      { state },
+    );
+    expect(r.events).toEqual([]);
+    expect(readFileSync(path.join(state, "log"), "utf8")).toContain(
+      "claude-code PermissionRequest: the claude-code adapter did not claim this payload",
+    );
+  });
+
+  // The facts pass gets the HOOK's environment, not the worker's. It matters because
+  // sweepJobs runs any stale job file: a devin job can be processed by a worker that a
+  // Claude Code hook spawned, and devin resolves its config and its session store from
+  // XDG_CONFIG_HOME / XDG_DATA_HOME.
+  it("reads a harness's facts from the job's environment, not the worker's", async () => {
+    const other = path.join(tmp, "elsewhere");
+    mkdirSync(path.join(other, "config", "devin"), { recursive: true });
+    writeFileSync(
+      path.join(other, "config", "devin", "config.json"),
+      JSON.stringify({ version: 1, devin: { org_id: "org-from-the-job" } }),
+    );
+    const state = path.join(tmp, "devin-facts");
+    const r = await runJob(
+      {
+        harness: "devin",
+        event: "SessionStart",
+        argv: ["devin", "SessionStart"],
+        stdin: JSON.stringify({ session_id: "frill-vulture", source: "startup" }),
+        cwd: tmp,
+        env: {
+          XDG_CONFIG_HOME: path.join(other, "config"),
+          XDG_DATA_HOME: path.join(other, "data"),
+          DEVIN_PROJECT_DIR: tmp,
+        },
+        at: Date.now(),
+      },
+      { state },
+    );
+    expect(r.events[0]?.type).toBe("session.started");
+    expect(r.events[0]?.session.account_id).toBe("org-from-the-job");
+    expect(r.events[0]?.session.cwd).toBe(tmp);
+  });
 });
 
 describe("sessions the control daemon named (control/aliases.ts)", () => {

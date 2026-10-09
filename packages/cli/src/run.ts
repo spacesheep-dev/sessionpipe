@@ -273,7 +273,14 @@ export async function runJob(
     return { events: [], delivered: {} };
   }
   const r = adapter.fromHook({ argv: job.argv, stdin: job.stdin, env: { ...process.env, ...job.env }, cwd: job.cwd });
-  if (!r || !r.session.id) return { events: [], delivered: {} };
+  // The adapter did not claim the payload (another harness ran our entry out of a
+  // shared hooks file, an event name it does not map, a payload with no session id).
+  // Dropped either way, but never in silence: this is where a wrongly-named event
+  // lands, and the log is the only thing on the machine that can say so.
+  if (!r || !r.session.id) {
+    log(state, `${job.harness} ${job.event}: the ${job.harness} adapter did not claim this payload; event dropped`);
+    return { events: [], delivered: {} };
+  }
   // A session the control daemon started goes by the id its start command named, not
   // the one the harness picked (CONTROL.md §6 `start`; control/aliases.ts): its events
   // say so, and so does everything below. The adapter's own reading of the session
@@ -323,7 +330,9 @@ export async function runJob(
     const heavy = !/^(PreToolUse|PostToolUse|PostToolUseFailure|BeforeTool|AfterTool|PostInvocation)$/.test(job.event);
     let learned: Partial<Session> = {};
     if (heavy) {
-      const f = adapter.facts(r.session, r.transcript, r.hints ?? {}, facts);
+      // The hook's environment, not the worker's: a swept job may be run by a worker
+      // another harness's hook spawned, whose env names none of this harness's homes.
+      const f = adapter.facts(r.session, r.transcript, r.hints ?? {}, facts, { ...process.env, ...job.env });
       const { started_at: _s, last_at: _l, first_ask: _fa, harness_version, ...rest } = f;
       learned = rest;
       if (harness_version) facts.save(job.harness, id, { harness_version });

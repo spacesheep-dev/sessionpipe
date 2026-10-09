@@ -13,6 +13,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ask, socketPath } from "./control/local.js";
 
+/** A Claude Code session id (the same test as core's notClaudeCode). */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** The two streams the hook touches: stdin once, whole; stdout for an answer. */
 export interface HookIO {
   stdin(): Buffer;
@@ -85,6 +88,10 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       stdin,
       cwd: process.cwd(),
       env: pick([
+        // Where a harness keeps its config and its sessions, so a job swept by a worker
+        // some other harness's hook spawned still resolves this harness's own homes
+        // (run.ts sweepJobs runs any stale job file, whatever spawned the worker).
+        "APPDATA",
         "CLAUDE_CODE_HOST_SESSION_ID",
         "CLAUDE_CONFIG_DIR",
         "CLAUDE_PROJECT_DIR",
@@ -92,6 +99,9 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         // Devin's payload names no folder at all; this is the only thing that does.
         "DEVIN_PROJECT_DIR",
         "GEMINI_CLI_HOME",
+        // Devin's config file and session store are both resolved through these.
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
       ]),
       ppid: process.ppid,
       at: Date.now(),
@@ -152,6 +162,14 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     }
     const id = typeof s.session_id === "string" ? s.session_id : "";
     if (!id) return null;
+    // Our entry in ~/.claude/settings.json is run by every harness that imports that file
+    // — Devin's `claude` hooks provider is live, not a stub — and it arrives under the
+    // claude-code name. Every Claude Code payload names a transcript and a UUID session;
+    // a payload with neither is somebody else's, and must not be parked for up to 125 s
+    // waiting on an answer that is not coming. Same test as core's notClaudeCode
+    // (claude-code.ts), which the worker applies; repeated here because this file imports
+    // nothing but node builtins.
+    if (typeof s.transcript_path !== "string" && !UUID.test(id)) return null;
     const session = `claude-code:${id}`;
     if (event === "Stop")
       return ask(sock, { op: "stop", session, active: s.stop_hook_active === true }, 300).then((r) =>

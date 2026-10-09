@@ -867,6 +867,32 @@ describe.runIf(unix)("the built hook talks to the daemon", () => {
     expect(out).toBe("");
     expect(Date.now() - t).toBeLessThan(3000);
   });
+
+  // Our entry in ~/.claude/settings.json is run by every harness that imports that
+  // file, under the claude-code name, and the PermissionRequest wait is up to 125 s.
+  // A payload that is not Claude Code's must never be parked in it: Devin's names no
+  // transcript and its session id is a word-word slug, so this is the shape to refuse.
+  it.runIf(existsSync(dist))(
+    "a payload another harness ran is not parked in the control wait",
+    async () => {
+      await startDaemon();
+      const t = Date.now();
+      const out = await runHook("PermissionRequest", {
+        session_id: "zest-lantana",
+        prompt_id: "p1",
+        tool_name: "exec",
+        tool_input: { command: "ls" },
+      });
+      expect(out).toBe("");
+      expect(Date.now() - t).toBeLessThan(3000);
+      // A Stop from the same payload is not parked either (it waits before the event).
+      const stop = await runHook("Stop", { session_id: "zest-lantana", stop_hook_active: false });
+      expect(stop).toBe("");
+      // That the Claude Code shape DOES go into the wait, and is answered, is the test
+      // above — nothing is started here that would outlive this one.
+    },
+    20_000,
+  );
 });
 
 describe.runIf(unix)("one daemon, and when it may restart (autoupdate.ts)", () => {
