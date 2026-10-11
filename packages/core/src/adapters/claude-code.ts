@@ -243,6 +243,9 @@ export const claudeCode: Adapter = {
         return null;
     }
     const hints: Record<string, unknown> = {};
+    // The prompt, for the turn's first turn.progress: the transcript may not hold it
+    // yet when the worker runs. Never an event field of its own (tier 2 carries it).
+    if (event === "UserPromptSubmit" && typeof s.prompt === "string") hints.prompt = s.prompt;
     const host = input.env.CLAUDE_CODE_HOST_SESSION_ID;
     if (host && DESKTOP_ID.test(host)) hints.desktop_id = host;
     // The registry file is found while the process tree stands (the detached

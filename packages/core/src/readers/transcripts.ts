@@ -35,7 +35,12 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
   if (cur?.assistant) turns.push(cur);
   // A user message with no reply yet stays unsent: the cursor stops before it.
   const line = cur && !cur.assistant ? cur.startLine : endLine;
-  return { turns: turns.map((t) => ({ user: t.user, assistant: t.assistant, at: t.at, endLine: t.endLine })), line };
+  const out: TranscriptRead = {
+    turns: turns.map((t) => ({ user: t.user, assistant: t.assistant, at: t.at, endLine: t.endLine })),
+    line,
+  };
+  if (cur && !cur.assistant && cur.user) out.open = { user: cur.user, at: cur.at };
+  return out;
 }
 
 /** Injected context the person never typed: <tag>…</tag> wrappers, HTML comments, slash-command expansions. */

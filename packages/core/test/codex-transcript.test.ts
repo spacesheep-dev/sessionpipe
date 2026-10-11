@@ -145,7 +145,11 @@ describe("a forked Codex subagent rollout", () => {
     const reply = JSON.parse(assistant("The synthetic edge cases pass."));
     reply.timestamp = "2026-10-09T23:48:05.000Z";
     const pending = [...FORK, JSON.stringify(ask)];
-    expect(readCodex(pending, 46)).toEqual({ turns: [], line: 46 });
+    expect(readCodex(pending, 46)).toEqual({
+      turns: [],
+      line: 46,
+      open: { user: "Check synthetic edge cases.", at: Date.parse("2026-10-09T23:48:00.000Z") },
+    });
     const complete = [...pending, JSON.stringify(reply)];
     expect(readCodex(complete, 46)).toEqual({
       turns: [

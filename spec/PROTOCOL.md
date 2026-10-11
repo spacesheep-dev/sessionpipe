@@ -99,6 +99,7 @@ Per-type `data` shapes are normative in
 | `turn.started` | 0 | `turn_id?`; tier 1 adds `prompt_chars` | A prompt was submitted. |
 | `turn.ended` | 0 | `turn_id?`, `reason`: `stop` · `interrupt` · `error`, `ms?`; tier 1 adds `error` (the harness's error class when the reason is `error`) | The Stop / AfterAgent / agentStop hook; Claude Code's `StopFailure` (a turn that ended on an API error) with `reason: error`. |
 | `turn.transcript` | 2 | `turn` (integer), `user`, `assistant` (each ≤ 20 000 chars, redacted), `at` | Read from the harness's transcript file by the worker after a turn ends; one event per completed exchange, in order. |
+| `turn.progress` | 2 | `turn` (integer), `user`, `assistant` (each ≤ 20 000 chars, redacted; over the cap the `assistant` side keeps its **end**), `at` | The turn still running: its prompt as the turn starts, then what the assistant has said so far, at most every 20 s on a tool call and only when it changed. `turn` is the number its `turn.transcript` will carry. A receiver keeps the latest per session and drops it once that `turn.transcript` (or the turn's end) arrives; it is a reading, never history. OPTIONAL for senders. |
 | `tool.started` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?` (set when a subagent made the call); tier 3 adds `input` | Pre-tool hook. OPTIONAL for senders whose harness has none. |
 | `tool.ended` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?`, `ms?`, `ok`, `error?`; tier 3 adds `input`, `output` (each ≤ 64 KB) | Post-tool hook. A tool name is `[A-Za-z0-9_.:-]{1,120}`; MCP tools keep the harness's own spelling. |
 | `files.changed` | 1 | `paths[]` (repo-relative or `~`-relative) | File-edit hooks (Cursor, Kiro, Goose), or paths lifted from a write tool's input. |
@@ -132,7 +133,7 @@ What each tier carries. The full rules, the rulesets and guidance are in
 | Tool names, durations, ok/error | — | ✓ | ✓ | ✓ |
 | File paths touched | — | ✓ | ✓ | ✓ |
 | Attention message, prompt length, subagents, compactions | — | ✓ | ✓ | ✓ |
-| Prompts and assistant text (`turn.transcript`) | — | — | ✓ | ✓ |
+| Prompts and assistant text (`turn.transcript`, `turn.progress`) | — | — | ✓ | ✓ |
 | Tool input and output, thinking, raw lines | — | — | — | ✓ |
 | Secrets ruleset | n/a | always | always | always |
 | PII ruleset | opt-in | opt-in | opt-in | opt-in |

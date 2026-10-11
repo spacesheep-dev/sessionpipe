@@ -21,6 +21,7 @@ export const KNOWN_TYPES = [
   "turn.started",
   "turn.ended",
   "turn.transcript",
+  "turn.progress",
   "tool.started",
   "tool.ended",
   "files.changed",
@@ -42,6 +43,7 @@ export const TYPE_TIER: Record<(typeof KNOWN_TYPES)[number], 0 | 1 | 2 | 3> = {
   "turn.started": 0,
   "turn.ended": 0,
   "turn.transcript": 2,
+  "turn.progress": 2,
   "tool.started": 1,
   "tool.ended": 1,
   "files.changed": 1,
@@ -141,6 +143,15 @@ export const EventData = z.object({
     ms: z.int().min(0).optional(),
   }),
   "turn.transcript": Loose.extend({
+    turn: z.int().min(0),
+    user: z.string().max(20_000),
+    assistant: z.string().max(20_000),
+    at: Rfc3339,
+  }),
+  /** The turn still running: its prompt and what the assistant has said so far. A
+   *  later turn.progress for the same turn replaces it; the turn.transcript with the
+   *  same number supersedes it. Over 20 000 chars, the assistant side keeps its END. */
+  "turn.progress": Loose.extend({
     turn: z.int().min(0),
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),

@@ -17,6 +17,7 @@ export const TYPE_TIER: Record<string, Tier> = {
   "turn.started": 0,
   "turn.ended": 0,
   "turn.transcript": 2,
+  "turn.progress": 2,
   "tool.started": 1,
   "tool.ended": 1,
   "files.changed": 1,
@@ -38,6 +39,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "turn.started": { 0: ["turn_id"], 1: ["prompt_chars"] },
   "turn.ended": { 0: ["turn_id", "reason", "ms"], 1: ["error"] },
   "turn.transcript": { 2: ["turn", "user", "assistant", "at"] },
+  "turn.progress": { 2: ["turn", "user", "assistant", "at"] },
   "tool.started": { 1: ["tool", "call_id", "turn_id", "agent_id"], 3: ["input"] },
   "tool.ended": { 1: ["tool", "call_id", "turn_id", "agent_id", "ms", "ok", "error"], 3: ["input", "output"] },
   "files.changed": { 1: ["paths"] },
@@ -82,6 +84,11 @@ function cap(v: unknown, max: number): unknown {
   return v;
 }
 
+/** At most `max` characters, keeping the end: an ellipsis, then the last max − 1. */
+export function capTail(v: string, max: number): string {
+  return v.length > max ? `…${v.slice(v.length - max + 1)}` : v;
+}
+
 export interface FilterOptions {
   /** The person's home directory, for pii@1's `~` rewrite. */
   home?: string;
@@ -103,7 +110,9 @@ export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: Filter
   if (keys === null) data = { ...event.data };
   else for (const k of keys) if (event.data[k] !== undefined) data[k] = event.data[k];
   if (typeof data.user === "string") data.user = cap(data.user, MAX_SIDE);
-  if (typeof data.assistant === "string") data.assistant = cap(data.assistant, MAX_SIDE);
+  // A turn still running is read for where it is now: its reply keeps the end.
+  if (typeof data.assistant === "string")
+    data.assistant = event.type === "turn.progress" ? capTail(data.assistant, MAX_SIDE) : cap(data.assistant, MAX_SIDE);
   if (data.input !== undefined) data.input = cap(data.input, MAX_IO);
   if (data.output !== undefined) data.output = cap(data.output, MAX_IO);
   if (typeof data.message === "string") data.message = cap(data.message, 200);

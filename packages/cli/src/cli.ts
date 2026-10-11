@@ -937,6 +937,9 @@ async function tail(): Promise<void> {
       case "turn.transcript":
         detail = `#${d.turn} "${String(d.user).slice(0, 50).replace(/\s+/g, " ")}"`;
         break;
+      case "turn.progress":
+        detail = `#${d.turn} ${String(d.assistant ?? "").length} chars so far`;
+        break;
       case "session.backfill":
         detail = `${e.session.title ?? ""}`;
         break;

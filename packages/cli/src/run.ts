@@ -16,6 +16,7 @@ import path from "node:path";
 import {
   adapterByName,
   Cursors,
+  capTail,
   type Event,
   type FactsState,
   FileSink,
@@ -32,6 +33,7 @@ import {
   StdoutSink,
   safeId,
   stateDir,
+  type TranscriptRead,
   takeLock,
   tilde,
   writeConfig,
@@ -167,6 +169,39 @@ export function buildSinks(sinks: SinkConfig[], o: { locked?: (name: string) => 
   return out;
 }
 
+/** How often a running turn's words go out again (turn.progress), at most. */
+export const PROGRESS_MS = 20_000;
+
+/** The turn still running in a transcript read from the delivery cursor: the last
+ *  turn with a reply so far, or a prompt nothing has answered yet (the hook's own
+ *  copy when the transcript doesn't hold it yet). `base` is the number the cursor's
+ *  first turn will get, so a turn keeps the number its turn.transcript will carry.
+ *  The reply keeps its end when it is long: where the turn is now. */
+export function openTurn(
+  read: TranscriptRead,
+  o: { base: number; prompt?: string | undefined; at: number },
+): { turn: number; user: string; assistant: string; at: number } | null {
+  const last = read.turns[read.turns.length - 1];
+  const fresh = (user: string, at: number) => ({
+    turn: o.base + read.turns.length,
+    user: user.slice(0, MAX_TURN_SIDE),
+    assistant: "",
+    at,
+  });
+  if (read.open) return fresh(read.open.user, read.open.at);
+  // The prompt the hook just reported, unless the transcript already has its reply.
+  const prompt = o.prompt?.trim();
+  if (prompt && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
+  if (!last) return null;
+  return {
+    turn: o.base + read.turns.length - 1,
+    user: last.user.slice(0, MAX_TURN_SIDE),
+    assistant: capTail(last.assistant, MAX_TURN_SIDE),
+    at: last.at,
+  };
+}
+const MAX_TURN_SIDE = 20_000;
+
 /** Run one hook job end to end: events → outbox → sinks. Returns what happened. */
 export async function runJob(
   job: Job,
@@ -244,8 +279,39 @@ export async function runJob(
       });
       events.push(e);
     }
-    // Tier 2: after a turn ends, the transcript's new turns become turn.transcript events.
     const wantsTranscript = cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 2);
+    // Tier 2, while a turn runs: what it has said so far, so a receiver can show a long
+    // turn before it ends. On the prompt, then at most every PROGRESS_MS on a tool call,
+    // and only when it changed. The cursor stays where it is: turn.transcript still
+    // delivers the whole turn when it ends.
+    const ending = r.events.some((e) => e.type === "turn.ended" || e.type === "session.ended");
+    const starting = r.events.some((e) => e.type === "turn.started");
+    if (wantsTranscript && r.transcript && !ending && (starting || r.events.some((e) => e.type === "tool.ended"))) {
+      const cur = facts.get(job.harness, id);
+      const at = opts.now ?? job.at;
+      if (starting || at - (Number(cur.progress_at) || 0) >= PROGRESS_MS) {
+        const p = openTurn(adapter.readTranscript(r.transcript, Number(cur.transcript_line) || 0), {
+          base: Number(cur.transcript_turns) || 0,
+          prompt: typeof r.hints?.prompt === "string" ? r.hints.prompt : undefined,
+          at,
+        });
+        const sig = p && `${p.turn}:${p.user.length}:${p.assistant.length}`;
+        if (p && (starting || sig !== cur.progress_sig)) {
+          events.push(
+            makeEvent(
+              { type: "turn.progress", harnessEvent: job.event, data: { ...p, at: new Date(p.at).toISOString() } },
+              {
+                harness: { name: job.harness, ...(version ? { version } : {}) },
+                session: { ...session, seq: outbox.nextSeq(ref) },
+                now: at,
+              },
+            ),
+          );
+          facts.save(job.harness, id, { progress_at: at, progress_sig: sig });
+        }
+      }
+    }
+    // Tier 2: after a turn ends, the transcript's new turns become turn.transcript events.
     if (
       wantsTranscript &&
       r.transcript &&
