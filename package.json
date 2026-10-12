@@ -32,7 +32,7 @@
     "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.4",
     "esbuild": "^0.28.2",
-    "marked": "^18.0.14",
+    "marked": "^18.1.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
     "zod": "^4.6.5"
