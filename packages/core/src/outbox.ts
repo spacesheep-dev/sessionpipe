@@ -26,6 +26,9 @@ export interface OutboxRef {
   session: string;
 }
 
+const READ_CHUNK = 1024 * 1024;
+const READ_MAX = 8 * 1024 * 1024;
+
 export class Outbox {
   constructor(readonly root: string) {}
 
@@ -97,7 +100,11 @@ export class Outbox {
   }
 
   /** Read events after byte offset `from`; returns them and the new offset. Lines
-   *  are read whole; a partial trailing line (a write in progress) is left. */
+   *  are read whole; a partial trailing line (a write in progress) is left. A read
+   *  takes READ_CHUNK bytes at a time, not the rest of the file: a session file grows
+   *  to tens of MB and a drain takes it in batches of 50. It reads on until the batch
+   *  is full or the file ends, so lines that parse to nothing never stop a drain; one
+   *  line longer than the chunk gets a larger one, up to READ_MAX. */
   read(ref: OutboxRef, from: number, maxEvents = 500): { events: Event[]; offset: number } {
     const f = this.file(ref);
     if (!existsSync(f)) return { events: [], offset: from };
@@ -105,22 +112,31 @@ export class Outbox {
     if (from >= size) return { events: [], offset: from };
     const fd = openSync(f, "r");
     try {
-      const buf = Buffer.alloc(Math.min(size - from, 8 * 1024 * 1024));
-      const n = readSync(fd, buf, 0, buf.length, from);
-      const text = buf.subarray(0, n).toString("utf8");
       const events: Event[] = [];
       let offset = from;
-      let pos = 0;
-      while (events.length < maxEvents) {
-        const nl = text.indexOf("\n", pos);
-        if (nl < 0) break;
-        const line = text.slice(pos, nl);
-        pos = nl + 1;
-        offset = from + Buffer.byteLength(text.slice(0, pos), "utf8");
-        if (!line.trim()) continue;
-        try {
-          events.push(JSON.parse(line) as Event);
-        } catch {}
+      let chunk = READ_CHUNK;
+      while (events.length < maxEvents && offset < size) {
+        const buf = Buffer.alloc(Math.min(size - offset, chunk));
+        const n = readSync(fd, buf, 0, buf.length, offset);
+        const text = buf.subarray(0, n).toString("utf8");
+        let pos = 0;
+        let used = 0;
+        while (events.length < maxEvents) {
+          const nl = text.indexOf("\n", pos);
+          if (nl < 0) break;
+          const line = text.slice(pos, nl);
+          pos = nl + 1;
+          used += Buffer.byteLength(line, "utf8") + 1;
+          if (!line.trim()) continue;
+          try {
+            events.push(JSON.parse(line) as Event);
+          } catch {}
+        }
+        offset += used;
+        if (used) continue;
+        // No whole line in this chunk: a line longer than it, or a write in progress.
+        if (offset + n >= size || chunk >= READ_MAX) break;
+        chunk *= 2;
       }
       return { events, offset };
     } finally {
