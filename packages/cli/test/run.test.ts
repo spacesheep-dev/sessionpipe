@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { Outbox } from "@sessionpipe/core";
+import { Outbox, takeLock } from "@sessionpipe/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { aliasFile, readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
 import { enqueueJob, runJob, sweepJobs } from "../src/run.js";
@@ -56,6 +56,17 @@ describe("runJob", () => {
       expect(statSync(f).mode & 0o777).toBe(0o600);
       expect(statSync(path.dirname(f)).mode & 0o777).toBe(0o700);
     }
+  });
+  it("a job takes its session's lock as soon as a sibling lets go, not at the next backoff step", async () => {
+    const ref = { harness: "codex", session: "race-1" };
+    const release = takeLock(tmp, ref);
+    setTimeout(() => release?.(), 900);
+    const t0 = Date.now();
+    const { events } = await runJob(job("PreToolUse", { tool_name: "Bash", tool_input: {}, tool_use_id: "c" }), {
+      state: tmp,
+    });
+    expect(events).toHaveLength(1);
+    expect(Date.now() - t0).toBeLessThan(1400); // doubling backoff got there at 1550 ms
   });
   it("sweepJobs runs a job another worker left behind", async () => {
     const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));

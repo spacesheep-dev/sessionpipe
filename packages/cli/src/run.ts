@@ -225,15 +225,16 @@ export async function runJob(
   await tellDaemon(state, job, id, r.session.cwd, r.transcript);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
-  // Hooks of one session fire close together (parallel subagents, issue #9): wait
-  // for the lock with a short backoff before giving the job back to the queue.
+  // Hooks of one session fire close together (parallel subagents, issue #9): poll
+  // for the lock, often enough that its siblings can't keep taking it in between,
+  // before giving the job back to the queue.
   let release = takeLock(state, ref);
-  for (let wait = 50; !release && wait <= 3200; wait *= 2) {
-    await new Promise((res) => setTimeout(res, wait));
+  for (const until = Date.now() + LOCK_WAIT_MS; !release && Date.now() < until; ) {
+    await new Promise((res) => setTimeout(res, 50));
     release = takeLock(state, ref);
   }
   if (!release) {
-    log(state, `${job.harness} ${job.event}: session ${id} locked for 6 s, re-queued`);
+    log(state, `${job.harness} ${job.event}: session ${id} locked for ${LOCK_WAIT_MS / 1000} s, re-queued`);
     enqueueJob(state, job);
     return { events: [], delivered: {} };
   }
@@ -355,6 +356,8 @@ export async function runJob(
   }
 }
 
+/** How long a job waits for its session's lock before it goes back to the queue. */
+const LOCK_WAIT_MS = 6000;
 const BATCH = 50;
 const MAX_PER_RUN = 500;
 
@@ -363,7 +366,9 @@ const MAX_PER_RUN = 500;
  *  install's 400-session backfill is nine POSTs, not four hundred (the receiver's
  *  write limit ended the first replay at 278 events, 2026-09-28). A cursor moves
  *  only after its batch was acknowledged; a refused batch stops the sink for this
- *  run and the next worker starts from the same cursors. */
+ *  run and the next worker starts from the same cursors. The sinks drain at once:
+ *  the session's lock is held for the slowest round trip, not the sum of them (a
+ *  verdict's config write is synchronous, so two sinks' never interleave). */
 export async function flush(
   state: string,
   sinkConfigs: SinkConfig[],
@@ -379,7 +384,7 @@ export async function flush(
     const k = `${first.harness}/${safeId(first.session)}`;
     refs.sort((a, b) => (`${a.harness}/${a.session}` === k ? -1 : `${b.harness}/${b.session}` === k ? 1 : 0));
   }
-  for (const sink of sinks) {
+  const drain = async (sink: Sink): Promise<void> => {
     const cursors = new Cursors(state, sink.name);
     const c = cursors.read();
     let sent = 0;
@@ -436,7 +441,8 @@ export async function flush(
     }
     if (!stalled && (batch.length || Object.keys(pending).length)) if (!(await send())) stalled = true;
     delivered[sink.name] = sent;
-  }
+  };
+  await Promise.all(sinks.map(drain));
   return delivered;
 }
 

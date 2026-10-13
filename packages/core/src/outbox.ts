@@ -184,13 +184,14 @@ export class Cursors {
   }
 }
 
-/** A lock per session so two workers never interleave. Stale after 5 min. */
+/** A lock per session so two workers never interleave. Stale once the worker that
+ *  took it is gone (its 15 s deadline ends it without a release), or after 5 min. */
 export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): (() => void) | null {
   const dir = path.join(root, "locks");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const f = path.join(dir, `${safeId(ref.harness)}-${safeId(ref.session)}.lock`);
   try {
-    if (Date.now() - statSync(f).mtimeMs > staleMs) unlinkSync(f);
+    if (Date.now() - statSync(f).mtimeMs > staleMs || !alive(Number(readFileSync(f, "utf8")))) unlinkSync(f);
     else return null;
   } catch {}
   try {
@@ -203,4 +204,16 @@ export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): ((
       unlinkSync(f);
     } catch {}
   };
+}
+
+/** Whether the process a lock names is still running. A pid that can't be read
+ *  counts as running: the 5 min rule decides then. */
+function alive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }

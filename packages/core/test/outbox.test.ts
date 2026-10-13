@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,5 +63,14 @@ describe("outbox", () => {
     expect(takeLock(tmp, ref)).toBeNull();
     release?.();
     expect(takeLock(tmp, ref)).not.toBeNull();
+  });
+  it("a lock whose worker is gone is taken at once, not after 5 min", () => {
+    const ref = { harness: "codex", session: "gone" };
+    mkdirSync(path.join(tmp, "locks"), { recursive: true });
+    // No process has this pid (above every platform's limit); a lock a dead worker left.
+    writeFileSync(path.join(tmp, "locks", "codex-gone.lock"), "2147483647");
+    expect(takeLock(tmp, ref)).not.toBeNull();
+    // One a live process holds (this one) is still exclusive.
+    expect(takeLock(tmp, ref)).toBeNull();
   });
 });
