@@ -26,6 +26,7 @@ import {
   type RunResult,
   redactSecrets,
   safeId,
+  shortId,
 } from "@sessionpipe/core";
 import { type ControlCommand, parseSessionRef, verifyCommand } from "@sessionpipe/core/control";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
@@ -946,7 +947,8 @@ export class ControlDaemon {
     if (ref.harness === "claude-code") {
       const target = this.state.copies[ref.id] ?? ref.id;
       const t = findTranscript(target, this.deps.claudeDirs()) ?? findTranscript(ref.id, this.deps.claudeDirs());
-      if (!t) return { refused: "no_session", why: `no Claude Code session ${ref.id.slice(0, 8)} on this machine` };
+      if (!t)
+        return { refused: "no_session", why: `no Claude Code session ${shortId(ref.harness, ref.id)} on this machine` };
       const folder = sessionFolder(t);
       const ok = folder && this.allowed(folder);
       if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
@@ -971,13 +973,14 @@ export class ControlDaemon {
     let file: string | null = null;
     if (ref.harness === "codex") {
       file = isUuid(target) ? codexControl.findRollout(target, this.deps.env ?? process.env) : null;
-      if (!a && !file) return { refused: "no_session", why: `no Codex session ${ref.id.slice(0, 8)} on this machine` };
+      if (!a && !file)
+        return { refused: "no_session", why: `no Codex session ${shortId(ref.harness, ref.id)} on this machine` };
       cwd ||= file ? codexControl.codexFacts(file).cwd : undefined;
     } else cwd ||= this.live.get(session)?.cwd || this.factsCwd(ref.harness, ref.id);
     if (!cwd)
       return {
         refused: "no_session",
-        why: `no folder known for ${ref.harness === "codex" ? "Codex" : "Antigravity"} session ${ref.id.slice(0, 8)}`,
+        why: `no folder known for ${ref.harness === "codex" ? "Codex" : "Antigravity"} session ${shortId(ref.harness, ref.id)}`,
       };
     const ok = this.allowed(cwd);
     if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
@@ -1679,7 +1682,9 @@ export class ControlDaemon {
     if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
     this.finish(r, id, { outcome: "taken" });
     const args = drv.args({ mode: this.cfg.mode, prompt: frameStart(cmd.text as string, r.url), cwd });
-    this.deps.log(`${id.slice(-8)}: ${drv.cmd} new session for ${ref.id.slice(0, 8)} (${this.cfg.mode}) in ${cwd}`);
+    this.deps.log(
+      `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
+    );
     await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null);
   }
 

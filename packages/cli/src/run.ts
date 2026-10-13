@@ -34,6 +34,7 @@ import {
   type SinkConfig,
   StdoutSink,
   safeId,
+  shortId,
   stateDir,
   type TranscriptRead,
   takeLock,
@@ -400,7 +401,10 @@ export async function runJob(
       events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
     );
     releaseJob(opts.claimed);
-    log(state, `${job.harness} ${job.event}: ${events.map((e) => e.type).join(",") || "nothing"} (${id.slice(0, 8)})`);
+    log(
+      state,
+      `${job.harness} ${job.event}: ${events.map((e) => e.type).join(",") || "nothing"} (${shortId(job.harness, id)})`,
+    );
   } finally {
     release();
   }

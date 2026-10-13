@@ -83,6 +83,17 @@ blanks an earlier full value.
 | `account_id` | An opaque id for the harness account, never an email. A receiver the person paired with for control learns the email that goes with it from the pairing request and the daemon's hellos (`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)). |
 | `parent_id` | For a subagent's own events: the parent session's id. `null` or absent otherwise. |
 
+**Short id.** Where a session is named to a person (a log line, a notification, a
+search box), senders and receivers use its short id: the first 8 hex digits, lowercase,
+of `sha256("sessionpipe.session:" + harness.name + ":" + session.id)`. It is derived
+from fields every event carries and is never sent. The id's own prefix is not a short
+form: Codex ids are time-ordered (UUIDv7), so two sessions started in the same minute
+share their first eight characters. A receiver SHOULD accept a typed prefix of a short
+id and resolve it against its sessions newest first, and MUST list the candidates
+rather than pick one when more than one matches. Vectors: `claude-code` with
+`8c132906-8c3f-4814-870a-afc3d05e1d2e` → `58ab6602`; `codex` with
+`01a10860-a43f-7ce2-b12f-a7911ae8a880` → `ae08c6ab`.
+
 ## 4. Event vocabulary
 
 *Tier* is the lowest tier that carries the type; a sink below it never sees it.
