@@ -191,7 +191,7 @@ export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): ((
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const f = path.join(dir, `${safeId(ref.harness)}-${safeId(ref.session)}.lock`);
   try {
-    if (Date.now() - statSync(f).mtimeMs > staleMs || !alive(Number(readFileSync(f, "utf8")))) unlinkSync(f);
+    if (Date.now() - statSync(f).mtimeMs > staleMs || !processAlive(Number(readFileSync(f, "utf8")))) unlinkSync(f);
     else return null;
   } catch {}
   try {
@@ -206,9 +206,9 @@ export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): ((
   };
 }
 
-/** Whether the process a lock names is still running. A pid that can't be read
- *  counts as running: the 5 min rule decides then. */
-function alive(pid: number): boolean {
+/** Whether the process a lock or a claimed job names is still running. A pid that
+ *  can't be read counts as running: the age rule decides then. */
+export function processAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return true;
   try {
     process.kill(pid, 0);

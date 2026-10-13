@@ -678,7 +678,7 @@ function status(): void {
     );
   let jobs = 0;
   try {
-    jobs = readdirSync(jobsDir(state)).length;
+    jobs = readdirSync(jobsDir(state)).filter((n) => n.endsWith(".json")).length;
   } catch {}
   if (json)
     out(

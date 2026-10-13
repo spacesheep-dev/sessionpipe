@@ -25,6 +25,7 @@ import {
   machineName,
   makeEvent,
   Outbox,
+  processAlive,
   readConfig,
   redactDeep,
   type Session,
@@ -77,7 +78,12 @@ export interface Job {
   env: Record<string, string>;
   ppid?: number;
   at: number;
+  /** How many times the session's lock held this job out (a fresh worker starts for
+   *  it each time, up to MAX_TRIES; after that a sweep picks it up). */
+  tries?: number;
 }
+
+export const MAX_TRIES = 10;
 
 /** A job file the worker will pick up: random suffix, 0600, in a 0700 dir. */
 export function enqueueJob(state: string, job: Job): string {
@@ -88,30 +94,70 @@ export function enqueueJob(state: string, job: Job): string {
   return f;
 }
 
-/** Jobs another worker left behind (a lost lock race, a killed worker): every
- *  worker sweeps the ones older than `olderThanMs` before it exits, so no event
- *  is lost (ground rule 4). Each is removed before it runs, so two sweepers
- *  never run one twice. */
-export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20): Promise<number> {
+/** A job is claimed by renaming its file `<file>.<pid>.running`: of two workers that
+ *  race for it, one rename wins. The claim stays until the job's events are in the
+ *  outbox (or it went back to the queue), so a worker its deadline ended mid-run
+ *  leaves it behind for a sweep to give back (ground rule 4: no event lost). */
+export function claimJob(file: string): { job: Job; file: string } | null {
+  const claimed = `${file}.${process.pid}.running`;
+  try {
+    renameSync(file, claimed);
+  } catch {
+    return null;
+  }
+  try {
+    return { job: JSON.parse(readFileSync(claimed, "utf8")) as Job, file: claimed };
+  } catch {
+    releaseJob(claimed);
+    return null;
+  }
+}
+export function releaseJob(claimed: string | undefined): void {
+  if (!claimed) return;
+  try {
+    unlinkSync(claimed);
+  } catch {}
+}
+
+/** Jobs another worker left behind: a claim whose worker is gone (or older than any
+ *  worker lives, `abandonedMs`) goes back to the queue, then every queued job older
+ *  than `olderThanMs` (younger ones belong to the worker their hook just spawned)
+ *  is claimed and run. Every worker sweeps before it exits. */
+export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20, abandonedMs = 60_000): Promise<number> {
   const jobs = jobsDir(state);
   let names: string[] = [];
   try {
-    names = readdirSync(jobs).filter((n) => n.endsWith(".json"));
+    names = readdirSync(jobs);
   } catch {
     return 0;
   }
-  let ran = 0;
-  for (const n of names.sort().slice(0, limit)) {
+  const queued = names.filter((n) => n.endsWith(".json"));
+  for (const n of names) {
+    const m = /^(.*\.json)\.(\d+)\.running$/.exec(n);
+    if (!m) continue;
     const f = path.join(jobs, n);
-    let job: Job | null = null;
+    try {
+      if (processAlive(Number(m[2])) && Date.now() - statSync(f).mtimeMs < abandonedMs) continue;
+      renameSync(f, path.join(jobs, m[1] as string));
+      queued.push(m[1] as string);
+    } catch {}
+  }
+  let ran = 0;
+  for (const n of queued.sort().slice(0, limit)) {
+    const f = path.join(jobs, n);
     try {
       if (Date.now() - statSync(f).mtimeMs < olderThanMs) continue;
-      job = JSON.parse(readFileSync(f, "utf8")) as Job;
-      unlinkSync(f);
     } catch {
       continue;
     }
-    await runJob(job, { state }).catch(() => {});
+    const c = claimJob(f);
+    if (!c) continue;
+    try {
+      await runJob(c.job, { state, claimed: c.file });
+    } catch {
+    } finally {
+      releaseJob(c.file);
+    }
     ran++;
   }
   return ran;
@@ -202,11 +248,13 @@ export function openTurn(
 }
 const MAX_TURN_SIDE = 20_000;
 
-/** Run one hook job end to end: events → outbox → sinks. Returns what happened. */
+/** Run one hook job end to end: events → outbox → sinks. Returns what happened.
+ *  `claimed` is the job file this run holds: released once the events are in the
+ *  outbox or the job is back in the queue (`requeued` names its new file). */
 export async function runJob(
   job: Job,
-  opts: { state?: string; now?: number } = {},
-): Promise<{ events: Event[]; delivered: Record<string, number> }> {
+  opts: { state?: string; now?: number; claimed?: string; lockWaitMs?: number } = {},
+): Promise<{ events: Event[]; delivered: Record<string, number>; requeued?: string }> {
   const state = opts.state ?? stateDir();
   const cfg = readConfig();
   const adapter = adapterByName(job.harness);
@@ -229,14 +277,16 @@ export async function runJob(
   // for the lock, often enough that its siblings can't keep taking it in between,
   // before giving the job back to the queue.
   let release = takeLock(state, ref);
-  for (const until = Date.now() + LOCK_WAIT_MS; !release && Date.now() < until; ) {
+  const lockWait = opts.lockWaitMs ?? LOCK_WAIT_MS;
+  for (const until = Date.now() + lockWait; !release && Date.now() < until; ) {
     await new Promise((res) => setTimeout(res, 50));
     release = takeLock(state, ref);
   }
   if (!release) {
-    log(state, `${job.harness} ${job.event}: session ${id} locked for ${LOCK_WAIT_MS / 1000} s, re-queued`);
-    enqueueJob(state, job);
-    return { events: [], delivered: {} };
+    log(state, `${job.harness} ${job.event}: session ${id} locked for ${lockWait / 1000} s, re-queued`);
+    const requeued = enqueueJob(state, { ...job, tries: (job.tries ?? 0) + 1 });
+    releaseJob(opts.claimed);
+    return { events: [], delivered: {}, requeued };
   }
   try {
     const facts = factsState(state);
@@ -347,6 +397,7 @@ export async function runJob(
       ref,
       events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
     );
+    releaseJob(opts.claimed);
     log(state, `${job.harness} ${job.event}: ${events.map((e) => e.type).join(",") || "nothing"} (${id.slice(0, 8)})`);
     const delivered = await flush(state, cfg.sinks, outbox, ref);
     if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);

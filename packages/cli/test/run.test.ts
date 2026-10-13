@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Issue #9 (no event lost to the lock race) and advisory GHSA-8f6f-c3c9-j5p6
 // (the outbox holds redacted strings at rest, 0600/0700).
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Outbox, takeLock } from "@sessionpipe/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { aliasFile, readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
-import { enqueueJob, runJob, sweepJobs } from "../src/run.js";
+import { claimJob, enqueueJob, jobsDir, runJob, sweepJobs } from "../src/run.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-run-"));
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
@@ -67,6 +76,50 @@ describe("runJob", () => {
     });
     expect(events).toHaveLength(1);
     expect(Date.now() - t0).toBeLessThan(1400); // doubling backoff got there at 1550 ms
+  });
+  it("a claim is released once the job's events are in the outbox", async () => {
+    const f = enqueueJob(tmp, job("PreToolUse", { tool_name: "Bash", tool_input: {}, tool_use_id: "d" }));
+    const c = claimJob(f);
+    expect(c?.file).toBe(`${f}.${process.pid}.running`);
+    expect(existsSync(f)).toBe(false);
+    const { events } = await runJob(c?.job as Parameters<typeof runJob>[0], { state: tmp, claimed: c?.file as string });
+    expect(events).toHaveLength(1);
+    expect(readdirSync(jobsDir(tmp))).toEqual([]);
+  });
+  it("a claim a dead worker left mid-run goes back to the queue and the next sweep runs it", async () => {
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const old = new Date(Date.now() - 10_000);
+    const { renameSync, utimesSync } = await import("node:fs");
+    utimesSync(f, old, old);
+    renameSync(f, `${f}.2147483647.running`); // no process has this pid
+    expect(await sweepJobs(tmp, 3000)).toBe(1);
+    expect(readdirSync(jobsDir(tmp))).toEqual([]);
+    const { events } = new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100);
+    expect(events.some((e) => e.type === "session.ended")).toBe(true);
+  });
+  it("a claim a live worker holds is left alone", async () => {
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const { renameSync } = await import("node:fs");
+    renameSync(f, `${f}.${process.pid}.running`);
+    expect(await sweepJobs(tmp, 0)).toBe(0);
+    expect(readdirSync(jobsDir(tmp))).toEqual([`${path.basename(f)}.${process.pid}.running`]);
+  });
+  it("a job the lock holds out goes back to the queue under a new file, its claim released", async () => {
+    const release = takeLock(tmp, { harness: "codex", session: "race-1" });
+    try {
+      const c = claimJob(enqueueJob(tmp, job("Stop")));
+      const r = await runJob(c?.job as Parameters<typeof runJob>[0], {
+        state: tmp,
+        claimed: c?.file as string,
+        lockWaitMs: 120,
+      });
+      expect(r.events).toEqual([]);
+      expect(r.requeued).toBeDefined();
+      expect(readdirSync(jobsDir(tmp))).toEqual([path.basename(r.requeued as string)]);
+      expect(JSON.parse(readFileSync(r.requeued as string, "utf8")).tries).toBe(1);
+    } finally {
+      release?.();
+    }
   });
   it("sweepJobs runs a job another worker left behind", async () => {
     const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
