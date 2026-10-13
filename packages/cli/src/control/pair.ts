@@ -42,7 +42,12 @@ export interface PairOptions {
   harnesses?: string[];
   /** The harness accounts signed in here (default: every Claude Code config dir's). */
   accounts?: HarnessAccount[];
+  /** How long expired codes are renewed for (default RENEW_FOR_MS). */
+  renewFor?: number;
 }
+
+/** How long `control pair` keeps asking for fresh codes when nobody approves one. */
+export const RENEW_FOR_MS = 60 * 60_000;
 
 async function json(r: Response): Promise<Record<string, unknown>> {
   try {
@@ -102,57 +107,88 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
       accounts = [];
     }
   const auth = { authorization: `Bearer ${o.token ?? pollKey}`, "content-type": "application/json" };
-  const started = await f(`${control}/pair`, {
-    method: "POST",
-    headers: o.token ? auth : { "content-type": "application/json" },
-    body: JSON.stringify({
-      ...(pollKey ? { poll_key: pollKey } : {}),
-      ...(existing ? { machine: existing.machine } : {}),
-      name: cfg.name,
-      harnesses: o.harnesses ?? drivableHarnesses(o.env ?? process.env),
-      modes: ["waiter", "turn", "resume", "fork"],
-      version: VERSION,
-      folders: cfg.folders,
-      mode: cfg.mode,
-      ...(accounts.length ? { accounts } : {}),
-    }),
-  });
-  const s = await json(started);
-  if (started.status !== 201 && started.status !== 200)
-    throw new Error(
-      `the receiver refused to start pairing (HTTP ${started.status}${s.reason ? `: ${String(s.reason)}` : ""})`,
-    );
-  const machine = String(s.machine);
-  const code = String(s.code);
-  o.out("");
-  const digits = String(s.check);
-  const spaced = /^\d{6}$/.test(digits) ? `${digits.slice(0, 3)} ${digits.slice(3)}` : digits;
-  // The approval happens on whatever device holds the person's passkey, which is
-  // rarely the machine being paired (a server may have no screen at all): say so, or
-  // the "Touch ID" line reads as "do it here" (2026-10-02, four machines, one headless).
+  const hello = {
+    ...(pollKey ? { poll_key: pollKey } : {}),
+    name: cfg.name,
+    harnesses: o.harnesses ?? drivableHarnesses(o.env ?? process.env),
+    modes: ["waiter", "turn", "resume", "fork"],
+    version: VERSION,
+    folders: cfg.folders,
+    mode: cfg.mode,
+    ...(accounts.length ? { accounts } : {}),
+  };
+  /** One pairing code from the receiver. `machine` names the row a previous code
+   *  made, so a renewal adds no second machine. */
+  const start = async (machine: string | undefined) => {
+    const started = await f(`${control}/pair`, {
+      method: "POST",
+      headers: o.token ? auth : { "content-type": "application/json" },
+      body: JSON.stringify({ ...hello, ...(machine ? { machine } : {}) }),
+    });
+    const s = await json(started);
+    if (started.status !== 201 && started.status !== 200)
+      throw new Error(
+        `the receiver refused to start pairing (HTTP ${started.status}${s.reason ? `: ${String(s.reason)}` : ""})`,
+      );
+    return {
+      machine: String(s.machine),
+      code: String(s.code),
+      url: String(s.url),
+      check: String(s.check),
+      until: Date.parse(String(s.expires_at)) || Date.now() + 10 * 60_000,
+    };
+  };
   const host = new URL(o.url).host;
-  o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one),`);
-  if (pollKey) {
-    // Open pairing: one address for everyone, and the digits are what the person types.
-    o.out(`  open ${String(s.url)} and enter:  ${spaced}`);
-    o.out("  then approve with that device's passkey (Touch ID, Face ID, a security key).");
-    o.out("  Pairing several machines? Run this on each one: every machine shows its own digits.");
-  } else {
-    o.out("  open this link and approve with that device's passkey (Touch ID, Face ID, a security key):");
-    o.out(`    ${String(s.url)}`);
-    o.out(`  The page shows these digits too: ${digits}`);
-  }
-  o.out("");
-  const until = Date.parse(String(s.expires_at)) || Date.now() + 10 * 60_000;
+  const announce = (p: { url: string; check: string; until: number }) => {
+    const spaced = /^\d{6}$/.test(p.check) ? `${p.check.slice(0, 3)} ${p.check.slice(3)}` : p.check;
+    o.out("");
+    // The approval happens on whatever device holds the person's passkey, which is
+    // rarely the machine being paired (a server may have no screen at all): say so, or
+    // the "Touch ID" line reads as "do it here" (2026-10-02, four machines, one headless).
+    o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one),`);
+    if (pollKey) {
+      // Open pairing: one address for everyone, and the digits are what the person types.
+      o.out(`  open ${p.url} and enter:  ${spaced}`);
+      o.out("  then approve with that device's passkey (Touch ID, Face ID, a security key).");
+      o.out("  Pairing several machines? Run this on each one: every machine shows its own digits.");
+    } else {
+      o.out("  open this link and approve with that device's passkey (Touch ID, Face ID, a security key):");
+      o.out(`    ${p.url}`);
+      o.out(`  The page shows these digits too: ${p.check}`);
+    }
+    const mins = Math.max(1, Math.round((p.until - Date.now()) / 60_000));
+    o.out(`  This code is good for ${mins} minute${mins === 1 ? "" : "s"}; if it runs out, a fresh one appears here.`);
+    o.out("");
+  };
+  // A code lives ten minutes on the receiver. A person approving three headless
+  // machines from a phone ran out of them (2026-10-08). A code nobody approved in time
+  // is renewed from this terminal, with fresh digits, for up to RENEW_FOR_MS: the old
+  // code is dead on the receiver, so no code lives longer than it did.
+  const renewUntil = Date.now() + (o.renewFor ?? RENEW_FOR_MS);
+  let cur = await start(existing?.machine);
+  announce(cur);
   for (;;) {
-    if (Date.now() > until) throw new Error("the pairing link expired; run `sessionpipe control pair` again");
     await sleep(2000);
-    const r = await f(`${control}/pair?code=${encodeURIComponent(code)}`, { headers: auth }).catch(() => null);
-    if (!r) continue;
-    if (r.status === 404) throw new Error("the receiver lost the pairing; run `sessionpipe control pair` again");
-    const p = await json(r);
-    if (p.status === "expired") throw new Error("the pairing link expired; run `sessionpipe control pair` again");
-    if (p.status !== "paired") continue;
+    let p: Record<string, unknown> = {};
+    let expired = Date.now() > cur.until;
+    if (!expired) {
+      const r = await f(`${control}/pair?code=${encodeURIComponent(cur.code)}`, { headers: auth }).catch(() => null);
+      if (!r) continue;
+      if (r.status === 404) throw new Error("the receiver lost the pairing; run `sessionpipe control pair` again");
+      p = await json(r);
+      if (p.status === "expired") expired = true;
+      else if (p.status !== "paired") continue;
+    }
+    if (expired) {
+      if (Date.now() >= renewUntil) throw new Error("the pairing link expired; run `sessionpipe control pair` again");
+      // A keyed pairing keeps the machine row its first code made; an open one starts
+      // clean under the same poll key (the receiver names the machine at approval).
+      cur = await start(o.token ? cur.machine : existing?.machine);
+      o.out("  Nobody approved that code before it expired. Here is a fresh one; the old digits no longer work.");
+      announce(cur);
+      continue;
+    }
+    const { machine, code } = cur;
     const key = p.key as TrustedKey;
     const proof = p.proof as { cred: string; ad: string; cd: string; sig: string };
     const v = await verifyEnrollment({ machine, code, key, proof, rpId });

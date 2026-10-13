@@ -4,7 +4,7 @@
   recorded from **real** hook payloads (secrets scrubbed; `npm run fixture-scan` gates it).
   `"*"` in an expected event is a wildcard for `id` and `time`.
 - `redaction/secrets.json`, `redaction/pii.json` — `[{ in, out }]` vectors for the rulesets.
-- `delivery/*.json` — receiver scenarios: dedup, 413 split, 403 tier, retry, forget, control.
+- `delivery/*.json` — receiver scenarios: dedup, 413 split, 403 tier, retry, forget, control, pairing renewal.
   A control scenario's `enqueue` step is the receiver's own test door: the runner signs
   the message with a test key it enrolled there, and `{run}` / `{run12}` are the run id.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment

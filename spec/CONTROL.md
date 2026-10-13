@@ -44,6 +44,10 @@ A key enters a machine's trust store **only from that machine's own terminal**:
    `sha256("sessionpipe.pair:" + machine + ":" + code)`.
 3. The daemon polls `GET {control}/pair?code=…` until it answers `paired` with the key
    and that assertion ([`control-paired.json`](https://sessionpipe.org/schema/v1/control-paired.json)).
+   A code the receiver expires unapproved MAY be renewed from the same terminal: a new
+   `POST {control}/pair` naming the `machine` it was handed (so the receiver keeps
+   one row), new digits printed, for as long as the command runs. The expired code
+   answers nothing; no code lives longer than the receiver gave it.
    The daemon MUST verify the assertion against the key it was handed before it trusts
    the key. A receiver that swaps in another key cannot produce the proof.
 4. The first pairing of a machine also hands over the machine's own bearer `token`,

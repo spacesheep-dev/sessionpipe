@@ -243,6 +243,54 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(rx.pairs[0]?.accounts).toEqual([{ harness: "claude-code", id: "acct-home", email: "me@example.com" }]);
     expect(out.join("\n")).toContain("names your Claude Code account: me@example.com");
   });
+  it("a code nobody approved in time is renewed in place: fresh digits, the same machine, no second row", async () => {
+    rx.paired = true;
+    rx.handKey = "same";
+    rx.expireFirst = true;
+    rx.codesIssued = 0;
+    rx.pairs.length = 0;
+    const out: string[] = [];
+    try {
+      const c = await pair({
+        url: rx.url,
+        token: rx.sinkToken,
+        folders: [project],
+        mode: "safe",
+        name: "testbox",
+        out: (s) => out.push(s),
+        sleep: async () => {},
+        env,
+      });
+      expect(rx.pairs).toHaveLength(2);
+      expect(rx.pairs[1]?.machine).toBe(rx.machine);
+      expect(out.join("\n")).toContain("Here is a fresh one");
+      expect(out.join("\n")).toContain("good for 10 minutes");
+      expect(c.receivers[0]?.keys.map((k) => k.id)).toEqual([rx.passkey.key.id]);
+    } finally {
+      rx.expireFirst = false;
+    }
+  });
+  it("renewal has an end: past it, an expired code is the error it always was", async () => {
+    rx.expireFirst = true;
+    rx.codesIssued = 0;
+    try {
+      await expect(
+        pair({
+          url: rx.url,
+          token: rx.sinkToken,
+          folders: [project],
+          mode: "safe",
+          name: "testbox",
+          out: () => {},
+          sleep: async () => {},
+          env,
+          renewFor: 0,
+        }),
+      ).rejects.toThrow("the pairing link expired");
+    } finally {
+      rx.expireFirst = false;
+    }
+  });
   it("open pairing: no token, the poll key gets the token, the sink key is handed over, the approver is named", async () => {
     rx.paired = true;
     rx.handKey = "same";

@@ -46,6 +46,9 @@ export class FakeReceiver {
   offCalled = false;
   /** Declare control.open_pairing: pairing may start with no token and a poll_key. */
   openPairing = false;
+  /** The first code this pairing is handed expires unapproved; the next one pairs. */
+  expireFirst = false;
+  codesIssued = 0;
   pollKey: string | null = null;
 
   async start(port = 0): Promise<void> {
@@ -163,9 +166,10 @@ export class FakeReceiver {
         if (!this.openPairing || auth || typeof b.poll_key !== "string") return send(401);
         this.pollKey = b.poll_key;
       }
+      const stale = this.expireFirst && this.codesIssued++ === 0;
       return send(201, {
         machine: this.machine,
-        code: this.pairCode,
+        code: stale ? "PAIR-STALE" : this.pairCode,
         url: `${this.url}/pair/${this.pairCode}`,
         check: "123456",
         expires_at: new Date(Date.now() + 600_000).toISOString(),
@@ -174,6 +178,7 @@ export class FakeReceiver {
     if (u.pathname === `${base}/pair` && req.method === "GET") {
       const open = this.pollKey !== null && auth === `Bearer ${this.pollKey}`;
       if (!sinkAuth && !open) return send(401);
+      if (u.searchParams.get("code") === "PAIR-STALE") return send(200, { status: "expired" });
       if (u.searchParams.get("code") !== this.pairCode) return send(404);
       if (!this.paired) return send(200, { status: "pending" });
       const proof = await this.passkey.enroll(this.machine, this.pairCode);
