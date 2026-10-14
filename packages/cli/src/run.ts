@@ -273,7 +273,10 @@ export async function runJob(
   // The control daemon learns each session's turn state and folder from its events (a
   // message for a session mid-turn waits for its Stop; a pending permission prompt
   // closes when the tool runs). A local round trip, and nothing when no daemon runs.
-  await tellDaemon(state, job, id, r.session.cwd, r.transcript);
+  // A Claude end needs the history check below before even the local daemon
+  // learns about it. Notify that end after releasing the session lock.
+  const claudeEnd = job.harness === "claude-code" && job.event === "SessionEnd";
+  if (!claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
   // Hooks of one session fire close together (parallel subagents, issue #9): poll
@@ -295,6 +298,18 @@ export async function runJob(
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
+    // `claude mcp list` fires SessionEnd with a fresh id but never starts a
+    // session or creates its transcript (Claude Code 2.1.300). Check before the
+    // facts pass creates state, while the session lock excludes another writer.
+    if (
+      claudeEnd &&
+      !existsSync(outbox.file(ref)) &&
+      !Object.keys(mem).length &&
+      (!r.transcript || !existsSync(r.transcript))
+    ) {
+      releaseJob(opts.claimed);
+      return { events: [], delivered: {} };
+    }
     // Heartbeat-class events read no facts (they fire every tool call); the rest refresh them.
     const heavy = !/^(PreToolUse|PostToolUse|PostToolUseFailure|BeforeTool|AfterTool|PostInvocation)$/.test(job.event);
     let learned: Partial<Session> = {};
@@ -408,6 +423,7 @@ export async function runJob(
   } finally {
     release();
   }
+  if (claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
   // The session's lock covered the append; the sinks drain without it (the outbox
   // reader leaves a line still being written), so a sibling hook isn't held out for
   // a round trip.

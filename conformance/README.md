@@ -3,6 +3,9 @@
 - `harness/<name>/*.json` — `{ input: { argv, stdin, env, files }, expect: [events] }`,
   recorded from **real** hook payloads (secrets scrubbed; `npm run fixture-scan` gates it).
   `"*"` in an expected event is a wildcard for `id` and `time`.
+- `worker/*.json` — reported hook regressions that require local session history;
+  `expect` lists emitted event types. The runner uses an empty temporary state and
+  rebases transcript paths there. Run by `npm run conformance` and CLI tests.
 - `redaction/secrets.json`, `redaction/pii.json` — `[{ in, out }]` vectors for the rulesets.
 - `short-id.json` — `{ harness, id, short_id }` vectors for a session's short id (spec/PROTOCOL.md §3):
   what a receiver shows and searches by must reach these.

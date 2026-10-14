@@ -72,6 +72,13 @@ presents that as its own reading.
 | Facts | Title: the per-pid registry `<config>/sessions/<pid>.json` (`name` with `nameSource` user → `custom`, auto/hook/peer → `harness`; `derived` is never a title), found through process ancestry because a `--continue --remote-control` session files its entry under another id; then `custom-title` / `ai-title` records; then the first human ask cut to 50 chars (`first-ask`). URL: registry `bridgeSessionId` → `https://claude.ai/code/<session_…>`, else `bridge_status` / `bridge-session` records. Account: `oauthAccount.accountUuid` in the config dir's `.claude.json` (never the email on an event); control's pair and hello name each config dir's account as `{id: accountUuid, email: emailAddress}`. Model: last assistant record's `message.model`. |
 | Quirks | Running sessions pick up hook changes live from 2.1.280. `type: "http"` handler exists (native lane). A prompt with pasted images can put the first ask megabytes into the file: stream to it, cap at 16 MB. |
 
+Claude Code 2.1.300's `claude mcp list` can fire a lone `SessionEnd` with a fresh id
+and a transcript path that never exists (reported 2026-10-13). The worker ignores
+that end when the session has neither an outbox nor saved facts and the transcript
+is absent. An end backed by any of those is preserved. This avoids inventing a
+session for an administrative command (PROTOCOL.md §4); the reported shape is in
+`conformance/worker/claude-code-mcp-list.json`.
+
 Fixtures recorded 2026-09-28 on Claude Code 2.1.258 (one `claude -p` run): `SessionStart`,
 `UserPromptSubmit`, `PreToolUse` / `PostToolUse` for Bash, Read and Agent (with
 `duration_ms` and, inside the subagent, `agent_id`), `PermissionRequest` (no

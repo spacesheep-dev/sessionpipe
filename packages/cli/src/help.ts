@@ -3,8 +3,9 @@
 // docs page reads the same table, so a command's usage is written in one place.
 export function usageTable(harnesses: readonly string[]): Record<string, string> {
   return {
-    connect: "connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
-    install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--backfill DAYS] [--sink URL --tier N]`,
+    connect:
+      "connect <receiver> [--machine NAME] [--rename-machine NAME] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
+    install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--rename-machine NAME] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]`,
     sink: "sink add|list|remove|test (use --help after a subcommand for its options)",
     "sink add": "sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--secret S] [--pii] [--name N]",
     "sink list": "sink list",

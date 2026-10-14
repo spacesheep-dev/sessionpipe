@@ -6,7 +6,8 @@
 //  2. Behaviour: when @sessionpipe/conformance is built (M2+), every adapter fixture
 //     is run through core's adapter and the events compared.
 // Exits non-zero on any miss.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -124,6 +125,44 @@ if (existsSync(runner)) {
     console.log(result.table);
     if (result.failed) failed += result.failed;
   }
+}
+
+// Worker fixtures cover decisions that need local history, beyond adapter mapping.
+for (const file of walk(path.join(root, "conformance/worker")).filter((f) => f.endsWith(".json"))) {
+  const state = mkdtempSync(path.join(os.tmpdir(), "sp-conformance-worker-"));
+  const previousConfig = process.env.SESSIONPIPE_CONFIG;
+  const problems = [];
+  try {
+    const { runJob } = await import(pathToFileURL(path.join(root, "packages/cli/dist/index.js")).href);
+    const fx = JSON.parse(readFileSync(file, "utf8"));
+    const payload = JSON.parse(fx.input.stdin);
+    process.env.SESSIONPIPE_CONFIG = path.join(state, "config.json");
+    writeFileSync(process.env.SESSIONPIPE_CONFIG, JSON.stringify({ sinks: [], harnesses: {} }));
+    const result = await runJob(
+      {
+        harness: fx.harness,
+        event: fx.event,
+        argv: fx.input.argv,
+        stdin: JSON.stringify({ ...payload, cwd: state, transcript_path: path.join(state, payload.transcript_path) }),
+        cwd: state,
+        env: { ...fx.input.env, HOME: state },
+        at: Date.now(),
+      },
+      { state },
+    );
+    if (JSON.stringify(result.events.map((e) => e.type)) !== JSON.stringify(fx.expect))
+      problems.push("worker emitted unexpected events");
+    if (!fx.expect.length && (existsSync(path.join(state, "outbox")) || existsSync(path.join(state, "facts"))))
+      problems.push("ignored hook created session state");
+  } catch (e) {
+    problems.push(String(e.message));
+  } finally {
+    if (previousConfig === undefined) delete process.env.SESSIONPIPE_CONFIG;
+    else process.env.SESSIONPIPE_CONFIG = previousConfig;
+    rmSync(state, { recursive: true, force: true });
+  }
+  if (problems.length) failed++;
+  rows.push([path.relative(root, file), problems.length ? "FAIL" : "ok", problems.join(" | ")]);
 }
 
 const w = Math.max(...rows.map((r) => r[0].length));

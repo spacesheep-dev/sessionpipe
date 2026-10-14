@@ -38,7 +38,7 @@ import { moveControlSecrets, pairedCount, readControl } from "./control/store.js
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
-import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
+import { checkInstallVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 
@@ -140,9 +140,9 @@ function help(): void {
   out(`sessionpipe ${VERSION} — an open protocol for what your coding agents are doing
 
 Usage:
-  sessionpipe connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
+  sessionpipe connect <receiver> [--machine NAME] [--rename-machine NAME] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
                                   (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity] [--machine NAME] [--backfill DAYS] [--sink URL --tier N]
+  sessionpipe install [--claude-code --codex --gemini-cli --antigravity] [--machine NAME] [--rename-machine NAME] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
   sessionpipe uninstall [--keep-state]
   sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--name N]
   sessionpipe sink list | remove <name> | test <name>
@@ -157,10 +157,10 @@ Docs: https://sessionpipe.org · nothing leaves this machine until you add a sin
 }
 
 async function install(): Promise<void> {
-  if (viaNpx(distDir)) return rerunGlobally(args, out);
   const cfg = readConfig();
-  const machine = flag("--machine");
-  if (machine) cfg.machine = machine.slice(0, 80);
+  configureMachine(cfg);
+  if (viaNpx(distDir)) return rerunGlobally(args, out);
+  checkInstallVersion(VERSION, { allowDowngrade: has("--allow-downgrade") });
   // A sink URL given here is added first, so the install knows whether it needs
   // every tool event or only the heartbeat's one.
   const sinkUrl = flag("--sink");
@@ -190,6 +190,27 @@ async function install(): Promise<void> {
       "  Nothing leaves this machine yet: events go to the local outbox. `sessionpipe tail` shows them; `sessionpipe sink add <url> --tier N` sends them.",
     );
   out("  Sessions already running pick up hooks on their next start (Claude Code ≥ 2.1.280 picks them up live).");
+}
+
+/** Setup lines can suggest a name for a new machine, never rename an existing
+ *  one. A paired daemon's name is authoritative until it is renamed separately. */
+function configureMachine(cfg: Config): void {
+  const control = readControl();
+  const pairedName = control?.receivers.length ? control.name : undefined;
+  const requested = flag("--machine")?.slice(0, 80);
+  const rename = flag("--rename-machine")?.slice(0, 80);
+  if (has("--rename-machine") && (!rename || rename.startsWith("--"))) throw new Error("--rename-machine needs a name");
+  const existing = cfg.machine || pairedName;
+  const name = rename || existing || requested;
+  if (pairedName && name !== pairedName)
+    throw new Error(
+      `machine name conflict: sessions would report as ${JSON.stringify(name)}, but the paired daemon reports as ${JSON.stringify(pairedName)}. Setup cannot rename the paired daemon; no setup changes were made. Use --rename-machine ${JSON.stringify(pairedName)} to keep sessions aligned with it.`,
+    );
+  if (!rename && existing && requested && requested !== existing)
+    out(
+      `  Keeping configured machine name ${JSON.stringify(existing)}; --machine ${JSON.stringify(requested)} only names a new machine. Use --rename-machine NAME for an explicit rename.`,
+    );
+  if (name) cfg.machine = name;
 }
 
 /** No sink takes tier ≥ 1: the harness only needs one tool event (issue #12). */
@@ -238,14 +259,14 @@ async function connect(): Promise<void> {
   const raw = args[1];
   if (!raw || raw.startsWith("-"))
     return out(
-      "usage: sessionpipe connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
+      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine NAME] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
     );
-  if (viaNpx(distDir)) return rerunGlobally(args, out);
   const url = (/^https?:\/\//.test(raw) ? raw : `https://${raw}`).replace(/\/$/, "");
   const host = new URL(url).host;
   const cfg = readConfig();
-  const machine = flag("--machine");
-  if (machine) cfg.machine = machine.slice(0, 80);
+  configureMachine(cfg);
+  if (viaNpx(distDir)) return rerunGlobally(args, out);
+  checkInstallVersion(VERSION, { allowDowngrade: has("--allow-downgrade") });
   const name = machineName(cfg, os.hostname());
   const before = cfg.sinks.find((x) => x.url.replace(/\/$/, "") === url);
   const tier = connectTier(flag("--tier"), before?.tier);

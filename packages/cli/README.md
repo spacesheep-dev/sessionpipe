@@ -25,6 +25,21 @@ No telemetry. Secrets never leave (`secrets@1` runs above tier 0, always). Your
 server or none. Pre-release: the reference receiver is still being built; see the
 [roadmap](https://github.com/spacesheep-dev/sessionpipe/blob/main/ROADMAP.md).
 
+## Re-running setup
+
+`connect` and `install` refuse to replace a newer global package or newer hook
+copies with the version running setup, including newer prereleases. The error
+shows both versions; `--allow-downgrade` explicitly overrides it. This guard is in
+the client running the command: already published older clients cannot gain it
+retroactively. Run the installed newer client to repair an existing installation.
+
+`--machine NAME` names a new machine. Re-running setup preserves its configured
+name, even when a setup line suggests a different one. Use `--rename-machine NAME`
+for an explicit rename. If that would disagree with a paired daemon, setup exits
+without changing configuration or hooks and reports the conflict; it does not
+rename the daemon. An already split config can be aligned with the daemon by
+passing its existing name to `--rename-machine`.
+
 ## Control: messages to your sessions (M6: Claude Code, Codex, Antigravity)
 
 A receiver that lists `control` can carry a message from your phone to a session on

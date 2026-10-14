@@ -22,6 +22,7 @@ import { FakeReceiver } from "./helpers/receiver.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.resolve(here, "../dist/cli.js");
+const rxUrl = "<receiver>";
 let rx: FakeReceiver;
 let tmp: string;
 let home: string;
@@ -78,7 +79,7 @@ afterAll(async () => {
 
 describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () => {
   it("one command: hooks through the launcher, paired, the sink at tier 2 with the handed-over key", async () => {
-    const r = await run(["connect", rx.url, "--no-service", "--mode", "safe"]);
+    const r = await run(["connect", rx.url, "--machine", "Intel", "--no-service", "--mode", "safe"]);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("not signed in as this shell sees it");
     expect(r.out).toContain("Approved by @fake on localhost");
@@ -90,12 +91,15 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
     expect(settings).not.toContain("dist/hook.js");
 
     const cfg = JSON.parse(readFileSync(env.SESSIONPIPE_CONFIG as string, "utf8")) as {
+      machine: string;
       sinks: { tier: number; token?: string; max_tier?: number }[];
     };
     expect(cfg.sinks).toHaveLength(1);
+    expect(cfg.machine).toBe("Intel");
     expect(cfg.sinks[0]).toMatchObject({ tier: 2, token: "sink_from_pairing_0123456789", max_tier: 2 });
 
     const ctl = JSON.parse(readFileSync(path.join(tmp, "config", "control.json"), "utf8")) as {
+      name: string;
       folders: string[];
       mode: string;
       receivers: { machine: string }[];
@@ -103,16 +107,48 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
     expect(ctl.receivers[0]?.machine).toBe(rx.machine);
     expect(ctl.folders).toEqual([realpathSync(project)]);
     expect(ctl.mode).toBe("safe");
+    expect(ctl.name).toBe("Intel");
   }, 30_000);
 
   it("again: nothing to approve, nothing duplicated", async () => {
     const r = await run(["connect", rx.url, "--no-service"]);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("Already paired");
+    expect(JSON.parse(readFileSync(env.SESSIONPIPE_CONFIG as string, "utf8")).machine).toBe("Intel");
+    expect(JSON.parse(readFileSync(path.join(tmp, "config", "control.json"), "utf8")).name).toBe("Intel");
     const settings = JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")) as {
       hooks: Record<string, unknown[]>;
     };
     for (const [ev, list] of Object.entries(settings.hooks))
       expect(list, `${ev}: ${JSON.stringify(list)}`).toHaveLength(1);
   }, 30_000);
+
+  for (const command of [
+    ["connect", rxUrl, "--no-service"],
+    ["install", "--claude-code", "--backfill", "0"],
+  ]) {
+    it(`${command[0]} keeps the name when a setup line supplies a different --machine`, async () => {
+      const control = readFileSync(path.join(tmp, "config", "control.json"), "utf8");
+      const r = await run([...command.map((a) => (a === rxUrl ? rx.url : a)), "--machine", "Intel-mbp"]);
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).toContain('Keeping configured machine name "Intel"');
+      expect(JSON.parse(readFileSync(env.SESSIONPIPE_CONFIG as string, "utf8")).machine).toBe("Intel");
+      expect(readFileSync(path.join(tmp, "config", "control.json"), "utf8")).toBe(control);
+    }, 30_000);
+
+    it(`${command[0]} refuses an explicit rename that would split a paired machine`, async () => {
+      const files = [
+        env.SESSIONPIPE_CONFIG as string,
+        path.join(tmp, "config", "control.json"),
+        path.join(home, ".claude", "settings.json"),
+        path.join(tmp, "data", "worker.js"),
+      ];
+      const before = files.map((f) => readFileSync(f));
+      const r = await run([...command.map((a) => (a === rxUrl ? rx.url : a)), "--rename-machine", "Intel-mbp"]);
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toContain("Setup cannot rename the paired daemon");
+      expect(r.out).toContain('paired daemon reports as "Intel"');
+      expect(files.map((f) => readFileSync(f))).toEqual(before);
+    });
+  }
 });

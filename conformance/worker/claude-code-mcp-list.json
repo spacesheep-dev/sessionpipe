@@ -1,0 +1,18 @@
+{
+  "harness": "claude-code",
+  "event": "SessionEnd",
+  "reported": {
+    "harness_version": "2.1.300",
+    "how": "Regression from the reported claude mcp list shape: fresh session id, no SessionStart, transcript_path never created. Paths and id are synthetic."
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "SessionEnd"
+    ],
+    "stdin": "{\"session_id\": \"589b8f0d-e2c0-4bd7-b9fa-a4d39ca498dc\", \"transcript_path\": \"missing-mcp-session.jsonl\", \"cwd\": \".\", \"hook_event_name\": \"SessionEnd\", \"reason\": \"other\"}",
+    "cwd": ".",
+    "env": {}
+  },
+  "expect": []
+}
