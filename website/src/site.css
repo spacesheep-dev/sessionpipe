@@ -460,127 +460,104 @@ details p {
   margin: 20px 0 0;
 }
 
-/* hero */
+/* hero: one column of type, then the tail as a ledger under a rule. Nothing boxed. */
 .home .hero {
-  padding: clamp(20px, 4vw, 44px) 0 clamp(28px, 4vw, 48px);
-}
-.home .hero-row {
-  display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-  gap: clamp(24px, 4vw, 44px);
-  align-items: start;
+  padding: clamp(28px, 5vw, 64px) 0 0;
 }
 .home .hero h1 {
   font-size: clamp(2rem, 4.2vw, 2.8rem);
   font-weight: 500;
-  line-height: 1.04;
-  margin: 0 0 28px;
-  letter-spacing: -0.025em;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  max-width: 21ch;
+  margin: 0 0 20px;
   text-wrap: balance;
-  max-width: none;
 }
 .home .lead {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
+  line-height: 1.5;
   color: var(--fg2);
-  margin: 0 0 18px;
-  max-width: 58ch;
+  max-width: 46ch;
+  margin: 0 0 28px;
   text-wrap: pretty;
 }
 .home .cmd {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--code);
-  padding: 10px 14px;
-  font: 0.92rem / 1.7 var(--mono);
-  overflow-x: auto;
-}
-.home .cmd p {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 1ch;
-  margin: 0;
-  white-space: nowrap;
-}
-.home .cmd code {
-  min-width: 24ch;
-}
-.home .cmd code {
-  background: none;
-  padding: 0;
-  font-size: 1em;
-  color: var(--fg);
+  margin: 0 0 22px;
+  font: 1.05rem / 1.5 var(--mono);
 }
 .home .cmd .p {
   color: var(--brand-text);
   user-select: none;
 }
-.home .cmd .c {
-  color: var(--fg2);
-  user-select: none;
+.home .cmd code {
+  background: none;
+  padding: 0;
+  font-size: 1em;
 }
 .home .links {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 18px;
   align-items: center;
-  margin: 18px 0 0;
+  gap: 10px 22px;
+  margin: 0;
 }
-/* agent.md stands in for the copy button only where the script didn't run */
+.home .links a.go {
+  background: var(--brand);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 4px;
+}
+.home .links a.go:hover {
+  background: var(--brand-text);
+}
+.home .links button.copy {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: 500 0.95rem var(--mono);
+  color: var(--brand-text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--line);
+}
+.home .links button.copy:hover {
+  text-decoration-color: currentColor;
+}
 .home .links .agent-link {
   display: none;
 }
 .home .links button.copy[hidden] + .agent-link {
   display: inline;
 }
-.home .links button.copy {
-  font-size: 14px;
-  padding: 10px 14px;
-}
-.home .links a {
-  font-weight: 600;
-}
-.home .links a.go {
-  background: var(--brand);
-  color: #fff;
-  text-decoration: none;
-  padding: 9px 16px;
-  border-radius: 8px;
-}
-.home .links a.go:hover {
-  background: var(--brand-text);
-}
 
-/* the live tail */
+/* the live tail: caption in the rail, log beside it, a hairline above, no box */
 .home .term {
-  padding: 0;
-  overflow: hidden;
-  background: var(--code);
-  box-shadow:
-    0 1px 0 var(--line),
-    0 24px 48px -32px color-mix(in oklab, var(--brand) 45%, transparent);
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  gap: 0 32px;
+  margin: clamp(40px, 6vw, 64px) 0 0;
+  padding: 20px 0 clamp(28px, 4vw, 40px);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
 }
 .home .term figcaption {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   margin: 0;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--card);
-  font: 12px / 1.4 var(--mono);
+  font: 12px / 1.5 var(--mono);
+  color: var(--fg2);
 }
 .home .term figcaption span:first-child {
   color: var(--fg);
 }
-.home .term figcaption span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .home .term pre {
   margin: 0;
-  padding: 14px;
-  font: 11.5px / 1.75 var(--mono);
+  font: 12.5px / 1.9 var(--mono);
   overflow-x: auto;
   scrollbar-width: thin;
   color: var(--fg);
@@ -639,6 +616,10 @@ details p {
 }
 
 /* sections: a numbered rail on the left, the content on the right */
+.home .hero + .sec {
+  border-top: 0;
+  padding-top: 0;
+}
 .home .sec {
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr);
@@ -1034,8 +1015,9 @@ details p {
 }
 
 @media (max-width: 860px) {
-  .home .hero-row {
+  .home .term {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
   .home .sec {
     grid-template-columns: minmax(0, 1fr);
@@ -1066,9 +1048,6 @@ details p {
   .home .recv > div {
     grid-template-columns: minmax(0, 1fr);
     gap: 4px;
-  }
-  .home .term figcaption span:last-child {
-    display: none;
   }
   .home .cmd p.c {
     white-space: normal;

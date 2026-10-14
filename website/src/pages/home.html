@@ -1,16 +1,11 @@
 <div class="home">
 <section class="hero">
 <h1>Your coding agents already report everything they do. You decide where it goes.</h1>
-<div class="hero-row">
-<div class="hero-copy">
 <p class="lead">One stream of events from Claude Code, Codex, Gemini CLI and Antigravity. Secrets removed on your machine; sent only where you say.</p>
-<div class="cmd">
-<p><span class="p" aria-hidden="true">$</span><code>npx sessionpipe install</code></p>
-</div>
+<p class="cmd"><span class="p" aria-hidden="true">$</span> <code>npx sessionpipe install</code></p>
 <p class="links"><a class="go" href="/get-started/">Get started</a><button type="button" class="copy" data-copy="/agent.md" hidden>Copy context for your agent</button><a class="agent-link" href="/agent.md">agent.md</a></p>
-</div>
 <figure class="term" aria-label="sessionpipe tail at tier 1: a Claude Code session and a Codex session in one stream; the Claude Code session ends up waiting for a permission.">
-<figcaption><span>sessionpipe tail --tier 1</span><span>~/.local/state/sessionpipe/outbox</span></figcaption>
+<figcaption><span>sessionpipe tail</span><span>--tier 1, the local outbox</span></figcaption>
 <pre aria-hidden="true"><span style="--i:0"><i>00:41:02</i> <b>claude-code</b>  session.started   ~/spacesheep main</span>
 <span style="--i:1"><i>00:41:09</i> <b>claude-code</b>  turn.started      prompt_chars=61</span>
 <span style="--i:2"><i>00:41:10</i> <b class="cx">codex      </b>  tool.started      Bash</span>
@@ -22,7 +17,6 @@
 <span style="--i:8"><i>00:41:31</i> <b>claude-code</b>  <strong>attention.needed</strong>  permission Bash "git push…"</span>
 <span class="cursor" style="--i:9"> </span></pre>
 </figure>
-</div>
 </section>
 
 <section class="sec" id="what">
