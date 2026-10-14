@@ -247,11 +247,11 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     log(`${e.message}; this one exits`);
     process.exit(0);
   }
-  // A sink whose token lives in a keychain can't send from a hook's worker that runs
-  // where the keychain is locked (a session started over ssh). This daemon runs in the
-  // person's own session, so it drains what those workers left, once a minute.
+  // Retry pending events even when a session has no more hooks. This also drains
+  // what workers with a locked keychain left. The shared drain honours each sink's
+  // wait and the machine-wide delivery lock, wherever its token lives.
   const drainTimer = setInterval(() => {
-    const sinks = readConfig().sinks.filter((s) => s.token_in && !s.paused);
+    const sinks = readConfig().sinks.filter((s) => !s.paused);
     if (sinks.length) void drain(stateDir(), sinks, new Outbox(stateDir())).catch(() => {});
   }, 60_000);
   drainTimer.unref();
