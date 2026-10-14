@@ -1,23 +1,36 @@
 name: Release
 
+# A push to the production branch is a release:
+#
+#   git push origin origin/main:production
+#
+# The pending changesets become the next version (a commit on release/v<version>), the
+# four packages go to npm, the version is tagged with a GitHub release, and a PR brings
+# the version bump back to main and merges itself once CI passes. Merges to main publish
+# nothing; production only ever moves forward along main.
+
 on:
   push:
-    branches: [main]
+    branches: [production]
 
 permissions:
   contents: write
   pull-requests: write
+  actions: write
   id-token: write
   packages: write
 
-concurrency: release-${{ github.ref }}
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
-    name: Version PR or publish
-    # On once each package lists this workflow as its npm trusted publisher
-    # (npmjs.com → package → Settings → Trusted publisher, file release.yml) and the
-    # repo variable RELEASES_ENABLED=true is set (ROADMAP.md, step 2).
+    name: Publish to npm
+    # On once the repo variable RELEASES_ENABLED=true is set and npm can take the
+    # publish: each package lists this workflow as its trusted publisher (npmjs.com →
+    # package → Settings → Trusted publisher, file release.yml), or the NPM_TOKEN secret
+    # holds an npm automation token.
     if: vars.RELEASES_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -34,33 +47,62 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
-      - name: Changesets — open the version PR, or publish when it merged
-        id: changesets
-        uses: changesets/action@v2
-        with:
-          publish: npm run release
-          title: "Release: version packages"
-          commit: "Release: version packages"
+      - name: Version
+        id: plan
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/release-version.mjs
+      - name: Publish to npm
+        if: steps.plan.outputs.publish == 'true'
+        run: npm run release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No NPM_TOKEN: publishing uses npm trusted publishing (OIDC), which Misha
-          # enables per package after the first manual publish (see ROADMAP.md).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
-      - name: Tag and GitHub release with the schema tarball
-        if: steps.changesets.outputs.published == 'true'
+      - name: Tags and GitHub release
+        if: steps.plan.outputs.finish == 'true'
         run: |
           set -e
-          v=$(node -p "require('./packages/core/package.json').version")
-          tar -czf sessionpipe-schemas-v$v.tgz -C schemas v1
-          gh release create "v$v" sessionpipe-schemas-v$v.tgz --title "v$v" --notes-file <(node -e "const c=require('fs').readFileSync('packages/core/CHANGELOG.md','utf8');const m=c.split(/^## /m)[1]||'';process.stdout.write('## '+m)") || true
+          v="${{ steps.plan.outputs.version }}"
+          tags=""
+          for d in cli core receiver conformance; do
+            t="$(node -p "require('./packages/$d/package.json').name")@$v"
+            git rev-parse -q --verify "refs/tags/$t" >/dev/null || git tag -a "$t" -m "$t"
+            tags="$tags refs/tags/$t"
+          done
+          git push origin $tags
+          if ! gh release view "v$v" >/dev/null 2>&1; then
+            tar -czf "sessionpipe-schemas-v$v.tgz" -C schemas v1
+            node -e "const c=require('fs').readFileSync('packages/core/CHANGELOG.md','utf8');process.stdout.write('## '+(c.split(/^## /m)[1]||''))" > notes.md
+            gh release create "v$v" "sessionpipe-schemas-v$v.tgz" --target "${{ steps.plan.outputs.sha }}" --title "v$v" --notes-file notes.md
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Receiver image → GHCR
-        if: steps.changesets.outputs.published == 'true' && hashFiles('packages/receiver/Dockerfile') != ''
+        if: steps.plan.outputs.publish == 'true' && hashFiles('packages/receiver/Dockerfile') != ''
         run: |
           set -e
-          v=$(node -p "require('./packages/receiver/package.json').version")
+          v="${{ steps.plan.outputs.version }}"
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker build -t ghcr.io/spacesheep-dev/sessionpipe-receiver:$v -t ghcr.io/spacesheep-dev/sessionpipe-receiver:latest -f packages/receiver/Dockerfile .
           docker push ghcr.io/spacesheep-dev/sessionpipe-receiver:$v
           docker push ghcr.io/spacesheep-dev/sessionpipe-receiver:latest
+      # A PR opened with this workflow's token starts no workflows of its own, so CI is
+      # started on the branch by hand; its checks are what let the PR merge itself.
+      - name: Version bump back to main
+        if: steps.plan.outputs.bumped == 'true'
+        run: |
+          set -e
+          v="${{ steps.plan.outputs.version }}"
+          b="release/v$v"
+          pr="$(gh pr list --head "$b" --state open --json url --jq '.[0].url // ""')"
+          if [ -z "$pr" ]; then
+            gh workflow run ci.yml --ref "$b"
+            run="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            pr="$(gh pr create --base main --head "$b" --title "Release: version packages ($v)" \
+              --body "v$v is on npm ([release run]($run)). This brings its version bump and changelogs back to main, and merges itself once CI passes. Until it does, the next push to production stops and points here.")"
+          fi
+          gh pr merge "$pr" --auto --rebase
+          echo "::notice::v$v published; $pr brings the bump back to main"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

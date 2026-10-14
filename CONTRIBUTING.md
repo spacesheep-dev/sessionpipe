@@ -91,6 +91,23 @@ license of the file it touches (Apache-2.0 for code, CC BY 4.0 for `spec/`).
   Measure before claiming.
 - Every source file starts with `// SPDX-License-Identifier: Apache-2.0`.
 
+## Releasing
+
+Merging to `main` publishes nothing. A release is a push to the `production` branch,
+by a maintainer:
+
+```sh
+git fetch origin
+git push origin origin/main:production
+```
+
+The [release workflow](.github/workflows/release.yml) then turns the pending changesets
+into the next version (a commit on `release/v<version>`), publishes the four packages
+to npm with provenance, tags them, makes a GitHub release with the schema tarball, and
+opens a PR that brings the version bump back to `main` and merges itself once CI passes.
+`production` only moves forward along `main`; a push from anywhere else is refused, and
+so is the next release while that PR is still open. A failed run can be re-run as is.
+
 ## Review
 
 A maintainer replies within five working days. Small fixes merge on one approval;
