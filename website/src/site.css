@@ -14,7 +14,7 @@
   --t1: #9db3ff;
   --t2: #6f86ff;
   --t3: #3b3fd8;
-  --serif: "Redaction", ui-serif, Georgia, serif;
+  --serif: "IBM Plex Serif", ui-serif, Georgia, serif;
   --mono: "Commit Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -41,31 +41,31 @@
   outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
-/* Two typefaces, served from this site (website/public/fonts/, OFL): Redaction for headings,
-   Commit Mono for anything that is data. Reading text stays system sans. */
+/* Two typefaces, served from this site (website/public/fonts/, OFL): IBM Plex Serif for
+   headings, Commit Mono for anything that is data. Reading text stays system sans. */
 @font-face {
-  font-family: "Redaction";
-  src: url("/fonts/redaction-400.woff2") format("woff2");
+  font-family: "IBM Plex Serif";
+  src: url("/fonts/ibm-plex-serif-400.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
-  font-family: "Redaction";
-  src: url("/fonts/redaction-400-italic.woff2") format("woff2");
+  font-family: "IBM Plex Serif";
+  src: url("/fonts/ibm-plex-serif-400-italic.woff2") format("woff2");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 @font-face {
-  font-family: "Redaction";
-  src: url("/fonts/redaction-700.woff2") format("woff2");
-  font-weight: 700;
+  font-family: "IBM Plex Serif";
+  src: url("/fonts/ibm-plex-serif-500.woff2") format("woff2");
+  font-weight: 500;
   font-display: swap;
 }
-/* The same face, worn down: for the one word the client removes. */
 @font-face {
-  font-family: "Redaction 50";
-  src: url("/fonts/redaction-50-400.woff2") format("woff2");
+  font-family: "IBM Plex Serif";
+  src: url("/fonts/ibm-plex-serif-600.woff2") format("woff2");
+  font-weight: 600;
   font-display: swap;
 }
 @font-face {
@@ -415,7 +415,7 @@ details p {
 .prose h2,
 .prose h3 {
   font-family: var(--serif);
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
 .prose code,
@@ -439,13 +439,13 @@ details p {
 .docs h2,
 .docs h3 {
   font-family: var(--serif);
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
 .home h3,
 .docs h3,
 .prose h3 {
-  font-weight: 700;
+  font-weight: 600;
 }
 .home .sub,
 .changelog .sub {
@@ -471,17 +471,13 @@ details p {
   align-items: start;
 }
 .home .hero h1 {
-  font-size: clamp(2.1rem, 5vw, 3.4rem);
-  font-weight: 400;
+  font-size: clamp(2rem, 4.2vw, 2.8rem);
+  font-weight: 500;
   line-height: 1.04;
   margin: 0 0 28px;
   letter-spacing: -0.025em;
   text-wrap: balance;
   max-width: none;
-}
-.home .redact {
-  font-family: "Redaction 50", var(--serif);
-  font-size: 1.08em;
 }
 .home .lead {
   font-size: 1.2rem;

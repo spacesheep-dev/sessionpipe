@@ -37,8 +37,8 @@ Attribution 4.0 International License (spec/LICENSE). The generated schemas unde
 schemas/ are code and stay under Apache-2.0.
 
 The website (website/public/fonts/) ships two typefaces under the SIL Open Font
-License 1.1, each with its license beside it: Redaction, Copyright 2019 MCKL Inc.
-(LICENSE-redaction.txt), and Commit Mono (LICENSE-commit-mono.txt).
+License 1.1, each with its license beside it: IBM Plex Serif, Copyright 2020 IBM Corp.
+(LICENSE-ibm-plex-serif.txt), and Commit Mono (LICENSE-commit-mono.txt).
 
 Third-party names (Claude Code, Codex, Gemini, Antigravity, Cursor, GitHub Copilot,
 Droid, Kiro, OpenCode and others) are trademarks of their respective owners. See
