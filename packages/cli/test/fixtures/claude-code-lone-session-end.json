@@ -1,0 +1,9 @@
+{
+  "description": "Synthetic reproduction of the lone SessionEnd reported for claude mcp list on Claude Code 2.1.300 (2026-10-14). No SessionStart or transcript file; paths and session id are test values.",
+  "payload": {
+    "session_id": "5da1dfb2-0000-4000-8000-000000000000",
+    "transcript_path": "projects/test/5da1dfb2-0000-4000-8000-000000000000.jsonl",
+    "hook_event_name": "SessionEnd",
+    "reason": "other"
+  }
+}

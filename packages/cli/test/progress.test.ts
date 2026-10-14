@@ -102,6 +102,11 @@ describe("turn.progress", () => {
     clock += 60_000;
     await runJob(job("UserPromptSubmit", { prompt: "Now the floorplans" }), { state: tmp });
     expect(progress().at(-1).data).toMatchObject({ turn: 1, user: "Now the floorplans", assistant: "" });
+    const end = await runJob(job("SessionEnd", { reason: "other" }), { state: tmp });
+    expect(end.events.map((e) => e.type)).toEqual(["session.ended"]);
+    expect(end.delivered).toEqual({ f: 1 });
+    expect(sent().at(-1)).toMatchObject({ type: "session.ended", data: { reason: "other" } });
+    expect(sent().filter((e) => e.type === "turn.transcript")).toHaveLength(1);
   });
 
   it("a long reply keeps its end, for the sender and for every sink", () => {

@@ -270,10 +270,11 @@ export async function runJob(
   // (facts, a remote URL) keeps the harness's id.
   const id =
     receiverIdOf(readAliases(aliasFile(path.join(state, "control"))), job.harness, r.session.id) ?? r.session.id;
+  const claudeEnd = job.harness === "claude-code" && r.events.some((e) => e.type === "session.ended");
   // The control daemon learns each session's turn state and folder from its events (a
   // message for a session mid-turn waits for its Stop; a pending permission prompt
   // closes when the tool runs). A local round trip, and nothing when no daemon runs.
-  await tellDaemon(state, job, id, r.session.cwd, r.transcript);
+  if (!claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
   // Hooks of one session fire close together (parallel subagents, issue #9): poll
@@ -295,6 +296,19 @@ export async function runJob(
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
+    // `claude mcp list` fires SessionEnd with a fresh id but no SessionStart or
+    // transcript. Check under the session lock, before creating facts or a seq:
+    // any existing outbox, facts or transcript is enough to preserve a real end.
+    if (
+      claudeEnd &&
+      !existsSync(outbox.file(ref)) &&
+      Object.keys(mem).length === 0 &&
+      !(r.transcript && existsSync(r.transcript))
+    ) {
+      releaseJob(opts.claimed);
+      return { events: [], delivered: {} };
+    }
+    if (claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
     // Heartbeat-class events read no facts (they fire every tool call); the rest refresh them.
     const heavy = !/^(PreToolUse|PostToolUse|PostToolUseFailure|BeforeTool|AfterTool|PostInvocation)$/.test(job.event);
     let learned: Partial<Session> = {};
