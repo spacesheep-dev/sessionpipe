@@ -127,10 +127,6 @@ sessionpipe update          # install the latest now; the daemon restarts onto i
 a launchd or systemd service doesn't inherit your shell's variables, while
 `sessionpipe update off` reaches it (it re-reads the config every ten minutes).
 
-Docs and the protocol: [sessionpipe.org](https://sessionpipe.org) · Source:
-[github.com/spacesheep-dev/sessionpipe](https://github.com/spacesheep-dev/sessionpipe) · Apache-2.0.
-Provided as-is; check what a sink receives with `sessionpipe tail` before you point it anywhere.
-
 ## Help and status JSON
 
 `sessionpipe <command> --help` (or `-h`) prints usage and exits successfully before
@@ -156,3 +152,9 @@ and warnings. Both commands still check hook installation, which can run
 `gemini --version` (up to four seconds) when `tools.enableHooks` is unset. JSON is an
 output format, not a promise of constant-time diagnostics. Plain `sessionpipe status`
 keeps its existing human output.
+
+---
+
+Docs and the protocol: [sessionpipe.org](https://sessionpipe.org) · Source:
+[github.com/spacesheep-dev/sessionpipe](https://github.com/spacesheep-dev/sessionpipe) · Apache-2.0.
+Provided as-is; check what a sink receives with `sessionpipe tail` before you point it anywhere.

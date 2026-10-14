@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Usage is data: asking for it must never enter a command's implementation.
-export function commandHelp(args: string[], harnesses: readonly string[]): string | undefined {
-  const usage: Record<string, string> = {
+// Usage is data: asking for it must never enter a command's implementation. The site's
+// docs page reads the same table, so a command's usage is written in one place.
+export function usageTable(harnesses: readonly string[]): Record<string, string> {
+  return {
     connect: "connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
     install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--backfill DAYS] [--sink URL --tier N]`,
     sink: "sink add|list|remove|test (use --help after a subcommand for its options)",
@@ -36,6 +37,10 @@ export function commandHelp(args: string[], harnesses: readonly string[]): strin
     "--version": "--version (print the installed version)",
     "-v": "-v (print the installed version)",
   };
+}
+
+export function commandHelp(args: string[], harnesses: readonly string[]): string | undefined {
+  const usage = usageTable(harnesses);
   for (let n = Math.min(args.length, 3); n > 0; n--) {
     const line = usage[args.slice(0, n).join(" ")];
     if (line) return `Usage: sessionpipe ${line}\n\n  -h, --help  Show help without running the command.`;
