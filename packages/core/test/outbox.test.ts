@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,5 +63,23 @@ describe("outbox", () => {
     expect(takeLock(tmp, ref)).toBeNull();
     release?.();
     expect(takeLock(tmp, ref)).not.toBeNull();
+  });
+  it("a lock goes with a process that exits holding it, and a stale release frees nobody else's", () => {
+    // A worker at its 15 s deadline leaves through process.exit, which runs no finally.
+    const ref = { harness: "codex", session: "s" };
+    const a = takeLock(tmp, ref);
+    expect(a).not.toBeNull();
+    const onExit = process.listeners("exit").find((l) => l.name === "releaseHeldLocks");
+    expect(onExit).toBeDefined();
+    onExit?.(0);
+    expect(existsSync(path.join(tmp, "locks", "codex-s.lock"))).toBe(false);
+    const b = takeLock(tmp, ref);
+    expect(b).not.toBeNull();
+    a?.();
+    expect(takeLock(tmp, ref)).toBeNull();
+    b?.();
+    const c = takeLock(tmp, ref);
+    expect(c).not.toBeNull();
+    c?.();
   });
 });

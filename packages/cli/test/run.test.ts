@@ -66,6 +66,16 @@ describe("runJob", () => {
     const { events } = new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100);
     expect(events.some((e) => e.type === "session.ended")).toBe(true);
   });
+  it("sweepJobs starts no job at or after `until`, and leaves it queued", async () => {
+    // A swept job is out of the queue while it runs: one started too near the
+    // worker's deadline would die with the worker, neither run nor re-queued.
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const old = new Date(Date.now() - 10_000);
+    const { existsSync, utimesSync } = await import("node:fs");
+    utimesSync(f, old, old);
+    expect(await sweepJobs(tmp, 3000, 20, { until: Date.now() })).toBe(0);
+    expect(existsSync(f)).toBe(true);
+  });
 });
 
 describe("sessions the control daemon named (control/aliases.ts)", () => {

@@ -184,7 +184,21 @@ export class Cursors {
   }
 }
 
-/** A lock per session so two workers never interleave. Stale after 5 min. */
+/** Lock files this process holds. A worker at its deadline leaves through
+ *  process.exit, which runs no `finally`; its locks go with it here, so a killed
+ *  worker never keeps a session locked for the 5 minutes a lock takes to go stale. */
+const held = new Map<string, symbol>();
+function releaseHeldLocks(): void {
+  for (const f of held.keys()) {
+    try {
+      unlinkSync(f);
+    } catch {}
+  }
+  held.clear();
+}
+
+/** A lock per session so two workers never interleave. Stale after 5 min, and let go
+ *  when this process exits holding it. */
 export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): (() => void) | null {
   const dir = path.join(root, "locks");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -198,7 +212,13 @@ export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): ((
   } catch {
     return null;
   }
+  if (!process.listeners("exit").includes(releaseHeldLocks)) process.on("exit", releaseHeldLocks);
+  const mine = Symbol(f);
+  held.set(f, mine);
+  // Once only: a second call must not remove the lock of whoever took it since.
   return () => {
+    if (held.get(f) !== mine) return;
+    held.delete(f);
     try {
       unlinkSync(f);
     } catch {}

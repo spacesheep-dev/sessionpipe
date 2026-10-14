@@ -17,6 +17,7 @@ import {
   adapterByName,
   Cursors,
   capTail,
+  type DeliveryResult,
   type Event,
   type FactsState,
   FileSink,
@@ -91,8 +92,15 @@ export function enqueueJob(state: string, job: Job): string {
 /** Jobs another worker left behind (a lost lock race, a killed worker): every
  *  worker sweeps the ones older than `olderThanMs` before it exits, so no event
  *  is lost (ground rule 4). Each is removed before it runs, so two sweepers
- *  never run one twice. */
-export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20): Promise<number> {
+ *  never run one twice, and none is started at or after `until`: one still waiting
+ *  for its session's lock when the worker's deadline came would be gone, neither
+ *  run nor re-queued. Swept jobs don't deliver; the caller delivers once after. */
+export async function sweepJobs(
+  state: string,
+  olderThanMs = 3000,
+  limit = 20,
+  o: { until?: number } = {},
+): Promise<number> {
   const jobs = jobsDir(state);
   let names: string[] = [];
   try {
@@ -102,6 +110,7 @@ export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20): 
   }
   let ran = 0;
   for (const n of names.sort().slice(0, limit)) {
+    if (o.until !== undefined && Date.now() >= o.until) break;
     const f = path.join(jobs, n);
     let job: Job | null = null;
     try {
@@ -111,7 +120,7 @@ export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20): 
     } catch {
       continue;
     }
-    await runJob(job, { state }).catch(() => {});
+    await runJob(job, { state, deliver: false }).catch(() => {});
     ran++;
   }
   return ran;
@@ -202,10 +211,12 @@ export function openTurn(
 }
 const MAX_TURN_SIDE = 20_000;
 
-/** Run one hook job end to end: events → outbox → sinks. Returns what happened. */
+/** Run one hook job end to end: events → outbox → sinks. Returns what happened.
+ *  `deliver: false` stops at the outbox (a sweep delivers once for all its jobs);
+ *  `until` ends the delivery's rounds (deliver). */
 export async function runJob(
   job: Job,
-  opts: { state?: string; now?: number } = {},
+  opts: { state?: string; now?: number; deliver?: boolean; until?: number } = {},
 ): Promise<{ events: Event[]; delivered: Record<string, number> }> {
   const state = opts.state ?? stateDir();
   const cfg = readConfig();
@@ -237,6 +248,7 @@ export async function runJob(
     enqueueJob(state, job);
     return { events: [], delivered: {} };
   }
+  let events: Event[] = [];
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
@@ -270,7 +282,7 @@ export async function runJob(
       ...(r.session.model ? { model: r.session.model } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
-    const events: Event[] = [];
+    events = [];
     for (const a of r.events) {
       const e = makeEvent(a, {
         harness: { name: job.harness, ...(version ? { version } : {}) },
@@ -347,12 +359,124 @@ export async function runJob(
       events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
     );
     log(state, `${job.harness} ${job.event}: ${events.map((e) => e.type).join(",") || "nothing"} (${id.slice(0, 8)})`);
-    const delivered = await flush(state, cfg.sinks, outbox, ref);
-    if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
-    return { events, delivered };
   } finally {
     release();
   }
+  // Delivery runs after the session's lock is let go. The lock guards the outbox, its
+  // seq and the facts: local, synchronous work. Held across the POSTs, it made every
+  // other hook of a busy session wait 6 s and go back to the queue (5,192 jobs
+  // waiting on one machine with four busy sessions, 2026-10-13).
+  const delivered =
+    opts.deliver === false
+      ? {}
+      : await deliver(state, cfg.sinks, outbox, ref, opts.until !== undefined ? { until: opts.until } : {});
+  if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
+  return { events, delivered };
+}
+
+/** The machine-wide delivery lock: a lock on a name no harness uses, so it has the
+ *  session locks' exclusivity and their release on exit. A worker holds it under
+ *  15 s (its deadline), so one older than this was left by a process that died. */
+const DELIVERY = { harness: "sessionpipe", session: "delivery" };
+const DELIVERY_STALE_MS = 60_000;
+
+/** One delivery at a time on this machine. Every worker used to flush for itself, so
+ *  a machine running four busy sessions sent hundreds of batches a minute, and after
+ *  its receiver's first 429 it kept sending: 828 refused requests in two minutes at least
+ *  (2026-10-13). Now a worker that finds a delivery running leaves a mark and goes; the
+ *  one delivering looks for the mark after it lets go, and goes round again. An event
+ *  appended before its worker left the mark is read by a round that starts after it,
+ *  so there are never more rounds than hooks. The rounds stop at `until` (the
+ *  worker's deadline is near) or when every sink is waiting; what is left is the
+ *  next worker's, from the same cursors. */
+export async function deliver(
+  state: string,
+  sinkConfigs: SinkConfig[],
+  outbox: Outbox,
+  first?: { harness: string; session: string },
+  o: { until?: number } = {},
+): Promise<Record<string, number>> {
+  const total: Record<string, number> = {};
+  const more = path.join(state, "locks", "delivery.more");
+  for (;;) {
+    let release = takeLock(state, DELIVERY, DELIVERY_STALE_MS);
+    if (!release) {
+      try {
+        writeFileSync(more, "");
+      } catch {}
+      // The one delivering may have let go between the first try and the mark.
+      release = takeLock(state, DELIVERY, DELIVERY_STALE_MS);
+      if (!release) return total;
+    }
+    try {
+      try {
+        unlinkSync(more);
+      } catch {}
+      for (const [k, v] of Object.entries(await flush(state, sinkConfigs, outbox, first, { gapMs: MIN_GAP_MS })))
+        total[k] = (total[k] ?? 0) + v;
+    } finally {
+      release();
+    }
+    if (!existsSync(more) || (o.until !== undefined && Date.now() >= o.until)) return total;
+    const now = Date.now();
+    if (sinkConfigs.every((s) => s.paused || sinkWait(state, s.name).until > now)) return total;
+  }
+}
+
+/** What a sink is waiting out, kept per sink in <state>/sinks/<sink>.json so every
+ *  worker on the machine waits, not only the one that was told (HTTP.md §2): a 429's
+ *  `retry-after`, or the backoff after the receiver failed `failures` times in a
+ *  row. `last` is when a batch last went to it. */
+export interface SinkWait {
+  until: number;
+  failures: number;
+  status?: number;
+  last?: number;
+}
+
+/** 5xx, network error, timeout: 2 s · 10 s · 60 s · 5 min · 30 min, then every 30 min (HTTP.md §2). */
+const BACKOFF_MS = [2_000, 10_000, 60_000, 300_000, 1_800_000];
+
+/** The least time between two batches of the workers' delivery to one HTTP receiver.
+ *  An event after a quiet second goes at once (the p50 2 s target, HTTP.md §2 Time);
+ *  in a burst, what comes meanwhile rides in the next batch of up to BATCH. A command
+ *  a person runs (replay, the install's backfill) isn't paced. */
+export const MIN_GAP_MS = 1_000;
+
+const waitFile = (state: string, sink: string): string => path.join(state, "sinks", `${safeId(sink)}.json`);
+
+export function sinkWait(state: string, sink: string): SinkWait {
+  try {
+    const j = JSON.parse(readFileSync(waitFile(state, sink), "utf8")) as Partial<SinkWait>;
+    return {
+      until: Number(j.until) || 0,
+      failures: Number(j.failures) || 0,
+      ...(j.status ? { status: Number(j.status) } : {}),
+      ...(j.last ? { last: Number(j.last) } : {}),
+    };
+  } catch {
+    return { until: 0, failures: 0 };
+  }
+}
+
+function saveWait(state: string, sink: string, w: SinkWait): void {
+  try {
+    const f = waitFile(state, sink);
+    mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+    const tmp = `${f}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(w), { mode: 0o600 });
+    renameSync(tmp, f);
+  } catch {}
+}
+
+/** How long to wait after a refused batch: a 429 says (a missing or unreadable
+ *  `retry-after` is a minute), a failure counts up the backoff. */
+function waitAfter(res: DeliveryResult, failures: number): number {
+  if (res.status === 429) {
+    const ms = res.retryAfterMs;
+    return ms !== undefined && Number.isFinite(ms) && ms > 0 ? Math.min(ms, 86_400_000) : 60_000;
+  }
+  return BACKOFF_MS[Math.min(failures, BACKOFF_MS.length) - 1] ?? 1_800_000;
 }
 
 const BATCH = 50;
@@ -363,15 +487,24 @@ const MAX_PER_RUN = 500;
  *  install's 400-session backfill is nine POSTs, not four hundred (the receiver's
  *  write limit ended the first replay at 278 events, 2026-09-28). A cursor moves
  *  only after its batch was acknowledged; a refused batch stops the sink for this
- *  run and the next worker starts from the same cursors. */
+ *  run and the next worker starts from the same cursors. A sink told to wait (a 429,
+ *  or a failing receiver: HTTP.md §2) is skipped until its time, by every worker on
+ *  the machine (sinkWait), and batches to an HTTP receiver go `gapMs` apart. */
 export async function flush(
   state: string,
   sinkConfigs: SinkConfig[],
   outbox: Outbox,
   first?: { harness: string; session: string },
+  o: { gapMs?: number } = {},
 ): Promise<Record<string, number>> {
   const delivered: Record<string, number> = {};
-  const sinks = buildSinks(sinkConfigs, {
+  const now = Date.now();
+  const ready = sinkConfigs.filter((s) => {
+    if (sinkWait(state, s.name).until <= now) return true;
+    delivered[s.name] = 0;
+    return false;
+  });
+  const sinks = buildSinks(ready, {
     locked: (name) => log(state, `sink ${name}: its token is in a keychain this process can't read; left for later`),
   });
   const refs = outbox.sessions();
@@ -382,6 +515,8 @@ export async function flush(
   for (const sink of sinks) {
     const cursors = new Cursors(state, sink.name);
     const c = cursors.read();
+    let wait = sinkWait(state, sink.name);
+    const gap = sink instanceof HttpSink ? (o.gapMs ?? 0) : 0;
     let sent = 0;
     let stalled = false;
     // Pull filtered events session by session into one batch; remember where each
@@ -395,15 +530,35 @@ export async function flush(
         cursors.write(c);
         return true;
       }
+      // Never longer than the gap itself, whatever a clock that jumped left in `last`.
+      const pause = Math.min(gap, (wait.last ?? 0) + gap - Date.now());
+      if (pause > 0) await new Promise((r) => setTimeout(r, pause));
       const res = await sink.send(batch);
+      const at = Date.now();
       if (!res.ok) {
-        log(state, `sink ${sink.name}: ${res.status ?? ""} ${res.error ?? ""} → ${res.action ?? "retry"}`);
-        if (res.action === "pause" || res.action === "lower-tier") applySinkVerdict(sink.name, res);
-        if (res.action !== "drop") {
+        const action = res.action ?? "retry";
+        if (action === "retry") {
+          const failures = res.status === 429 ? wait.failures : wait.failures + 1;
+          const hold = waitAfter(res, failures);
+          wait = { until: at + hold, failures, last: at, ...(res.status ? { status: res.status } : {}) };
+          log(
+            state,
+            `sink ${sink.name}: ${res.status ?? ""} ${res.error ?? ""} → retry in ${Math.ceil(hold / 1000)} s`,
+          );
+        } else {
+          wait = { ...wait, last: at };
+          log(state, `sink ${sink.name}: ${res.status ?? ""} ${res.error ?? ""} → ${action}`);
+        }
+        saveWait(state, sink.name, wait);
+        if (action === "pause" || action === "lower-tier") applySinkVerdict(sink.name, res);
+        if (action !== "drop") {
           batch = [];
           pending = {};
           return false;
         }
+      } else {
+        wait = { until: 0, failures: 0, last: at };
+        saveWait(state, sink.name, wait);
       }
       sent += batch.length;
       Object.assign(c, pending);

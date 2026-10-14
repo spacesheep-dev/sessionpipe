@@ -37,7 +37,7 @@ import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, readControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
-import { buildSinks, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
+import { buildSinks, factsState, flush, jobsDir, runJob, sinkWait, VERSION } from "./run.js";
 import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
@@ -619,7 +619,22 @@ async function replay(): Promise<void> {
     if (has("--from-start")) new Cursors(state, s.name).write({});
   }
   const d = await flush(state, sinks, new Outbox(state));
-  for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
+  for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered${waitNote(k)}`);
+}
+
+/** When a sink's wait for its receiver ends (HTTP.md §2), or null when it isn't waiting. */
+function waitingUntil(sink: string): string | null {
+  const w = sinkWait(state, sink);
+  return w.until > Date.now() ? new Date(w.until).toISOString() : null;
+}
+
+/** "; waiting 2 min after a 429" while a sink waits out its receiver (HTTP.md §2). */
+function waitNote(sink: string): string {
+  const w = sinkWait(state, sink);
+  const left = w.until - Date.now();
+  if (left <= 0) return "";
+  const why = w.status === 429 ? "a 429" : `${w.failures} failed batch${w.failures === 1 ? "" : "es"}`;
+  return `; waiting ${left >= 120_000 ? `${Math.round(left / 60_000)} min` : `${Math.ceil(left / 1000)} s`} after ${why}`;
 }
 
 function status(): void {
@@ -663,10 +678,11 @@ function status(): void {
       control: !!s.control,
       paused: s.paused ?? null,
       pending_sessions: pending,
+      waiting_until: waitingUntil(s.name),
     });
     if (!json)
       out(
-        `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}`,
+        `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}${waitNote(s.name)}`,
       );
   }
   const update = updateState(cfg);
@@ -857,6 +873,7 @@ async function doctor(): Promise<void> {
       pii: !!s.pii,
       control: !!s.control,
       paused: s.paused ?? null,
+      waiting_until: waitingUntil(s.name),
       token: s.token_in ? `in ${s.token_in}` : s.token ? `${s.token.slice(0, 4)}…` : null,
     });
   const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
@@ -874,7 +891,7 @@ async function doctor(): Promise<void> {
     for (const r of st) out(`  ${h.padEnd(12)} ${r.file.padEnd(44)} ${r.state}`);
   for (const s of report.sinks as { name: string; tier: number; max_tier: number | null; paused: string | null }[])
     out(
-      `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}`,
+      `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${waitNote(s.name)}`,
     );
   const lr = report.launcher as { file: string; node: string | null; node_ok: boolean } | undefined;
   if (lr)
