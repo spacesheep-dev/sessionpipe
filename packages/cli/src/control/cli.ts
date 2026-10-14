@@ -19,7 +19,7 @@ import {
 const { claudeLogin, detectCaps, findClaude, runClaude } = claudeControl;
 
 import { isBroad } from "../connect.js";
-import { flush, VERSION } from "../run.js";
+import { drain, VERSION } from "../run.js";
 import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
@@ -250,11 +250,11 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   // A sink whose token lives in a keychain can't send from a hook's worker that runs
   // where the keychain is locked (a session started over ssh). This daemon runs in the
   // person's own session, so it drains what those workers left, once a minute.
-  const drain = setInterval(() => {
+  const drainTimer = setInterval(() => {
     const sinks = readConfig().sinks.filter((s) => s.token_in && !s.paused);
-    if (sinks.length) void flush(stateDir(), sinks, new Outbox(stateDir())).catch(() => {});
+    if (sinks.length) void drain(stateDir(), sinks, new Outbox(stateDir())).catch(() => {});
   }, 60_000);
-  drain.unref();
+  drainTimer.unref();
   watchFile(controlFile(), { interval: 5000 }, () => {
     const next = readControl();
     if (next) d.reload(next);
@@ -275,7 +275,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   const restart = async (_from: string, to: string): Promise<void> => {
     stopping = true;
     updater?.stop();
-    clearInterval(drain);
+    clearInterval(drainTimer);
     unwatchFile(controlFile());
     for (const sig of signals) process.off(sig, bye);
     await d.stop();

@@ -187,9 +187,15 @@ export class Cursors {
 /** A lock per session so two workers never interleave. Stale once the worker that
  *  took it is gone (its 15 s deadline ends it without a release), or after 5 min. */
 export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): (() => void) | null {
+  return takeNamedLock(root, `${safeId(ref.harness)}-${safeId(ref.session)}`, staleMs);
+}
+
+/** A named lock under <root>/locks, held by one process at a time: the file names
+ *  its pid. Stale once that process is gone, or after `staleMs`. */
+export function takeNamedLock(root: string, name: string, staleMs = 5 * 60_000): (() => void) | null {
   const dir = path.join(root, "locks");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const f = path.join(dir, `${safeId(ref.harness)}-${safeId(ref.session)}.lock`);
+  const f = path.join(dir, `${name}.lock`);
   try {
     if (Date.now() - statSync(f).mtimeMs > staleMs || !processAlive(Number(readFileSync(f, "utf8")))) unlinkSync(f);
     else return null;

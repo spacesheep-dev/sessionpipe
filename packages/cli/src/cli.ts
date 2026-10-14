@@ -37,7 +37,7 @@ import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, readControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
-import { buildSinks, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
+import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
 import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
@@ -581,7 +581,7 @@ function queueBackfill(rows: { harness: string; row: BackfillRow }[], days: numb
     n++;
   }
   out(`  ✓ Backfill: ${n} session${n === 1 ? "" : "s"} from the last ${days} days queued as session.backfill`);
-  void flush(state, cfg.sinks, outbox);
+  void drain(state, cfg.sinks, outbox);
 }
 
 function backfill(): void {
@@ -618,7 +618,7 @@ async function replay(): Promise<void> {
   for (const s of sinks) {
     if (has("--from-start")) new Cursors(state, s.name).write({});
   }
-  const d = await flush(state, sinks, new Outbox(state));
+  const d = await flush(state, sinks, new Outbox(state), undefined, { force: true });
   for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
 }
 

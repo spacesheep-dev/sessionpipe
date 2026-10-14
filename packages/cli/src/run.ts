@@ -17,6 +17,7 @@ import {
   adapterByName,
   Cursors,
   capTail,
+  type DeliveryResult,
   type Event,
   type FactsState,
   FileSink,
@@ -36,6 +37,7 @@ import {
   stateDir,
   type TranscriptRead,
   takeLock,
+  takeNamedLock,
   tilde,
   writeConfig,
 } from "@sessionpipe/core";
@@ -288,6 +290,7 @@ export async function runJob(
     releaseJob(opts.claimed);
     return { events: [], delivered: {}, requeued };
   }
+  const events: Event[] = [];
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
@@ -321,7 +324,6 @@ export async function runJob(
       ...(r.session.model ? { model: r.session.model } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
-    const events: Event[] = [];
     for (const a of r.events) {
       const e = makeEvent(a, {
         harness: { name: job.harness, ...(version ? { version } : {}) },
@@ -399,12 +401,93 @@ export async function runJob(
     );
     releaseJob(opts.claimed);
     log(state, `${job.harness} ${job.event}: ${events.map((e) => e.type).join(",") || "nothing"} (${id.slice(0, 8)})`);
-    const delivered = await flush(state, cfg.sinks, outbox, ref);
-    if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
-    return { events, delivered };
   } finally {
     release();
   }
+  // The session's lock covered the append; the sinks drain without it (the outbox
+  // reader leaves a line still being written), so a sibling hook isn't held out for
+  // a round trip.
+  const delivered = (await drain(state, cfg.sinks, outbox, ref)) ?? {};
+  if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
+  return { events, delivered };
+}
+
+/** One worker drains a machine's sinks at a time (the `flush` lock). Another whose
+ *  events are in the outbox meanwhile marks that there is more and leaves them to
+ *  it (null: nothing sent by this one). The one draining looks for the mark after
+ *  each pass, once it has let the lock go, so events appended during a pass go out
+ *  in its next pass or with the worker that appended them, never wait for a later
+ *  hook. Under a flood of hook events this is one uploader sending full batches,
+ *  not one per event, all refused together (mordast, 2026-10-14: 828 refusals in
+ *  two minutes, 5 192 jobs queued). */
+export async function drain(
+  state: string,
+  sinkConfigs: SinkConfig[],
+  outbox: Outbox,
+  first?: { harness: string; session: string },
+): Promise<Record<string, number> | null> {
+  const more = path.join(state, "locks", "flush.more");
+  let release = takeNamedLock(state, "flush");
+  if (!release) {
+    try {
+      writeFileSync(more, "", { mode: 0o600 });
+    } catch {}
+    release = takeNamedLock(state, "flush");
+    if (!release) return null;
+  }
+  const delivered: Record<string, number> = {};
+  for (;;) {
+    try {
+      unlinkSync(more);
+    } catch {}
+    try {
+      for (const [k, v] of Object.entries(await flush(state, sinkConfigs, outbox, first)))
+        delivered[k] = (delivered[k] ?? 0) + v;
+    } finally {
+      release();
+    }
+    if (!existsSync(more)) return delivered;
+    release = takeNamedLock(state, "flush");
+    if (!release) return delivered;
+  }
+}
+
+/** HTTP.md §2: a sink that answered 429 isn't tried again before its `retry-after`;
+ *  one that was unreachable (5xx, a timeout) waits 2 s · 10 s · 60 s · 5 min · 30 min,
+ *  then every 30 min. Kept in <state>/backoff/<sink>.json, so every worker on the
+ *  machine waits, not only the one that was refused. Cleared by the next batch the
+ *  sink takes. */
+export interface Backoff {
+  until: number;
+  failures: number;
+  why: string;
+}
+const BACKOFF_MS = [2_000, 10_000, 60_000, 5 * 60_000, 30 * 60_000];
+const backoffFile = (state: string, sink: string): string => path.join(state, "backoff", `${safeId(sink)}.json`);
+export function readBackoff(state: string, sink: string): Backoff | null {
+  try {
+    const b = JSON.parse(readFileSync(backoffFile(state, sink), "utf8")) as Backoff;
+    return typeof b.until === "number" ? b : null;
+  } catch {
+    return null;
+  }
+}
+function noteFailure(state: string, sink: string, res: DeliveryResult, prev: Backoff | null): Backoff {
+  const failures = (prev?.failures ?? 0) + 1;
+  const ladder = BACKOFF_MS[Math.min(failures, BACKOFF_MS.length) - 1] as number;
+  const wait = Number.isFinite(res.retryAfterMs) ? (res.retryAfterMs as number) : ladder;
+  const b = { until: Date.now() + wait, failures, why: `${res.status ?? ""} ${res.error ?? ""}`.trim() };
+  const f = backoffFile(state, sink);
+  try {
+    mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+    writeFileSync(f, JSON.stringify(b), { mode: 0o600 });
+  } catch {}
+  return b;
+}
+function clearBackoff(state: string, sink: string): void {
+  try {
+    unlinkSync(backoffFile(state, sink));
+  } catch {}
 }
 
 /** How long a job waits for its session's lock before it goes back to the queue. */
@@ -425,6 +508,7 @@ export async function flush(
   sinkConfigs: SinkConfig[],
   outbox: Outbox,
   first?: { harness: string; session: string },
+  o: { /** Try a sink in backoff anyway (`sessionpipe replay`). */ force?: boolean } = {},
 ): Promise<Record<string, number>> {
   const delivered: Record<string, number> = {};
   const sinks = buildSinks(sinkConfigs, {
@@ -435,7 +519,12 @@ export async function flush(
     const k = `${first.harness}/${safeId(first.session)}`;
     refs.sort((a, b) => (`${a.harness}/${a.session}` === k ? -1 : `${b.harness}/${b.session}` === k ? 1 : 0));
   }
-  const drain = async (sink: Sink): Promise<void> => {
+  const drainSink = async (sink: Sink): Promise<void> => {
+    let backoff = readBackoff(state, sink.name);
+    if (backoff && !o.force && backoff.until > Date.now()) {
+      delivered[sink.name] = 0;
+      return;
+    }
     const cursors = new Cursors(state, sink.name);
     const c = cursors.read();
     let sent = 0;
@@ -453,13 +542,22 @@ export async function flush(
       }
       const res = await sink.send(batch);
       if (!res.ok) {
-        log(state, `sink ${sink.name}: ${res.status ?? ""} ${res.error ?? ""} → ${res.action ?? "retry"}`);
+        const action = res.action ?? "retry";
+        let wait = "";
+        if (action === "retry") {
+          backoff = noteFailure(state, sink.name, res, backoff);
+          wait = `, waits ${Math.round((backoff.until - Date.now()) / 1000)} s`;
+        }
+        log(state, `sink ${sink.name}: ${res.status ?? ""} ${res.error ?? ""} → ${action}${wait}`);
         if (res.action === "pause" || res.action === "lower-tier") applySinkVerdict(sink.name, res);
         if (res.action !== "drop") {
           batch = [];
           pending = {};
           return false;
         }
+      } else if (backoff) {
+        clearBackoff(state, sink.name);
+        backoff = null;
       }
       sent += batch.length;
       Object.assign(c, pending);
@@ -493,7 +591,7 @@ export async function flush(
     if (!stalled && (batch.length || Object.keys(pending).length)) if (!(await send())) stalled = true;
     delivered[sink.name] = sent;
   };
-  await Promise.all(sinks.map(drain));
+  await Promise.all(sinks.map(drainSink));
   return delivered;
 }
 
