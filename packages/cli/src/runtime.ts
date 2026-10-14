@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Persistent paths shared by hook installation and control pairing.
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { launcherState } from "./launcher.js";
 import { VERSION } from "./run.js";
+import { isNewer } from "./update.js";
 
 /** Homebrew's versioned Cellar path dies on `brew upgrade node`; its stable links survive. */
 export function stableNode(exe: string): string {
@@ -28,23 +30,56 @@ export function viaNpx(distDir: string): boolean {
   return /[\\/]_npx[\\/]/.test(distDir) || /[\\/]\.npm[\\/]/.test(distDir);
 }
 
+/** Homebrew's default prefix disappears on a node upgrade; use the persistent one. */
+function installLocation(): { prefix: string; target: string } {
+  let prefix = "";
+  try {
+    prefix = execFileSync("npm", ["prefix", "-g"], {
+      encoding: "utf8",
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {}
+  return {
+    prefix,
+    target: /\/Cellar\/node(?:@\d+)?\/[^/]+/.test(prefix) ? path.join(os.homedir(), ".local") : prefix,
+  };
+}
+
+/** Refuse before npm, config or hook writes, including hooks left by another prefix. */
+export function assertSetupVersion(allowDowngrade: boolean, target?: string): void {
+  if (allowDowngrade) return;
+  const check = (installed: string | null, where: string): void => {
+    if (installed && isNewer(installed, VERSION, true))
+      throw new Error(
+        `refusing to downgrade sessionpipe: ${installed} is installed at ${where}; this command would install ${VERSION}. Use the installed newer CLI, or pass --allow-downgrade to force ${VERSION}.`,
+      );
+  };
+  const hooks = launcherState(VERSION);
+  check(hooks.version, hooks.file);
+  const prefix = target ?? installLocation().target;
+  if (!prefix) return;
+  const pkg = path.join(
+    prefix,
+    ...(process.platform === "win32" ? [] : ["lib"]),
+    "node_modules",
+    "sessionpipe",
+    "package.json",
+  );
+  let installed: unknown;
+  try {
+    installed = (JSON.parse(readFileSync(pkg, "utf8")) as { version?: unknown }).version;
+  } catch {}
+  if (typeof installed === "string") check(installed, pkg);
+}
+
 /** Install the running version persistently and hand off the original command before side effects. */
-export function rerunGlobally(argv: string[], out: (s: string) => void): void {
+export function rerunGlobally(argv: string[], out: (s: string) => void, setup?: { allowDowngrade: boolean }): void {
+  const { prefix, target } = installLocation();
+  if (setup) assertSetupVersion(setup.allowDowngrade, target);
   out(`  Installing sessionpipe@${VERSION} globally, so hooks and services use a persistent copy…`);
   let bin: string;
   try {
-    // Homebrew's default prefix is the versioned Cellar folder that `brew upgrade
-    // node` deletes, and its bin is not on PATH (issue #13): install into ~/.local
-    // there, and run the copy from the prefix we installed into.
-    let prefix = "";
-    try {
-      prefix = execFileSync("npm", ["prefix", "-g"], {
-        encoding: "utf8",
-        timeout: 15000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-    } catch {}
-    const target = /\/Cellar\/node(?:@\d+)?\/[^/]+/.test(prefix) ? path.join(os.homedir(), ".local") : prefix;
     execFileSync("npm", ["install", "-g", `sessionpipe@${VERSION}`, ...(target ? ["--prefix", target] : [])], {
       stdio: ["ignore", "ignore", "inherit"],
     });

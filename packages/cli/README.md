@@ -14,6 +14,20 @@ sessionpipe doctor             # what is wired, hook timing, sink state
 sessionpipe uninstall          # every config file byte-identical again
 ```
 
+`connect` and `install` refuse to replace a newer global package or hook launcher
+with an older build, including a newer prerelease (`0.9.0-devin.1` is newer than
+`0.7.0`). The refusal prints both versions and exits before installing or writing
+hooks. Use the installed newer CLI, or explicitly pass `--allow-downgrade` to
+replace it. Already-published older CLIs do not gain this guard retroactively.
+
+`--machine NAME` sets the initial name. On later runs, setup keeps the configured
+name and says when it ignores a different `--machine`, so a copied setup command
+cannot separate sessions from their daemon or reset the identity used for backoff.
+For an unpaired machine, `--machine NAME --rename-machine` explicitly renames it.
+If control is configured under a different name, setup refuses the rename before
+any writes: renaming a paired daemon requires coordinated pairing changes, which
+these setup commands do not perform.
+
 | Tier | What leaves |
 |-----:|-------------|
 | 0 | session state and timing, folder, repo, branch, model, title, the *kind* of attention needed |

@@ -4,7 +4,16 @@
 //   connect · install · uninstall · sink add|list|remove|test · secrets · status ·
 //   doctor · tail · backfill · forget · replay · update · hook · worker
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +47,7 @@ import { moveControlSecrets, pairedCount, readControl } from "./control/store.js
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
-import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
+import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 
@@ -140,9 +149,9 @@ function help(): void {
   out(`sessionpipe ${VERSION} — an open protocol for what your coding agents are doing
 
 Usage:
-  sessionpipe connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
+  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
                                   (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity] [--machine NAME] [--backfill DAYS] [--sink URL --tier N]
+  sessionpipe install [--claude-code --codex --gemini-cli --antigravity] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
   sessionpipe uninstall [--keep-state]
   sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--name N]
   sessionpipe sink list | remove <name> | test <name>
@@ -156,11 +165,37 @@ ${CONTROL_HELP}
 Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
 }
 
-async function install(): Promise<void> {
-  if (viaNpx(distDir)) return rerunGlobally(args, out);
+/** --machine names a first install. A repeat setup must not split sessions from control. */
+function setupConfig(): Config {
   const cfg = readConfig();
-  const machine = flag("--machine");
-  if (machine) cfg.machine = machine.slice(0, 80);
+  const requested = flag("--machine");
+  if ((has("--machine") || has("--rename-machine")) && (!requested || requested.startsWith("-")))
+    throw new Error("--machine NAME is required when naming or renaming a machine");
+  const machine = requested?.slice(0, 80);
+  const control = readControl();
+  const current =
+    cfg.machine || control?.name || (existsSync(configFile()) ? machineName(cfg, os.hostname()) : undefined);
+  if (current && machine && machine !== current && !has("--rename-machine")) {
+    out(
+      `  Keeping configured machine name ${current}; ignoring --machine ${machine}. Use --rename-machine with --machine NAME for an explicit rename.`,
+    );
+    cfg.machine = current;
+  } else {
+    const name = machine || current || machineName(cfg, os.hostname());
+    // receivers[].machine is a receiver-issued id, not the daemon's display name.
+    if (machine && control && control.name !== name)
+      throw new Error(
+        `refusing to rename machine to ${name}: the control daemon is configured as ${control.name}. Setup cannot rename a paired daemon; keep its existing name.`,
+      );
+    cfg.machine = name;
+  }
+  return cfg;
+}
+
+async function install(): Promise<void> {
+  const cfg = setupConfig();
+  if (viaNpx(distDir)) return rerunGlobally(args, out, { allowDowngrade: has("--allow-downgrade") });
+  assertSetupVersion(has("--allow-downgrade"));
   // A sink URL given here is added first, so the install knows whether it needs
   // every tool event or only the heartbeat's one.
   const sinkUrl = flag("--sink");
@@ -238,14 +273,13 @@ async function connect(): Promise<void> {
   const raw = args[1];
   if (!raw || raw.startsWith("-"))
     return out(
-      "usage: sessionpipe connect <receiver> [--machine NAME] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
+      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
     );
-  if (viaNpx(distDir)) return rerunGlobally(args, out);
+  const cfg = setupConfig();
+  if (viaNpx(distDir)) return rerunGlobally(args, out, { allowDowngrade: has("--allow-downgrade") });
+  assertSetupVersion(has("--allow-downgrade"));
   const url = (/^https?:\/\//.test(raw) ? raw : `https://${raw}`).replace(/\/$/, "");
   const host = new URL(url).host;
-  const cfg = readConfig();
-  const machine = flag("--machine");
-  if (machine) cfg.machine = machine.slice(0, 80);
   const name = machineName(cfg, os.hostname());
   const before = cfg.sinks.find((x) => x.url.replace(/\/$/, "") === url);
   const tier = connectTier(flag("--tier"), before?.tier);

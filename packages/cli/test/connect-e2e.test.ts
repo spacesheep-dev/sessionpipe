@@ -78,7 +78,7 @@ afterAll(async () => {
 
 describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () => {
   it("one command: hooks through the launcher, paired, the sink at tier 2 with the handed-over key", async () => {
-    const r = await run(["connect", rx.url, "--no-service", "--mode", "safe"]);
+    const r = await run(["connect", rx.url, "--no-service", "--mode", "safe", "--machine", "Intel"]);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("not signed in as this shell sees it");
     expect(r.out).toContain("Approved by @fake on localhost");
@@ -106,7 +106,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
   }, 30_000);
 
   it("again: nothing to approve, nothing duplicated", async () => {
-    const r = await run(["connect", rx.url, "--no-service"]);
+    const r = await run(["connect", rx.url, "--no-service", "--machine", "Intel"]);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("Already paired");
     const settings = JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8")) as {
@@ -114,5 +114,34 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
     };
     for (const [ev, list] of Object.entries(settings.hooks))
       expect(list, `${ev}: ${JSON.stringify(list)}`).toHaveLength(1);
+  }, 30_000);
+
+  it("a repeated setup line keeps the paired machine name even with a different --machine", async () => {
+    const configFile = env.SESSIONPIPE_CONFIG as string;
+    const controlFile = path.join(tmp, "config", "control.json");
+    const before = JSON.parse(readFileSync(configFile, "utf8")) as { machine: string };
+    const control = readFileSync(controlFile, "utf8");
+    const r = await run(["connect", rx.url, "--no-service", "--machine", "Intel-mbp"]);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain(`Keeping configured machine name ${before.machine}`);
+    expect(r.out).toContain("Already paired");
+    expect(JSON.parse(readFileSync(configFile, "utf8")).machine).toBe(before.machine);
+    expect(readFileSync(controlFile, "utf8")).toBe(control);
+  }, 30_000);
+
+  it("an explicit rename cannot split the paired daemon", async () => {
+    const configFile = env.SESSIONPIPE_CONFIG as string;
+    const controlFile = path.join(tmp, "config", "control.json");
+    const config = readFileSync(configFile, "utf8");
+    const control = readFileSync(controlFile, "utf8");
+    const hook = readFileSync(path.join(tmp, "data", "hook.js"));
+    const worker = readFileSync(path.join(tmp, "data", "worker.js"));
+    const r = await run(["connect", rx.url, "--no-service", "--machine", "Intel-mbp", "--rename-machine"]);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain("refusing to rename");
+    expect(readFileSync(configFile, "utf8")).toBe(config);
+    expect(readFileSync(controlFile, "utf8")).toBe(control);
+    expect(readFileSync(path.join(tmp, "data", "hook.js"))).toEqual(hook);
+    expect(readFileSync(path.join(tmp, "data", "worker.js"))).toEqual(worker);
   }, 30_000);
 });

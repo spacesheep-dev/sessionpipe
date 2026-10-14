@@ -83,6 +83,16 @@ describe("versions", () => {
     expect(isNewer("0.6.0", "dev")).toBe(false);
     expect(compareVersions("x", "0.1.0")).toBeNull();
   });
+  it("setup can compare installed prereleases without offering them as auto-updates", () => {
+    expect(isNewer("0.9.0-devin.1", "0.7.0", true)).toBe(true);
+    expect(isNewer("0.9.0-devin.1", "0.7.0")).toBe(false);
+    expect(isNewer("0.7.0", "0.9.0-devin.1")).toBe(false);
+    expect(isNewer("0.9.0", "0.9.0-devin.1")).toBe(true);
+    expect(isNewer("0.9.0-devin.2", "0.9.0-devin.1", true)).toBe(true);
+    expect(isNewer("0.9.0-devin.1", "0.9.0", true)).toBe(false);
+    expect(isNewer("0.9.0-devin.1", "0.9.0-devin.1", true)).toBe(false);
+    expect(isNewer("garbage", "0.7.0", true)).toBe(false);
+  });
 });
 
 describe("the registry", () => {

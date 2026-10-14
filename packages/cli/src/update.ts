@@ -39,10 +39,11 @@ export function compareVersions(a: string, b: string): number | null {
 }
 
 /** `a` is a release newer than `b`. A prerelease is never offered as an update: the
- *  `latest` dist-tag is a release, and anything else is someone's experiment. */
-export function isNewer(a: string, b: string): boolean {
+ *  `latest` dist-tag is a release, and anything else is someone's experiment.
+ *  Setup opts into prereleases when checking whether an installed build is newer. */
+export function isNewer(a: string, b: string, includePrereleases = false): boolean {
   const x = parse(a);
-  if (!x || x.pre !== null) return false;
+  if (!x || (!includePrereleases && x.pre !== null)) return false;
   const c = compareVersions(a, b);
   return c !== null && c > 0;
 }
