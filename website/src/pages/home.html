@@ -1,15 +1,13 @@
 <div class="home">
 <section class="hero">
-<p class="meta"><span>sessionpipe {{version}}</span><span>protocol 1, draft</span><span>{{jsbytes}} bytes of JavaScript: the copy button</span></p>
 <h1>Your coding agents already report everything they do. You decide where it goes.</h1>
 <div class="hero-row">
 <div class="hero-copy">
-<p class="lead">Claude Code, Codex, Gemini CLI and Antigravity each fire hooks in their own format. sessionpipe turns them into one stream of events, removes <span class="redact">secrets</span> on your machine, and sends only what you allow: to your server, a file, or nowhere.</p>
+<p class="lead">One stream of events from Claude Code, Codex, Gemini CLI and Antigravity. <span class="redact">Secrets</span> removed on your machine; sent only where you say.</p>
 <div class="cmd">
-<p><span class="p" aria-hidden="true">$</span><code>npx sessionpipe install</code><span class="c"># nothing is sent yet</span></p>
-<p><span class="p" aria-hidden="true">$</span><code>sessionpipe tail</code><span class="c"># watch it locally</span></p>
+<p><span class="p" aria-hidden="true">$</span><code>npx sessionpipe install</code></p>
 </div>
-<p class="links"><a class="go" href="/get-started/">Get started</a><button type="button" class="copy" data-copy="/agent.md" hidden>Copy context for your agent</button><a class="agent-link" href="/agent.md">agent.md</a><a href="/docs/">Docs</a></p>
+<p class="links"><a class="go" href="/get-started/">Get started</a><button type="button" class="copy" data-copy="/agent.md" hidden>Copy context for your agent</button><a class="agent-link" href="/agent.md">agent.md</a></p>
 </div>
 <figure class="term" aria-label="sessionpipe tail at tier 1: a Claude Code session and a Codex session in one stream; the Claude Code session ends up waiting for a permission.">
 <figcaption><span>sessionpipe tail --tier 1</span><span>~/.local/state/sessionpipe/outbox</span></figcaption>

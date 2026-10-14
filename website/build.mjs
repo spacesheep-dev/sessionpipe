@@ -99,8 +99,8 @@ function page({ title, description, body, pathname, edit, license, jsonld }) {
 <meta property="og:image" content="${SITE}/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="robots" content="index, follow, max-image-preview:large">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#3b3fd8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1220" media="(prefers-color-scheme: dark)">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
 ${twin ? `<link rel="alternate" type="text/markdown" href="${twin}" title="This page as Markdown">\n` : ""}<link rel="alternate" type="application/atom+xml" href="/changelog/feed.xml" title="sessionpipe releases">
 ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ""}
@@ -108,7 +108,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><a class="brand" href="/" aria-label="sessionpipe home">session<i aria-hidden="true"></i>pipe</a><nav aria-label="Site">${navHtml}</nav></header>
+<header class="top"><a class="brand" href="/" aria-label="sessionpipe home"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h5l2-5 4 10 2-5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>sessionpipe</a><nav aria-label="Site">${navHtml}</nav></header>
 <main id="main">${bar}${body}</main>
 <footer><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} ${edit ? `<a href="${edit}">Edit on GitHub</a> ·` : ""} <a href="/security/">Security</a> · <a href="/legal/">Legal &amp; privacy</a> · <a href="/governance/">Governance</a> · <a href="/changelog/">Changelog</a></p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></footer>
 ${twin ? '<script src="/copy.js" defer></script>\n' : ""}</body>
@@ -478,11 +478,8 @@ const FAQ = [
   writeFileSync(path.join(out, "llms-full.txt"), full);
   const kb = (s) => `${Math.round(Buffer.byteLength(s) / 1024)} KB`;
   let home = read("website/src/pages/home.html");
-  home = home
-    .replace("{{jsbytes}}", String(Buffer.byteLength(read("website/public/copy.js"))))
-    .replace("{{fullkb}}", kb(full));
+  home = home.replace("{{fullkb}}", kb(full));
   home = home.replace(/\{\{diagram:([a-z-]+)\}\}/g, (_, n) => diagram(n));
-  home = home.replace("{{version}}", version);
   {
     // The next release's headlines, then the last release's.
     const { next, releases } = changelog;

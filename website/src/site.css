@@ -1,40 +1,48 @@
-/* Two colours: --fg on --bg, swapped in dark mode. Every other token is one of the two. */
 :root {
-  --bg: #fff;
-  --fg: #000;
-  --bg2: var(--bg);
-  --fg2: var(--fg);
-  --line: var(--fg);
-  --brand: var(--fg);
-  --brand-text: var(--fg);
-  --ok: var(--fg);
-  --warn: var(--fg);
-  --card: var(--bg);
-  --code: var(--bg);
-  --t0: var(--fg);
-  --t1: var(--fg);
-  --t2: var(--fg);
-  --t3: var(--fg);
+  --bg: #fbfbfd;
+  --bg2: #f1f2f7;
+  --fg: #15172b;
+  --fg2: #4b4f6b;
+  --line: #dcdfe9;
+  --brand: #3b3fd8;
+  --brand-text: #2f33c4;
+  --ok: #1f8a4c;
+  --warn: #b26a00;
+  --card: #ffffff;
+  --code: #f4f4f9;
+  --t0: #c9d7ff;
+  --t1: #9db3ff;
+  --t2: #6f86ff;
+  --t3: #3b3fd8;
   --serif: "Redaction", ui-serif, Georgia, serif;
   --mono: "Commit Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000;
-    --fg: #fff;
+    --bg: #0f1220;
+    --bg2: #161a2e;
+    --fg: #e8eaf6;
+    --fg2: #a6abc8;
+    --line: #2a2f4a;
+    --brand: #5b60ff;
+    --brand-text: #9aa0ff;
+    --ok: #4ccb7f;
+    --warn: #e0a94a;
+    --card: #171b31;
+    --code: #1c2039;
+    --t0: #2a3566;
+    --t1: #3a4a9a;
+    --t2: #4b5fd0;
+    --t3: #8a90ff;
   }
 }
-::selection {
-  background: var(--fg);
-  color: var(--bg);
-}
 :focus-visible {
-  outline: 2px solid var(--fg);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
-/* Two typefaces, served from this site (website/public/fonts/, OFL): Redaction for headings
-   and the wordmark, Commit Mono for anything that is data. Reading text stays system sans. */
+/* Two typefaces, served from this site (website/public/fonts/, OFL): Redaction for headings,
+   Commit Mono for anything that is data. Reading text stays system sans. */
 @font-face {
   font-family: "Redaction";
   src: url("/fonts/redaction-400.woff2") format("woff2");
@@ -123,19 +131,11 @@ a:hover {
 .brand {
   display: inline-flex;
   align-items: center;
-  font: 700 23px / 1 var(--serif);
-  letter-spacing: -0.02em;
+  gap: 8px;
+  font-weight: 700;
   color: var(--fg);
   text-decoration: none;
-}
-/* session|pipe: the bar is a shell pipe, cap height to below the baseline. */
-.brand i {
-  display: inline-block;
-  width: 0.13em;
-  height: 1.05em;
-  margin: 0 0.09em 0 0.11em;
-  background: currentColor;
-  transform: translateY(0.1em);
+  font-size: 18px;
 }
 .top nav {
   display: flex;
@@ -150,9 +150,7 @@ a:hover {
 }
 .top nav a[aria-current] {
   color: var(--fg);
-  text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 6px;
+  background: var(--bg2);
 }
 .top nav a:hover {
   color: var(--fg);
@@ -221,7 +219,7 @@ footer {
 }
 .prose code {
   background: var(--code);
-  padding: 0;
+  padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.92em;
 }
@@ -429,7 +427,7 @@ details p {
   font-family: var(--mono);
   font-size: 0.88em;
   background: var(--code);
-  padding: 0;
+  padding: 1px 5px;
   border-radius: 4px;
 }
 .home h1,
@@ -472,15 +470,6 @@ details p {
   gap: clamp(24px, 4vw, 44px);
   align-items: start;
 }
-.home .meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-  margin: 0 0 14px;
-  font: 12px / 1.4 var(--mono);
-  color: var(--fg2);
-  text-transform: lowercase;
-}
 .home .hero h1 {
   font-size: clamp(2.1rem, 5vw, 3.4rem);
   font-weight: 400;
@@ -495,7 +484,7 @@ details p {
   font-size: 1.08em;
 }
 .home .lead {
-  font-size: 1.08rem;
+  font-size: 1.2rem;
   color: var(--fg2);
   margin: 0 0 18px;
   max-width: 58ch;
@@ -555,16 +544,14 @@ details p {
   font-weight: 600;
 }
 .home .links a.go {
-  background: var(--fg);
-  color: var(--bg);
-  border: 1px solid var(--fg);
+  background: var(--brand);
+  color: #fff;
   text-decoration: none;
   padding: 9px 16px;
   border-radius: 8px;
 }
 .home .links a.go:hover {
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--brand-text);
 }
 
 /* the live tail */
@@ -572,7 +559,9 @@ details p {
   padding: 0;
   overflow: hidden;
   background: var(--code);
-  box-shadow: 6px 6px 0 var(--fg);
+  box-shadow:
+    0 1px 0 var(--line),
+    0 24px 48px -32px color-mix(in oklab, var(--brand) 45%, transparent);
 }
 .home .term figcaption {
   display: flex;
@@ -622,8 +611,7 @@ details p {
 }
 .home .term strong {
   font-weight: 600;
-  background: var(--fg);
-  color: var(--bg);
+  color: var(--warn);
 }
 .home .term .cursor {
   display: inline-block;
@@ -776,7 +764,8 @@ details p {
 }
 .home .json del {
   color: var(--fg2);
-  text-decoration-thickness: 2px;
+  opacity: 0.6;
+  text-decoration-color: var(--warn);
 }
 .home .flow p {
   font-size: 0.9rem;
@@ -813,12 +802,15 @@ details p {
 }
 .home .ladder li:nth-child(1)::after {
   --f: 0.25;
+  opacity: 0.4;
 }
 .home .ladder li:nth-child(2)::after {
   --f: 0.5;
+  opacity: 0.6;
 }
 .home .ladder li:nth-child(3)::after {
   --f: 0.75;
+  opacity: 0.8;
 }
 .home .ladder li:nth-child(4)::after {
   --f: 1;
@@ -926,11 +918,12 @@ details p {
 }
 .bump.minor,
 .bump.major {
-  background: var(--fg);
-  color: var(--bg);
+  color: var(--brand-text);
+  border-color: color-mix(in oklab, var(--brand) 40%, var(--line));
 }
 .pill {
-  border-style: dashed;
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, var(--line));
   font-family: var(--mono);
 }
 .entries .what {
@@ -1032,7 +1025,7 @@ details p {
   color: var(--fg2);
 }
 .changelog .release.next {
-  border: 1px dashed var(--line);
+  border: 1px dashed color-mix(in oklab, var(--ok) 45%, var(--line));
   border-radius: 12px;
   padding: 20px 20px 8px;
   margin-top: 16px;
@@ -1175,15 +1168,15 @@ details p {
 button.copy {
   font: 600 13px / 1 var(--mono);
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--fg);
+  background: var(--card);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 7px 10px;
   cursor: pointer;
 }
 button.copy:hover {
-  background: var(--fg);
-  color: var(--bg);
+  border-color: var(--brand);
+  color: var(--brand-text);
 }
 .agentbar {
   display: flex;
