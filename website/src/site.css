@@ -469,7 +469,7 @@ details p {
   font-weight: 500;
   line-height: 1.08;
   letter-spacing: -0.02em;
-  max-width: 21ch;
+  max-width: 26ch;
   margin: 0 0 20px;
   text-wrap: balance;
 }
