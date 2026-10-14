@@ -13,8 +13,9 @@ yet normative.
 
 **What every adapter reads, and nothing more.** A documented hooks or plugin API,
 and files the person's own harness wrote on the person's own machine: the transcript
-named in the hook payload, a session registry, the config file's account id. No
-vendor API is called, no credential is read, no token is sent anywhere. The
+named in the hook payload, a session registry, the config file's account id (or the
+API endpoint its settings name, for a home with no login). No vendor API is called,
+no credential is read, no token is sent anywhere. The
 documentation URL per harness is in its row.
 
 ## Registry
@@ -69,7 +70,7 @@ presents that as its own reading.
 | Ids in stdin | `session_id`, `prompt_id`, `cwd`, `transcript_path`, `tool_name`, `tool_use_id`, `agent_id`, `permission_mode`, `hook_event_name`. |
 | Env | `CLAUDE_CODE_HOST_SESSION_ID` (`local_…`): the desktop app's id for the session → `session.url` `claude://code/continue/<id>` when no bridge link exists. `CLAUDE_PROJECT_DIR`. |
 | Transcript (tier 2) | `<config>/projects/<cwd-slug>/<session_id>.jsonl`; records `type: user\|assistant` with `message.content` a string or text parts. Skip `isMeta`, `isSidechain`, non-`human` `origin.kind`, injected `<tag>…</tag>` blocks. |
-| Facts | Title: the per-pid registry `<config>/sessions/<pid>.json` (`name` with `nameSource` user → `custom`, auto/hook/peer → `harness`; `derived` is never a title), found through process ancestry because a `--continue --remote-control` session files its entry under another id; then `custom-title` / `ai-title` records; then the first human ask cut to 50 chars (`first-ask`). URL: registry `bridgeSessionId` → `https://claude.ai/code/<session_…>`, else `bridge_status` / `bridge-session` records. Account: `oauthAccount.accountUuid` in the config dir's `.claude.json` (never the email on an event); control's pair and hello name each config dir's account as `{id: accountUuid, email: emailAddress}`. Model: last assistant record's `message.model`. |
+| Facts | Title: the per-pid registry `<config>/sessions/<pid>.json` (`name` with `nameSource` user → `custom`, auto/hook/peer → `harness`; `derived` is never a title), found through process ancestry because a `--continue --remote-control` session files its entry under another id; then `custom-title` / `ai-title` records; then the first human ask cut to 50 chars (`first-ask`). URL: registry `bridgeSessionId` → `https://claude.ai/code/<session_…>`, else `bridge_status` / `bridge-session` records. Account: `oauthAccount.accountUuid` in the config dir's `.claude.json` (never the email on an event); control's pair and hello name each config dir's account as `{id: accountUuid, email: emailAddress}`. A config dir with no `oauthAccount` whose `settings.json` sets `env.ANTHROPIC_BASE_URL` to an http(s) host other than Anthropic's (`*.anthropic.com`) runs on another API (Kimi on a Modal endpoint, GLM on Z.ai): its account is `api-` + the first 16 hex of the SHA-256 of that URL's origin (`scheme://host[:port]`; never its path or a `user:password@`), and pair and hello name it `{id, name: host}`. Only that one key is read, never the tokens or headers beside it. Model: last assistant record's `message.model`. |
 | Quirks | Running sessions pick up hook changes live from 2.1.280. `type: "http"` handler exists (native lane). A prompt with pasted images can put the first ask megabytes into the file: stream to it, cap at 16 MB. |
 
 Fixtures recorded 2026-09-28 on Claude Code 2.1.258 (one `claude -p` run): `SessionStart`,
