@@ -1,66 +1,178 @@
+<div class="home">
 <section class="hero">
-<h1>An open protocol for what your coding agents are doing.</h1>
-<p class="lead">One install hooks Claude Code, Codex, Gemini CLI, Antigravity and more. Every event is filtered to a privacy tier you choose per destination, secrets are removed on your machine, and it goes to your server, to a file, or nowhere at all.</p>
-<p><span class="install">npx sessionpipe install</span></p>
-<p><a href="/get-started/">Get started</a> · <a href="/protocol/">Read the protocol</a> · <a href="https://github.com/spacesheep-dev/sessionpipe">Source on GitHub</a></p>
-<p class="sub">sessionpipe is the missing wire between coding-agent hooks and whatever you want to build on them: a presence board, an activity feed, memory across sessions, a permission prompt you can answer from your phone. Claude Code hooks, Codex hooks, Gemini CLI hooks and Antigravity hooks become one vocabulary of session events, on your terms.</p>
-</section>
-
-<section class="block">
-<h2>How it fits together</h2>
-<p class="sub">Adapters are the only vendor code. Core owns access, state and transport: what leaves, at which tier, in what order. Interpretation belongs to receivers.</p>
-<figure>{{diagram:architecture}}<figcaption>Harnesses → one adapter each → core (normalise, filter, redact, outbox) → any number of sinks. Control flows back.</figcaption></figure>
-</section>
-
-<section class="block">
-<h2>Four tiers, chosen per sink</h2>
-<p class="sub">A sink is configured at a tier; the receiver's well-known file declares its maximum; the lower wins. Filtering is an allowlist per event type, never a denylist.</p>
-<table class="tiers">
-<thead><tr><th>Tier</th><th>What leaves</th><th>Good for</th></tr></thead>
-<tbody>
-<tr class="t0"><td class="n"><span class="chip" style="background:var(--t0)"></span>0 presence</td><td>Session id, state and timing, machine, folder, repo, branch, model, title, link; the <em>kind</em> of attention needed</td><td>A board: working / needs you / done</td></tr>
-<tr><td class="n"><span class="chip" style="background:var(--t1)"></span>1 actions</td><td>+ tool names, durations, ok/error, file paths, the attention message, subagents, compactions</td><td>An activity feed</td></tr>
-<tr><td class="n"><span class="chip" style="background:var(--t2)"></span>2 conversation</td><td>+ your prompts and the assistant's text, redacted</td><td>Memory, search, recaps</td></tr>
-<tr><td class="n"><span class="chip" style="background:var(--t3)"></span>3 full</td><td>+ tool input and output, thinking, raw hook lines</td><td>Full replay on a receiver you own</td></tr>
-</tbody>
-</table>
-<p class="sub" style="margin-top:12px">The secrets ruleset runs above tier 0 and cannot be turned off. PII reduction is a second, opt-in pass. <a href="/protocol/privacy/">The privacy spec</a>.</p>
-</section>
-
-<section class="block">
-<h2>The six moments every harness fires</h2>
-<figure>{{diagram:moments}}<figcaption>The protocol carries facts and timestamps, never a verdict: "stale" and "done" are a receiver's readings.</figcaption></figure>
-</section>
-
-<section class="block">
-<h2>No server needed to see it</h2>
-<p class="sub"><code>sessionpipe tail</code> follows the local outbox. This is what tier 1 looks like:</p>
-<div class="tail"><span class="dim">00:41:02</span> <span class="k">claude-code</span> 8c13…  session.started   source=startup  ~/spacesheep main
-<span class="dim">00:41:09</span> <span class="k">claude-code</span> 8c13…  turn.started      prompt_chars=61
-<span class="dim">00:41:11</span> <span class="k">claude-code</span> 8c13…  tool.started      Read
-<span class="dim">00:41:11</span> <span class="k">claude-code</span> 8c13…  tool.ended        Read <span class="ok">ok</span> 38ms
-<span class="dim">00:41:14</span> <span class="k">claude-code</span> 8c13…  tool.started      Bash
-<span class="dim">00:41:16</span> <span class="k">claude-code</span> 8c13…  tool.ended        Bash <span class="ok">ok</span> 1830ms
-<span class="dim">00:41:31</span> <span class="k">claude-code</span> 8c13…  <span class="warn">attention.needed</span>  permission Bash "git push origin …"</div>
-</section>
-
-<section class="block">
-<h2>Who already receives</h2>
-<div class="grid">
-<div class="card"><h3>sessionpipe-receiver</h3><p>The reference receiver: one process, JSONL files, a page you can answer from a phone. <code>npx sessionpipe-receiver</code>, or Docker.</p></div>
-<div class="card"><h3>spacesheep.dev</h3><p>Sessions, memory and recaps for people who run agents all day. Tier 2.</p></div>
-<div class="card"><h3>Yours</h3><p>Serve <code>/.well-known/sessionpipe</code> and one POST route, pass the conformance suite, and <a href="/receivers/">list it</a>.</p></div>
+<p class="meta"><span>sessionpipe {{version}}</span><span>protocol 1, draft</span><span>{{jsbytes}} bytes of JavaScript: the copy button</span></p>
+<h1>Your coding agents already report everything they do. You decide where it goes.</h1>
+<div class="hero-row">
+<div class="hero-copy">
+<p class="lead">Claude Code, Codex, Gemini CLI and Antigravity each fire hooks in their own format. sessionpipe turns them into one stream of events, removes <span class="redact">secrets</span> on your machine, and sends only what you allow: to your server, a file, or nowhere.</p>
+<div class="cmd">
+<p><span class="p" aria-hidden="true">$</span><code>npx sessionpipe install</code><span class="c"># nothing is sent yet</span></p>
+<p><span class="p" aria-hidden="true">$</span><code>sessionpipe tail</code><span class="c"># watch it locally</span></p>
+</div>
+<p class="links"><a class="go" href="/get-started/">Get started</a><button type="button" class="copy" data-copy="/agent.md" hidden>Copy context for your agent</button><a class="agent-link" href="/agent.md">agent.md</a><a href="/docs/">Docs</a></p>
+</div>
+<figure class="term" aria-label="sessionpipe tail at tier 1: a Claude Code session and a Codex session in one stream; the Claude Code session ends up waiting for a permission.">
+<figcaption><span>sessionpipe tail --tier 1</span><span>~/.local/state/sessionpipe/outbox</span></figcaption>
+<pre aria-hidden="true"><span style="--i:0"><i>00:41:02</i> <b>claude-code</b>  session.started   ~/spacesheep main</span>
+<span style="--i:1"><i>00:41:09</i> <b>claude-code</b>  turn.started      prompt_chars=61</span>
+<span style="--i:2"><i>00:41:10</i> <b class="cx">codex      </b>  tool.started      Bash</span>
+<span style="--i:3"><i>00:41:11</i> <b>claude-code</b>  tool.started      Read</span>
+<span style="--i:4"><i>00:41:11</i> <b>claude-code</b>  tool.ended        Read <em>ok</em> 38ms</span>
+<span style="--i:5"><i>00:41:12</i> <b class="cx">codex      </b>  tool.ended        Bash <em>ok</em> 1204ms</span>
+<span style="--i:6"><i>00:41:14</i> <b>claude-code</b>  tool.started      Bash</span>
+<span style="--i:7"><i>00:41:16</i> <b class="cx">codex      </b>  turn.ended        stop</span>
+<span style="--i:8"><i>00:41:31</i> <b>claude-code</b>  <strong>attention.needed</strong>  permission Bash "git push…"</span>
+<span class="cursor" style="--i:9"> </span></pre>
+</figure>
 </div>
 </section>
 
-<section class="block">
-<h2>Three promises</h2>
-<div class="grid">
-<div class="card promise"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--ok)" stroke-width="2"/><path d="M8 12l3 3 5-6" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><div><h3>No telemetry</h3><p>sessionpipe reports to the sinks you configured and to nobody else. This site has no analytics.</p></div></div>
-<div class="card promise"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--ok)" stroke-width="2"/><path d="M8 12l3 3 5-6" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><div><h3>Secrets never leave</h3><p>Redaction runs on your machine, before the outbox, on every string above tier 0.</p></div></div>
-<div class="card promise"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="var(--ok)" stroke-width="2"/><path d="M8 12l3 3 5-6" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><div><h3>Your server or none</h3><p>A file, stdout, the reference receiver on your laptop, or any HTTPS endpoint that speaks the protocol.</p></div></div>
+<section class="sec" id="what">
+<header class="rail"><span class="n">§1</span><h2>What it is</h2></header>
+<div class="body">
+<p class="big">A small client and an open protocol. The client sits between your agents and whatever you want to build on them. The protocol is the shape of what it sends, so anyone can write the other end.</p>
+<dl class="terms">
+<div><dt>hook</dt><dd>A command the agent runs at a moment it already knows about: a session started, a tool is about to run, it is waiting for you. sessionpipe's hook hands the payload to a background worker and exits in under 150&nbsp;ms.</dd></div>
+<div><dt>adapter</dt><dd>One file per agent that translates its hooks into protocol events. The only vendor-specific code in the tree.</dd></div>
+<div><dt>event</dt><dd><code>session.started</code>, <code>tool.ended</code>, <code>attention.needed</code>: 17 types in protocol 1. Facts and timestamps, never a verdict: "stuck" and "done" are for the receiver to decide.</dd></div>
+<div><dt>tier</dt><dd>How much of an event leaves, from 0 (presence only) to 3 (everything). Chosen per destination.</dd></div>
+<div><dt>outbox</dt><dd>Append-only files on your disk. A destination's cursor moves only after it answered 2xx, and 30 days are kept, so a laptop that was offline for a week loses nothing.</dd></div>
+<div><dt>sink, receiver</dt><dd>A sink is where your machine sends: a file, stdout, or a URL. A receiver is the server at that URL. It reads the stream and is the only part that decides what any of it means.</dd></div>
+</dl>
 </div>
-<p class="sub">Apache-2.0 code, CC BY 4.0 spec, DCO, no CLA. Pre-release: see the <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/ROADMAP.md">roadmap</a>.</p>
 </section>
 
-{{faq}}
+<section class="sec" id="event">
+<header class="rail"><span class="n">§2</span><h2>One event, start to finish</h2></header>
+<div class="body">
+<p class="sub">Claude Code asks permission to run a command. Here is what it hands the hook, what the adapter makes of it, and what a destination set to tier 0 actually receives.</p>
+</div>
+<div class="wide">
+<ol class="flow">
+<li>
+<h3><span>in</span>What Claude Code fires</h3>
+<pre class="json"><code>{
+  <span class="k">"hook_event_name"</span>: <span class="s">"PermissionRequest"</span>,
+  <span class="k">"session_id"</span>: <span class="s">"ed6c7665-589f-…"</span>,
+  <span class="k">"cwd"</span>: <span class="s">"~/…/ws2"</span>,
+  <span class="k">"transcript_path"</span>: <span class="s">"~/.claude/projects/…"</span>,
+  <span class="k">"permission_mode"</span>: <span class="s">"default"</span>,
+  <span class="k">"tool_name"</span>: <span class="s">"Bash"</span>,
+  <span class="k">"tool_input"</span>: {
+    <span class="k">"command"</span>: <span class="s">"cat /nonexistent-file-xyz"</span>,
+    <span class="k">"description"</span>: <span class="s">"Try to read a file…"</span>
+  }
+}</code></pre>
+<p>Its own field names, its own format. Codex and Gemini CLI say the same thing differently.</p>
+</li>
+<li>
+<h3><span>adapt</span>What the adapter makes</h3>
+<pre class="json"><code>{
+  <span class="k">"protocol"</span>: <span class="n">1</span>,
+  <span class="k">"type"</span>: <span class="s">"attention.needed"</span>,
+  <span class="k">"time"</span>: <span class="s">"2026-09-28T03:44:50.515Z"</span>,
+  <span class="k">"tier"</span>: <span class="n">1</span>,
+  <span class="k">"harness"</span>: { <span class="k">"name"</span>: <span class="s">"claude-code"</span> },
+  <span class="k">"session"</span>: { <span class="k">"id"</span>: <span class="s">"ed6c7665-…"</span> },
+  <span class="k">"privacy"</span>: { <span class="k">"rulesets"</span>: [<span class="s">"secrets@1"</span>] },
+  <span class="k">"data"</span>: {
+    <span class="k">"attention_id"</span>: <span class="s">"perm-1bb18c870624a063"</span>,
+    <span class="k">"kind"</span>: <span class="s">"permission"</span>,
+    <span class="k">"tool"</span>: <span class="s">"Bash"</span>,
+    <span class="k">"message"</span>: <span class="s">"Bash cat /nonexistent-fi…"</span>
+  }
+}</code></pre>
+<p>The same envelope for every agent. Secrets in <code>message</code> would already be gone.</p>
+</li>
+<li>
+<h3><span>out</span>What a tier-0 sink receives</h3>
+<pre class="json"><code>{
+  <span class="k">"protocol"</span>: <span class="n">1</span>,
+  <span class="k">"type"</span>: <span class="s">"attention.needed"</span>,
+  <span class="k">"tier"</span>: <span class="n">0</span>,
+  <span class="k">"…"</span>
+  <span class="k">"data"</span>: {
+    <span class="k">"attention_id"</span>: <span class="s">"perm-1bb18c870624a063"</span>,
+    <span class="k">"kind"</span>: <span class="s">"permission"</span>
+<del>    "tool": "Bash",</del>
+<del>    "message": "Bash cat /nonexistent-…"</del>
+  }
+}</code></pre>
+<p>"Needs you", without the words. The filter is an allowlist per event type, so a field nobody listed never leaves.</p>
+</li>
+</ol>
+<p class="note">Recorded from Claude Code 2.1.258 on 28 Sep 2026, trimmed for width. The full payload is a <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/conformance/harness/claude-code/permission-request-bash.json">conformance fixture</a>; CI checks the adapter against it.</p>
+<figure class="arch">{{diagram:architecture}}<figcaption>The whole machine: agents → one adapter each → core (normalise, filter, redact, outbox) → any number of sinks. Messages and permission answers come back the other way.</figcaption></figure>
+</div>
+</section>
+
+<section class="sec" id="tiers">
+<header class="rail"><span class="n">§3</span><h2>You choose how much leaves</h2></header>
+<div class="body">
+<p class="sub">Each destination is set to a tier, and each receiver states the most it will accept. The lower of the two wins. Every tier includes the one above it in this list.</p>
+<ol class="ladder">
+<li><span class="t">0</span><div><h3>presence</h3><p>Session id, state, timing, machine, folder, repo, branch, model, title; the <em>kind</em> of attention needed.</p><p class="for">A board of who is working, who needs you, who is done.</p></div></li>
+<li><span class="t">1</span><div><h3>actions</h3><p>+ tool names, durations, ok or error, file paths, the attention message, subagents.</p><p class="for">An activity feed.</p></div></li>
+<li><span class="t">2</span><div><h3>conversation</h3><p>+ your prompts and the assistant's replies, redacted.</p><p class="for">Memory, search, recaps.</p></div></li>
+<li><span class="t">3</span><div><h3>full</h3><p>+ tool input and output, thinking, raw hook lines.</p><p class="for">Full replay, on a server you own.</p></div></li>
+</ol>
+<p class="note">The secrets ruleset runs on every string above tier 0 and cannot be turned off. PII reduction is a second pass you can turn on. <code>sessionpipe tail --tier N</code> shows exactly what a tier sends before you point it anywhere. <a href="/protocol/privacy/">The privacy spec</a>.</p>
+</div>
+</section>
+
+<section class="sec" id="uses">
+<header class="rail"><span class="n">§4</span><h2>What people build on it</h2></header>
+<div class="body">
+<ul class="uses">
+<li><span class="tag">tier 0</span><h3>A presence board</h3><p>Every session on every machine: working, needs you, done. Nothing about what it is working on.</p></li>
+<li><span class="tag">tier 1</span><h3>An activity feed</h3><p>Which tools ran, how long they took, what failed, which files they touched.</p></li>
+<li><span class="tag">tier 2</span><h3>Memory and recaps</h3><p>Search what you asked an agent last Tuesday, on any machine, in any harness.</p></li>
+<li><span class="tag">control</span><h3>Answers from your phone</h3><p>Approve a permission or send the next prompt. Each command is signed on your device and checked on the machine against keys enrolled at its own terminal. The server in between can carry a command but cannot forge one.</p></li>
+</ul>
+<h3 class="minor">Who receives today</h3>
+<dl class="recv">
+<div><dt><code>sessionpipe-receiver</code></dt><dd>The reference receiver. One process, JSONL files, a page you can answer from a phone. <code>npx sessionpipe-receiver</code>, or Docker.</dd></div>
+<div><dt><a href="https://spacesheep.dev">spacesheep.dev</a></dt><dd>Sessions, memory and recaps for people who run agents all day. Tier 2.</dd></div>
+<div><dt>Yours</dt><dd>Serve <code>/.well-known/sessionpipe</code> and one POST route, pass the conformance suite, and <a href="/receivers/">add it to the list</a>.</dd></div>
+</dl>
+</div>
+</section>
+
+<section class="sec" id="changes">
+<header class="rail"><span class="n">§5</span><h2>What changed lately</h2></header>
+<div class="body">
+{{changes}}
+</div>
+</section>
+
+<section class="sec" id="agents">
+<header class="rail"><span class="n">§6</span><h2>For agents</h2></header>
+<div class="body">
+<p class="sub">Every page here is also plain Markdown, so an agent can read the site without a browser. Hand it the first file and it finds the rest. All of it is rebuilt from the repository on every deploy.</p>
+<dl class="files">
+<div><dt><a href="/agent.md">/agent.md</a><button type="button" class="copy" data-copy="/agent.md" hidden>Copy</button></dt><dd>Context for an agent helping you: what sessionpipe is, every command (read from the CLI itself), and the rules it should follow about tiers, approvals and keys.</dd></div>
+<div><dt><a href="/llms.txt">/llms.txt</a></dt><dd>The index, in the llms.txt format, linking each page's Markdown.</dd></div>
+<div><dt><a href="/llms-full.txt">/llms-full.txt</a></dt><dd>The whole site in one file, {{fullkb}}: docs, protocol, changelog.</dd></div>
+<div><dt><a href="/docs/index.md">&lt;page&gt;/index.md</a></dt><dd>Any page as Markdown, linked from its <code>&lt;head&gt;</code>, with a button that copies it.</dd></div>
+<div><dt><a href="/schema/">/schema/v1/</a></dt><dd>JSON Schemas for every message, at the URLs their <code>$id</code>s name.</dd></div>
+</dl>
+</div>
+</section>
+
+<section class="sec" id="promises">
+<header class="rail"><span class="n">§7</span><h2>Three promises</h2></header>
+<div class="body">
+<ol class="promises">
+<li><h3>No telemetry.</h3><p>sessionpipe reports to the destinations you configured and to nobody else. This site has no analytics, no cookies, and loads nothing from anyone.</p></li>
+<li><h3>Secrets never leave.</h3><p>Redaction runs on your machine before anything is written to the outbox, so a receiver never sees what was removed.</p></li>
+<li><h3>Your server, or none.</h3><p>A file, stdout, the reference receiver on your laptop, or any HTTPS endpoint that speaks the protocol. There is no sessionpipe cloud.</p></li>
+</ol>
+<p class="note">Apache-2.0 code, CC BY 4.0 spec, DCO, no CLA. Pre-release: things move weekly, and the <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/ROADMAP.md">roadmap</a> says which. Provided as-is.</p>
+</div>
+</section>
+
+<section class="sec" id="faq">
+<header class="rail"><span class="n">§8</span><h2>Questions people ask</h2></header>
+<div class="body">{{faq}}</div>
+</section>
+</div>

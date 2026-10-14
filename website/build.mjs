@@ -5,7 +5,9 @@
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { transformSync } from "esbuild";
 import { marked } from "marked";
+import { loadChangelog, splitLead } from "./src/changelog.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const _src = path.join(root, "website/src");
@@ -23,9 +25,10 @@ cpSync(path.join(root, "schemas/v1"), path.join(out, "schema/v1"), { recursive: 
 const css = read("website/src/site.css");
 const nav = [
   ["/", "Home"],
+  ["/docs/", "Docs"],
   ["/protocol/", "Protocol"],
-  ["/get-started/", "Get started"],
   ["/receivers/", "Receivers"],
+  ["/changelog/", "Changelog"],
   ["https://github.com/spacesheep-dev/sessionpipe", "GitHub"],
 ];
 
@@ -68,6 +71,11 @@ marked.use({ gfm: true, headerIds: true, mangle: false });
 
 function page({ title, description, body, pathname, edit, license, jsonld }) {
   const canonical = SITE + pathname;
+  const twin = twins.has(pathname) ? `${pathname}index.md` : null;
+  const bar =
+    twin && pathname !== "/"
+      ? `<div class="agentbar"><button type="button" class="copy" data-copy="${twin}" hidden>Copy page as Markdown</button><a href="${twin}">Markdown</a><a href="/llms.txt">llms.txt</a></div>`
+      : "";
   const navHtml = nav
     .map(
       ([href, label]) =>
@@ -79,7 +87,7 @@ function page({ title, description, body, pathname, edit, license, jsonld }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark">
 <title>${title}</title>
 <meta name="description" content="${description}">
@@ -91,18 +99,19 @@ function page({ title, description, body, pathname, edit, license, jsonld }) {
 <meta property="og:image" content="${SITE}/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="robots" content="index, follow, max-image-preview:large">
-<meta name="theme-color" content="#3b3fd8" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0f1220" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+${twin ? `<link rel="alternate" type="text/markdown" href="${twin}" title="This page as Markdown">\n` : ""}<link rel="alternate" type="application/atom+xml" href="/changelog/feed.xml" title="sessionpipe releases">
 ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script>` : ""}
 <style>${css}</style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><a class="brand" href="/" aria-label="sessionpipe home"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h5l2-5 4 10 2-5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>sessionpipe</a><nav aria-label="Site">${navHtml}</nav></header>
-<main id="main">${body}</main>
+<header class="top"><a class="brand" href="/" aria-label="sessionpipe home">session<i aria-hidden="true"></i>pipe</a><nav aria-label="Site">${navHtml}</nav></header>
+<main id="main">${bar}${body}</main>
 <footer><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} ${edit ? `<a href="${edit}">Edit on GitHub</a> ·` : ""} <a href="/security/">Security</a> · <a href="/legal/">Legal &amp; privacy</a> · <a href="/governance/">Governance</a> · <a href="/changelog/">Changelog</a></p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></footer>
-</body>
+${twin ? '<script src="/copy.js" defer></script>\n' : ""}</body>
 </html>
 `;
 }
@@ -113,8 +122,19 @@ function write(pathname, html) {
   writeFileSync(path.join(dir, "index.html"), html);
 }
 
+// Every page with Markdown behind it also gets <path>index.md, the same words for an agent.
+// Links become absolute, so a copied page still works on its own.
+const twins = new Map();
+function twin(pathname, md) {
+  const text = `${md.replace(/\]\((\/[^)\s]*)\)/g, `](${SITE}$1)`).trim()}\n`;
+  twins.set(pathname, text);
+  mkdirSync(path.join(out, pathname), { recursive: true });
+  writeFileSync(path.join(out, pathname, "index.md"), text);
+}
+
 function mdPage({ pathname, file, title, description, map, dirPrefix = "", license, extra = "" }) {
   const md = rewriteLinks(read(file), map, dirPrefix);
+  twin(pathname, md);
   const body = `<article class="prose">${marked.parse(md)}${extra}</article>`;
   write(
     pathname,
@@ -171,6 +191,7 @@ const specs = [
 const specNav = `<nav class="subnav" aria-label="Protocol"><a href="/protocol/">Protocol</a><a href="/protocol/http/">HTTP</a><a href="/protocol/privacy/">Privacy</a><a href="/protocol/control/">Control</a><a href="/protocol/adapters/">Adapters</a><a href="/protocol/versioning/">Versioning</a><a href="/schema/v1/event.json">Schemas</a></nav>`;
 for (const [pathname, file, title, description] of specs) {
   const md = rewriteLinks(read(file), specPath, "");
+  twin(pathname, md);
   const body = `${specNav}<article class="prose">${marked.parse(md)}</article>`;
   const jsonld = {
     "@context": "https://schema.org",
@@ -229,13 +250,89 @@ mdPage({
   description: "Maintainers, how decisions are made, how to become a maintainer.",
   map: rootPath,
 });
-mdPage({
-  pathname: "/changelog/",
-  file: "CHANGELOG.md",
-  title: "Changelog · sessionpipe",
-  description: "Protocol-level changes.",
-  map: rootPath,
-});
+// --- changelog, from packages/*/CHANGELOG.md and .changeset/ -------------------------
+const changelog = loadChangelog(root);
+const REPO = "https://github.com/spacesheep-dev/sessionpipe";
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const day = (iso) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+function entryHtml(e, { full = true } = {}) {
+  const [lead, rest] = splitLead(e.text);
+  const more = full && rest ? `<details><summary>Details</summary>${marked.parse(rest)}</details>` : "";
+  const meta = full
+    ? `<p class="meta">${e.hash ? `<a href="${REPO}/commit/${e.hash}">${e.hash}</a> · ` : ""}${e.packages.join(", ")}</p>`
+    : "";
+  return `<li><span class="bump ${e.bump}">${e.bump}</span><div><p class="what">${marked.parseInline(lead)}</p>${more}${meta}</div></li>`;
+}
+function releaseHtml(r) {
+  const id = `v${r.version}`;
+  const when = r.date ? ` <time datetime="${r.date}">${day(r.date)}</time>` : "";
+  return `<section class="release" id="${id}"><h2><a href="#${id}">${r.version}</a>${when}</h2><ul class="entries">${r.entries.map((e) => entryHtml(e)).join("")}</ul></section>`;
+}
+{
+  const { next, releases } = changelog;
+  const nextHtml = next
+    ? `<section class="release next" id="next"><h2><a href="#next">${next.version}</a> <span class="pill">next</span></h2><p class="sub">Merged to main and waiting for the release. The version follows from the largest bump below.</p><ul class="entries">${next.entries.map((e) => entryHtml(e)).join("")}</ul></section>`
+    : "";
+  const protocol = rewriteLinks(read("CHANGELOG.md"), rootPath, "")
+    .replace(/^# .*\n/, "")
+    .replace(/^## /gm, "### ");
+  const entryMd = (e) =>
+    `- **${e.bump}** ${e.text.replace(/\n/g, "\n  ")}${e.hash ? ` ([${e.hash}](${REPO}/commit/${e.hash}))` : ""}`;
+  twin(
+    "/changelog/",
+    [
+      "# sessionpipe changelog",
+      "",
+      "Every release of the four packages (one shared version number), newest first, generated from the repository's changesets.",
+      "",
+      ...(next ? [`## ${next.version} (next, on main, not released yet)`, "", ...next.entries.map(entryMd), ""] : []),
+      ...releases.flatMap((r) => [`## ${r.version}${r.date ? ` (${r.date})` : ""}`, "", ...r.entries.map(entryMd), ""]),
+      "## Protocol",
+      "",
+      protocol,
+    ].join("\n"),
+  );
+  const body = `<div class="changelog"><header class="cl-head"><h1>Changelog</h1><p class="sub">Every release of the four packages (they share one version number), newest first. Built from the repository's changesets each time the site deploys, so this page cannot drift from what shipped. Each entry links the commit that made it. Subscribe with the <a href="/changelog/feed.xml">Atom feed</a>.</p></header>${nextHtml}${releases.map(releaseHtml).join("")}<section class="release" id="protocol"><h2><a href="#protocol">Protocol</a></h2><div class="prose">${marked.parse(protocol)}</div></section></div>`;
+  write(
+    "/changelog/",
+    page({
+      title: "Changelog · sessionpipe",
+      description: "Every sessionpipe release and what it changed, generated from the repository's changesets.",
+      body,
+      pathname: "/changelog/",
+    }),
+  );
+  // Atom: one entry per release.
+  const updated = (r) => `${r.date ?? new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  const feed = `<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>sessionpipe releases</title>
+<link href="${SITE}/changelog/"/>
+<link rel="self" href="${SITE}/changelog/feed.xml"/>
+<id>${SITE}/changelog/</id>
+<updated>${releases[0] ? updated(releases[0]) : new Date().toISOString()}</updated>
+${releases
+  .slice(0, 20)
+  .map(
+    (r) => `<entry>
+<title>sessionpipe ${r.version}</title>
+<link href="${SITE}/changelog/#v${r.version}"/>
+<id>${SITE}/changelog/#v${r.version}</id>
+<updated>${updated(r)}</updated>
+<content type="html">${esc(`<ul>${r.entries.map((e) => `<li><strong>${e.bump}</strong> ${marked.parse(e.text)}</li>`).join("")}</ul>`)}</content>
+</entry>`,
+  )
+  .join("\n")}
+</feed>
+`;
+  writeFileSync(path.join(out, "changelog/feed.xml"), feed);
+}
 {
   const privacy = read("website/src/pages/privacy.md");
   const body = `<article class="prose">${marked.parse(privacy)}<h2 id="trademarks">Trademarks</h2>${marked.parse(read("TRADEMARKS.md").replace(/^# Trademarks\n/, ""))}<h2 id="code-license">Code license</h2><p>Apache License 2.0. <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/LICENSE">Full text</a> · <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/NOTICE">NOTICE</a></p><h2 id="spec-license">Specification license</h2><p>Creative Commons Attribution 4.0 International. <a href="https://creativecommons.org/licenses/by/4.0/">Summary</a> · <a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/LICENSE">Full text</a></p></article>`;
@@ -263,8 +360,78 @@ for (const [pathname, file, title, description] of [
     "Who speaks the sessionpipe protocol, and how to list yours.",
   ],
 ]) {
-  const body = `<article class="prose">${marked.parse(rewriteLinks(read(file), { ...specPath, ...rootPath }, "spec/"))}</article>`;
+  const md = rewriteLinks(read(file), { ...specPath, ...rootPath }, "spec/");
+  twin(pathname, md);
+  const body = `<article class="prose">${marked.parse(md)}</article>`;
   write(pathname, page({ title, description, body, pathname }));
+}
+
+// --- docs, from website/src/docs/docs.md, the CLI's usage table and the READMEs --------
+// The CLI's own usage table (packages/cli/src/help.ts), so a usage line is written once.
+const usage = await (async () => {
+  const { code } = transformSync(read("packages/cli/src/help.ts"), { loader: "ts", format: "esm" });
+  const { usageTable } = await import(`data:text/javascript,${encodeURIComponent(code)}`);
+  return usageTable(["<harness>"]);
+})();
+const usageLine = (cmd) => `sessionpipe ${usage[cmd].replace(/ \([^()]*\)$/, "")}`;
+const publicCommands = Object.keys(usage).filter(
+  (k) => !k.startsWith("-") && !/\((internal|use --help)/.test(usage[k]),
+);
+{
+  const used = new Set();
+  const src = "website/src/docs/docs.md";
+  const withUsage = (text, render) =>
+    text.replace(/^\{\{usage (.+?)\}\}$/gm, (_, cmd) => {
+      if (!usage[cmd]) throw new Error(`${src}: the CLI has no command "${cmd}"`);
+      used.add(cmd);
+      return render(usageLine(cmd));
+    });
+  let md = read(src).replace(/^\{\{include ([^#}]+)(?:#(.+?))?\}\}$/gm, (_, file, heading) => {
+    const lines = read(file).split("\n");
+    let from = 0;
+    if (heading) {
+      from = lines.findIndex((l) => l.startsWith(`## ${heading}`)) + 1;
+      if (!from) throw new Error(`${src}: ${file} has no "## ${heading}" section`);
+    } else if (lines[0].startsWith("# ")) from = 1;
+    const to = lines.findIndex((l, i) => i >= from && /^(#{1,2} |---$)/.test(l));
+    return lines
+      .slice(from, to === -1 ? undefined : to)
+      .join("\n")
+      .trim();
+  });
+  md = rewriteLinks(md, { ...specPath, ...rootPath }, "spec/");
+  twin("/docs/", withUsage(md, (line) => `\`\`\`sh\n${line}\n\`\`\``).replace(/ \{#[a-z0-9-]+\}$/gm, ""));
+  md = withUsage(md, (line) => `<pre class="usage"><code>${esc(line)}</code></pre>`);
+  // A command the CLI has and this page doesn't is a build error, not a gap someone notices.
+  const missing = publicCommands.filter((k) => !used.has(k));
+  if (missing.length) throw new Error(`${src}: document ${missing.map((k) => `"${k}"`).join(", ")}`);
+  const toc = [];
+  const html = marked.parse(md).replace(/<h([23])>(.*?)<\/h\1>/g, (_, level, inner) => {
+    const m = /\s*\{#([a-z0-9-]+)\}$/.exec(inner);
+    const text = m ? inner.slice(0, m.index) : inner;
+    let id =
+      m?.[1] ??
+      text
+        .replace(/<[^>]+>/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+    while (toc.some((h) => h.id === id)) id += "-";
+    toc.push({ level: Number(level), id, text: text.replace(/<[^>]+>/g, "") });
+    return `<h${level} id="${id}"><a href="#${id}">${text}</a></h${level}>`;
+  });
+  const tocHtml = toc.map((h) => `<li class="l${h.level}"><a href="#${h.id}">${h.text}</a></li>`).join("");
+  write(
+    "/docs/",
+    page({
+      title: "Docs · sessionpipe",
+      description:
+        "Every sessionpipe command, the control daemon, self-updates, status JSON and the conformance suite.",
+      body: `<div class="docs"><nav class="toc" aria-label="On this page"><p>On this page</p><ul>${tocHtml}</ul></nav><article class="prose">${html}</article></div>`,
+      pathname: "/docs/",
+      edit: `https://github.com/spacesheep-dev/sessionpipe/edit/main/${src}`,
+    }),
+  );
 }
 
 // --- home ---------------------------------------------------------------------------
@@ -296,12 +463,51 @@ const FAQ = [
 ];
 {
   const diagram = (name) => read(`website/src/diagrams/${name}.svg`);
+  // The home page's Markdown is the brief for an agent; /agent.md is the same file.
+  const agent = read("website/src/agents/agent.md")
+    .replace("{{version}}", version)
+    .replace("{{commands}}", `\`\`\`sh\n${publicCommands.map(usageLine).join("\n")}\n\`\`\``);
+  twin("/", agent);
+  writeFileSync(path.join(out, "agent.md"), twins.get("/"));
+  // Everything with Markdown behind it, in reading order, in one file.
+  const order = ["/", "/docs/", "/get-started/", "/receivers/", ...specs.map((s) => s[0]), "/changelog/"];
+  const rest = [...twins.keys()].filter((p) => !order.includes(p));
+  const full = [...order, ...rest]
+    .map((p) => `<!-- ${SITE}${p} · Markdown: ${SITE}${p}index.md -->\n\n${twins.get(p)}`)
+    .join("\n---\n\n");
+  writeFileSync(path.join(out, "llms-full.txt"), full);
+  const kb = (s) => `${Math.round(Buffer.byteLength(s) / 1024)} KB`;
   let home = read("website/src/pages/home.html");
+  home = home
+    .replace("{{jsbytes}}", String(Buffer.byteLength(read("website/public/copy.js"))))
+    .replace("{{fullkb}}", kb(full));
   home = home.replace(/\{\{diagram:([a-z-]+)\}\}/g, (_, n) => diagram(n));
-  home = home.replace(
-    "{{faq}}",
-    `<section class="block" id="faq"><h2>Questions people ask</h2>${FAQ.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join("")}</section>`,
-  );
+  home = home.replace("{{version}}", version);
+  {
+    // The next release's headlines, then the last release's.
+    const { next, releases } = changelog;
+    const list = (entries) =>
+      `<ul class="entries brief">${entries.map((e) => entryHtml(e, { full: false })).join("")}</ul>`;
+    const shown = 5;
+    const parts = [];
+    if (next) {
+      const more = next.entries.length - shown;
+      parts.push(
+        `<h3 class="minor">Next: ${next.version} <span class="pill">on main</span></h3>${list(next.entries.slice(0, shown))}${more > 0 ? `<p class="more"><a href="/changelog/#next">and ${more} more</a></p>` : ""}`,
+      );
+    }
+    if (releases[0]) {
+      const r = releases[0];
+      parts.push(
+        `<h3 class="minor">${r.version}${r.date ? ` <time datetime="${r.date}">${day(r.date)}</time>` : ""}</h3>${list(r.entries)}`,
+      );
+    }
+    parts.push(
+      `<p class="note"><a href="/changelog/">The full changelog</a>, ${releases.length} releases since ${releases.at(-1)?.version ?? "the start"}, each entry linked to its commit. Generated from the repository on every deploy. <a href="/changelog/feed.xml">Atom feed</a>.</p>`,
+    );
+    home = home.replace("{{changes}}", parts.join(""));
+  }
+  home = home.replace("{{faq}}", FAQ.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join(""));
   const jsonld = {
     "@context": "https://schema.org",
     "@graph": [
@@ -362,6 +568,7 @@ writeFileSync(
 // sitemap + robots
 const pages = [
   "/",
+  "/docs/",
   ...specs.map((s) => s[0]),
   "/schema/",
   "/get-started/",
@@ -378,27 +585,36 @@ writeFileSync(
   path.join(out, "sitemap.xml"),
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${pages.map(urlRow).join("\n")}\n</urlset>\n`,
 );
+const mdLink = (p, t, note) => `- [${t}](${SITE}${p}index.md)${note ? `: ${note}` : ""}`;
 const llms = [
   "# sessionpipe",
   "",
   "> An open protocol and client for what your coding agents are doing: hooks for Claude Code, Codex, Gemini CLI, Antigravity and more; four privacy tiers; secrets removed on the person's machine; events sent to a server of their choosing or to none. Apache-2.0 code, CC BY 4.0 spec.",
   "",
-  "## Protocol",
+  "Every page below is Markdown. An agent helping someone set sessionpipe up should read the first link before running anything.",
   "",
-  ...specs.map(([p, , t]) => `- [${t}](${SITE}${p})`),
-  `- [JSON Schemas](${SITE}/schema/)`,
+  "## Start here",
+  "",
+  `- [Context for an agent](${SITE}/agent.md): what sessionpipe is, every command, and the rules to follow`,
+  `- [The whole site in one file](${SITE}/llms-full.txt)`,
   "",
   "## Use it",
   "",
-  `- [Get started](${SITE}/get-started/)`,
-  `- [Receivers](${SITE}/receivers/)`,
+  mdLink("/get-started/", "Get started", "connect, install, tail, add a sink"),
+  mdLink("/docs/", "Docs", "every command, the control daemon, self-updates, status JSON, conformance"),
+  mdLink("/receivers/", "Receivers", "who speaks the protocol"),
+  mdLink("/changelog/", "Changelog", "every release, generated from the changesets"),
+  "",
+  "## Protocol",
+  "",
+  ...specs.map(([p, , t]) => mdLink(p, t)),
+  `- [JSON Schemas](${SITE}/schema/v1/event.json): one per message; their $ids are these URLs`,
+  "",
+  "## Optional",
+  "",
+  mdLink("/security/", "Security"),
+  mdLink("/governance/", "Governance"),
   "- [Source](https://github.com/spacesheep-dev/sessionpipe)",
-  "",
-  "## Project",
-  "",
-  `- [Security](${SITE}/security/)`,
-  `- [Governance](${SITE}/governance/)`,
-  `- [Legal and privacy](${SITE}/legal/)`,
   "",
 ];
 writeFileSync(path.join(out, "llms.txt"), llms.join("\n"));

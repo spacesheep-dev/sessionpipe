@@ -1,7 +1,0 @@
-<svg viewBox="0 0 960 150" role="img" aria-label="Six moments every harness fires, on a timeline: session started, turn started, tool started and ended, attention needed, turn ended, session ended. Tier 0 carries the state moments; tier 1 adds the tools; tier 2 adds the words." xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="13">
-<path d="M40 70H920" stroke="var(--line)" stroke-width="2"/>
-<g fill="var(--brand)"><circle cx="80" cy="70" r="7"/><circle cx="240" cy="70" r="7"/><circle cx="400" cy="70" r="7"/><circle cx="560" cy="70" r="7"/><circle cx="720" cy="70" r="7"/><circle cx="880" cy="70" r="7"/></g>
-<g fill="var(--fg)" text-anchor="middle" font-weight="600"><text x="80" y="48">session.started</text><text x="240" y="48">turn.started</text><text x="400" y="48">tool.started · ended</text><text x="560" y="48">attention.needed</text><text x="720" y="48">turn.ended</text><text x="880" y="48">session.ended</text></g>
-<g fill="var(--fg2)" text-anchor="middle" font-size="12"><text x="80" y="98">tier 0 · startup, resume</text><text x="240" y="98">tier 0 · a prompt went in</text><text x="400" y="98">tier 1 · name, ms, ok</text><text x="560" y="98">tier 0 · "needs you"</text><text x="720" y="98">tier 0 · stop, interrupt</text><text x="880" y="98">tier 0 · four harnesses never say</text></g>
-<g fill="var(--fg2)" text-anchor="middle" font-size="12"><text x="400" y="128">tier 2 adds turn.transcript after each turn; tier 3 adds tool input and output</text></g>
-</svg>
