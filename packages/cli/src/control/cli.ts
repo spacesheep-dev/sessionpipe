@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// `sessionpipe control pair | keys | off | run | status` and `sessionpipe wait`.
-import { existsSync, realpathSync, unwatchFile, watchFile } from "node:fs";
+// `sessionpipe control pair | mode | folders | keys | off | run | status` and `sessionpipe wait`.
+import { existsSync, realpathSync, statSync, unwatchFile, watchFile } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -33,6 +33,7 @@ import { waitForMessage, waitSession } from "./wait.js";
 
 export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto] [--tier 0-3] [--token T] [--name N] [--no-service]
   sessionpipe control mode auto|safe                (how sessions run when you message them)
+  sessionpipe control folders [add|remove DIR…]     (where sessions you message may run)
   sessionpipe control status | keys [remove <id>] | off [<receiver>] | run
   sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)`;
 
@@ -65,6 +66,50 @@ async function askMode(out: (s?: string) => void): Promise<"safe" | "auto"> {
   } finally {
     rl.close();
   }
+}
+
+/** `control folders add|remove`: the new list, and a line per folder saying what became
+ *  of it. A folder to add must exist and be a project, never the home folder or above
+ *  it (pair's rule); folders are compared as real paths, as the daemon compares them. */
+export function changeFolders(
+  folders: string[],
+  op: "add" | "remove",
+  dirs: string[],
+  home = os.homedir(),
+): { folders: string[]; said: string[] } {
+  const real = (d: string) => {
+    try {
+      return realpathSync.native(d);
+    } catch {
+      return path.resolve(d);
+    }
+  };
+  const next = [...folders];
+  const said: string[] = [];
+  for (const d of dirs) {
+    const abs = path.resolve(d);
+    const at = next.findIndex((f) => real(f) === real(abs));
+    if (op === "remove") {
+      if (at < 0) said.push(`  · ${abs} wasn't allowed`);
+      else said.push(`  ✓ No longer allowed: ${next.splice(at, 1)[0]}`);
+      continue;
+    }
+    let dir = false;
+    try {
+      dir = statSync(abs).isDirectory();
+    } catch {}
+    if (!dir) said.push(`  ✗ ${abs} isn't a folder on this machine`);
+    else if (isBroad(abs, home))
+      said.push(
+        `  ✗ Not allowing all of ${abs}: name a project folder inside it, so a message can't run anywhere you own`,
+      );
+    else if (at >= 0) said.push(`  · ${abs} is already allowed`);
+    else {
+      next.push(abs);
+      said.push(`  ✓ Allowed ${abs}`);
+    }
+  }
+  return { folders: next, said };
 }
 
 export async function controlMain(argv: string[], out: (s?: string) => void, distDir: string): Promise<void> {
@@ -158,6 +203,34 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       // The running daemon reads control.json again within seconds; the next run uses it.
       return out(
         `  ✓ Sessions you message now run in ${want} mode${want === "auto" ? " (Claude Code's auto mode decides what's safe)" : " (only what each folder's settings already allow)"}.`,
+      );
+    }
+    case "folders": {
+      // The folders are the machine's own list, so they change here, at its keyboard, as
+      // at pairing: no new pairing and no passkey. A message to a session in any other
+      // folder is refused ("that session's folder isn't one this machine allows").
+      const op = argv[2];
+      const usage = "  usage: sessionpipe control folders [add|remove <folder>…]";
+      if (op !== undefined && op !== "add" && op !== "remove") return out(usage);
+      const c = readControl();
+      if (!c) return out("  control isn't set up on this machine: run `sessionpipe control pair <receiver>` first");
+      if (op) {
+        const dirs = argv.slice(3);
+        if (!dirs.length) return out(usage);
+        const r = changeFolders(c.folders, op, dirs);
+        for (const l of r.said) out(l);
+        if (r.folders.join("\n") !== c.folders.join("\n")) {
+          c.folders = r.folders;
+          writeControl(c);
+          // The running daemon reads control.json again within seconds and tells the
+          // receiver the new list in a hello then.
+          out("  The control daemon uses the new list within seconds.");
+        }
+      }
+      return out(
+        c.folders.length
+          ? `  Sessions you message may run in:\n${c.folders.map((f) => `    ${f}`).join("\n")}`
+          : "  No folder is allowed: a message to a session here is refused until you add one.",
       );
     }
     case "keys": {

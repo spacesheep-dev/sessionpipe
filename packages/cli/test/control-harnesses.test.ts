@@ -461,6 +461,19 @@ describe.runIf(unix)("hello", () => {
     for (let i = 0; i < 100 && !rx.hellos.length; i++) await new Promise((r) => setTimeout(r, 20));
     expect(rx.hellos[0]).toMatchObject({ harnesses: ["codex"] });
   });
+  it("says a new folder list in a hello at once, and nothing when nothing it says changed", async () => {
+    await startDaemon();
+    for (let i = 0; i < 100 && !rx.hellos.length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(rx.hellos).toHaveLength(1);
+    const kimi = path.join(tmp, "claude-kimi");
+    mkdirSync(kimi, { recursive: true });
+    d?.reload({ ...cfg(), folders: [project, kimi] });
+    for (let i = 0; i < 100 && rx.hellos.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(rx.hellos[1]?.folders).toEqual([project, kimi]);
+    d?.reload({ ...cfg(), folders: [project, kimi] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(rx.hellos).toHaveLength(2);
+  });
   it("names the accounts signed in, read again for each hello", async () => {
     const file = path.join(tmp, "claude-config", ".claude.json");
     mkdirSync(path.dirname(file), { recursive: true });

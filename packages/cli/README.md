@@ -34,6 +34,8 @@ enroll at this terminal; the receiver can queue a message but can never forge on
 
 ```sh
 sessionpipe control pair spacesheep.dev   # one link: approve with your passkey; installs the daemon (this folder by default)
+sessionpipe control folders add ~/work/api   # let messages reach sessions in another folder too (no new pairing)
+sessionpipe control folders [remove <dir>]   # the list, or stop allowing a folder
 sessionpipe control status          # receivers, parked waiters, sessions mid-turn, open permission prompts
 sessionpipe control keys [remove <id>]
 sessionpipe control off             # tell the receiver, forget its token and keys
