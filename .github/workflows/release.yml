@@ -100,7 +100,10 @@ jobs:
             gh workflow run ci.yml --ref "$b"
             run="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             pr="$(gh pr create --base main --head "$b" --title "Release: version packages ($v)" \
-              --body "v$v is on npm ([release run]($run)). This brings its version bump and changelogs back to main, and merges itself once CI passes. Until it does, the next push to production stops and points here.")"
+              --body "v$v is on npm ([release run]($run)). This brings its version bump and changelogs back to main, and merges itself once CI passes. Until it does, the next push to production stops and points here.")" || {
+              echo "::error::v$v is on npm, but the PR back to main could not be opened. Open it from ${{ github.server_url }}/${{ github.repository }}/compare/main...$b?expand=1, or let GitHub Actions open pull requests (organization, then repository, Settings → Actions) and re-run this job."
+              exit 1
+            }
           fi
           gh pr merge "$pr" --auto --rebase
           echo "::notice::v$v published; $pr brings the bump back to main"
