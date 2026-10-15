@@ -1,5 +1,26 @@
 # sessionpipe
 
+## 0.9.0
+
+### Minor Changes
+
+- 0940788: `turn.progress` (tier 2): a turn still running goes out as it runs, not only when it ends. The prompt is sent as the turn starts, then what the assistant has said so far, at most every 20 s on a tool call and only when it changed, under the number its `turn.transcript` will carry. Over 20 000 characters the reply keeps its end. A 21-minute turn used to show nothing on its receiver for 21 minutes.
+
+### Patch Changes
+
+- 91265cb: A busy session's events no longer wait 6 s and go back to the queue behind its own lock. A lock whose worker is gone (its 15 s deadline ended it without a release) is taken at once instead of after 5 min; a job polls for the lock every 50 ms instead of doubling its wait, so siblings can't keep taking it in between; and the sinks drain at once, so the lock is held for the slowest round trip, not the sum of them (33 re-queues in one day's log on a machine with three sinks, 2026-10-13).
+- 8253085: The usage table behind `--help` is exported (`usageTable`), so sessionpipe.org's docs page prints the same usage lines the CLI does; `--help` output is unchanged. The README's closing links sit at its end again, after "Help and status JSON".
+- 94c1b2f: Skip the parent's replayed history in forked Codex rollouts when reading session
+  facts and transcripts. Wait for an event naming the fork's own thread, preserve
+  its original transcript timestamps and cursors, and leave its title unset until
+  it contains a real user ask of its own.
+- e2ba5c8: The control daemon retries pending events for every non-paused sink once a minute, including sinks whose token is in config.json. A session whose final delivery was refused no longer needs another hook event to reach its sink after the retry wait. The existing per-sink wait and machine-wide delivery lock still apply.
+- 2d8a8ae: Ignore Claude Code's lone SessionEnd hooks (for example, from `claude mcp list`) when there is no outbox, stored facts or existing transcript. These hooks no longer create an outbox or reach a sink or the local daemon. Real sessions still send their end, including when their transcript was deleted but an outbox or facts remain.
+- 1ca23ee: No hook event is lost to a worker's 15 s deadline, and none waits for an unrelated hook. A worker used to delete its job file before running it, so one ended mid-run (a sink that hung, a lock held out) took the event with it. A job is now claimed by renaming its file and the claim is released only once its events are in the outbox; a sweep gives a claim whose worker is gone back to the queue. A job the session's lock held out used to wait in the queue for the next hook's sweep, however long that took; a fresh worker now starts for it.
+- 434d10c: A machine under a flood of hook events no longer floods its sinks. One worker drains the sinks at a time; the others leave their events in the outbox for it and it sends them in full batches of 50, so four busy sessions cost a request per batch, not per event. A sink that answered 429 is not tried again by any worker before its `retry-after`, and one that could not be reached waits 2 s · 10 s · 60 s · 5 min · 30 min, then every 30 min, as HTTP.md §2 has said all along (a machine with four busy sessions was refused 828 times in two minutes and had 5 192 jobs queued, 2026-10-14). The session's lock now covers only the append, not the round trips.
+- 6ea4095: `control pair`: a code nobody approved before it expired is renewed in place, with fresh digits, for up to an hour. A person approving three headless machines from a phone ran out of ten-minute codes (2026-10-08). The expired code is dead on the receiver, so nothing lives longer than it did; a keyed pairing keeps the machine row its first code made. The terminal now also says how long a code is good for.
+- 40fb6e5: A session's short id (PROTOCOL.md §3): the first 8 hex digits of `sha256("sessionpipe.session:" + harness + ":" + id)`, what a person reads in a log line, a notification or a search box. Derived, never sent. Not a prefix of the id: Codex ids are time-ordered, and four of ninety on one machine shared their first eight characters. `shortId()` in core; the worker's log and the daemon's lines that name a session use it.
+
 ## 0.8.0
 
 ### Minor Changes
