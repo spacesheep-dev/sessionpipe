@@ -9,6 +9,7 @@ import {
   claudeDirs,
   codexControl,
   drivableHarnesses,
+  machineName,
   Outbox,
   readConfig,
   stateDir,
@@ -128,7 +129,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
         },
         folders,
         mode,
-        name: flag("--name") ?? existing?.name ?? cfg.machine ?? os.hostname(),
+        name: flag("--name") ?? existing?.name ?? machineName(cfg, os.hostname()),
         out,
       });
       const c = readControl()!;

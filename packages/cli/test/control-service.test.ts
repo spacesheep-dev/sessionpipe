@@ -15,6 +15,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlMain } from "../src/control/cli.js";
 import { pair, serviceFiles } from "../src/control/pair.js";
+import { readControl } from "../src/control/store.js";
 import { stableNode } from "../src/runtime.js";
 
 vi.mock("node:child_process", async (original) => ({
@@ -27,7 +28,7 @@ vi.mock("@sessionpipe/core", async (original) => ({
 }));
 vi.mock("../src/control/store.js", async (original) => ({
   ...(await original<typeof import("../src/control/store.js")>()),
-  readControl: () => ({ folders: ["/project"], mode: "safe", receivers: [], name: "test" }),
+  readControl: vi.fn(() => ({ folders: ["/project"], mode: "safe", receivers: [], name: "test" })),
 }));
 // Keep the real platform service writers; only the receiver pairing is stubbed.
 vi.mock("../src/control/pair.js", async (original) => ({
@@ -160,6 +161,18 @@ describe.skipIf(process.platform === "win32")("POSIX control service paths", () 
       });
     });
   }
+
+  it("names a first pairing like the hooks do: the hostname without its .local suffix", async () => {
+    vi.spyOn(os, "hostname").mockReturnValue("Build-Box.local");
+    vi.mocked(readControl).mockReturnValueOnce(null);
+    const args = argv.filter((a) => a !== "--name" && a !== "my machine");
+    await controlMain(
+      [...args, "--no-service"],
+      vi.fn(),
+      path.join(home, ".local", "lib", "node_modules", "sessionpipe", "dist"),
+    );
+    expect(pair).toHaveBeenCalledWith(expect.objectContaining({ name: "Build-Box" }));
+  });
 
   it("does not pair or write a service if global installation fails", async () => {
     vi.mocked(execFileSync).mockImplementation(() => {
