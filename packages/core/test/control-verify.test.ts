@@ -5,10 +5,21 @@
 import { describe, expect, it } from "vitest";
 import {
   type Assertion,
+  b64url,
+  derToRaw,
   fromB64url,
+  KEY_STORE_SESSION,
+  keyUsable,
+  originAllowed,
+  parseCommand,
+  parseGrant,
   parseSessionRef,
+  RS256,
   type SignedCommand,
+  sha256,
+  verifyAssertion,
   verifyCommand,
+  verifyEnrollment,
 } from "../src/control/verify.js";
 import { commandStr, DayKey, MACHINE, Passkey, signed } from "./helpers/authenticator.js";
 
@@ -70,6 +81,218 @@ describe("verifyCommand", () => {
     expect(fromB64url("AQ+D")).toBeNull();
     expect(fromB64url("AQ==")).toBeNull();
     expect(fromB64url("A")).toBeNull();
+  });
+
+  it("nothing, or not an object, is malformed; a valid command needs no nonce store", async () => {
+    const o = { machine: MACHINE, rpId: RP, trusted: [] as never[], now: T + 1000 };
+    expect(await verifyCommand(null, o)).toMatchObject({ ok: false, code: "malformed" });
+    expect(await verifyCommand(undefined, o)).toMatchObject({ ok: false, code: "malformed" });
+    expect(await verifyCommand(5 as unknown as SignedCommand, o)).toMatchObject({ ok: false, code: "malformed" });
+    const pk = await Passkey.create({ rpId: RP });
+    const day = await DayKey.create();
+    const s = await signed(pk, day, commandStr({}));
+    expect(await verifyCommand(s, { ...o, trusted: [pk.key] })).toMatchObject({
+      ok: true,
+      via: "grant",
+      key: pk.key.id,
+    });
+  });
+
+  it("a grant whose day key is not a key at all fails the command's signature", async () => {
+    const pk = await Passkey.create({ rpId: RP });
+    const day = await DayKey.create();
+    const cmd = commandStr({});
+    const iat = T - 60_000;
+    const exp = iat + 3600_000;
+    const grant = await day.grant(pk, { iat, exp, str: day.grantStr({ iat, exp, rp: RP, pub: "AAAA" }) });
+    const r = await verifyCommand(
+      { cmd, csig: await day.sign(cmd), grant },
+      { machine: MACHINE, rpId: RP, trusted: [pk.key], now: T + 1000 },
+    );
+    expect(r).toMatchObject({ ok: false, code: "bad_csig" });
+  });
+});
+
+describe("parseCommand", () => {
+  const code = (fields: Record<string, unknown>) => {
+    const p = parseCommand(commandStr(fields));
+    return p.ok ? "ok" : `${p.code}: ${p.why}`;
+  };
+  it("the string itself", () => {
+    expect(parseCommand("")).toMatchObject({ ok: false, code: "malformed" });
+    expect(parseCommand(undefined)).toMatchObject({ ok: false, code: "malformed" });
+    expect(parseCommand("x".repeat(48_001))).toMatchObject({ ok: false, code: "malformed" });
+    expect(parseCommand("{")).toMatchObject({ ok: false, code: "malformed", why: "the command is not JSON" });
+    for (const s of ["null", "[]", '"s"', "1"])
+      expect(parseCommand(s), s).toMatchObject({ ok: false, code: "malformed", why: "the command is not an object" });
+  });
+  it("start: text and an absolute folder, nothing else", () => {
+    expect(code({ kind: "start", cwd: "/x" })).toBe("ok");
+    expect(code({ kind: "start", cwd: "C:\\x" })).toBe("ok");
+    expect(code({ kind: "start", text: undefined, cwd: "/x" })).toMatch(/^bad_fields: a new session needs text/);
+    expect(code({ kind: "start", cwd: "rel" })).toMatch(/^bad_fields: .*absolute folder/);
+    expect(code({ kind: "start" })).toMatch(/^bad_fields: .*absolute folder/);
+    expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe("bad_fields: a start carries text and cwd");
+  });
+  it("permission.answer: for and decision, no text", () => {
+    expect(code({ kind: "permission.answer", text: undefined, for: "a", decision: "deny" })).toBe("ok");
+    expect(code({ kind: "permission.answer", for: "a", decision: "allow" })).toMatch(
+      /^bad_fields: a permission answer/,
+    );
+    expect(code({ kind: "permission.answer", text: undefined, decision: "allow" })).toBe(
+      "bad_fields: which attention?",
+    );
+    expect(code({ kind: "permission.answer", text: undefined, for: "a", decision: "maybe" })).toBe(
+      "bad_fields: allow or deny?",
+    );
+  });
+  it("cancel carries nothing; a note is short text", () => {
+    expect(code({ kind: "cancel", text: undefined })).toBe("ok");
+    expect(code({ kind: "cancel", text: undefined, note: "why" })).toBe("ok");
+    expect(code({ kind: "cancel" })).toBe("bad_fields: a cancel carries nothing");
+    expect(code({ kind: "cancel", text: undefined, note: "n".repeat(2001) })).toMatch(/^bad_fields: a note is text/);
+    expect(code({ kind: "cancel", text: undefined, note: 5 })).toMatch(/^bad_fields: a note is text/);
+  });
+  it("key.add: the key store session, the key, an optional short name", () => {
+    const key = { id: "a".repeat(20), alg: -7, spki: "b".repeat(50) };
+    const add = (f: Record<string, unknown>) =>
+      code({ kind: "key.add", session: KEY_STORE_SESSION, text: undefined, key, ...f });
+    expect(add({})).toBe("ok");
+    expect(add({ name: "iPhone" })).toBe("ok");
+    expect(add({ name: "  " })).toBe("bad_fields: a device name is text, at most 80 characters");
+    expect(add({ name: "n".repeat(81) })).toBe("bad_fields: a device name is text, at most 80 characters");
+    expect(add({ text: "x" })).toBe("bad_fields: a key.add carries the key and a name");
+    expect(add({ cwd: "/x" })).toBe("bad_fields: a key.add carries the key and a name");
+    expect(add({ key: { ...key, alg: -8 } })).toMatch(/^bad_fields: a key.add carries the key/);
+    expect(add({ key: undefined })).toMatch(/^bad_fields: a key.add carries the key/);
+    expect(code({ kind: "key.add", text: undefined, key })).toMatch(/^bad_session: a key.add names/);
+    expect(code({ key })).toBe("bad_fields: only a key.add carries a key");
+    expect(code({ name: "x" })).toBe("bad_fields: only a key.add carries a key");
+  });
+});
+
+describe("parseGrant", () => {
+  const str = (g: Record<string, unknown>) =>
+    JSON.stringify({ v: 1, t: "sessionpipe.grant", pub: "AAAA", iat: T, exp: T + 3600_000, rp: RP, ...g });
+  it("the string itself", () => {
+    expect(parseGrant(undefined, RP)).toEqual({ ok: false, why: "the grant is missing or too long" });
+    expect(parseGrant("", RP)).toEqual({ ok: false, why: "the grant is missing or too long" });
+    expect(parseGrant("x".repeat(2001), RP)).toEqual({ ok: false, why: "the grant is missing or too long" });
+    expect(parseGrant("{", RP)).toEqual({ ok: false, why: "the grant is not JSON" });
+    for (const s of ["null", "[]", "7"])
+      expect(parseGrant(s, RP), s).toEqual({ ok: false, why: "the grant is not an object" });
+  });
+  it("the fields", () => {
+    expect(parseGrant(str({}), RP)).toMatchObject({ ok: true });
+    expect(parseGrant(str({ t: "x" }), RP)).toEqual({ ok: false, why: "not a sessionpipe grant" });
+    expect(parseGrant(str({ rp: "other" }), RP)).toEqual({
+      ok: false,
+      why: `the grant is for another site, not ${RP}`,
+    });
+    expect(parseGrant(str({ pub: "" }), RP)).toEqual({ ok: false, why: "the grant is missing parts" });
+    expect(parseGrant(str({ iat: "t" }), RP)).toEqual({ ok: false, why: "the grant is missing parts" });
+    expect(parseGrant(str({ exp: T }), RP)).toEqual({ ok: false, why: "the grant ends before it starts" });
+    expect(parseGrant(str({ exp: T + 2 * 86_400_000 }), RP)).toEqual({
+      ok: false,
+      why: "the grant lasts longer than a day",
+    });
+  });
+});
+
+describe("derToRaw", () => {
+  const der = (ints: number[][]) => {
+    const body = ints.flatMap((v) => [0x02, v.length, ...v]);
+    return new Uint8Array([0x30, body.length, ...body]);
+  };
+  const n32 = Array.from({ length: 32 }, (_, i) => i + 1);
+  it("accepts only one encoding of a signature", () => {
+    expect(derToRaw(der([n32, n32]))).toEqual(new Uint8Array([...n32, ...n32]));
+    expect(derToRaw(der([[5], [7]]))).toEqual(
+      new Uint8Array([...new Array(31).fill(0), 5, ...new Array(31).fill(0), 7]),
+    );
+    expect(derToRaw(der([[0, 0x80, ...n32.slice(0, 31)], n32]))).toEqual(
+      new Uint8Array([0x80, ...n32.slice(0, 31), ...n32]),
+    );
+    expect(derToRaw(der([[0, ...n32], n32]))).toBeNull(); // a needless leading zero
+    expect(derToRaw(der([[0x81, ...n32.slice(0, 31)], n32]))).toBeNull(); // negative
+    expect(derToRaw(der([[], n32]))).toBeNull(); // an empty integer
+    expect(derToRaw(der([[1, ...n32, 1], n32]))).toBeNull(); // 34 bytes
+    expect(derToRaw(der([[1, ...n32], n32]))).toBeNull(); // 33 bytes with no zero to drop
+    expect(derToRaw(new Uint8Array([0x31, ...der([n32, n32]).slice(1)]))).toBeNull(); // not a sequence
+    expect(derToRaw(new Uint8Array([...der([n32, n32]), 0]))).toBeNull(); // a trailing byte
+    expect(derToRaw(new Uint8Array([0x30, 6, 0x02, 1, 1, 0x02, 1, 1]))).toEqual(
+      new Uint8Array([...new Array(31).fill(0), 1, ...new Array(31).fill(0), 1]),
+    );
+    expect(derToRaw(new Uint8Array([0x30, 5, 0x02, 1, 1, 0x02, 1]))).toBeNull(); // short
+    expect(derToRaw(new Uint8Array([0x30, 6, 0x02, 10, 1, 2, 3, 4]))).toBeNull(); // an integer longer than the bytes
+    expect(derToRaw(new Uint8Array([0x30, 8, 0x02, 1, 1, 0x02, 1, 1, 5, 0]))).toBeNull(); // junk after s
+  });
+});
+
+describe("keys", () => {
+  it("keyUsable: a well-formed id, a known algorithm, a key WebCrypto can import, RSA of 2048 bits", async () => {
+    const pk = await Passkey.create({ rpId: RP });
+    expect(await keyUsable(pk.key)).toBe(true);
+    expect(await keyUsable(null as never)).toBe(false);
+    expect(await keyUsable({ ...pk.key, id: 5 as unknown as string })).toBe(false);
+    expect(await keyUsable({ ...pk.key, id: "short" })).toBe(false);
+    expect(await keyUsable({ ...pk.key, alg: 1 })).toBe(false);
+    expect(await keyUsable({ ...pk.key, spki: "" })).toBe(false);
+    expect(await keyUsable({ ...pk.key, spki: "AAAA" })).toBe(false);
+    const rsa = await Passkey.create({ rpId: RP, alg: RS256 });
+    expect(await keyUsable(rsa.key)).toBe(true);
+    const weak = await crypto.subtle.generateKey(
+      { name: "RSASSA-PKCS1-v1_5", modulusLength: 1024, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["sign", "verify"],
+    );
+    const spki = b64url(await crypto.subtle.exportKey("spki", weak.publicKey));
+    expect(await keyUsable({ id: rsa.key.id, alg: RS256, spki })).toBe(false);
+  });
+  it("originAllowed", () => {
+    expect(originAllowed(`https://${RP}`, RP)).toBe(true);
+    expect(originAllowed(`https://app.${RP}`, RP)).toBe(true);
+    expect(originAllowed("http://localhost:3000", "localhost")).toBe(true);
+    expect(originAllowed(`http://${RP}`, RP)).toBe(false);
+    expect(originAllowed("https://evil.example", RP)).toBe(false);
+    expect(originAllowed(`https://${RP}/path`, RP)).toBe(false);
+    expect(originAllowed("not a url", RP)).toBe(false);
+    expect(originAllowed(5, RP)).toBe(false);
+    expect(originAllowed(`https://${RP}`, "")).toBe(false);
+  });
+  it("verifyAssertion: the shapes it refuses before any crypto", async () => {
+    const pk = await Passkey.create({ rpId: RP });
+    const challenge = await sha256("c");
+    const good = await pk.assert(challenge);
+    expect(await verifyAssertion(challenge, good, pk.key, RP)).toEqual({ ok: true });
+    expect(await verifyAssertion(challenge, null, pk.key, RP)).toMatchObject({
+      ok: false,
+      why: "no passkey signature",
+    });
+    const enc = new TextEncoder();
+    for (const cd of ["null", '"s"', "7"])
+      expect(await verifyAssertion(challenge, { ...good, cd: b64url(enc.encode(cd)) }, pk.key, RP)).toMatchObject({
+        ok: false,
+        why: "the passkey signature is malformed",
+      });
+    expect(await verifyAssertion(challenge, { ...good, ad: b64url(new Uint8Array(10)) }, pk.key, RP)).toMatchObject({
+      ok: false,
+      why: "the passkey signature is malformed",
+    });
+    expect(await verifyAssertion(challenge, good, { ...pk.key, alg: 0 }, RP)).toMatchObject({
+      ok: false,
+      why: "a trusted key is unusable",
+    });
+  });
+  it("verifyEnrollment refuses a key the machine could never use", async () => {
+    const pk = await Passkey.create({ rpId: RP });
+    const proof = await pk.enroll(MACHINE, "123456");
+    expect(await verifyEnrollment({ machine: MACHINE, code: "123456", key: pk.key, proof, rpId: RP })).toEqual({
+      ok: true,
+    });
+    expect(
+      await verifyEnrollment({ machine: MACHINE, code: "123456", key: { ...pk.key, alg: 0 }, proof, rpId: RP }),
+    ).toMatchObject({ ok: false, why: "the key is in a shape this machine can't use" });
   });
 });
 
