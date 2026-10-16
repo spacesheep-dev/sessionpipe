@@ -12,7 +12,12 @@ export class StdoutSink implements Sink {
     private readonly write: (line: string) => void = (l) => process.stdout.write(`${l}\n`),
   ) {}
   async send(events: Event[]): Promise<DeliveryResult> {
-    for (const e of events) this.write(JSON.stringify(e));
-    return { ok: true, acknowledged: events.length, accepted: events.length, duplicates: 0, rejected: [] };
+    try {
+      for (const e of events) this.write(JSON.stringify(e));
+      return { ok: true, acknowledged: events.length, accepted: events.length, duplicates: 0, rejected: [] };
+    } catch (e) {
+      // A closed pipe (`sessionpipe tail | head`): a result, like every other sink.
+      return { ok: false, acknowledged: 0, error: String((e as Error).message ?? e), action: "retry" };
+    }
   }
 }
