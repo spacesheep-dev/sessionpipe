@@ -31,8 +31,11 @@ export function gitFacts(cwd: string | undefined): { repo?: string; branch?: str
 
 /** `https://user:token@host/x` → `https://host/x`; `git@github.com:a/b.git` → `github.com/a/b`. */
 export function stripCredentials(url: string): string {
-  let u = url.replace(/\/\/[^/@]*@/, "//");
-  const ssh = /^(?:ssh:\/\/)?git@([^:/]+)[:/](.+?)(?:\.git)?$/.exec(u);
-  if (ssh) u = `${ssh[1]}/${ssh[2]}`;
-  return u.replace(/^https?:\/\//, "").replace(/\.git$/, "");
+  // The ssh forms first: the `git@` they are known by is what the credential strip removes.
+  const ssh = /^(?:ssh:\/\/)?git@([^:/]+)[:/](.+?)(?:\.git)?$/.exec(url);
+  if (ssh) return `${ssh[1]}/${ssh[2]}`;
+  return url
+    .replace(/\/\/[^/@]*@/, "//")
+    .replace(/^https?:\/\//, "")
+    .replace(/\.git$/, "");
 }
