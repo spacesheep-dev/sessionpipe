@@ -2,7 +2,7 @@
 // The drain packs events from many sessions into one batch and moves every
 // cursor only after the batch was acknowledged; a sink that refused waits as
 // HTTP.md §2 says, for every worker; one worker drains at a time.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -172,6 +172,99 @@ describe("drain: one worker at a time", () => {
       expect(await drain(tmp, sink, outbox)).toEqual({ s: 2 });
       expect(rx.hits()).toBe(2);
       expect(new Cursors(tmp, "s").read()["codex/late"]).toBeGreaterThan(0);
+    } finally {
+      await rx.close();
+    }
+  });
+});
+
+/** A receiver that sees each batch and answers from it. */
+async function sizedReceiver(answer: (events: Event[]) => number): Promise<{
+  url: string;
+  batches: Event[][];
+  close: () => Promise<void>;
+}> {
+  const batches: Event[][] = [];
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (d: Buffer) => {
+      raw += d.toString("utf8");
+    });
+    req.on("end", () => {
+      const { events } = JSON.parse(raw) as { events: Event[] };
+      batches.push(events);
+      res.writeHead(answer(events), { "content-type": "application/json" }).end("{}");
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    batches,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+  };
+}
+
+describe("a batch too large is halved (HTTP.md §2 413)", () => {
+  it("halves until it fits; one event too large alone is dropped and logged; the cursor reaches the end", async () => {
+    const outbox = new Outbox(tmp);
+    const events = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ev("big", i));
+    const fat = events[5] as Event;
+    // Over three events is too large; the fat one is too large whatever the batch.
+    const rx = await sizedReceiver((b) => (b.length > 3 || b.some((e) => e.id === fat.id) ? 413 : 202));
+    try {
+      outbox.append({ harness: "codex", session: "big" }, events);
+      const sink = [{ name: "s", url: rx.url, tier: 3 as const, token: "t" }];
+      expect((await flush(tmp, sink, outbox)).s).toBe(8);
+      expect(rx.batches.map((b) => b.map((e) => e.session.seq))).toEqual([
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        [0, 1, 2, 3],
+        [0, 1],
+        [2, 3],
+        [4, 5, 6, 7],
+        [4, 5],
+        [4],
+        [5],
+        [6, 7],
+      ]);
+      const taken = rx.batches.filter((b) => b.length <= 3 && !b.some((e) => e.id === fat.id)).flat();
+      expect(taken.map((e) => e.session.seq).sort()).toEqual([0, 1, 2, 3, 4, 6, 7]);
+      expect(new Cursors(tmp, "s").read()["codex/big"]).toBe(
+        statSync(outbox.file({ harness: "codex", session: "big" })).size,
+      );
+      expect(readFileSync(path.join(tmp, "log"), "utf8")).toMatch(
+        new RegExp(`${fat.id} \\(session.heartbeat\\) is too large alone, dropped`),
+      );
+      expect(readBackoff(tmp, "s")).toBeNull();
+      // Nothing is sent again.
+      expect((await flush(tmp, sink, outbox)).s).toBe(0);
+    } finally {
+      await rx.close();
+    }
+  });
+  it("a half refused for another reason keeps the cursor: the next run sends the whole batch again", async () => {
+    const outbox = new Outbox(tmp);
+    let down = true;
+    const rx = await sizedReceiver((b) => (b.length > 2 ? 413 : down && (b[0] as Event).session.seq >= 2 ? 503 : 202));
+    try {
+      outbox.append(
+        { harness: "codex", session: "half" },
+        [0, 1, 2, 3].map((i) => ev("half", i)),
+      );
+      const sink = [{ name: "s", url: rx.url, tier: 3 as const, token: "t" }];
+      expect((await flush(tmp, sink, outbox)).s).toBe(0);
+      expect(rx.batches.map((b) => b.length)).toEqual([4, 2, 2]);
+      expect(new Cursors(tmp, "s").read()["codex/half"]).toBeUndefined();
+      expect(readBackoff(tmp, "s")?.failures).toBe(1);
+      down = false;
+      expect((await flush(tmp, sink, outbox, undefined, { force: true })).s).toBe(4);
+      expect(rx.batches.slice(3).map((b) => b.map((e) => e.session.seq))).toEqual([
+        [0, 1, 2, 3],
+        [0, 1],
+        [2, 3],
+      ]);
+      expect(new Cursors(tmp, "s").read()["codex/half"]).toBe(
+        statSync(outbox.file({ harness: "codex", session: "half" })).size,
+      );
     } finally {
       await rx.close();
     }
