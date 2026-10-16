@@ -89,7 +89,9 @@ export const geminiCli: Adapter = {
     const event = input.argv[1] ?? "";
     let s: Record<string, unknown> = {};
     try {
-      s = input.stdin ? (JSON.parse(input.stdin) as Record<string, unknown>) : {};
+      // A stdin that is JSON but not an object (`null`, a number) is no payload.
+      const j: unknown = input.stdin ? JSON.parse(input.stdin) : {};
+      if (j && typeof j === "object" && !Array.isArray(j)) s = j as Record<string, unknown>;
     } catch {}
     const id = s.session_id as string | undefined;
     if (!id) return null;
