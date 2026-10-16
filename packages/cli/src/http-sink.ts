@@ -18,6 +18,16 @@ export function webhookId(events: Pick<Event, "id">[]): string {
     .slice(0, 32)}`;
 }
 
+/** HTTP.md §2 429: wait as `retry-after` says, seconds or an HTTP date (RFC 9110
+ *  §10.2.3); a minute when the header is missing or unreadable. */
+export function retryAfterMs(header: string | null, now = Date.now()): number {
+  if (header === null || header.trim() === "") return 60_000;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, secs) * 1000;
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - now) : 60_000;
+}
+
 export class HttpSink implements Sink {
   readonly name: string;
   readonly pii: boolean;
@@ -91,7 +101,7 @@ export class HttpSink implements Sink {
           status: 429,
           error: err,
           action: "retry",
-          retryAfterMs: Number(r.headers.get("retry-after") ?? 60) * 1000,
+          retryAfterMs: retryAfterMs(r.headers.get("retry-after")),
         };
       return { ok: false, acknowledged: 0, status: r.status, error: err, action: "retry" };
     } catch (e) {
