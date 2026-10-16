@@ -47,13 +47,20 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
 export const isInjected = (text: string): boolean =>
   (/^<[a-z_-]+>/i.test(text) && /<\/[a-z_-]+>\s*$/i.test(text)) || /^<!--\s/.test(text) || /^<command-/.test(text);
 
-const endOf = (lines: string[]) => (lines[lines.length - 1] === "" ? lines.length - 1 : lines.length);
 const parse = (raw: string): Record<string, unknown> | null => {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
   }
+};
+/** The line after the last whole one. A trailing line that does not parse has no
+ *  newline yet (a write in progress): the cursor stops before it, or the prompt in
+ *  it would never be read. */
+const endOf = (lines: string[]) => {
+  const last = lines[lines.length - 1];
+  if (last === undefined) return 0;
+  return last === "" || parse(last) === null ? lines.length - 1 : lines.length;
 };
 const textParts = (c: unknown, kinds: string[]): string => {
   if (typeof c === "string") return c;
