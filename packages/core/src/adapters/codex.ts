@@ -203,7 +203,8 @@ export const codex: Adapter = {
       // Codex's notify passes one JSON argument: {"type":"agent-turn-complete","thread-id":…,"turn-id":…,"cwd":…}
       const raw = input.argv.find((a) => a.startsWith("{")) ?? input.stdin;
       try {
-        s = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        const j: unknown = raw ? JSON.parse(raw) : {};
+        if (j && typeof j === "object" && !Array.isArray(j)) s = j as Record<string, unknown>;
       } catch {}
       const id = (s["thread-id"] ?? s.thread_id ?? s["session-id"] ?? s.session_id) as string | undefined;
       if (!id) return null;
@@ -223,7 +224,9 @@ export const codex: Adapter = {
       return r;
     }
     try {
-      s = input.stdin ? (JSON.parse(input.stdin) as Record<string, unknown>) : {};
+      // A stdin that is JSON but not an object (`null`, a number) is no payload.
+      const j: unknown = input.stdin ? JSON.parse(input.stdin) : {};
+      if (j && typeof j === "object" && !Array.isArray(j)) s = j as Record<string, unknown>;
     } catch {}
     const id = s.session_id as string | undefined;
     if (!id) return null;
