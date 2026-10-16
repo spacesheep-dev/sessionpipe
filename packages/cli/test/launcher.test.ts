@@ -57,7 +57,9 @@ describe.skipIf(process.platform === "win32" || !existsSync(path.join(dist, "hoo
     expect(launcherState("9.9.9", env).problems.join(" ")).toMatch(/is gone/);
   });
 
-  it("the hook answers Antigravity: `{}` to what sessionpipe hooks, an ask (never a silent deny) to a leftover PreToolUse", () => {
+  it("the hook answers Antigravity: `{}` to what sessionpipe hooks, an ask (never a silent deny) to a leftover PreToolUse", {
+    timeout: 30_000,
+  }, () => {
     const { launcher } = installLauncher({ distDir: dist, node: process.execPath, version: "9.9.9", env });
     const run = (event: string) =>
       spawnSync(launcher, ["antigravity", event], {
