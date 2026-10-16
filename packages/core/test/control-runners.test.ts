@@ -7,9 +7,17 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { agyArgs, agyError, agyLine, reading as agyReading, findAgy } from "../src/adapters/antigravity-control.js";
+import {
+  agyArgs,
+  agyEnv,
+  agyError,
+  agyLine,
+  reading as agyReading,
+  findAgy,
+} from "../src/adapters/antigravity-control.js";
 import {
   codexArgs,
+  codexEnv,
   codexLine,
   codexLogin,
   reading as codexReading,
@@ -339,4 +347,113 @@ describe("finding the binaries, and running one", () => {
       expect(kept.stdout).toBe('{"type":"result"}');
     },
   );
+});
+
+describe("the readers on lines they were not measured on", () => {
+  it("codexLine: anything that is not one of its shapes is nothing; a turn.failed without words still fails", () => {
+    for (const l of [
+      "5",
+      "null",
+      "[]",
+      j({ type: "thread.started" }),
+      j({ type: "item.completed", item: { type: "error" } }),
+      j({ type: "item.completed", item: { type: "todo_list" } }),
+      j({ type: "error" }),
+      j({ type: "something.else" }),
+    ])
+      expect(codexLine(l)).toBeNull();
+    expect(codexLine(j({ type: "turn.failed" }))).toEqual({ done: true, failed: "Codex reported an error" });
+    expect(codexEnv({ A: "1" })).toEqual({ A: "1", SESSIONPIPE_CONTROL_JOB: "1" });
+  });
+  it("codex outcome: a clean exit with no words is a placeholder; a silent failure's reason is the last warning, or none", () => {
+    expect(codexReading().outcome({ code: 0 })).toEqual({ reply: "(Codex finished without a written reply.)" });
+    const warned = codexReading();
+    warned.feed(CODEX_RUN[1] as string);
+    expect(warned.outcome({ code: 1, stderr: "" })).toEqual({
+      failed: expect.stringContaining("without an answer: `--dangerously-bypass-hook-trust`"),
+    });
+    expect(codexReading().outcome({ code: 1 })).toEqual({ failed: "Codex exited (code 1) without an answer" });
+    const many = codexReading();
+    for (let i = 0; i < 25; i++) many.feed(CODEX_RUN[1] as string);
+    expect(many.warnings).toHaveLength(20);
+  });
+  it("agyLine: the id from a step or the result, an error step's words, nothing for the rest", () => {
+    for (const l of [
+      "5",
+      "null",
+      j({ event: "other" }),
+      j({ event: "init" }),
+      j({ event: "step_update", step_update: { step_type: "tool" } }),
+    ])
+      expect(agyLine(l)).toBeNull();
+    expect(
+      agyLine(
+        j({ event: "step_update", step_update: { conversation_id: CONV, step_type: "error_message", error: "quota" } }),
+      ),
+    ).toEqual({ session: CONV, note: "quota" });
+    expect(agyLine(j({ event: "step_update", step_update: { step_type: "error_message", message: "m" } }))).toEqual({
+      note: "m",
+    });
+    expect(agyLine(j({ event: "step_update", step_update: { step_type: "error_message" } }))).toBeNull();
+    expect(agyLine(j({ event: "result" }))).toEqual({ result: { status: "", response: "", error: "", denied: [] } });
+    expect(agyEnv({ A: "1" })).toEqual({ A: "1", SESSIONPIPE_CONTROL_JOB: "1" });
+  });
+  it("agyError: nothing without the marker, the first line of what isn't JSON, the raw line of JSON without words", () => {
+    expect(agyError("")).toBe("");
+    expect(agyError("AGY_ERROR:")).toBe("");
+    expect(agyLine("not json")).toBeNull();
+    expect(agyReading().feed("not json")).toBe(false);
+    expect(agyLine(j({ event: "step_update" }))).toBeNull();
+    expect(agyLine(j({ event: "step_update", step_update: { step_type: "agent_response", text_delta: "t" } }))).toEqual(
+      {
+        delta: { step: 0, text: "t" },
+      },
+    );
+    expect(agyError("x\nAGY_ERROR: not json\nmore")).toBe("not json");
+    expect(agyError('AGY_ERROR: {"code":"X"}')).toBe('{"code":"X"}');
+    expect(agyError('AGY_ERROR: {"detail":"d"}')).toBe("d");
+  });
+  it("agy outcome: no result reports the error step or nothing; a failed status without words falls back; the text when the result has none", () => {
+    const noted = agyReading();
+    noted.feed(j({ event: "step_update", step_update: { step_type: "error_message", text_delta: "no quota" } }));
+    expect(noted.outcome({ code: 2 })).toEqual({ failed: "Antigravity exited (code 2) without an answer: no quota" });
+    expect(agyReading().outcome({ code: null, signal: "SIGKILL" })).toEqual({
+      failed: "Antigravity exited (SIGKILL) without an answer",
+    });
+    expect(agyReading().outcome({ error: "spawn ENOENT" })).toEqual({
+      failed: "couldn't start Antigravity: spawn ENOENT",
+    });
+    const bad = agyReading();
+    bad.feed(j({ event: "result", result: { status: "ERROR" } }));
+    expect(bad.outcome({ code: 1 })).toEqual({ failed: "Antigravity reported an error" });
+    expect(bad.outcome({ code: 1, stderr: 'AGY_ERROR: {"message":"stderr says"}' })).toEqual({ failed: "stderr says" });
+    bad.feed(j({ event: "step_update", step_update: { step_type: "error_message", text_delta: "noted" } }));
+    expect(bad.outcome({ code: 1 })).toEqual({ failed: "noted" });
+    const streamed = agyReading();
+    streamed.feed(
+      j({ event: "step_update", step_update: { step_index: 1, step_type: "agent_response", text_delta: "Hi.\n\n" } }),
+    );
+    streamed.feed(
+      j({ event: "step_update", step_update: { step_index: 3, step_type: "agent_response", text_delta: "Bye." } }),
+    );
+    streamed.feed(
+      j({
+        event: "result",
+        result: {
+          status: "SUCCESS",
+          response: "  ",
+          denied_actions: ["rm", { name: "edit" }, { x: 1 }, 7, { tool: "" }],
+        },
+      }),
+    );
+    expect(streamed.outcome({ code: 0 })).toEqual({
+      reply: "Hi.\n\nBye.\n\n(Not allowed on this machine, since nobody was there to approve: rm, edit.)",
+    });
+    const silent = agyReading();
+    silent.feed(j({ event: "result", result: { status: "SUCCESS" } }));
+    expect(silent.outcome({ code: 0 })).toEqual({ reply: "(Antigravity finished without a written reply.)" });
+  });
+  it("drivableHarnesses reads this machine's PATH when given none", () => {
+    expect(Array.isArray(drivableHarnesses())).toBe(true);
+  });
 });

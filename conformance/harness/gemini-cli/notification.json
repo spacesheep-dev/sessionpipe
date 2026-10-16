@@ -1,0 +1,36 @@
+{
+  "harness": "gemini-cli",
+  "event": "Notification",
+  "note": "Not a recording: the payload is derived from spec/ADAPTERS.md (Gemini CLI row) and the adapter's own parsing; a real one replaces it. attention_id is minted by the sender (notif-<epoch ms>), so it is a wildcard here",
+  "input": {
+    "argv": [
+      "gemini-cli",
+      "Notification"
+    ],
+    "stdin": "{\"session_id\":\"a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d\",\"transcript_path\":\"/Users/dev/.gemini/tmp/3b7a9c1e5d2f4a6b/chats/session-2026-10-05T14-22-11-a3f2c1d0.jsonl\",\"cwd\":\"/Users/dev/projects/app\",\"hook_event_name\":\"Notification\",\"timestamp\":\"2026-10-05T14:22:11.000Z\",\"notification_type\":\"ToolPermission\",\"message\":\"Allow run_shell_command: rm -rf dist?\",\"details\":{\"tool\":\"run_shell_command\"}}\n",
+    "env": {},
+    "cwd": "/"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "attention.needed",
+      "harness": {
+        "name": "gemini-cli",
+        "event": "Notification"
+      },
+      "session": {
+        "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+        "cwd": "/Users/dev/projects/app",
+        "seq": "*"
+      },
+      "data": {
+        "attention_id": "*",
+        "kind": "permission",
+        "message": "Allow run_shell_command: rm -rf dist?"
+      }
+    }
+  ]
+}

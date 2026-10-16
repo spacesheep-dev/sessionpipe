@@ -1,0 +1,34 @@
+{
+  "harness": "antigravity",
+  "event": "Stop",
+  "note": "Not a recording: the payload is derived from spec/ADAPTERS.md (Antigravity row) and the adapter's own parsing; a real one replaces it. session.cwd is workspacePaths[0] resolved by the host OS (a POSIX recording reads as D:\\... on Windows), so it is not stated here; packages/core/test/antigravity.test.ts checks it",
+  "input": {
+    "argv": [
+      "antigravity",
+      "Stop"
+    ],
+    "stdin": "{\"conversationId\":\"6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"workspacePaths\":[\"file:///Users/dev/projects/app\"],\"transcriptPath\":\"/Users/dev/.gemini/antigravity/brain/6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/.system_generated/logs/transcript.jsonl\",\"artifactDirectoryPath\":\"/Users/dev/.gemini/antigravity/brain/6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"modelName\":\"gemini-3-pro\",\"executionNum\":0,\"terminationReason\":\"COMPLETED\",\"fullyIdle\":true}\n",
+    "env": {},
+    "cwd": "/"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "antigravity",
+        "event": "Stop"
+      },
+      "session": {
+        "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "model": "gemini-3-pro",
+        "seq": "*"
+      },
+      "data": {
+        "reason": "stop"
+      }
+    }
+  ]
+}
