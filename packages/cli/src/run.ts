@@ -551,6 +551,31 @@ export async function flush(
     // session's offset would land if the batch goes through.
     let batch: Event[] = [];
     let pending: Record<string, number> = {};
+    // HTTP.md §2 413: halve the batch and try again; one event too large on its own
+    // is dropped and logged. A half that is refused for another reason stops the
+    // run like any refusal: the cursor stays, and the halves that went through are
+    // sent again next time (the receiver counts them as duplicates).
+    const deliver = async (events: Event[]): Promise<DeliveryResult> => {
+      const res = await sink.send(events);
+      if (res.ok || res.action !== "split") return res;
+      if (events.length === 1) {
+        const e = events[0] as Event;
+        log(state, `sink ${sink.name}: 413 ${res.error ?? ""} → event ${e.id} (${e.type}) is too large alone, dropped`);
+        return { ok: true, acknowledged: 0, accepted: 0, duplicates: 0, rejected: [{ id: e.id, reason: "too_large" }] };
+      }
+      const half = Math.ceil(events.length / 2);
+      const a = await deliver(events.slice(0, half));
+      if (!a.ok) return a;
+      const b = await deliver(events.slice(half));
+      if (!b.ok) return b;
+      return {
+        ok: true,
+        acknowledged: a.acknowledged + b.acknowledged,
+        accepted: (a.accepted ?? 0) + (b.accepted ?? 0),
+        duplicates: (a.duplicates ?? 0) + (b.duplicates ?? 0),
+        rejected: [...(a.rejected ?? []), ...(b.rejected ?? [])],
+      };
+    };
     const send = async (): Promise<boolean> => {
       if (!batch.length) {
         Object.assign(c, pending);
@@ -558,7 +583,7 @@ export async function flush(
         cursors.write(c);
         return true;
       }
-      const res = await sink.send(batch);
+      const res = await deliver(batch);
       if (!res.ok) {
         const action = res.action ?? "retry";
         let wait = "";
