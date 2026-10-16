@@ -1,0 +1,37 @@
+{
+  "harness": "antigravity",
+  "event": "PreToolUse",
+  "note": "Not a recording: the payload is derived from spec/ADAPTERS.md (Antigravity row) and the adapter's own parsing; a real one replaces it. Not an event sessionpipe registers: an entry a 0.1-0.6.0 install left in hooks.json. Its stdout is AG_STALE_PRETOOL (asks the person), checked in packages/core/test/install.test.ts. session.cwd is workspacePaths[0] resolved by the host OS (a POSIX recording reads as D:\\... on Windows), so it is not stated here; packages/core/test/antigravity.test.ts checks it",
+  "input": {
+    "argv": [
+      "antigravity",
+      "PreToolUse"
+    ],
+    "stdin": "{\"conversationId\":\"6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"workspacePaths\":[\"file:///Users/dev/projects/app\"],\"transcriptPath\":\"/Users/dev/.gemini/antigravity/brain/6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b/.system_generated/logs/transcript.jsonl\",\"artifactDirectoryPath\":\"/Users/dev/.gemini/antigravity/brain/6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"modelName\":\"gemini-3-pro\",\"stepIdx\":2,\"executionNum\":0,\"toolCall\":{\"name\":\"view_file\",\"args\":{\"AbsolutePath\":\"/Users/dev/projects/app/README.md\"}}}\n",
+    "env": {},
+    "cwd": "/"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "tool.started",
+      "harness": {
+        "name": "antigravity",
+        "event": "PreToolUse"
+      },
+      "session": {
+        "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+        "model": "gemini-3-pro",
+        "seq": "*"
+      },
+      "data": {
+        "tool": "view_file",
+        "input": {
+          "AbsolutePath": "/Users/dev/projects/app/README.md"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "harness": "gemini-cli",
+  "event": "PreCompress",
+  "note": "Not a recording: the payload is derived from spec/ADAPTERS.md (Gemini CLI row) and the adapter's own parsing; a real one replaces it",
+  "input": {
+    "argv": [
+      "gemini-cli",
+      "PreCompress"
+    ],
+    "stdin": "{\"session_id\":\"a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d\",\"transcript_path\":\"/Users/dev/.gemini/tmp/3b7a9c1e5d2f4a6b/chats/session-2026-10-05T14-22-11-a3f2c1d0.jsonl\",\"cwd\":\"/Users/dev/projects/app\",\"hook_event_name\":\"PreCompress\",\"timestamp\":\"2026-10-05T14:22:11.000Z\",\"trigger\":\"manual\"}\n",
+    "env": {},
+    "cwd": "/"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "context.compacted",
+      "harness": {
+        "name": "gemini-cli",
+        "event": "PreCompress"
+      },
+      "session": {
+        "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+        "cwd": "/Users/dev/projects/app",
+        "seq": "*"
+      },
+      "data": {
+        "trigger": "manual"
+      }
+    }
+  ]
+}

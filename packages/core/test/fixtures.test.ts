@@ -18,6 +18,16 @@ const files = readdirSync(dir).flatMap((h) => {
     : [];
 });
 
+/** `expect` with each "*" leaf (an id the sender mints) replaced by what the adapter gave. */
+const wild = (exp: unknown, got: unknown): unknown => {
+  if (exp === "*") return got;
+  if (exp && typeof exp === "object" && !Array.isArray(exp))
+    return Object.fromEntries(
+      Object.entries(exp).map(([k, v]) => [k, wild(v, (got as Record<string, unknown> | undefined)?.[k])]),
+    );
+  return exp;
+};
+
 describe("adapter fixtures", () => {
   for (const f of files) {
     const fx = JSON.parse(readFileSync(f, "utf8"));
@@ -35,7 +45,7 @@ describe("adapter fixtures", () => {
       for (const [i, e] of fx.expect.entries()) {
         const got = r!.events[i]!;
         expect(got.harnessEvent).toBe(e.harness.event);
-        expect(got.data).toEqual(e.data);
+        expect(got.data).toEqual(wild(e.data, got.data));
         for (const [k, v] of Object.entries(e.session))
           if (v !== "*") expect((r!.session as Record<string, unknown>)[k]).toEqual(v);
       }

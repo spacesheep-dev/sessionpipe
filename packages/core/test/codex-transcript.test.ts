@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { codex, codexFacts } from "../src/adapters/codex.js";
+import { codexReplayBoundary } from "../src/adapters/codex-rollout.js";
 import { codexInjected, readCodex } from "../src/readers/transcripts.js";
 
 // Codex writes the AGENTS.md it read into the session as a "user" message (measured on
@@ -113,6 +114,15 @@ describe("a forked Codex subagent rollout", () => {
       started_at: Date.parse("2026-10-09T23:47:06.489Z"),
       last_at: Date.parse("2026-10-09T23:47:11.000Z"),
     });
+  });
+
+  it("has no boundary without a session_meta, or for a session that is nobody's fork", () => {
+    expect(codexReplayBoundary(null)).toBeUndefined();
+    expect(codexReplayBoundary({ type: "event_msg" })).toBeUndefined();
+    expect(codexReplayBoundary({ type: "session_meta", payload: { id: "x" } })).toBeUndefined();
+    expect(
+      codexReplayBoundary({ type: "session_meta", payload: { forked_from_id: "p" } })?.({ type: "event_msg" }),
+    ).toBe(false);
   });
 
   it.each(["forked_from_id", "source"])("recognizes a fork using only %s", (key) => {
