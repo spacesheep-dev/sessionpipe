@@ -1,16 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-// The transcript readers and the line the cursor may advance to.
+// The transcript readers: complete turns out of each harness's file format, the line
+// the cursor may advance to, and the edges a worker meets — resuming from a cursor,
+// a line still being written, an empty file, a file that shrank, a prompt with no
+// reply yet.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { openTurn } from "../../cli/src/run.js";
-import { readClaude } from "../src/readers/transcripts.js";
+import {
+  isInjected,
+  pairTurns,
+  readAntigravity,
+  readClaude,
+  readCodex,
+  readGemini,
+} from "../src/readers/transcripts.js";
 
 const T0 = "2026-10-01T00:00:00.000Z";
-const line = (type: string, text: string) =>
-  JSON.stringify({ type, message: { content: [{ type: "text", text }] }, timestamp: T0 });
+const T1 = "2026-10-01T00:00:05.000Z";
+const at = (s: string) => Date.parse(s);
 
-// The reported middle-of-turn compaction, including a summary timestamp before
-// its preceding boundary and tool messages that are not part of either text side.
+/** A Claude Code / Droid transcript line. */
+const cl = (type: string, content: unknown, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ type, message: { content }, timestamp: T0, ...extra });
+const user = (text: string, extra: Record<string, unknown> = {}) => cl("user", [{ type: "text", text }], extra);
+const assistant = (text: string, extra: Record<string, unknown> = {}) =>
+  cl("assistant", [{ type: "text", text }], { timestamp: T1, ...extra });
+
 const COMPACTION = readFileSync(new URL("./fixtures/claude-mid-turn-compaction.jsonl", import.meta.url), "utf8")
   .trimEnd()
   .split("\n");
@@ -27,6 +42,44 @@ const SUMMARIES = [
     lines: COMPACTION.map((l) => l.replace('"isCompactSummary":true', '"repeatsCompactSummary":true')),
   },
 ];
+
+describe("pairTurns", () => {
+  const m = (role: "user" | "assistant", text: string, line: number) => ({ role, text, at: line, line });
+  it("a second prompt before any reply joins the first; a prompt after a reply starts a new turn", () => {
+    const r = pairTurns([m("user", "a", 0), m("user", "b", 1), m("assistant", "x", 2), m("user", "c", 3)], 4);
+    expect(r.turns).toEqual([{ user: "a\n\nb", assistant: "x", at: 0, endLine: 2 }]);
+    expect(r.open).toEqual({ user: "c", at: 3 });
+    expect(r.line).toBe(3);
+  });
+  it("two complete turns in a row", () => {
+    const r = pairTurns([m("user", "a", 0), m("assistant", "x", 1), m("user", "b", 2), m("assistant", "y", 3)], 4);
+    expect(r.turns.map((t) => [t.user, t.assistant, t.endLine])).toEqual([
+      ["a", "x", 1],
+      ["b", "y", 3],
+    ]);
+    expect(r.line).toBe(4);
+    expect(r.open).toBeUndefined();
+  });
+  it("a reply with no prompt before it is a turn with an empty user side", () => {
+    const r = pairTurns([m("assistant", "x", 0), m("assistant", "y", 1)], 2);
+    expect(r.turns).toEqual([{ user: "", assistant: "x\n\ny", at: 0, endLine: 1 }]);
+  });
+  it("nothing in, nothing out", () => {
+    expect(pairTurns([], 0)).toEqual({ turns: [], line: 0 });
+  });
+});
+
+describe("isInjected", () => {
+  it("knows wrappers, comments and command expansions from a person's words", () => {
+    expect(isInjected("<system-reminder>x</system-reminder>")).toBe(true);
+    expect(isInjected("<local-command-stdout>x</local-command-stdout>\n")).toBe(true);
+    expect(isInjected("<!-- a comment -->")).toBe(true);
+    expect(isInjected("<command-name>/clear</command-name>")).toBe(true);
+    expect(isInjected("<b>bold</b> and then more")).toBe(false);
+    expect(isInjected("fix <the> thing")).toBe(false);
+    expect(isInjected("plain words")).toBe(false);
+  });
+});
 
 describe("readClaude", () => {
   it.each(SUMMARIES)("keeps replies before and after $flag in the person's original turn", ({ lines }) => {
@@ -46,15 +99,208 @@ describe("readClaude", () => {
     }
   });
 
+  const lines = [user("hello"), assistant("hi"), user("more?"), assistant("yes"), assistant("and more"), ""];
+  it("pairs prompts with everything the assistant said before the next prompt", () => {
+    const r = readClaude(lines, 0);
+    expect(r.turns).toEqual([
+      { user: "hello", assistant: "hi", at: at(T0), endLine: 1 },
+      { user: "more?", assistant: "yes\n\nand more", at: at(T0), endLine: 4 },
+    ]);
+    expect(r.line).toBe(5);
+    expect(r.open).toBeUndefined();
+  });
+  it("resumes from a cursor with absolute line numbers", () => {
+    const first = readClaude(lines.slice(0, 2), 0);
+    expect(first.line).toBe(2);
+    const r = readClaude(lines, first.line);
+    expect(r.turns).toEqual([{ user: "more?", assistant: "yes\n\nand more", at: at(T0), endLine: 4 }]);
+    expect(r.line).toBe(5);
+  });
+  it("an open turn: the prompt with no reply yet is reported, the cursor stops before it", () => {
+    const r = readClaude([user("hello"), assistant("hi"), user("and now?"), ""], 0);
+    expect(r.turns).toHaveLength(1);
+    expect(r.open).toEqual({ user: "and now?", at: at(T0) });
+    expect(r.line).toBe(2);
+    const later = readClaude([user("hello"), assistant("hi"), user("and now?"), assistant("this"), ""], r.line);
+    expect(later.turns).toEqual([{ user: "and now?", assistant: "this", at: at(T0), endLine: 3 }]);
+    expect(later.line).toBe(4);
+  });
   it("a partial last line (a write in progress) is not read and not skipped over", () => {
-    const partial = line("user", "second ask").slice(0, 20);
-    const r = readClaude([line("user", "hello"), line("assistant", "hi"), partial], 0);
+    const partial = user("second ask").slice(0, 20);
+    const r = readClaude([user("hello"), assistant("hi"), partial], 0);
     expect(r.turns).toHaveLength(1);
     expect(r.line).toBe(2);
-    const done = readClaude(
-      [line("user", "hello"), line("assistant", "hi"), line("user", "second ask"), line("assistant", "ok"), ""],
-      r.line,
+    const done = readClaude([user("hello"), assistant("hi"), user("second ask"), assistant("ok"), ""], r.line);
+    expect(done.turns).toEqual([{ user: "second ask", assistant: "ok", at: at(T0), endLine: 3 }]);
+  });
+  it("a complete last line without its newline is read and counted", () => {
+    const r = readClaude([user("hello"), assistant("hi")], 0);
+    expect(r.turns).toHaveLength(1);
+    expect(r.line).toBe(2);
+  });
+  it("an empty file", () => {
+    expect(readClaude([""], 0)).toEqual({ turns: [], line: 0 });
+    expect(readClaude([], 0)).toEqual({ turns: [], line: 0 });
+  });
+  it("a file that shrank below the cursor yields nothing and reports its real end", () => {
+    const r = readClaude(lines, 50);
+    expect(r.turns).toEqual([]);
+    expect(r.line).toBe(5);
+  });
+  it("skips sidechains, meta and non-human prompts, injected context, empty text, junk lines", () => {
+    const r = readClaude(
+      [
+        "not json",
+        user("side", { isSidechain: true }),
+        user("meta", { isMeta: true }),
+        user("agent", { origin: { kind: "agent" } }),
+        user("<system-reminder>x</system-reminder>"),
+        cl("user", [{ type: "tool_result", content: "x" }]),
+        cl("user", [{ type: "text", text: "   " }]),
+        user("human", { origin: { kind: "human" } }),
+        cl("assistant", "a string, not blocks"),
+        cl("assistant", [{ type: "tool_use", name: "Bash" }]),
+        cl("assistant", [{ type: "text", text: 5 }, { text: "no type" }, null]),
+        assistant("reply"),
+        cl("system", "ignored"),
+      ],
+      0,
     );
-    expect(done.turns).toEqual([{ user: "second ask", assistant: "ok", at: Date.parse(T0), endLine: 3 }]);
+    expect(r.turns).toEqual([{ user: "human", assistant: "reply", at: at(T0), endLine: 11 }]);
+  });
+  it("a prompt as a plain string, a missing timestamp, a one-of-each origin", () => {
+    const before = Date.now();
+    const r = readClaude([JSON.stringify({ type: "user", message: { content: "typed" } }), assistant("ok")], 0);
+    expect(r.turns[0]?.user).toBe("typed");
+    expect(r.turns[0]?.at).toBeGreaterThanOrEqual(before);
+    expect(readClaude([user("x", { origin: {} }), assistant("y")], 0).turns[0]?.user).toBe("x");
+    expect(readClaude([JSON.stringify({ type: "user" }), assistant("y")], 0).turns[0]?.user).toBe("");
+  });
+});
+
+describe("readCodex", () => {
+  const item = (role: string, kind: string, text: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      type: "response_item",
+      timestamp: T0,
+      payload: { type: "message", role, content: [{ type: kind, text }] },
+      ...extra,
+    });
+  it("reads only messages, only with text, only from the two roles, with or without a timestamp", () => {
+    const before = Date.now();
+    const r = readCodex(
+      [
+        "",
+        JSON.stringify({ type: "session_meta", payload: { id: "x" } }),
+        JSON.stringify({ type: "event_msg", payload: {} }),
+        JSON.stringify({ type: "response_item", payload: { type: "function_call" } }),
+        JSON.stringify({ type: "response_item" }),
+        item("user", "input_text", "   "),
+        item("system", "input_text", "nope"),
+        item("user", "input_text", "ask", { timestamp: undefined }),
+        item("assistant", "output_text", "answer"),
+        "",
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([{ user: "ask", assistant: "answer", at: r.turns[0]?.at, endLine: 8 }]);
+    expect(r.turns[0]?.at).toBeGreaterThanOrEqual(before);
+    expect(r.line).toBe(9);
+  });
+  it("an empty file", () => {
+    expect(readCodex([""], 0)).toEqual({ turns: [], line: 0 });
+  });
+  it("a forked session whose replay never ends yields nothing", () => {
+    const meta = JSON.stringify({ type: "session_meta", payload: { id: "child", forked_from_id: "parent" } });
+    expect(readCodex([meta, item("user", "input_text", "replayed"), item("assistant", "output_text", "x")], 0)).toEqual(
+      { turns: [], line: 3 },
+    );
+  });
+});
+
+describe("readGemini", () => {
+  const g = (type: string, body: Record<string, unknown>) => JSON.stringify({ type, timestamp: T0, ...body });
+  it("reads user and gemini/model lines from content, message or text", () => {
+    const r = readGemini(
+      [
+        g("user", { content: "one" }),
+        g("gemini", { content: [{ type: "text", text: "two" }] }),
+        g("user", { message: "three" }),
+        g("model", { text: "four" }),
+        "",
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([
+      { user: "one", assistant: "two", at: at(T0), endLine: 1 },
+      { user: "three", assistant: "four", at: at(T0), endLine: 3 },
+    ]);
+    expect(r.line).toBe(4);
+  });
+  it("skips junk, other types, empty text; a missing timestamp is now", () => {
+    const before = Date.now();
+    const r = readGemini(
+      [
+        "{",
+        g("tool", { content: "x" }),
+        g("user", { content: "  " }),
+        g("user", { content: "q", timestamp: undefined }),
+        g("gemini", { content: 7 }),
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([]);
+    expect(r.open?.user).toBe("q");
+    expect(r.open?.at).toBeGreaterThanOrEqual(before);
+    expect(r.line).toBe(3);
+  });
+  it("resumes from a cursor", () => {
+    const lines = [
+      g("user", { content: "a" }),
+      g("gemini", { content: "b" }),
+      g("user", { content: "c" }),
+      g("gemini", { content: "d" }),
+      "",
+    ];
+    expect(readGemini(lines, 2).turns).toEqual([{ user: "c", assistant: "d", at: at(T0), endLine: 3 }]);
+  });
+});
+
+describe("readAntigravity", () => {
+  const step = (type: string, content: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ type, content, created_at: T0, ...extra });
+  it("unwraps <USER_REQUEST> and pairs it with the planner's response", () => {
+    const r = readAntigravity(
+      [
+        step("USER_INPUT", "<USER_REQUEST>fix it</USER_REQUEST>"),
+        step("PLANNER_RESPONSE", "on it"),
+        step("USER_INPUT", "<USER_REQUEST>cut off mid"),
+        step("PLANNER_RESPONSE", "done", { created_at: undefined, timestamp: T1 }),
+        "",
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([
+      { user: "fix it", assistant: "on it", at: at(T0), endLine: 1 },
+      { user: "cut off mid", assistant: "done", at: at(T0), endLine: 3 },
+    ]);
+    expect(r.line).toBe(4);
+  });
+  it("skips junk, non-string content, other step types, empty text; a missing time is now", () => {
+    const before = Date.now();
+    const r = readAntigravity(
+      [
+        "nope",
+        step("USER_INPUT", { not: "a string" }),
+        step("TOOL_CALL", "ls"),
+        step("USER_INPUT", "<USER_REQUEST>   </USER_REQUEST>"),
+        step("PLANNER_RESPONSE", "   "),
+        step("USER_INPUT", "bare words", { created_at: undefined }),
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([]);
+    expect(r.open?.user).toBe("bare words");
+    expect(r.open?.at).toBeGreaterThanOrEqual(before);
   });
 });
