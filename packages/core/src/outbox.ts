@@ -46,13 +46,14 @@ export class Outbox {
    *  restart; an in-memory counter would restart at 0 and collide). */
   nextSeq(ref: OutboxRef): number {
     const f = this.seqFile(ref);
-    let n = 0;
+    let n = -1;
     try {
-      n = Number(readFileSync(f, "utf8")) || 0;
-    } catch {
-      // A missing counter with an existing outbox: recover from the file's last line.
-      n = this.lastSeqInFile(ref) + 1;
-    }
+      const t = readFileSync(f, "utf8").trim();
+      if (/^\d+$/.test(t)) n = Number(t);
+    } catch {}
+    // A missing or unreadable counter (a crash between truncate and write leaves it
+    // empty) with an existing outbox: recover from the file's last line.
+    if (n < 0) n = this.lastSeqInFile(ref) + 1;
     mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
     writeFileSync(f, String(n + 1), { mode: 0o600 });
     return n;

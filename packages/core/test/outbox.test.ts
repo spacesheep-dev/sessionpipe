@@ -41,6 +41,19 @@ describe("outbox", () => {
     rmSync(path.join(tmp, "outbox/codex/s_1.seq"));
     expect(o.nextSeq(ref)).toBe(2);
   });
+  it("the seq counter survives a crash that left it empty or unreadable", () => {
+    const o = new Outbox(tmp);
+    const ref = { harness: "codex", session: "inv" };
+    expect(o.nextSeq(ref)).toBe(0);
+    expect(o.nextSeq(ref)).toBe(1);
+    o.append(ref, [ev(0), ev(1)]);
+    const seqFile = path.join(tmp, "outbox", "codex", "inv.seq");
+    writeFileSync(seqFile, ""); // a crash between truncate and write
+    expect(o.nextSeq(ref)).toBe(2);
+    writeFileSync(seqFile, "abc");
+    expect(o.nextSeq(ref)).toBe(2);
+    expect(o.nextSeq(ref)).toBe(3);
+  });
   it("reads from an offset, whole lines only, and cursors move independently per sink", () => {
     const o = new Outbox(tmp);
     const ref = { harness: "codex", session: "s/1" };
