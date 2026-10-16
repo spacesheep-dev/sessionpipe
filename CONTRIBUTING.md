@@ -20,6 +20,17 @@ Node ≥ 20. CI runs all of the above on Node 20 / 22 / 24 × Linux / macOS / Wi
 plus `npm run schemas -- --check` (generated files must match the commit), the
 conformance fixtures, a secret scan over `conformance/`, and the hook-timing benchmark.
 
+On one cell (Linux, Node 22) the tests run as `npm run test:coverage`, with the
+thresholds in `vitest.config.ts`: `core/src/sinks` at 100 %, `core/src/{adapters,privacy,readers}`,
+`core/src/outbox.ts` and `cli/src/http-sink.ts` at the floor the tests reach today (97–100 %),
+the rest of `core/src` at 95 %. A number only goes up. Run it locally before opening a PR.
+Two more gates: a PR that touches `packages/core/src/adapters/` must also touch
+`conformance/harness/` (as a spec change must touch `conformance/` or `schemas/`), and
+`packages/core/test/registry.test.ts` holds every adapter in the registry to at least
+one fixture, and every fixture directory to a registered adapter. A new harness is one
+adapter file + fixtures for every event it handles + a row in `spec/ADAPTERS.md`; a
+harness payload change is a new fixture, never an edit of a recorded one.
+
 ## The ten ground rules
 
 Every PR is checked against these (they are the project's invariants, in

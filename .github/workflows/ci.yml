@@ -41,6 +41,10 @@ jobs:
         run: npm run schemas -- --check
       - name: Unit tests (vitest)
         run: npm test
+        if: matrix.os != 'ubuntu-latest' || matrix.node != 22
+      - name: Unit tests with coverage thresholds (vitest)
+        run: npm run test:coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
       - name: Conformance fixtures
         run: npm run conformance
       - name: Fixture secret scan
@@ -89,6 +93,26 @@ jobs:
           fixture=$(echo "$changed" | grep -E '^(conformance/|schemas/)' || true)
           if [ -n "$spec" ] && [ -z "$fixture" ]; then
             echo "::error::spec changed ($spec) with no change under conformance/ or schemas/ — add the fixture that proves it"
+            exit 1
+          fi
+          echo "ok"
+
+  adapter-fixture:
+    name: An adapter change carries a fixture
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: packages/core/src/adapters/ changed → conformance/harness/ changed too
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+          adapter=$(echo "$changed" | grep -E '^packages/core/src/adapters/' || true)
+          fixture=$(echo "$changed" | grep -E '^conformance/harness/' || true)
+          if [ -n "$adapter" ] && [ -z "$fixture" ]; then
+            echo "::error::adapter changed ($adapter) with no change under conformance/harness/ — add the fixture that proves it"
             exit 1
           fi
           echo "ok"
