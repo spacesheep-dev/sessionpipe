@@ -218,6 +218,16 @@ interface Live {
   lastEvent: number;
 }
 
+interface PollState {
+  started: number;
+  last: number | null;
+  error: string | null;
+  on: boolean;
+  unauthorized: boolean;
+  authBackoff: number;
+  wake: (() => void) | null;
+}
+
 export interface Status {
   version: string;
   pid: number;
@@ -227,7 +237,10 @@ export interface Status {
     machine: string;
     keys: number;
     polling: boolean;
+    /** Last successful poll; failed responses must not conceal a control outage. */
     last_poll: number | null;
+    /** Time since success, or since this loop started if it has never succeeded. */
+    last_poll_age_ms: number;
     last_error: string | null;
   }[];
   waiting: string[];
@@ -270,7 +283,7 @@ export class ControlDaemon {
   private readonly lastEnd = new Map<string, number>();
   private state: DaemonState;
   private running = false;
-  private readonly polling = new Map<string, { last: number | null; error: string | null; on: boolean }>();
+  private readonly polling = new Map<string, PollState>();
   private readonly delivered: Record<string, number> = {};
   private helloTimer: NodeJS.Timeout | null = null;
   private helloSoon: NodeJS.Timeout | null = null;
@@ -347,6 +360,7 @@ export class ControlDaemon {
     this.running = false;
     this.paused?.go();
     for (const a of this.aborts) a.abort();
+    for (const st of this.polling.values()) st.wake?.();
     if (this.helloTimer) clearInterval(this.helloTimer);
     if (this.helloSoon) clearTimeout(this.helloSoon);
     if (this.ownTimer) clearInterval(this.ownTimer);
@@ -450,6 +464,7 @@ export class ControlDaemon {
           keys: r.keys.length,
           polling: !!p?.on,
           last_poll: p?.last ?? null,
+          last_poll_age_ms: p ? Math.max(0, this.deps.now() - (p.last ?? p.started)) : 0,
           last_error: p?.error ?? null,
         };
       }),
@@ -631,8 +646,33 @@ export class ControlDaemon {
 
   private async pollLoop(first: PairedReceiver): Promise<void> {
     const key = first.control + first.machine;
-    const st = { last: null as number | null, error: null as string | null, on: true };
+    const st: PollState = {
+      started: this.deps.now(),
+      last: null,
+      error: null,
+      on: true,
+      unauthorized: false,
+      authBackoff: 0,
+      wake: null,
+    };
     this.polling.set(key, st);
+    // Unlike a bare sleep, this wait can end as soon as a hello proves the token
+    // works, or the daemon stops. Keep exactly one poll loop per receiver.
+    const retry = (ms: number) =>
+      new Promise<void>((resolve) => {
+        st.on = false;
+        if (!this.running) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(() => st.wake?.(), ms);
+        timer.unref();
+        st.wake = () => {
+          clearTimeout(timer);
+          st.wake = null;
+          resolve();
+        };
+      });
     let backoff = 0;
     let downSince = 0;
     // A deploy takes the receiver away for seconds, not minutes: retry soon, capped at
@@ -646,6 +686,7 @@ export class ControlDaemon {
       const r = this.cfg.receivers.find((x) => x.control + x.machine === key);
       if (!this.running || !r) break;
       if (this.paused) {
+        st.on = false;
         await this.paused.until;
         continue;
       }
@@ -660,11 +701,12 @@ export class ControlDaemon {
           if (!st.error?.startsWith("can't read"))
             this.deps.log(`${r.url}: can't read this machine's token from ${r.token_in ?? "its store"}; retrying`);
           st.error = `can't read this machine's token from ${r.token_in ?? "its store"} (locked?); retrying every 30 s`;
-          await new Promise((res) => setTimeout(res, 30_000));
+          await retry(30_000);
           continue;
         }
       }
       const ctl = new AbortController();
+      st.on = true;
       this.aborts.add(ctl);
       // A poll held past wait + 10 s is a dead connection (a laptop that slept, a
       // network that changed): give up on it and ask again.
@@ -675,8 +717,11 @@ export class ControlDaemon {
         u.searchParams.set("wait", "25");
         const asked = this.deps.now();
         const res = await this.deps.fetch(u, { headers: { authorization: `Bearer ${r.token}` }, signal: ctl.signal });
-        st.last = this.deps.now();
-        if (downSince && res.status < 500) {
+        // The request deadline applies to reading the response, never to a retry
+        // delay (which can be much longer than a long-poll).
+        if (res.status !== 200) clearTimeout(t);
+        st.unauthorized = res.status === 401;
+        if (downSince && (res.status === 200 || res.status === 204)) {
           // Timed to when this poll was sent: a long-poll that reconnected is then held
           // up to `wait` before it answers.
           this.deps.log(`${r.url}: back after ${Math.round((asked - downSince) / 1000)} s (${backoff} failed tries)`);
@@ -685,7 +730,12 @@ export class ControlDaemon {
         if (res.status === 401) {
           st.error = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
           this.deps.log(`${r.url}: ${st.error}`);
-          break;
+          downSince ||= this.deps.now();
+          backoff++;
+          const delay = Math.min(60_000 * 2 ** st.authBackoff, 30 * 60_000);
+          st.authBackoff = Math.min(st.authBackoff + 1, 5);
+          await retry(delay);
+          continue;
         }
         if (res.status === 200) {
           let fresh = 0;
@@ -706,26 +756,41 @@ export class ControlDaemon {
           } finally {
             this.receiving--;
           }
+          clearTimeout(t);
+          st.last = this.deps.now();
+          st.error = null;
+          st.authBackoff = 0;
+          backoff = 0;
           // Only messages already in hand (a receiver that ignores `taken`): don't
           // turn the long-poll into a spin.
           if (!fresh) await sleep(2000);
-          st.error = null;
-          backoff = 0;
         } else if (res.status === 204) {
+          st.last = this.deps.now();
           st.error = null;
+          st.authBackoff = 0;
           backoff = 0;
         } else {
           st.error = `HTTP ${res.status}`;
           downSince ||= this.deps.now();
-          await sleep(pause(backoff++));
+          let delay = pause(backoff++);
+          if (res.status === 503) {
+            const after = res.headers.get("retry-after");
+            const ms = after && /^\d+$/.test(after) ? Number(after) * 1000 : Date.parse(after ?? "") - this.deps.now();
+            if (Number.isFinite(ms)) delay = Math.max(delay, ms);
+          }
+          // Node treats an overflowing timeout as 1 ms; a long Retry-After must
+          // not accidentally become a tight loop.
+          await retry(Math.min(delay, 2_147_483_647));
         }
       } catch (e) {
         if (!this.running) break;
         // Paused for an update: the abort was ours, not the network's.
         if (this.paused) continue;
         st.error = String((e as Error)?.message || e).slice(0, 120);
+        st.unauthorized = false;
         downSince ||= this.deps.now();
-        await sleep(pause(backoff++));
+        clearTimeout(t);
+        await retry(pause(backoff++));
       } finally {
         clearTimeout(t);
         this.aborts.delete(ctl);
@@ -785,7 +850,15 @@ export class ControlDaemon {
         mode: this.cfg.mode,
         ...(accounts.length ? { accounts } : {}),
       };
-      await this.post(r, "/hello", body).catch(() => {});
+      const res = await this.post(r, "/hello", body).catch(() => null);
+      const st = this.polling.get(r.control + r.machine);
+      if (res?.ok && st?.unauthorized) {
+        st.unauthorized = false;
+        st.authBackoff = 0;
+        st.error = null;
+        this.deps.log(`${r.url}: hello accepted; retrying control poll now`);
+        st.wake?.();
+      }
     }
   }
 

@@ -62,7 +62,15 @@ replace(
 );
 replace(require("node:http"), ["request", "get"], "http");
 replace(require("node:https"), ["request", "get"], "https");
-replace(require("node:net").Socket.prototype, ["connect"], "net.Socket");
+// Status may read the daemon's local IPC socket, never a TCP address.
+const socket = require("node:net").Socket.prototype;
+const connect = socket.connect;
+socket.connect = function (...args) {
+  const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+  const file = typeof first === "string" ? first : first?.path;
+  if (!file || file !== process.env.SESSIONPIPE_SOCKET) return deny("net.Socket.connect")();
+  return connect.apply(this, args);
+};
 replace(require("node:net").Server.prototype, ["listen"], "net.Server");
 replace(require("node:tls"), ["connect"], "tls");
 replace(require("node:dgram"), ["createSocket"], "dgram");

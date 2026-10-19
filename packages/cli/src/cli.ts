@@ -33,6 +33,7 @@ import {
 import { connectFolders, connectTier } from "./connect.js";
 import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
 import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
+import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, readControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
@@ -622,7 +623,50 @@ async function replay(): Promise<void> {
   for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
 }
 
-function status(): void {
+type ControlHealth = {
+  running: boolean;
+  receivers: (Pick<Status["receivers"][number], "url" | "polling" | "last_poll" | "last_error"> & {
+    last_poll_age_ms: number | null;
+  })[];
+};
+
+async function controlHealth(): Promise<ControlHealth | null> {
+  if (!pairedCount()) return null;
+  const reply = await ask(socketPath(state), { op: "status" }, 1500);
+  if (reply?.op !== "status") return { running: false, receivers: [] };
+  const status = reply.status as Status;
+  return {
+    running: true,
+    receivers: status.receivers.map((r) => ({
+      url: r.url,
+      polling: r.polling,
+      last_poll: r.last_poll,
+      last_error: r.last_error,
+      // An older daemon has no age field. Its last_poll still exposes a loop
+      // that stopped long ago, and polling=false catches the terminal 401.
+      last_poll_age_ms: r.last_poll_age_ms ?? (r.last_poll === null ? null : Math.max(0, Date.now() - r.last_poll)),
+    })),
+  };
+}
+
+function controlLines(control: ControlHealth | null): void {
+  if (!control) {
+    out("  control:  not paired");
+    return;
+  }
+  if (!control.running) {
+    out("  control:  daemon not running or not responding; polling: no");
+    return;
+  }
+  for (const r of control.receivers) {
+    const age = r.last_poll_age_ms === null ? "unknown" : `${Math.floor(r.last_poll_age_ms / 60_000)} minutes`;
+    out(
+      `  control:  ${r.url} · polling: ${r.polling ? "yes" : "no"} · last successful poll: ${r.last_poll === null ? `never (${age} since start)` : `${age} ago`} · last error: ${r.last_error ?? "none"}`,
+    );
+  }
+}
+
+async function status(): Promise<void> {
   const cfg = readConfig();
   const hc = hookCommand();
   const json = has("--json");
@@ -669,6 +713,8 @@ function status(): void {
         `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}`,
       );
   }
+  const control = await controlHealth();
+  if (!json) controlLines(control);
   const update = updateState(cfg);
   if (!json) out(`  update:   ${updateLine(update, Date.now())}`);
   const t = timing();
@@ -691,6 +737,7 @@ function status(): void {
           harnesses,
           sinks,
           timing: t,
+          control,
           update,
           jobs,
         },
@@ -769,6 +816,23 @@ async function doctor(): Promise<void> {
     warnings: [] as string[],
   };
   const warnings = report.warnings as string[];
+  const health = await controlHealth();
+  report.control = health;
+  if (health && !health.running)
+    warnings.push("the control daemon is not running or not responding; polling is stopped");
+  for (const r of health?.receivers ?? []) {
+    // A normal long-poll takes 25 s (35 s deadline). Allow one minute at startup
+    // and between responses, but report a stopped/backing-off loop immediately.
+    if (!r.polling || (r.last_poll_age_ms !== null && r.last_poll_age_ms >= 60_000)) {
+      const age =
+        r.last_poll_age_ms === null
+          ? "never polled"
+          : `not polled for ${Math.floor(r.last_poll_age_ms / 60_000)} minutes`;
+      warnings.push(
+        `${r.url}: the daemon has ${age}: ${r.last_error ?? (r.polling ? "no successful poll response" : "polling stopped")}`,
+      );
+    }
+  }
   const upd = report.update as ReturnType<typeof updateState>;
   if (upd.failed)
     warnings.push(
@@ -876,6 +940,7 @@ async function doctor(): Promise<void> {
     out(
       `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}`,
     );
+  controlLines(health);
   const lr = report.launcher as { file: string; node: string | null; node_ok: boolean } | undefined;
   if (lr)
     out(`  hooks run ${lr.file} → node ${lr.node ? tilde(lr.node) : "?"}${lr.node_ok ? "" : " (gone: PATH's node)"}`);

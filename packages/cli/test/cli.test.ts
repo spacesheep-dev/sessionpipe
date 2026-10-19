@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -115,6 +116,8 @@ beforeAll(() => {
     GEMINI_CLI_HOME: path.join(tmp, ".gemini"),
     SESSIONPIPE_CONFIG: config,
     SESSIONPIPE_STATE: state,
+    SESSIONPIPE_SOCKET:
+      process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock"),
     SESSIONPIPE_DATA: path.join(tmp, "data"),
     SESSIONPIPE_SECRETS: "file",
     SESSIONPIPE_NO_UPDATE_CHECK: "1",
@@ -239,15 +242,17 @@ describe("status", () => {
     const diagnostic = run(["doctor", "--json"], false);
     expect(diagnostic.status, diagnostic.stderr).toBe(0);
     const doctor = JSON.parse(diagnostic.stdout);
-    for (const key of ["version", "machine", "state", "config", "harnesses", "timing", "update"])
+    for (const key of ["version", "machine", "state", "config", "harnesses", "timing", "update", "control"])
       expect(report[key], key).toEqual(doctor[key]);
+    expect(report.control).toEqual({ running: false, receivers: [] });
+    expect(doctor.warnings).toContain("the control daemon is not running or not responding; polling is stopped");
     doctor.sinks.forEach(({ token: _token, ...sink }: Record<string, unknown>, i: number) => {
       const { pending_sessions: _pending, ...actual } = report.sinks[i];
       expect(actual).toEqual(sink);
     });
   }, 30000);
 
-  it("preserves the human table byte for byte", () => {
+  it("adds control health to the human table", () => {
     const r = run(["status"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toBe("");
@@ -262,6 +267,7 @@ describe("status", () => {
       `  ${"gemini-cli".padEnd(12)} ${`~${path.sep}.gemini${path.sep}settings.json`.padEnd(44)} missing`,
       `  sink      ${"receiver".padEnd(16)} tier 1  PAUSED HTTP 401`,
       `  sink      ${"local".padEnd(16)} tier 0  up to date`,
+      "  control:  daemon not running or not responding; polling: no",
       "  update:   not automatic: update_check is false in config.json (`sessionpipe update on`)",
       "  hook:     in-process p50 3 ms over 1 runs (`sessionpipe doctor` measures the wall clock the harness waits)",
       "  jobs:     1 waiting",
@@ -286,11 +292,81 @@ describe("status", () => {
       const before = snapshot(tmp);
       const r = run(["status", "--json"]);
       expect(r.status, r.stderr).toBe(0);
-      expect(JSON.parse(r.stdout)).toMatchObject({ harnesses: {}, sinks: [], timing: null, jobs: 0 });
+      expect(JSON.parse(r.stdout)).toMatchObject({ harnesses: {}, sinks: [], timing: null, jobs: 0, control: null });
       expect(r.stderr).toBe("");
       expect(snapshot(tmp)).toEqual(before);
     } finally {
       env = saved;
     }
   });
+});
+
+// Async children let the fake local daemon answer while the built commands run.
+function diagnostic(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [...(args[0] === "status" ? ["--require", guard] : []), cli, ...args], {
+      cwd: tmp,
+      env,
+      timeout: 15_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (b) => {
+      stdout += b;
+    });
+    child.stderr.on("data", (b) => {
+      stderr += b;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 && !stderr ? resolve(stdout) : reject(new Error(`${code}: ${stderr}`))));
+  });
+}
+
+describe("control health in status and doctor", () => {
+  const error = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
+  it.each([
+    { name: "an old daemon that permanently stopped", polling: false, minutes: 3480, error, legacy: true },
+    { name: "a daemon backing off before its first success", polling: false, minutes: 5, error, never: true },
+    { name: "a stalled loop still claiming to poll", polling: true, minutes: 5, error: null },
+    { name: "a healthy long-poll", polling: true, minutes: 0, error: null },
+  ])(
+    "reports $name in both text and JSON",
+    async (test) => {
+      const receiver = {
+        url: "https://receiver.invalid",
+        polling: test.polling,
+        last_poll: test.never ? null : Date.now() - test.minutes * 60_000,
+        last_error: test.error,
+        ...(test.legacy ? {} : { last_poll_age_ms: test.minutes * 60_000 }),
+      };
+      const server = net.createServer((socket) => {
+        socket.once("data", (data) => {
+          expect(JSON.parse(data.toString())).toEqual({ op: "status" });
+          socket.end(`${JSON.stringify({ op: "status", status: { receivers: [receiver] } })}\n`);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(env.SESSIONPIPE_SOCKET, resolve));
+      try {
+        for (const command of ["status", "doctor"]) {
+          const report = JSON.parse(await diagnostic([command, "--json"]));
+          expect(report.control).toMatchObject({ running: true, receivers: [receiver] });
+          expect(report.control.receivers[0].last_poll_age_ms).toBeGreaterThanOrEqual(test.minutes * 60_000);
+          if (command === "doctor") {
+            const warning = `${receiver.url}: the daemon has not polled for ${test.minutes} minutes: ${test.error ?? "no successful poll response"}`;
+            if (test.minutes) expect(report.warnings).toContain(warning);
+            else expect(report.warnings.some((w: string) => w.includes("daemon has"))).toBe(false);
+          }
+          const text = await diagnostic([command]);
+          expect(text).toContain(`polling: ${test.polling ? "yes" : "no"}`);
+          expect(text).toContain(`last error: ${test.error ?? "none"}`);
+          expect(text).toContain(test.never ? "never (5 minutes since start)" : `${test.minutes} minutes ago`);
+          if (command === "doctor" && test.minutes)
+            expect(text).toContain(`! ${receiver.url}: the daemon has not polled for ${test.minutes} minutes:`);
+        }
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+    30_000,
+  );
 });
