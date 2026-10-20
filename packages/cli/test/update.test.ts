@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AutoUpdater,
@@ -34,12 +35,17 @@ import { serviceFiles } from "../src/control/pair.js";
 import {
   compareVersions,
   type Exec,
+  type ExecResult,
+  execCapture,
   globalPrefix,
+  installedVersion,
   installVersion,
   isNewer,
   latestVersion,
   npmArgv,
+  prefixOf,
   REGISTRY_LATEST,
+  unwritable,
 } from "../src/update.js";
 
 const posix = process.platform !== "win32";
@@ -230,6 +236,102 @@ describe.runIf(posix)("installVersion (npm stood in for)", () => {
     const r = await installVersion("0.6.0", { node: "n", distDir: dist, harnesses: [], exec });
     expect(r).toMatchObject({ ok: true });
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe.runIf(posix)("the install's edges", () => {
+  it("npm's last words: its error, the tail of its stderr, or its exit code", async () => {
+    const { dist } = globalCopy();
+    const npm =
+      (r: Partial<ExecResult>): Exec =>
+      async (argv) =>
+        argv.includes("--global")
+          ? { code: 1, stdout: "", stderr: "", ...r }
+          : { code: 0, stdout: "0.6.0", stderr: "" };
+    const run = (exec: Exec) => installVersion("0.6.0", { node: "n", distDir: dist, harnesses: [], exec });
+    expect(await run(npm({ code: null, error: "spawn npm ENOENT" }))).toMatchObject({
+      error: "npm install: spawn npm ENOENT",
+    });
+    expect(await run(npm({ stderr: "npm WARN x\nnpm ERR! code EACCES\nnpm ERR! syscall mkdir\n" }))).toMatchObject({
+      error: "npm install: npm ERR! code EACCES npm ERR! syscall mkdir",
+    });
+    expect(await run(npm({ code: 137 }))).toMatchObject({ error: "npm install: exit 137" });
+  });
+
+  it("a re-arm that fails is said, not fatal; a copy on disk that says nothing is `nothing`", async () => {
+    const { dist } = globalCopy();
+    const exec: Exec = async (argv) => {
+      if (argv.includes("--version")) return { code: 0, stdout: "0.6.0\n", stderr: "" };
+      if (argv.includes("install") && !argv.includes("--global")) return { code: 1, stdout: "", stderr: "no hooks" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const r = await installVersion("0.6.0", { node: "n", distDir: dist, harnesses: ["codex"], exec });
+    expect(r).toMatchObject({
+      ok: true,
+      hooks: "re-arming the hooks failed (no hooks); `sessionpipe install` does it",
+    });
+    const silent: Exec = async (argv) =>
+      argv.includes("--version") ? { code: 1, stdout: "", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+    const v = await installVersion("0.6.0", { node: "n", distDir: dist, harnesses: [], exec: silent });
+    expect(v).toMatchObject({ ok: false, stage: "verify", error: expect.stringContaining("says nothing, not 0.6.0") });
+    const garbage: Exec = async () => ({ code: 0, stdout: "not a version", stderr: "" });
+    expect(await installedVersion({ node: "n", distDir: dist, exec: garbage })).toBeNull();
+  });
+
+  it("with nothing stood in for: this node runs the built CLI for its version, and npm is not run for a checkout", async () => {
+    const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
+    expect(await installedVersion({ node: process.execPath, distDir: dist })).toBe(
+      JSON.parse(readFileSync(path.resolve(dist, "../package.json"), "utf8")).version,
+    );
+    const r = await installVersion("0.6.0", {
+      node: process.execPath,
+      distDir: path.join(tmp, "src", "dist"),
+      harnesses: [],
+    });
+    expect(r).toMatchObject({ ok: false, stage: "prefix" });
+  });
+
+  it("Windows: the prefix holds node_modules directly, sessionpipe.cmd beside it, and npm-cli.js under node's own folder", () => {
+    const prefix = path.join(tmp, "npm");
+    const dist = path.join(prefix, "node_modules", "sessionpipe", "dist");
+    mkdirSync(dist, { recursive: true });
+    expect(globalPrefix(dist, "win32")).toBeNull();
+    writeFileSync(path.join(prefix, "sessionpipe.cmd"), "");
+    expect(globalPrefix(dist, "win32")).toBe(prefix);
+    expect(globalPrefix(`${prefix}\\node_modules\\sessionpipe\\dist`, "win32")).toBe(prefix);
+    expect(unwritable(prefix, "win32")).toBeNull();
+    expect(unwritable(path.join(tmp, "nowhere"), "win32")).toMatch(/isn't writable/);
+    const node = path.join(tmp, "nodejs", "node.exe");
+    const cli = path.join(tmp, "nodejs", "node_modules", "npm", "bin", "npm-cli.js");
+    expect(npmArgv(node, "win32")).toEqual(["npm.cmd"]);
+    mkdirSync(path.dirname(cli), { recursive: true });
+    writeFileSync(cli, "");
+    expect(npmArgv(node, "win32")).toEqual([node, cli]);
+    expect(prefixOf(dist)).toBeNull();
+  });
+
+  it("runs a command to its end, keeping its output; a timeout, a missing command and a bad argument are results too", async () => {
+    const node = process.execPath;
+    const ok = await execCapture([node, "-e", "process.stdout.write('out'); process.stderr.write('err')"], {
+      env: process.env,
+      timeoutMs: 30_000,
+    });
+    expect(ok).toEqual({ code: 0, stdout: "out", stderr: "err" });
+    const slow = await execCapture([node, "-e", "setTimeout(() => {}, 20000)"], { env: process.env, timeoutMs: 200 });
+    expect(slow.code).toBeNull();
+    const missing = await execCapture([path.join(tmp, "no-such-command")], { env: process.env, timeoutMs: 1000 });
+    expect(missing).toMatchObject({ code: null, error: expect.stringContaining("ENOENT") });
+    const empty = await execCapture([""], { env: process.env, timeoutMs: 1000 });
+    expect(empty).toMatchObject({ code: null, error: expect.any(String) });
+    // On Windows a .cmd needs a shell; here the shell just reports it missing.
+    const real = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      const cmd = await execCapture(["no-such-thing.cmd"], { env: process.env, timeoutMs: 5000 });
+      expect(cmd.code).not.toBe(0);
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
   });
 });
 

@@ -52,6 +52,19 @@ describe.skipIf(process.platform === "win32")("folders", () => {
     expect(c).toEqual({ folders: ["/home/me/notes", "/home/me/spacesheep"], from: "recent" });
   });
 
+  it("a folder inside one already picked adds nothing, and the list stops at `max`", () => {
+    const recent = ["/home/me/spacesheep", "/home/me/spacesheep/packages/cli", "/home/me/notes", "/home/me/more"];
+    expect(connectFolders({ ...base, cwd: "/home/me", recent }).folders).toEqual([
+      "/home/me/spacesheep",
+      "/home/me/notes",
+      "/home/me/more",
+    ]);
+    expect(connectFolders({ ...base, cwd: "/home/me", recent, max: 2 }).folders).toEqual([
+      "/home/me/spacesheep",
+      "/home/me/notes",
+    ]);
+  });
+
   it("run from home with no other session folder: none, rather than all of home", () => {
     expect(connectFolders({ ...base, cwd: "/home/me", recent: ["/home/me", "/"] })).toEqual({
       folders: [],

@@ -3,13 +3,21 @@
 // sessionpipe was installed with — and with PATH's node once that one is gone. With no
 // node at all it still exits 0 (and Antigravity still gets its `{}`).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AG_STALE_PRETOOL } from "@sessionpipe/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installLauncher, launcherScript, launcherState, removeLauncher } from "../src/launcher.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  dataDir,
+  installLauncher,
+  launcherPath,
+  launcherScript,
+  launcherState,
+  removeLauncher,
+  usesLauncher,
+} from "../src/launcher.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.resolve(here, "../dist");
@@ -95,6 +103,43 @@ describe.skipIf(process.platform === "win32" || !existsSync(path.join(dist, "hoo
     const c = spawnSync(launcher, ["claude-code", "Stop"], { env: { PATH: "/nonexistent" }, encoding: "utf8" });
     expect(c.status).toBe(0);
     expect(c.stdout).toBe("");
+  });
+
+  it("lives under SESSIONPIPE_DATA, else XDG_DATA_HOME, else ~/.local/share; Windows keeps the direct entry", () => {
+    expect(dataDir({ SESSIONPIPE_DATA: path.join(data, "x", "..", "d") })).toBe(path.join(data, "d"));
+    expect(dataDir({ XDG_DATA_HOME: "/xdg" })).toBe(path.join("/xdg", "sessionpipe"));
+    expect(dataDir({})).toBe(path.join(os.homedir(), ".local", "share", "sessionpipe"));
+    expect(launcherPath({ SESSIONPIPE_DATA: data })).toBe(path.join(data, "sessionpipe-hook"));
+    expect(usesLauncher("win32")).toBe(false);
+    expect(usesLauncher("linux")).toBe(true);
+    expect(usesLauncher()).toBe(process.platform !== "win32");
+  });
+
+  it("doctor's view of a launcher that is missing, or missing its files, or whose node line is unreadable", () => {
+    expect(launcherState("9.9.9", env)).toEqual({
+      file: path.join(data, "sessionpipe-hook"),
+      present: false,
+      node: null,
+      nodeOk: false,
+      version: null,
+      problems: ["the hook launcher is missing; run `sessionpipe install` again"],
+    });
+    installLauncher({ distDir: dist, node: process.execPath, version: "9.9.9", env });
+    rmSync(path.join(data, "worker.js"));
+    expect(launcherState("9.9.9", env).problems).toEqual([
+      "worker.js is missing beside the hook launcher; run `sessionpipe install` again",
+    ]);
+    writeFileSync(path.join(data, "sessionpipe-hook"), "#!/bin/sh\nexit 0\n");
+    const odd = launcherState("9.9.9", env);
+    expect(odd).toMatchObject({ present: true, node: null, nodeOk: false, version: null });
+    expect(odd.problems[0]).toContain("the node the hook launcher names (?) is gone");
+    // The env is this process's by default.
+    vi.stubEnv("SESSIONPIPE_DATA", data);
+    try {
+      expect(launcherState("9.9.9").file).toBe(path.join(data, "sessionpipe-hook"));
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("an older launcher says so; a node path with a quote survives the round trip", () => {

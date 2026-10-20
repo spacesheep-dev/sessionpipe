@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -199,6 +208,17 @@ describe("help never dispatches a command", () => {
       expect(r.stderr).toBe("");
       expect(snapshot(tmp)).toEqual(before);
     });
+});
+
+describe("the installed binary", () => {
+  it("runs through npm's bin link (a symlink to dist/cli.js), as `npm install -g` places it", () => {
+    const bin = path.join(tmp, "bin", "sessionpipe");
+    mkdirSync(path.dirname(bin), { recursive: true });
+    symlinkSync(cli, bin);
+    const r = spawnSync(process.execPath, [bin, "--version"], { cwd: tmp, env, encoding: "utf8", timeout: 30000 });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe(`${JSON.parse(readFileSync(path.resolve(here, "../package.json"), "utf8")).version}\n`);
+  });
 });
 
 describe("status", () => {

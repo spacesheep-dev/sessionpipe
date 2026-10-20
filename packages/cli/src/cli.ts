@@ -52,21 +52,52 @@ import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 
-process.stdout.on("error", (e: NodeJS.ErrnoException) => {
-  if (e.code === "EPIPE") process.exit(0);
-});
-const args = process.argv.slice(2);
-const cmd = args[0] ?? "help";
+const print = (s = ""): void => {
+  process.stdout.write(`${s}\n`);
+};
+// One command per process: `main` sets these for the run, every command reads them.
+let args: string[] = [];
+let out: (s?: string) => void = print;
+let state = "";
 const flag = (name: string): string | undefined => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
 const has = (name: string): boolean => args.includes(name);
-const out = (s = ""): void => {
-  process.stdout.write(`${s}\n`);
-};
-const state = stateDir();
 const distDir = path.dirname(fileURLToPath(import.meta.url));
+
+export interface Io {
+  /** One line of output. */
+  out: (s?: string) => void;
+  /** What a failed command says, then `exit(1)`. */
+  err: (s: string) => void;
+  exit: (code: number) => void;
+}
+
+/** Run one command: `argv` is what follows `sessionpipe`; `io` is this process by default. */
+export async function main(
+  argv: string[],
+  io: Io = { out: print, err: (s) => void process.stderr.write(s), exit: (c) => process.exit(c) },
+): Promise<void> {
+  args = argv;
+  out = io.out;
+  state = stateDir();
+  try {
+    await command(args[0] ?? "help");
+  } catch (e) {
+    io.err(`sessionpipe: ${(e as Error).message}\n`);
+    io.exit(1);
+  }
+}
+
+/** Is this file the process entrypoint? By real path: npm's bin link to it counts. */
+export function isEntrypoint(argv1: string | undefined, url: string): boolean {
+  try {
+    return !!argv1 && realpathSync(argv1) === fileURLToPath(url);
+  } catch {
+    return false;
+  }
+}
 
 /** The command a hook entry runs: the launcher, which outlives node upgrades
  *  (launcher.ts); on Windows, this node by a stable absolute path and hook.js by its
@@ -93,7 +124,7 @@ function selectedAdapters(): typeof ADAPTERS {
   return ADAPTERS.filter((a) => a.detect());
 }
 
-async function main(): Promise<void> {
+async function command(cmd: string): Promise<void> {
   // Help wins over every command and argument, before any command can do work.
   if (has("--help") || has("-h")) {
     const usage = commandHelp(
@@ -813,7 +844,9 @@ function hookWall(runs = 8): { n: number; p50: number; p95: number } | null {
     rmSync(tmp, { recursive: true, force: true });
   }
   times.sort((a, b) => a - b);
-  const q = (p: number) => Math.round(times[Math.min(times.length - 1, Math.floor(p * times.length))] ?? 0);
+  // `?? 0` satisfies noUncheckedIndexedAccess: the index is clamped to the last of `runs` entries.
+  const q = (p: number) =>
+    Math.round(/* v8 ignore next */ times[Math.min(times.length - 1, Math.floor(p * times.length))] ?? 0);
   return { n: times.length, p50: q(0.5), p95: q(0.95) };
 }
 
@@ -825,7 +858,9 @@ function timing(): { n: number; p50: number; p95: number } | null {
       .filter((x) => x >= 0)
       .sort((a, b) => a - b);
     if (!ms.length) return null;
-    const q = (p: number) => Math.round(ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] ?? 0);
+    // `?? 0` satisfies noUncheckedIndexedAccess: the index is clamped to the last of a non-empty list.
+    const q = (p: number) =>
+      Math.round(/* v8 ignore next */ ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] ?? 0);
     return { n: ms.length, p50: q(0.5), p95: q(0.95) };
   } catch {
     return null;
@@ -1151,7 +1186,11 @@ async function update(): Promise<void> {
     );
 }
 
-main().catch((e) => {
-  process.stderr.write(`sessionpipe: ${(e as Error).message}\n`);
-  process.exit(1);
-});
+// The process entrypoint (`node dist/cli.js`, or npm's bin link to it) runs the command;
+// an import of this module runs nothing.
+if (isEntrypoint(process.argv[1], import.meta.url)) {
+  process.stdout.on("error", (e: NodeJS.ErrnoException) => {
+    if (e.code === "EPIPE") process.exit(0);
+  });
+  void main(process.argv.slice(2));
+}

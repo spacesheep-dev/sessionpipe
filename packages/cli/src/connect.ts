@@ -9,11 +9,13 @@ export function isBroad(dir: string, home: string): boolean {
   const d = path.resolve(dir);
   const h = path.resolve(home);
   if (d === path.parse(d).root) return true;
-  return d === h || h.startsWith(d.endsWith(path.sep) ? d : d + path.sep);
+  // A resolved path ends with the separator only when it is the root, answered above.
+  return d === h || h.startsWith(/* v8 ignore next */ d.endsWith(path.sep) ? d : d + path.sep);
 }
 
+// `parent` is a resolved, non-root folder (isBroad keeps the root out): it never ends with the separator.
 const inside = (child: string, parent: string): boolean =>
-  child !== parent && child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+  child !== parent && child.startsWith(/* v8 ignore next */ parent.endsWith(path.sep) ? parent : parent + path.sep);
 
 export interface FolderChoice {
   folders: string[];

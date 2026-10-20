@@ -141,6 +141,9 @@ export function moveSinkSecrets(
     }
     if (!full.token && !full.secret) continue;
     if (to === "file") {
+      // From a store, so with a token (sinkWithSecrets is null without one); a sink
+      // already in the file never gets here.
+      /* v8 ignore else */
       if (full.token) s.token = full.token;
       if (full.secret) s.secret = full.secret;
       delete s.token_in;

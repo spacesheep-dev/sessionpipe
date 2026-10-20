@@ -6,17 +6,19 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readConfig } from "@sessionpipe/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { moveControlSecrets, readControl, writeControl } from "../src/control/store.js";
 import {
   bestStore,
   defaultRunner,
+  dropSinkSecrets,
   moveSinkSecrets,
   probe,
   type Runner,
   secretDel,
   secretGet,
   secretSet,
+  sinkAccount,
   sinkWithSecrets,
 } from "../src/secrets.js";
 
@@ -147,6 +149,124 @@ describe("control.json", () => {
   it("keeps the machine's own caps across a write", () => {
     writeControl({ ...base, limits: { headless: 1 } }, env);
     expect(readControl(env, keychain().run)?.limits).toEqual({ headless: 1 });
+  });
+});
+
+/** A stand-in for `secret-tool`: the Secret Service as a Linux desktop session sees it. */
+function secretService() {
+  const items = new Map<string, string>();
+  const run: Runner = (cmd, args, input) => {
+    if (cmd !== "secret-tool") return { status: 127, stdout: "" };
+    const account = args[args.indexOf("account") + 1] as string;
+    if (args[0] === "store") {
+      items.set(account, input ?? "");
+      return { status: 0, stdout: "" };
+    }
+    if (args[0] === "lookup")
+      return items.has(account) ? { status: 0, stdout: items.get(account) as string } : { status: 1, stdout: "" };
+    if (args[0] === "clear") return { status: items.delete(account) ? 0 : 1, stdout: "" };
+    return { status: 1, stdout: "" };
+  };
+  return { items, run };
+}
+
+describe("the Secret Service store", () => {
+  it("stores through stdin, reads back without a trailing newline, and clears", () => {
+    const s = secretService();
+    expect(secretSet("secret-service", "sink:a:token", "ss_abc", s.run)).toBe(true);
+    expect(s.items.get("sink:a:token")).toBe("ss_abc");
+    expect(secretGet("secret-service", "sink:a:token", s.run)).toBe("ss_abc");
+    secretDel("secret-service", "sink:a:token", s.run);
+    expect(secretGet("secret-service", "sink:a:token", s.run)).toBeNull();
+    expect(probe("secret-service", s.run)).toBe(true);
+    // An item that reads back empty is no item.
+    s.items.set("sink:e:token", "");
+    expect(secretGet("secret-service", "sink:e:token", s.run)).toBeNull();
+  });
+
+  it("is the store of a Linux desktop session (D-Bus and a display), or whatever SESSIONPIPE_SECRETS names", () => {
+    const s = secretService();
+    const bus = { DBUS_SESSION_BUS_ADDRESS: "unix:x" };
+    expect(bestStore({ ...bus, DISPLAY: ":0" }, "linux", s.run)).toBe("secret-service");
+    expect(bestStore({ ...bus, WAYLAND_DISPLAY: "wayland-0" }, "linux", s.run)).toBe("secret-service");
+    expect(bestStore({ DISPLAY: ":0" }, "linux", s.run)).toBe("file");
+    expect(bestStore({ SESSIONPIPE_SECRETS: "secret-service" }, "darwin", s.run)).toBe("secret-service");
+    expect(bestStore({ SESSIONPIPE_SECRETS: "keychain" }, "linux", s.run)).toBe("file");
+    expect(bestStore({ SESSIONPIPE_SECRETS: "keychain" }, "linux", keychain().run)).toBe("keychain");
+  });
+});
+
+describe("the keychain's own tool", () => {
+  it("runs it with the value on stdin and hands back its status and output; a tool that isn't there is no status", () => {
+    expect(defaultRunner("sh", ["-c", "cat; echo more"], "in")).toEqual({ status: 0, stdout: "inmore\n" });
+    expect(defaultRunner("sh", ["-c", "exit 3"])).toEqual({ status: 3, stdout: "" });
+    expect(defaultRunner(path.join(tmp, "no-such-tool"), [])).toEqual({ status: null, stdout: "" });
+  });
+
+  it("refuses an account its stdin parser would split", () => {
+    const k = keychain();
+    expect(secretSet("keychain", 'sink:a"b:token', "value", k.run)).toBe(false);
+    expect(k.items.size).toBe(0);
+  });
+});
+
+describe("moving sinks' keys", () => {
+  const write = (sinks: unknown[]) => writeFileSync(file, JSON.stringify({ sinks, harnesses: {} }));
+
+  it("leaves a sink already in the store, a sink with no key, and names scoped by SESSIONPIPE_CONFIG", () => {
+    vi.stubEnv("SESSIONPIPE_CONFIG", file);
+    try {
+      const k = keychain();
+      write([
+        { name: "kc", url: "https://kc.dev", tier: 1, token_in: "keychain" },
+        { name: "none", url: "stdout", tier: 0 },
+        { name: "rx", url: "https://rx.dev", tier: 1, token: "ss_key" },
+      ]);
+      k.items.set(sinkAccount("kc"), "already");
+      expect(sinkAccount("kc")).toMatch(/^sink:kc:token@[0-9a-f]{8}$/);
+      expect(moveSinkSecrets("keychain", { run: k.run })).toEqual({ moved: ["rx"], kept: [] });
+      expect(readConfig(file).sinks.map((s) => s.token_in)).toEqual(["keychain", undefined, "keychain"]);
+      expect(k.items.get(sinkAccount("rx"))).toBe("ss_key");
+      // Back into the file, the token only: nothing is written for a secret it never had.
+      expect(moveSinkSecrets("file", { run: k.run })).toEqual({ moved: ["kc", "rx"], kept: [] });
+      expect(readConfig(file).sinks[2]).toEqual({ name: "rx", url: "https://rx.dev", tier: 1, token: "ss_key" });
+      expect(k.items.size).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("from one store to another: written there first, then the file, then the old item dropped", () => {
+    const k = keychain();
+    const s = secretService();
+    const run: Runner = (cmd, args, input) => (cmd === "security" ? k.run(cmd, args, input) : s.run(cmd, args, input));
+    write([{ name: "rx", url: "https://rx.dev", tier: 1, token: "ss_key", secret: "whsec_s" }]);
+    expect(moveSinkSecrets("keychain", { run, file })).toEqual({ moved: ["rx"], kept: [] });
+    expect(moveSinkSecrets("secret-service", { run, file })).toEqual({ moved: ["rx"], kept: [] });
+    expect(readConfig(file).sinks[0]?.token_in).toBe("secret-service");
+    expect(k.items.size).toBe(0);
+    expect([...s.items.values()]).toEqual(["ss_key", "whsec_s"]);
+    expect(sinkWithSecrets(readConfig(file).sinks[0] as never, run)).toMatchObject({
+      token: "ss_key",
+      secret: "whsec_s",
+    });
+    dropSinkSecrets(readConfig(file).sinks[0] as never, run);
+    expect(s.items.size).toBe(0);
+    dropSinkSecrets({ name: "plain", url: "stdout", tier: 0 }, run);
+  });
+
+  it("a key in a store this session can't read stays there, and is named", () => {
+    write([{ name: "kc", url: "https://kc.dev", tier: 1, token_in: "keychain" }]);
+    expect(moveSinkSecrets("file", { run: keychain({ locked: true }).run, file })).toEqual({ moved: [], kept: ["kc"] });
+    expect(readConfig(file).sinks[0]?.token_in).toBe("keychain");
+  });
+
+  it("a secret the store refuses keeps the pair together, in the file", () => {
+    const k = keychain();
+    write([{ name: "rx", url: "https://rx.dev", tier: 1, token: "ss_key", secret: "has space" }]);
+    expect(moveSinkSecrets("keychain", { run: k.run, file })).toEqual({ moved: [], kept: ["rx"] });
+    expect(k.items.size).toBe(0);
+    expect(readConfig(file).sinks[0]).toMatchObject({ token: "ss_key", secret: "has space" });
   });
 });
 
