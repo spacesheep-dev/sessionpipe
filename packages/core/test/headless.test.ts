@@ -92,6 +92,16 @@ describe("runHeadless", () => {
     expect(runFailure("Claude", { error: "nope" })).toBe("couldn't start Claude: nope");
     expect(runFailure("Claude", { code: 1 })).toBeNull();
   });
+  posix("a tool left holding stdout after the harness exits does not hold the result past two seconds", async () => {
+    // The grandchild keeps stdout for 6 s; the result comes on the 2 s timer, with room for a loaded machine.
+    const leaves = script("leaves", "sleep 6 &\nprintf 'bye'");
+    const t0 = Date.now();
+    const r = await runHeadless(leaves, [], { cwd: tmp, env: process.env });
+    expect(r).toMatchObject({ code: 0, signal: null, stdout: "bye", timedOut: false });
+    const ms = Date.now() - t0;
+    expect(ms).toBeGreaterThanOrEqual(1900);
+    expect(ms).toBeLessThan(5500);
+  });
 });
 
 describe("words", () => {

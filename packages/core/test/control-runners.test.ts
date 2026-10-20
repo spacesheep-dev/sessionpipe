@@ -155,6 +155,7 @@ describe("codex exec --json", () => {
       '-c sandbox_mode="workspace-write" --',
     );
     expect(codexArgs({ mode: "auto", prompt: "x", cwd: "/w" })).toContain("--approve-for-me");
+    expect(codexArgs({ mode: "safe", prompt: "x" })).not.toContain("-C");
     // Never a bypass flag, in either mode.
     for (const mode of ["safe", "auto"] as const)
       expect(codexArgs({ mode, prompt: "x", cwd: "/w" }).join(" ")).not.toMatch(/dangerously|full-auto/);

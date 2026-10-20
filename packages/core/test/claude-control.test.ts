@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   claudeEnv,
   claudeLogin,
+  cmpVersion,
   detectCaps,
   findClaude,
   findTranscript,
@@ -50,6 +51,13 @@ Options:
 `;
 
 describe("finding claude", () => {
+  it("orders the app's versions by number, a missing part as 0", () => {
+    expect(cmpVersion("1.9.0", "1.10.0")).toBeLessThan(0);
+    expect(cmpVersion("1.10.0", "1.9.0")).toBeGreaterThan(0);
+    expect(cmpVersion("1.10", "1.10.0")).toBe(0);
+    expect(cmpVersion("1.9", "1.9.5")).toBeLessThan(0);
+    expect(cmpVersion("1.9.5", "1.9")).toBeGreaterThan(0);
+  });
   it.runIf(process.platform !== "win32")(
     "the override, then PATH (absolute entries only), then the installers' folders, then the app's newest copy",
     () => {

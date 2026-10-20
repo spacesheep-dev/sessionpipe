@@ -26,7 +26,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** A transcript someone else wrote this recently is in use. */
 const LIVE_WRITE_MS = 90_000;
 
-const cmpVersion = (a: string, b: string) => {
+/** Dotted versions by number, a missing part as 0: 1.9.0 < 1.10 = 1.10.0. */
+export const cmpVersion = (a: string, b: string) => {
   const pa = a.split(".").map(Number);
   const pb = b.split(".").map(Number);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++)

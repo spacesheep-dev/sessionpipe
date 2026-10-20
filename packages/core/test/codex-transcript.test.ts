@@ -64,6 +64,16 @@ describe("a Codex rollout", () => {
       title: "what folder are you in?",
       title_source: "first-ask",
     });
+    // No session_meta, or one without a cwd: the title still comes, the cwd does not.
+    expect(codexFacts(rolloutFile(ROLLOUT.slice(1)))).toEqual({
+      title: "what folder are you in?",
+      title_source: "first-ask",
+      started_at: Date.parse("2026-10-04T12:00:00Z"),
+      last_at: Date.parse("2026-10-04T12:00:05Z"),
+    });
+    const noCwd = JSON.stringify({ type: "session_meta", payload: { cli_version: "0.160.0" } });
+    expect(codexFacts(rolloutFile([noCwd, ...ROLLOUT.slice(1)]))).toMatchObject({ harness_version: "0.160.0" });
+    expect(codexFacts(rolloutFile([noCwd, ...ROLLOUT.slice(1)])).cwd).toBeUndefined();
   });
 
   it("keeps the existing non-forked fixture's serialized output byte for byte", () => {
@@ -198,7 +208,8 @@ describe("a forked Codex subagent rollout", () => {
       type: "event_msg",
       payload: { type: "token_count", padding: "x".repeat(200_000) },
     });
-    const lines = [...FORK.slice(0, 37), padding, ...FORK.slice(37, 39), padding, ...FORK.slice(39)];
+    // A line in the gap that is not JSON is skipped by the scan, never mistaken for the boundary.
+    const lines = [...FORK.slice(0, 37), padding, "not json", ...FORK.slice(37, 39), padding, ...FORK.slice(39)];
     expect(codexFacts(rolloutFile(lines))).toEqual({
       cwd: "/synthetic/child",
       harness_version: "0.160.0",

@@ -16,6 +16,7 @@ import {
   parseSessionRef,
   RS256,
   type SignedCommand,
+  sameBytes,
   sha256,
   verifyAssertion,
   verifyCommand,
@@ -199,6 +200,15 @@ describe("parseGrant", () => {
   });
 });
 
+describe("sameBytes", () => {
+  it("compares the whole of equal lengths; a different length is never equal", () => {
+    expect(sameBytes(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 3]))).toBe(true);
+    expect(sameBytes(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 4]))).toBe(false);
+    expect(sameBytes(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2]))).toBe(false);
+    expect(sameBytes(new Uint8Array(0), new Uint8Array(0))).toBe(true);
+  });
+});
+
 describe("derToRaw", () => {
   const der = (ints: number[][]) => {
     const body = ints.flatMap((v) => [0x02, v.length, ...v]);
@@ -219,6 +229,7 @@ describe("derToRaw", () => {
     expect(derToRaw(der([[1, ...n32, 1], n32]))).toBeNull(); // 34 bytes
     expect(derToRaw(der([[1, ...n32], n32]))).toBeNull(); // 33 bytes with no zero to drop
     expect(derToRaw(new Uint8Array([0x31, ...der([n32, n32]).slice(1)]))).toBeNull(); // not a sequence
+    expect(derToRaw(new Uint8Array([0x30, 6, 0x03, 1, 1, 0x02, 1, 1]))).toBeNull(); // r is not an INTEGER
     expect(derToRaw(new Uint8Array([...der([n32, n32]), 0]))).toBeNull(); // a trailing byte
     expect(derToRaw(new Uint8Array([0x30, 6, 0x02, 1, 1, 0x02, 1, 1]))).toEqual(
       new Uint8Array([...new Array(31).fill(0), 1, ...new Array(31).fill(0), 1]),

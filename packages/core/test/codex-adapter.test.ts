@@ -93,6 +93,11 @@ describe("codex fromHook", () => {
     expect(hook("SubagentStop", {})?.events[0]?.data).toEqual({ agent_id: "" });
     expect(hook("SubagentStop", { subagent_id: "s", agent_type: 3 })?.events[0]?.data).toEqual({ agent_id: "s" });
     expect(hook("SubagentStart", { agent_id: "a" })?.events[0]?.data).toEqual({ agent_id: "a" });
+    expect(hook("SubagentStart", {})?.events[0]?.data).toEqual({ agent_id: "" });
+    expect(hook("SubagentStop", { agent_id: "a", agent_type: "reviewer" })?.events[0]?.data).toEqual({
+      agent_id: "a",
+      agent_type: "reviewer",
+    });
     expect(hook("PreCompact", { trigger: "manual" })?.events[0]?.data).toEqual({ trigger: "manual" });
     expect(hook("PreCompact", {})?.events[0]?.data).toEqual({ trigger: "auto" });
     expect(hook("PostCompact", {})?.events).toEqual([]);

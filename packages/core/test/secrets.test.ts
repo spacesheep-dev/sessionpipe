@@ -92,6 +92,10 @@ describe("secrets@1 is idempotent", () => {
 
 describe("secrets@1 edges", () => {
   const same = (s: string) => expect(redactSecrets(s)).toBe(s);
+  it("an empty string is itself; a prose value already redacted in part is not redacted twice", () => {
+    same("");
+    expect(redactSecrets(`password is A1:ghp_${"a".repeat(36)}`)).toBe(`password is A1:${REDACTED}`);
+  });
   it("a token count is a number, not a token", () => {
     same("max_tokens: 4096");
     same("input_tokens=12k");

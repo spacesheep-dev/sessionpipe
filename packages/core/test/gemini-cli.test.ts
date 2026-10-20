@@ -206,6 +206,8 @@ describe("gemini-cli transcript and facts", () => {
       ].join("\n")}\n`,
     );
     expect(geminiCli.facts({ id: SID }, file, {}, noState)).toEqual({});
+    writeFileSync(file, `${JSON.stringify({ type: "gemini", content: "nobody asked" })}\n`);
+    expect(geminiCli.facts({ id: SID }, file, {}, noState).title).toBeUndefined();
     writeFileSync(file, `${JSON.stringify({ type: "user", message: "from message" })}\n`);
     expect(geminiCli.facts({ id: SID }, file, {}, noState).title).toBe("from message");
     writeFileSync(file, `${JSON.stringify({ type: "user", text: `\n\n${"word ".repeat(30)}end` })}\n`);

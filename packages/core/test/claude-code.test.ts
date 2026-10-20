@@ -116,6 +116,7 @@ describe("claude-code fromHook", () => {
     expect(fail({ error: "e" })?.error).toBe("e");
     expect(fail({ message: "m" })?.error).toBe("m");
     expect(fail({ other: 1 })?.error).toBeUndefined();
+    expect(fail(0)?.error).toBeUndefined();
     expect(fail(undefined, "from the response")?.error).toBe("from the response");
     expect(fail("x".repeat(3000))!.error).toHaveLength(2000);
     expect(hook("PostToolUseFailure", {})?.events).toEqual([]);
@@ -356,11 +357,17 @@ describe("claude-code facts", () => {
       title: "the ask",
       title_source: "first-ask",
     });
+    // A content that is neither text nor blocks is no ask.
+    expect(claudeFacts(transcript([user(42), user("the ask")]), SID, {}, memState())).toMatchObject({
+      title: "the ask",
+      title_source: "first-ask",
+    });
   });
   it("finds the registry entry through the hook's pid when the session id is filed under another", () => {
     registry(777, { sessionId: "another-session", name: "Via pid", nameSource: "hook" });
     registry("broken", "{ not json");
     registry(779, { name: "no session or source" });
+    registry(780, "null");
     const file = transcript([user("ask"), assistant("ok")]);
     expect(claudeFacts(file, SID, { claude_pid: 777 }, memState())).toMatchObject({
       title: "Via pid",

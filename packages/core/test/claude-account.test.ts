@@ -22,7 +22,12 @@ describe("claudeAccounts", () => {
   it("reads the default dir's ~/.claude.json and a second dir's own file", () => {
     login(path.join(home, ".claude.json"), { accountUuid: "acct-1", emailAddress: "me@example.com" });
     login(path.join(home, ".claude-work", ".claude.json"), { accountUuid: "acct-2", emailAddress: "me@work.example" });
-    const dirs = [path.join(home, ".claude"), path.join(home, ".claude-work")];
+    // The same account signed in twice keeps the email seen first.
+    login(path.join(home, ".claude-again", ".claude.json"), {
+      accountUuid: "acct-1",
+      emailAddress: "me@other.example",
+    });
+    const dirs = [path.join(home, ".claude"), path.join(home, ".claude-work"), path.join(home, ".claude-again")];
     expect(claudeAccounts(dirs, home)).toEqual([
       { harness: "claude-code", id: "acct-1", email: "me@example.com" },
       { harness: "claude-code", id: "acct-2", email: "me@work.example" },
