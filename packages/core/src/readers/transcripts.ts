@@ -84,7 +84,11 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j || j.isSidechain) continue;
     const origin = j.origin as { kind?: string } | undefined;
-    if (j.type === "user" && (j.isMeta || (origin?.kind && origin.kind !== "human"))) continue;
+    if (
+      j.type === "user" &&
+      (j.isMeta || j.isCompactSummary || j.repeatsCompactSummary || (origin?.kind && origin.kind !== "human"))
+    )
+      continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const c = (j.message as { content?: unknown } | undefined)?.content;
     if (j.type === "user") {

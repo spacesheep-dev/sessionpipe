@@ -1,0 +1,8 @@
+{"type":"user","timestamp":"2026-10-20T16:13:30.000Z","message":{"role":"user","content":"Run experiment 3 and report back."}}
+{"type":"assistant","timestamp":"2026-10-20T16:13:50.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Starting experiment 3."}]}}
+{"type":"assistant","timestamp":"2026-10-20T16:14:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","timestamp":"2026-10-20T16:14:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"a.py"}]}}
+{"type":"assistant","timestamp":"2026-10-20T16:18:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"The plan is ready; writing the scheduler."}]}}
+{"type":"system","subtype":"compact_boundary","timestamp":"2026-10-20T16:19:54.144Z","compactMetadata":{"trigger":"auto","preTokens":967008}}
+{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"timestamp":"2026-10-20T16:19:53.093Z","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n..."}}
+{"type":"assistant","timestamp":"2026-10-20T16:20:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Writing the evaluation app now."}]}}
