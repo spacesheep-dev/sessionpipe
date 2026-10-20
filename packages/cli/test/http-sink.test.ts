@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HttpSink, retryAfterMs, webhookId } from "../src/http-sink.js";
 
 describe("webhook-id (HTTP.md §2: retries reuse it)", () => {
@@ -50,6 +50,18 @@ describe("retry-after (HTTP.md §2 429: wait as told)", () => {
       expect(res.retryAfterMs).toBeLessThanOrEqual(31_000);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});
+
+describe("a throw that is not an Error", () => {
+  it("still becomes a retry result with the thrown value as the error text", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce("socket hang up" as never);
+    try {
+      const res = await new HttpSink({ name: "h", url: "http://127.0.0.1:9", tier: 3, token: "t" }, 3).send([]);
+      expect(res).toMatchObject({ ok: false, acknowledged: 0, action: "retry", error: "socket hang up" });
+    } finally {
+      spy.mockRestore();
     }
   });
 });
