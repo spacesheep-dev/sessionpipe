@@ -21,9 +21,10 @@ plus `npm run schemas -- --check` (generated files must match the commit), the
 conformance fixtures, a secret scan over `conformance/`, and the hook-timing benchmark.
 
 On one cell (Linux, Node 22) the tests run as `npm run test:coverage`, with the
-thresholds in `vitest.config.ts`: `core/src/sinks` at 100 %, `core/src/{adapters,privacy,readers}`,
-`core/src/outbox.ts` and `cli/src/http-sink.ts` at the floor the tests reach today (97–100 %),
-the rest of `core/src` at 95 %. A number only goes up. Run it locally before opening a PR.
+threshold in `vitest.config.ts`: every file under `packages/*/src` at 100 % of lines,
+branches, functions and statements. A branch only another platform or a failing builtin
+reaches is tested by faking that (`process.platform`, one `fs` call); code nothing can
+reach is deleted, not ignored. A number never goes down. Run it locally before opening a PR.
 Two more gates: a PR that touches `packages/core/src/adapters/` must also touch
 `conformance/harness/` (as a spec change must touch `conformance/` or `schemas/`), and
 `packages/core/test/registry.test.ts` holds every adapter in the registry to at least
