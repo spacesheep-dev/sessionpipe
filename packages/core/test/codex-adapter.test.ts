@@ -39,29 +39,38 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 const notifyState = () => codex.installed(cmd, env)[1]?.state;
 
 describe("codex fromHook", () => {
+  /** The thread's rollout under this test's CODEX_HOME: what makes a notify a session's. */
+  const rollout = (id: string) => {
+    const day = path.join(home, ".codex", "sessions", "2026", "09", "27");
+    mkdirSync(day, { recursive: true });
+    const f = path.join(day, `rollout-2026-09-27T19-08-31-${id}.jsonl`);
+    writeFileSync(f, "");
+    return f;
+  };
   it("notify: the payload is one JSON argument, stdin only as a fallback; the thread id under any of its names", () => {
-    const r = hook("notify", "", {}, [
+    const f = rollout(SID);
+    const r = hook("notify", "", env, [
       JSON.stringify({ type: "agent-turn-complete", "thread-id": SID, "turn-id": "t1", cwd: "/w" }),
     ]);
     expect(r).toEqual({
       session: { id: SID, cwd: "/w" },
       events: [{ type: "turn.ended", data: { reason: "stop", turn_id: "t1" }, harnessEvent: "notify" }],
       hints: {},
+      transcript: f,
     });
-    expect(hook("notify", JSON.stringify({ thread_id: "t" }))?.session).toEqual({ id: "t", cwd: "/" });
-    expect(hook("notify", JSON.stringify({ "session-id": "s" }))?.events[0]?.data).toEqual({ reason: "stop" });
-    expect(hook("notify", JSON.stringify({ session_id: "s2" }))?.session.id).toBe("s2");
-    expect(hook("notify", "")).toBeNull();
-    expect(hook("notify", "null")).toBeNull();
-    expect(hook("notify", "", {}, ["{ broken"])).toBeNull();
+    expect(hook("notify", JSON.stringify({ thread_id: SID }), env)?.session).toEqual({ id: SID, cwd: "/" });
+    expect(hook("notify", JSON.stringify({ "session-id": SID }), env)?.events[0]?.data).toEqual({ reason: "stop" });
+    expect(hook("notify", JSON.stringify({ session_id: SID }), env)?.session.id).toBe(SID);
+    expect(hook("notify", "", env)).toBeNull();
+    expect(hook("notify", "null", env)).toBeNull();
+    expect(hook("notify", "[]", env)).toBeNull();
+    expect(hook("notify", "", env, ["{ broken"])).toBeNull();
   });
-  it("notify names the thread's rollout file when CODEX_HOME holds it", () => {
-    const day = path.join(home, ".codex", "sessions", "2026", "09", "27");
-    mkdirSync(day, { recursive: true });
-    const f = path.join(day, `rollout-2026-09-27T19-08-31-${SID}.jsonl`);
-    writeFileSync(f, "");
+  it("notify without the thread's rollout under CODEX_HOME is an ephemeral thread: nothing", () => {
+    expect(hook("notify", "", env, [JSON.stringify({ "thread-id": SID })])).toBeNull();
+    const f = rollout(SID);
     expect(hook("notify", "", env, [JSON.stringify({ "thread-id": SID })])?.transcript).toBe(f);
-    expect(hook("notify", "", env, [JSON.stringify({ "thread-id": "other-thread-id" })])?.transcript).toBeUndefined();
+    expect(hook("notify", "", env, [JSON.stringify({ "thread-id": "other-thread-id" })])).toBeNull();
   });
   it("needs a session id and a known event; the model rides on the session", () => {
     expect(hook("Stop", "{}")).toBeNull();

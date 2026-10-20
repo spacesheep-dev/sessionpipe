@@ -41,7 +41,8 @@ for (const f of harness) {
   const problems = [];
   if (!fx.input || typeof fx.input.stdin !== "string" || !Array.isArray(fx.input.argv))
     problems.push("input.{argv,stdin} missing");
-  if (!Array.isArray(fx.expect) || !fx.expect.length) problems.push("expect empty");
+  // An empty `expect` is a payload the adapter must report nothing for; check 2 holds it to that.
+  if (!Array.isArray(fx.expect)) problems.push("expect missing");
   for (const [i, e] of (fx.expect ?? []).entries()) {
     const ev = {
       protocol: 1,

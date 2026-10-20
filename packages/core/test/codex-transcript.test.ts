@@ -106,7 +106,14 @@ describe("a forked Codex subagent rollout", () => {
   it("reads only the child's complete reply with its real timestamp and original line numbers", () => {
     const file = rolloutFile(FORK);
     expect(codex.readTranscript!(file, 0)).toEqual({ turns: CHILD_TURNS, line: 46 });
-    const rows = codex.backfill!(0, { CODEX_HOME: path.dirname(path.dirname(file)) });
+    // A subagent's rollout is part of its parent's session, so backfill skips it. The
+    // same rollout as a fork the person made (no `source.subagent`) is backfilled with
+    // the child's own facts, not the parent's.
+    expect(codex.backfill!(0, { CODEX_HOME: path.dirname(path.dirname(file)) })).toEqual([]);
+    const meta = JSON.parse(FORK[0]!);
+    delete meta.payload.source;
+    const fork = rolloutFile([JSON.stringify(meta), ...FORK.slice(1)]);
+    const rows = codex.backfill!(0, { CODEX_HOME: path.dirname(path.dirname(fork)) });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.session).toEqual({
       id: "11111111-1111-4111-8111-111111111111",

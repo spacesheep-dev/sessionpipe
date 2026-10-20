@@ -89,12 +89,15 @@ Fixtures recorded 2026-09-28 on Claude Code 2.1.258 (one `claude -p` run): `Sess
 | Ids in stdin | `session_id`, `turn_id`, `cwd`, `transcript_path`, `model`, `permission_mode`, `tool_name`, `tool_input`, `tool_response`, `tool_use_id` (`exec-<uuid>`), `stop_hook_active`, `last_assistant_message`, `source`, `reason`. |
 | Transcript (tier 2) | `transcript_path` = `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl` (`.zst` possible); `response_item` records with `payload.type: message`, `role`, `content[].input_text \| output_text`. Skip user texts starting with `<tag>` (Codex's own injections). |
 | Facts | Title: first user message (`first-ask`, 80 chars). `session_meta.payload`: `cwd`, `cli_version`, `git.branch`, `git.repository_url`. Model: last `turn_context.payload.model`. |
+| Threads | Only the person's own threads are sessions. **An ephemeral thread** has no rollout: every hook carries `transcript_path: null` and its notify finds no file, so the adapter reports nothing for it. Codex Desktop runs its own background work this way (ambient suggestions and their safety review, a new chat's title), and so does `codex exec --ephemeral`. **A subagent's thread** (its `session_meta.source.subagent`) is part of its parent's session. Codex fires the subagent's hooks with the parent's `session_id`: `SubagentStart` / `SubagentStop` name it as `agent_id`. Its `SubagentStart` and tool calls carry the subagent's own rollout as `transcript_path`, which is never read as the session's transcript. Its notify and its rollout (backfill) report nothing. A fork the person made (`forked_from_id` alone) is a session of its own. |
 | Quirks | The `notify` line lands inside a `[projects."…"]` table when appended at the end, and never runs — write before the first table, move a misplaced one. |
 | Control | `codex exec --json --skip-git-repo-check -C <cwd> … -- <text>` starts a session; `codex exec resume --json --skip-git-repo-check … -- <id> <text>` continues one; stdin closed. Codex picks the id (`thread.started` → `thread_id`), so a daemon keeps the start's id as the name (CONTROL.md §6 `start`). The answer is the turn's `agent_message` items; `error` items are warnings, `turn.failed` is a failure. Safe mode: `-s workspace-write`; auto: `--approve-for-me`. Never `--dangerously-bypass-approvals-and-sandbox` or `--dangerously-bypass-hook-trust`. Signed in: `codex login status` exits 0 (or `CODEX_API_KEY` is set). |
 
 Fixtures recorded 2026-09-28 on codex-cli 0.157.1: all of `SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse` (ok and a sandbox error), `Stop`,
-`SessionEnd`.
+`SessionEnd`. Recorded 2026-10-20 on codex-cli 0.160.0, an ephemeral thread
+(`codex exec --ephemeral`): `SessionStart`, `UserPromptSubmit`, `Stop` and `SessionEnd`,
+each with `transcript_path: null` and an empty `expect`.
 
 ## Gemini CLI (`gemini-cli`) — M2
 

@@ -2,7 +2,8 @@
 
 - `harness/<name>/*.json` — `{ input: { argv, stdin, env, files }, expect: [events] }`,
   recorded from **real** hook payloads (secrets scrubbed; `npm run fixture-scan` gates it).
-  `"*"` in an expected event is a wildcard for `id` and `time`.
+  `"*"` in an expected event is a wildcard for `id` and `time`. An empty `expect` is a
+  payload the adapter reports nothing for (Codex's ephemeral threads).
 - `redaction/secrets.json`, `redaction/pii.json` — `[{ in, out }]` vectors for the rulesets.
 - `short-id.json` — `{ harness, id, short_id }` vectors for a session's short id (spec/PROTOCOL.md §3):
   what a receiver shows and searches by must reach these.

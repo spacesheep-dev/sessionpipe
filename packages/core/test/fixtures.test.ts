@@ -40,6 +40,11 @@ describe("adapter fixtures", () => {
         env: fx.input.env ?? {},
         cwd: fx.input.cwd ?? "/",
       });
+      // An empty `expect`: a payload the adapter reports nothing for.
+      if (!fx.expect.length) {
+        expect(r?.events ?? []).toEqual([]);
+        return;
+      }
       expect(r, "fromHook returned null").not.toBeNull();
       expect(r!.events.map((e) => e.type)).toEqual(fx.expect.map((e: { type: string }) => e.type));
       for (const [i, e] of fx.expect.entries()) {

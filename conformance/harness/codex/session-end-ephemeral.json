@@ -1,0 +1,19 @@
+{
+  "harness": "codex",
+  "event": "SessionEnd",
+  "recorded": {
+    "at": "2026-10-20T17:49:25.306Z",
+    "harness_version": "0.160.0",
+    "how": "codex exec --ephemeral -s read-only with the installed sessionpipe hooks in ~/.codex/hooks.json, SESSIONPIPE_NO_WORKER=1 so each payload stayed in its job file"
+  },
+  "input": {
+    "argv": [
+      "codex",
+      "SessionEnd"
+    ],
+    "stdin": "{\"session_id\":\"01a15a6e-9b8f-7ae2-ac7d-204d5cb9ff71\",\"transcript_path\":null,\"cwd\":\"/Users/yaroslavvb/.ctmp/claude-501/-Users-yaroslavvb-git-spacesheep/eae54a74-485b-5aaa-aff7-65d616071138/scratchpad/rec/ws\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+    "env": {},
+    "cwd": "/Users/yaroslavvb/.ctmp/claude-501/-Users-yaroslavvb-git-spacesheep/eae54a74-485b-5aaa-aff7-65d616071138/scratchpad/rec/ws"
+  },
+  "expect": []
+}

@@ -11,7 +11,7 @@ import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { codexInjected, readCodex } from "../readers/transcripts.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
 import * as toml from "./codex-config.js";
-import { codexReplayBoundary } from "./codex-rollout.js";
+import { codexReplayBoundary, codexSubagent } from "./codex-rollout.js";
 import type {
   Adapter,
   BackfillRow,
@@ -149,6 +149,19 @@ export function findRollout(threadId: string, env: NodeJS.ProcessEnv = process.e
   return best;
 }
 
+/** A rollout's first record, its own session_meta. About 50 KB (it carries the base
+ *  instructions), so it is read on its own rather than from a sampled head. */
+function rolloutMeta(file: string): Record<string, unknown> | null {
+  return scanLines(file, (line) => parseLines([line])[0] ?? {});
+}
+
+/** A rollout named for a thread other than `id` (`rollout-<time>-<thread id>.jsonl`).
+ *  A name of any other shape says nothing, so it is not taken for another thread's. */
+function ofAnotherThread(file: string, id: string): boolean {
+  const m = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i.exec(file);
+  return !!m?.[1] && m[1].toLowerCase() !== id.toLowerCase();
+}
+
 export const codex: Adapter = {
   name: NAME,
   events: CODEX_EVENTS,
@@ -204,6 +217,12 @@ export const codex: Adapter = {
       } catch {}
       const id = (s["thread-id"] ?? s.thread_id ?? s["session-id"] ?? s.session_id) as string | undefined;
       if (!id) return null;
+      // Notify names the thread whose turn ended. Without a rollout it is an ephemeral
+      // thread, kept nowhere (the hooks' `transcript_path: null` below). A subagent's
+      // thread belongs to its parent, whose hooks already report it: SubagentStart and
+      // SubagentStop name it as `agent_id`. Neither is a session of its own.
+      const file = findRollout(String(id), input.env as NodeJS.ProcessEnv);
+      if (!file || codexSubagent(rolloutMeta(file))) return null;
       const r: HookResult = {
         session: { id: String(id), cwd: typeof s.cwd === "string" ? s.cwd : input.cwd },
         events: [
@@ -214,9 +233,8 @@ export const codex: Adapter = {
           },
         ],
         hints: {},
+        transcript: file,
       };
-      const file = findRollout(String(id), input.env as NodeJS.ProcessEnv);
-      if (file) r.transcript = file;
       return r;
     }
     try {
@@ -226,6 +244,11 @@ export const codex: Adapter = {
     } catch {}
     const id = s.session_id as string | undefined;
     if (!id) return null;
+    // `transcript_path: null` is an ephemeral thread (recorded on codex-cli 0.160.0):
+    // Codex Desktop's own background threads (ambient suggestions and their safety
+    // review) and `codex exec --ephemeral`. Codex keeps nothing of one, so there is no
+    // session to name, read or resume.
+    if (s.transcript_path === null) return null;
     const session: HookResult["session"] = { id: String(id), cwd: typeof s.cwd === "string" ? s.cwd : input.cwd };
     if (typeof s.model === "string") session.model = s.model;
     const turn_id = typeof s.turn_id === "string" ? s.turn_id : undefined;
@@ -300,7 +323,10 @@ export const codex: Adapter = {
         return null;
     }
     const r: HookResult = { session, events, hints: {} };
-    if (typeof s.transcript_path === "string") r.transcript = s.transcript_path;
+    // Inside a subagent Codex sends the parent's session_id with the subagent's own
+    // rollout (its SubagentStart, its tool calls): that file is not this session's.
+    if (typeof s.transcript_path === "string" && !ofAnotherThread(s.transcript_path, String(id)))
+      r.transcript = s.transcript_path;
     return r;
   },
 
@@ -325,6 +351,8 @@ export const codex: Adapter = {
     for (const f of recentFiles(sessionsDir(env), 3, sinceMs, (n) => /^rollout-.*\.jsonl$/.test(n))) {
       const m = /([0-9a-f]{8}-[0-9a-f-]{27,})\.jsonl$/i.exec(path.basename(f));
       if (!m?.[1]) continue;
+      // A subagent's rollout is part of its parent's session, as in fromHook's notify.
+      if (codexSubagent(rolloutMeta(f))) continue;
       const facts = codexFacts(f);
       if (!facts.started_at || !facts.last_at) continue;
       const { started_at, last_at, first_ask: _fa, harness_version: _hv, ...rest } = facts;

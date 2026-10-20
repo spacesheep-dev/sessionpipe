@@ -52,8 +52,9 @@ export async function runAdapterFixtures(
       env: fx.input.env ?? {},
       cwd: fx.input.cwd ?? "/",
     });
+    // An empty `expect` is a payload the adapter reports nothing for.
     if (!r) {
-      results.push({ file, ok: false, why: "fromHook returned null" });
+      results.push(fx.expect.length ? { file, ok: false, why: "fromHook returned null" } : { file, ok: true });
       continue;
     }
     let why: string | null = matches(

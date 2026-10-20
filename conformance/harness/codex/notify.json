@@ -1,7 +1,7 @@
 {
   "harness": "codex",
   "event": "notify",
-  "note": "Not a recording: the fallback when hooks are off, derived from spec/ADAPTERS.md (Codex row) and the adapter. Codex passes the payload as one JSON argument, not on stdin; a real one replaces it",
+  "note": "Not a recording: the fallback when hooks are off, derived from spec/ADAPTERS.md (Codex row) and the adapter. Codex passes the payload as one JSON argument, not on stdin. It expects nothing because its thread has no rollout under CODEX_HOME (the fixture runner's env holds none): a thread Codex kept nowhere is ephemeral, not a session. A real one, recorded with its rollout, replaces it",
   "input": {
     "argv": [
       "codex",
@@ -12,25 +12,5 @@
     "env": {},
     "cwd": "/"
   },
-  "expect": [
-    {
-      "id": "*",
-      "time": "*",
-      "tier": "*",
-      "type": "turn.ended",
-      "harness": {
-        "name": "codex",
-        "event": "notify"
-      },
-      "session": {
-        "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
-        "cwd": "/Users/dev/projects/app",
-        "seq": "*"
-      },
-      "data": {
-        "reason": "stop",
-        "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
-      }
-    }
-  ]
+  "expect": []
 }

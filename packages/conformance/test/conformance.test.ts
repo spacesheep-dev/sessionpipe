@@ -80,12 +80,17 @@ describe("runAdapterFixtures", () => {
     const unknown = recorded();
     unknown.harness = "nope";
     expect(await why(unknown)).toMatchObject({ ok: false, why: "no adapter nope" });
+    // An empty `expect` is a payload the adapter must report nothing for: a null is a pass.
+    // The same null against an expected event is the failure it always was.
     const nothing: Fixture = {
       harness: "codex",
       input: { argv: ["codex", "notify"], stdin: "" },
       expect: [],
     };
-    expect(await why(nothing)).toMatchObject({ ok: false, why: "fromHook returned null" });
+    expect(await why(nothing)).toEqual({ file: expect.any(String), ok: true });
+    const missing = recorded();
+    missing.input.stdin = "";
+    expect(await why(missing)).toMatchObject({ ok: false, why: "fromHook returned null" });
     const r = await runAdapterFixtures([fixture(unknown), fixture(recorded())]);
     expect(r.failed).toBe(1);
     expect(r.table.split("\n")).toEqual([`FAIL ${r.results[0]!.file} — no adapter nope`, `ok   ${r.results[1]!.file}`]);
