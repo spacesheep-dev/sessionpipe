@@ -8,7 +8,7 @@
 // headlessly; the Agent SDK, waiters, Stop blocks and forks are Claude Code's.
 //
 // A receiver can queue a message; it can never make this process run one.
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import {
@@ -501,7 +501,11 @@ export class ControlDaemon {
       this.server!.once("error", reject);
       this.server!.listen(this.sock, () => resolve());
     });
-    if (process.platform !== "win32") this.sockId = socketId(this.sock);
+    if (process.platform !== "win32") {
+      // The socket is this user's alone (CONTROL.md §8: mode 0600), whatever the umask.
+      chmodSync(this.sock, 0o600);
+      this.sockId = socketId(this.sock);
+    }
   }
 
   private onConn(s: net.Socket): void {

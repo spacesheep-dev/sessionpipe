@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -708,6 +709,13 @@ setTimeout(() => { fs.appendFileSync(${JSON.stringify(marks)}, JSON.stringify({ 
     await startDaemon();
     const q = await rx.send({ kind: "cancel", session: SESSION, text: undefined });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "unsupported" });
+  });
+});
+
+describe.runIf(unix)("the local socket (CONTROL.md §8)", () => {
+  it("is this user's alone: mode 0600, whatever the umask", async () => {
+    await startDaemon();
+    expect(statSync(sock).mode & 0o777).toBe(0o600);
   });
 });
 
