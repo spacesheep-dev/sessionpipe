@@ -259,15 +259,18 @@ function agProjects(dir: string): { id: string; folders: string[] }[] {
   for (const n of names) {
     const id = n.slice(0, -5);
     if (!ID_RE.test(id)) continue;
-    let j: { projectResources?: { resources?: { folderUri?: unknown }[] } };
+    let j: { projectResources?: { resources?: { folderUri?: unknown; gitFolder?: { folderUri?: unknown } }[] } };
     try {
       j = JSON.parse(readFileSync(path.join(dir, n), "utf8"));
     } catch {
       continue;
     }
     const folders: string[] = [];
+    // A resource is one of the kinds in Antigravity's project.proto: a plain folder is
+    // `{ folderUri }`, a git checkout `{ gitFolder: { folderUri, defaultBranch, allowWrite } }`
+    // (what 2.23.1 writes for a folder under git); google3 and remote resources name no folder.
     for (const r of j?.projectResources?.resources ?? []) {
-      const f = agPath(r?.folderUri);
+      const f = agPath(r?.folderUri ?? r?.gitFolder?.folderUri);
       if (f) folders.push(...agVariants(f));
     }
     if (folders.length) out.push({ id, folders });
