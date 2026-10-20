@@ -63,10 +63,10 @@ export async function runAdapterFixtures(
     );
     if (!why)
       for (const [i, e] of fx.expect.entries()) {
-        const got = r.events[i];
+        const got = r.events[i] as (typeof r.events)[number]; // one per expected type: the count matched above
         why =
-          matches(e.harness.event, got?.harnessEvent, `[${i}].harness.event`) ??
-          matches(e.data, got?.data, `[${i}].data`) ??
+          matches(e.harness.event, got.harnessEvent, `[${i}].harness.event`) ??
+          matches(e.data, got.data, `[${i}].data`) ??
           matches({ ...e.session, seq: "*" }, r.session, `[${i}].session`);
         if (why) break;
       }
