@@ -15,6 +15,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { runHeadless } from "@sessionpipe/core";
@@ -321,13 +322,102 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     expect(started()).toHaveLength(0);
   });
 
-  it("not installed: failed in words", async () => {
-    await startDaemon({ extra: { codex: () => null } });
+  it("not installed: failed in words, for a start and for a resume", async () => {
+    await startDaemon({ extra: { codex: () => null, agy: () => null } });
+    const none = await rx.send({ kind: "start", session: `antigravity:${RECV}`, cwd: project, text: "go" });
+    expect(await rx.waitAck(none.id)).toMatchObject({
+      outcome: "failed",
+      detail: "Antigravity isn't installed on this machine",
+    });
     const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
     expect(await rx.waitAck(q.id)).toMatchObject({
       outcome: "failed",
       detail: "Codex isn't installed on this machine",
     });
+    const OWN = "0199c0de-1111-7222-8333-944455556666";
+    const day = path.join(tmp, "codex-home", "sessions", "2026", "10", "03");
+    mkdirSync(day, { recursive: true });
+    const f = path.join(day, `rollout-2026-10-03T09-00-00-${OWN}.jsonl`);
+    writeFileSync(f, `${JSON.stringify({ type: "session_meta", payload: { id: OWN, cwd: project } })}\n`);
+    utimesSync(f, new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+    const r = await rx.send({ session: `codex:${OWN}`, text: "hi" });
+    expect(await rx.waitAck(r.id)).toMatchObject({
+      outcome: "failed",
+      detail: "Codex isn't installed on this machine",
+    });
+  });
+
+  it("a thread id that isn't a UUID is nothing to resume; a start whose folder was never recorded has no folder", async () => {
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "aliases.json"),
+      JSON.stringify({ "codex:named": { id: "thread-named", cwd: "", at: "" } }),
+    );
+    await startDaemon();
+    const none = await rx.send({ session: "codex:thread-1", text: "hi" });
+    expect(await rx.waitAck(none.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+    const bare = await rx.send({ session: "codex:named", text: "hi" });
+    expect(await rx.waitAck(bare.id)).toMatchObject({
+      outcome: "refused",
+      code: "no_session",
+      detail: expect.stringMatching(/^no folder known for Codex session /),
+    });
+  });
+
+  it("a runner that hands the whole output over at the end is read the same way; one that fails is failed", {
+    timeout: 20_000,
+  }, async () => {
+    const lines = [
+      JSON.stringify({ type: "thread.started", thread_id: THREAD }),
+      "",
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({ type: "item.completed", item: { id: "i1", type: "agent_message", text: "all at once" } }),
+      JSON.stringify({ type: "turn.completed", usage: {} }),
+    ];
+    const answers: DaemonDeps["run"][] = [
+      async () => ({
+        code: 0,
+        signal: null,
+        stdout: `${lines.join("\n")}\n`,
+        stderr: "",
+        tooBig: false,
+        timedOut: false,
+      }),
+      async () => ({ code: 1, signal: null, stdout: "", stderr: "", tooBig: false, timedOut: false }),
+      async () => ({ error: "spawn EACCES" }),
+    ];
+    await startDaemon({ extra: { run: (...a) => answers.shift()!(...a) } });
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "all at once" });
+    expect(aliases()[`codex:${RECV}`]).toMatchObject({ id: THREAD });
+    const q2 = await rx.send({ session: `codex:${RECV}`, text: "again" });
+    expect(await rx.waitAck(q2.id)).toMatchObject({
+      outcome: "failed",
+      detail: "Codex exited (code 1) without an answer",
+    });
+    const q3 = await rx.send({ session: `codex:${RECV}`, text: "once more" });
+    expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "failed", detail: "couldn't start Codex: spawn EACCES" });
+  });
+
+  it("a start whose alias can't be recorded still delivers, and says so", { timeout: 20_000 }, async () => {
+    mkdirSync(path.join(tmp, "state", "control", "aliases.json"), { recursive: true });
+    const log: string[] = [];
+    await startDaemon({ extra: { log: (s) => log.push(s) } });
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(log.find((l) => l.startsWith("couldn't record codex:"))).toMatch(/→ 0199b6f2: /);
+  });
+
+  it("a waiter whose socket died before its close was seen doesn't count as one", { timeout: 20_000 }, async () => {
+    await startDaemon();
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    await rx.waitAck(q.id);
+    const live = (d as unknown as { liveOf(s: string): { waiter: unknown } }).liveOf(`codex:${RECV}`);
+    const dead = new net.Socket();
+    dead.destroy();
+    live.waiter = dead;
+    const q2 = await rx.send({ session: `codex:${RECV}`, text: "again" });
+    expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
   });
 });
 
@@ -397,6 +487,11 @@ describe.runIf(unix)("Antigravity (agy)", () => {
     const q2 = await rx.send({ session: `antigravity:${OWN}`, text: "again" });
     expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
     expect(started()[1]?.argv?.slice(0, 2)).toEqual(["--conversation", OWN]);
+    // Facts that name a folder that isn't a path name nothing.
+    const ODD = "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5e";
+    writeFileSync(path.join(tmp, "state", "facts", "antigravity", `${ODD}.json`), JSON.stringify({ cwd: "relative" }));
+    const q3 = await rx.send({ session: `antigravity:${ODD}`, text: "hi" });
+    expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "refused", code: "no_session" });
   });
 
   it("a conversation agy doesn't know: it runs in a fresh one, says so, and the next message follows it", {

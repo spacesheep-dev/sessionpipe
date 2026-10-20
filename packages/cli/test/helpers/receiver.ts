@@ -50,6 +50,10 @@ export class FakeReceiver {
   expireFirst = false;
   codesIssued = 0;
   pollKey: string | null = null;
+  /** `control.session_tools` in the well-known file, when set (CONTROL.md §6 `start`). */
+  sessionTools: unknown = undefined;
+  /** What the well-known file answers with; a receiver that is away answers nothing useful. */
+  wellKnownStatus = 200;
 
   async start(port = 0): Promise<void> {
     this.server = createServer((req, res) => void this.route(req, res));
@@ -144,6 +148,7 @@ export class FakeReceiver {
     };
     const machineAuth = auth === `Bearer ${this.token}`;
     const sinkAuth = auth === `Bearer ${this.sinkToken}`;
+    if (u.pathname === "/.well-known/sessionpipe" && this.wellKnownStatus !== 200) return send(this.wellKnownStatus);
     if (u.pathname === "/.well-known/sessionpipe")
       return send(200, {
         protocol: [1],
@@ -155,6 +160,7 @@ export class FakeReceiver {
         control: {
           wait_max_s: 25,
           ...(this.openPairing ? { open_pairing: true } : {}),
+          ...(this.sessionTools !== undefined ? { session_tools: this.sessionTools } : {}),
           signing: { rp_id: "localhost", algs: [-7, -257] },
         },
       });

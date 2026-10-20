@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Fake time and HTTP handlers only: the existing receiver signs the messages,
 // but never listens on TCP. The daemon uses its real local IPC socket.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DayKey, Passkey } from "../../core/test/helpers/authenticator.js";
-import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import { ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
+import { ask } from "../src/control/local.js";
 import type { ControlConfig } from "../src/control/store.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
@@ -79,29 +80,53 @@ beforeEach(async () => {
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${rx.token}`);
     if (u.pathname === "/control/hello") return hello(url, init);
     if (u.pathname === "/control/ack") {
-      rx.acks.push(...JSON.parse(String(init?.body)).acks);
-      return new Response(null, { status: 202 });
+      const status = ackStatus.shift() ?? 202;
+      if (status === 0) throw new Error("ECONNRESET");
+      if (status === 202) rx.acks.push(...JSON.parse(String(init?.body)).acks);
+      return new Response(null, { status });
     }
     expect(u.pathname).toBe("/control");
     return poll(url, init);
   };
-  daemon = new ControlDaemon(
-    config,
-    path.join(tmp, "control"),
-    process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock"),
-    {
-      now: Date.now,
-      fetch,
-      log,
-      claudeDirs: () => [],
-      accounts: () => [],
-      claude: () => ({
-        bin: "fake-claude",
-        caps: { hasMode: true, modes: ["dontAsk"], promptsNone: false, fork: true },
-      }),
-      run,
-    },
-  );
+  ackStatus.length = 0;
+  deps = {
+    now: Date.now,
+    fetch,
+    log,
+    claudeDirs: () => [path.join(tmp, "claude")],
+    accounts: () => [],
+    claude: () => ({
+      bin: "fake-claude",
+      caps: { hasMode: true, modes: ["dontAsk"], promptsNone: false, fork: true },
+    }),
+    run,
+  };
+  daemon = new ControlDaemon(config, path.join(tmp, "control"), sock(), deps);
+});
+const sock = () =>
+  process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock");
+/** What the ack endpoint answers next, in order (0: the connection fails); 202 when the list is empty. */
+const ackStatus: number[] = [];
+let deps: DaemonDeps;
+/** The session's transcript in the daemon's Claude Code config dir, in the allowed folder. */
+function transcript(sid = SID): string {
+  const dir = path.join(tmp, "claude", "projects", tmp.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, `${sid}.jsonl`);
+  writeFileSync(f, `${JSON.stringify({ type: "user", cwd: tmp })}\n`);
+  // Written ten minutes ago by the daemon's (fake) clock: idle, not someone's live session.
+  const past = new Date(Date.now() - 10 * MINUTE);
+  utimesSync(f, past, past);
+  return f;
+}
+/** A run that answers as `claude -p --output-format json` does. */
+const result = (over: Record<string, unknown> = {}) => ({
+  code: 0,
+  signal: null,
+  stdout: JSON.stringify({ type: "result", result: "delivered", session_id: SID, is_error: false, ...over }),
+  stderr: "",
+  tooBig: false,
+  timedOut: false,
 });
 
 afterEach(async () => {
@@ -305,5 +330,292 @@ describe("control poll recovery", () => {
     daemon.resumeIntake();
     await vi.advanceTimersByTimeAsync(0);
     expect(poll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the machine's token", () => {
+  it("unreadable at start: said once, asked again every 30 s, polled with as soon as it reads", async () => {
+    config.receivers[0]!.token = "";
+    config.receivers[0]!.token_in = "keychain";
+    const token = vi
+      .fn<NonNullable<DaemonDeps["token"]>>()
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(null)
+      .mockReturnValue(rx.token);
+    deps.token = token;
+    await start();
+    expect(poll).not.toHaveBeenCalled();
+    expect(state().last_error).toBe("can't read this machine's token from keychain (locked?); retrying every 30 s");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(log.mock.calls.filter(([l]) => String(l).includes("can't read"))).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(log).toHaveBeenCalledWith(`${rx.url}: machine token readable again`);
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(config.receivers[0]?.token).toBe(rx.token);
+  });
+
+  it("with no store to ask, a missing token is named as its store", async () => {
+    config.receivers[0]!.token = "";
+    await start();
+    expect(state().last_error).toContain("from its store (locked?)");
+    expect(log).toHaveBeenCalledWith(`${rx.url}: can't read this machine's token from its store; retrying`);
+  });
+});
+
+describe("what a poll can answer", () => {
+  it("a 200 with no messages, and a 500: back off like any failure", async () => {
+    poll.mockResolvedValueOnce(Response.json({})).mockResolvedValueOnce(new Response(null, { status: 500 }));
+    await start();
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(poll).toHaveBeenCalledTimes(2);
+    expect(state()).toMatchObject({ polling: false, last_error: "HTTP 500" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(poll).toHaveBeenCalledTimes(3);
+  });
+
+  it("a receiver unpaired while its poll was parked: what that poll brought is still handled; its ack has nowhere to go; the loop ends", async () => {
+    transcript();
+    let answer!: (r: Response) => void;
+    const message = await rx.send({ session: `claude-code:${SID}`, text: "last words" });
+    poll.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    await start();
+    daemon.reload({ ...config, receivers: [] });
+    answer(Response.json({ messages: [message] }));
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(daemon.status().busy).toBeNull());
+    expect(rx.acks).toEqual([]);
+    expect(daemon.status().acks_pending).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(poll).toHaveBeenCalledTimes(1);
+    expect(daemon.status().receivers).toEqual([]);
+  });
+
+  it("a start for a harness this daemon doesn't drive, with no env of its own", async () => {
+    vi.stubEnv("CODEX_HOME", path.join(tmp, "codex-home"));
+    const agy = await rx.send({ kind: "start", session: "antigravity:conv-1", cwd: tmp, text: "hi" });
+    const codex = await rx.send({ kind: "start", session: "codex:thread-1", cwd: tmp, text: "hi" });
+    const thread = await rx.send({ session: "codex:0199c0de-1111-7222-8333-944455556666", text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [agy, codex, thread] }));
+    await start();
+    await vi.waitFor(() =>
+      expect(rx.finalAck(agy.id)).toMatchObject({
+        outcome: "failed",
+        detail: "Antigravity isn't installed on this machine",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(rx.finalAck(codex.id)).toMatchObject({
+        outcome: "failed",
+        detail: "Codex isn't installed on this machine",
+      }),
+    );
+    await vi.waitFor(() => expect(rx.finalAck(thread.id)).toMatchObject({ outcome: "refused", code: "no_session" }));
+    vi.unstubAllEnvs();
+  });
+
+  it("a poll held past its deadline, and a hello that never answers, are given up on", async () => {
+    const hang: typeof fetch = (_u, init) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+    poll.mockImplementationOnce(hang);
+    hello.mockImplementationOnce(hang);
+    await start();
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20_001);
+    expect(state().last_error).toBe("aborted");
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("acks (CONTROL.md §10)", () => {
+  it("kept and sent again, with a growing pause, until the receiver accepts them; a receiver with none is skipped", async () => {
+    config.receivers.push({
+      ...config.receivers[0]!,
+      url: "https://second.test",
+      control: "https://second.test/control",
+      machine: "second",
+    });
+    transcript();
+    // Refused once, unreachable once, then accepted.
+    ackStatus.push(500, 0);
+    const message = await rx.send({ session: `claude-code:${SID}`, text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [message] }));
+    await start();
+    await vi.waitFor(() => expect(daemon.status().acks_pending).toBeGreaterThan(0));
+    expect(rx.acks).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(rx.acks).toEqual([]);
+    await vi.advanceTimersByTimeAsync(4000);
+    await vi.waitFor(() => expect(rx.finalAck(message.id)).toMatchObject({ outcome: "delivered" }));
+    expect(daemon.status().acks_pending).toBe(0);
+  });
+});
+
+describe("a message queued for a Stop (CONTROL.md §6 `turn`)", () => {
+  it("goes another way after thirty minutes without a Stop; one the Stop took is left alone", async () => {
+    transcript();
+    run.mockResolvedValue(result());
+    await start();
+    await ask(sock(), { op: "event", session: `claude-code:${SID}`, event: "UserPromptSubmit" }, 500);
+    const late = await rx.send({ session: `claude-code:${SID}`, text: "late" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [late] }));
+    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.waitFor(() => expect(rx.acks.find((a) => a.id === late.id)).toMatchObject({ outcome: "taken" }));
+    expect(run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30 * MINUTE);
+    await vi.waitFor(() => expect(rx.finalAck(late.id)).toMatchObject({ outcome: "delivered", mode: "resume" }));
+    // The next one is taken by the Stop hook in time: the fallback finds nothing to do.
+    await ask(sock(), { op: "event", session: `claude-code:${SID}`, event: "UserPromptSubmit" }, 500);
+    const taken = await rx.send({ session: `claude-code:${SID}`, text: "in time" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [taken] }));
+    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.waitFor(() => expect(rx.acks.find((a) => a.id === taken.id)).toMatchObject({ outcome: "taken" }));
+    expect(await ask(sock(), { op: "stop", session: `claude-code:${SID}`, active: false }, 500)).toMatchObject({
+      op: "block",
+    });
+    await vi.advanceTimersByTimeAsync(30 * MINUTE);
+    await vi.waitFor(() => expect(rx.finalAck(taken.id)).toMatchObject({ outcome: "delivered", mode: "turn" }));
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("an Agent SDK session held idle", () => {
+  it("is closed after its idle time, unless mid-turn or just used, and a later message resumes it", async () => {
+    await daemon.stop();
+    let busy = false;
+    const host: SdkHost = {
+      start: () => ({
+        send: async () => ({ reply: "ok" }),
+        interrupt: async () => {},
+        close: () => {},
+        get busy() {
+          return busy;
+        },
+        lastUsed: Date.now(),
+      }),
+    };
+    daemon = new ControlDaemon(config, path.join(tmp, "control"), sock(), {
+      ...deps,
+      sdk: host,
+      sdkIdleMs: 5 * MINUTE,
+    });
+    const message = await rx.send({ kind: "start", session: `claude-code:${SID}`, cwd: tmp, text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [message] }));
+    await start();
+    await vi.waitFor(() => expect(rx.finalAck(message.id)).toMatchObject({ outcome: "delivered", mode: "sdk" }));
+    expect(daemon.status().sdk).toEqual([SID]);
+    await vi.advanceTimersByTimeAsync(2 * MINUTE);
+    expect(daemon.status().sdk).toEqual([SID]);
+    busy = true;
+    await vi.advanceTimersByTimeAsync(4 * MINUTE);
+    expect(daemon.status().sdk).toEqual([SID]);
+    busy = false;
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(daemon.status().sdk).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      `sdk session ${SID.slice(0, 8)} closed after 5 min idle (it resumes on the next message)`,
+    );
+  });
+});
+
+describe("what a headless run's end means (outcome)", () => {
+  const cases: [string, Record<string, unknown>, Record<string, unknown>][] = [
+    [
+      "couldn't start",
+      { error: "spawn ENOENT" },
+      { outcome: "failed", detail: "couldn't start Claude Code: spawn ENOENT" },
+    ],
+    [
+      "timed out",
+      { timedOut: true },
+      { outcome: "failed", detail: "Claude Code was still working after 30 minutes, so it was stopped" },
+    ],
+    ["too big", { tooBig: true }, { outcome: "failed", detail: "Claude Code's answer was too large to read" }],
+    [
+      "no result, a stderr tail",
+      { stdout: "", code: 1, stderr: "a\nb\nc\nd\n" },
+      { outcome: "failed", detail: "Claude Code exited (code 1) without an answer: b c d" },
+    ],
+    [
+      "no result, killed",
+      { stdout: null, signal: "SIGKILL", stderr: "" },
+      { outcome: "failed", detail: "Claude Code exited (SIGKILL) without an answer" },
+    ],
+    [
+      "an error with a result",
+      { stdout: JSON.stringify({ type: "result", is_error: true, result: "rate limited" }) },
+      { outcome: "failed", detail: "rate limited" },
+    ],
+    [
+      "an error with a subtype",
+      { stdout: JSON.stringify({ type: "result", is_error: true, subtype: "error_max_turns" }) },
+      { outcome: "failed", detail: "error_max_turns" },
+    ],
+    [
+      "an error with nothing",
+      { stdout: JSON.stringify({ type: "result", is_error: true }) },
+      { outcome: "failed", detail: "Claude Code reported an error" },
+    ],
+    [
+      "denials by name",
+      {
+        stdout: JSON.stringify({
+          type: "result",
+          result: "did it",
+          permission_denials: [{ tool_name: "Bash" }, { tool_name: "Bash" }, {}],
+        }),
+      },
+      {
+        outcome: "delivered",
+        reply: "did it\n\n(Not allowed on this machine, since nobody was there to approve: Bash.)",
+      },
+    ],
+    [
+      "denials without names",
+      { stdout: JSON.stringify({ type: "result", result: "did it", permission_denials: [{}] }) },
+      {
+        outcome: "delivered",
+        reply: "did it\n\n(Not allowed on this machine, since nobody was there to approve: 1 action(s).)",
+      },
+    ],
+    [
+      "no words",
+      { stdout: JSON.stringify({ type: "result", result: "  " }) },
+      { outcome: "delivered", reply: "(Claude Code finished without a written reply.)" },
+    ],
+    [
+      "a session id that isn't one",
+      { stdout: JSON.stringify({ type: "result", result: "ok", session_id: "nope" }) },
+      { outcome: "delivered", reply: "ok", mode: "resume" },
+    ],
+  ];
+  it.each(cases)("%s", async (_name, res, ack) => {
+    transcript();
+    run.mockResolvedValue({ ...result(), ...res } as never);
+    const message = await rx.send({ session: `claude-code:${SID}`, text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [message] }));
+    await start();
+    await vi.waitFor(() => expect(rx.finalAck(message.id)).toMatchObject(ack));
+    expect(rx.finalAck(message.id)).not.toHaveProperty("session");
+  });
+  it("a start that ends badly is failed the same way", async () => {
+    run.mockResolvedValue({ ...result(), stdout: "", code: 2, stderr: "boom" } as never);
+    const message = await rx.send({ kind: "start", session: `claude-code:${SID}`, cwd: tmp, text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [message] }));
+    await start();
+    await vi.waitFor(() =>
+      expect(rx.finalAck(message.id)).toMatchObject({
+        outcome: "failed",
+        detail: "Claude Code exited (code 2) without an answer: boom",
+      }),
+    );
   });
 });

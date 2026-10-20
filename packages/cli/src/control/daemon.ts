@@ -377,6 +377,7 @@ export class ControlDaemon {
     await new Promise<void>((r) => (this.server ? this.server.close(() => r()) : r()));
     this.server = null;
     // Only the socket file this daemon made: after a hand-over the path is someone else's.
+    /* v8 ignore next -- Node unlinks a listening Unix socket's path in server.close(), so the file is gone by here; kept for a runtime that doesn't */
     if (process.platform !== "win32" && this.sockId && socketId(this.sock) === this.sockId)
       try {
         unlinkSync(this.sock);
@@ -436,7 +437,9 @@ export class ControlDaemon {
       try {
         await this.listen();
       } catch (e) {
-        this.deps.log(`couldn't listen again: ${String((e as Error)?.message || e)}`);
+        this.deps.log(
+          `couldn't listen again: ${String(/* v8 ignore next -- listen() throws Errors (net, DaemonRunning) */ (e as Error)?.message || e)}`,
+        );
       }
       return;
     }
@@ -758,7 +761,9 @@ export class ControlDaemon {
             for (const m of body.messages ?? []) {
               if (m && !this.inflight.has(m.id)) fresh++;
               void this.handle(cur, m).catch((e) =>
-                this.deps.log(`handle ${String(m?.id).slice(-8)}: ${String((e as Error)?.message || e)}`),
+                this.deps.log(
+                  `handle ${String(m?.id).slice(-8)}: ${String(/* v8 ignore next -- handle() rejects with an Error (the ack file) */ (e as Error)?.message || e)}`,
+                ),
               );
             }
           } finally {
@@ -1094,7 +1099,7 @@ export class ControlDaemon {
       writeAliases(aliasFile(this.dir), this.aliases);
     } catch (e) {
       this.deps.log(
-        `couldn't record ${harness}:${id.slice(0, 8)} → ${real.slice(0, 8)}: ${String((e as Error)?.message || e)}`,
+        `couldn't record ${harness}:${id.slice(0, 8)} → ${real.slice(0, 8)}: ${String(/* v8 ignore next -- writeAliases throws fs Errors */ (e as Error)?.message || e)}`,
       );
     }
   }
@@ -1120,6 +1125,7 @@ export class ControlDaemon {
         ...(this.deps.codexLogin ? { login: this.deps.codexLogin } : {}),
         loginHint: codexControl.LOGIN_HINT,
       };
+    /* v8 ignore else -- only a HEADLESS harness gets here (route.ts): Claude Code never asks for a driver */
     if (harness === "antigravity")
       return {
         label: "Antigravity",
@@ -1129,6 +1135,7 @@ export class ControlDaemon {
           resume ? antigravityControl.agyArgs({ mode, prompt, resume }) : antigravityControl.agyArgs({ mode, prompt }),
         reading: () => antigravityControl.reading(),
       };
+    /* v8 ignore next -- see above */
     return null;
   }
 
@@ -1229,7 +1236,10 @@ export class ControlDaemon {
       };
     }
     const transcript = place.transcript;
-    const claude = ref.harness === "claude-code" ? this.deps.claude() : null;
+    const claude =
+      ref.harness === "claude-code"
+        ? this.deps.claude()
+        : /* v8 ignore next -- every other harness returned above */ null;
     const target = this.state.copies[ref.id] ?? ref.id;
     const t = transcript;
     // The daemon's own run holding it is not "someone else's live process": the message
@@ -1253,6 +1263,7 @@ export class ControlDaemon {
   private async prompt(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number): Promise<void> {
     const route = routePrompt(this.view(cmd.session, place));
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
+    /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });
     const ref = parseSessionRef(cmd.session)!;
     const text = cmd.text as string;
@@ -1297,6 +1308,7 @@ export class ControlDaemon {
       case "resume":
       case "fork":
         return this.headless(r, id, cmd, place, route.mode, sent);
+      /* v8 ignore next -- no harness has an input API wired yet (view() says api: false) */
       case "api":
         return this.finish(r, id, { outcome: "unsupported", detail: "no input API wired for this harness" });
     }
@@ -1356,7 +1368,11 @@ export class ControlDaemon {
     const login = drv.login;
     if (login && !(await this.signedIn(`${drv.cmd}:`, () => login(bin)))) {
       this.deps.log(`${drv.cmd} isn't signed in as the daemon sees it`);
-      return { failed: drv.loginHint ?? `${drv.label} isn't signed in on this machine` };
+      return {
+        failed:
+          /* v8 ignore next -- only Codex has a login check, and it has a hint */ drv.loginHint ??
+          `${drv.label} isn't signed in on this machine`,
+      };
     }
     return { bin };
   }
@@ -1371,6 +1387,7 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
       // Read again: the start this waited for may have named the session meanwhile.
+      /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
       const target = this.aliasOf(ref.harness, ref.id)?.id ?? place.target ?? ref.id;
       const args = drv.args({
         mode: this.cfg.mode,
@@ -1525,6 +1542,7 @@ export class ControlDaemon {
   private addKey(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number) {
     const k = cmd.key!;
     const name = typeof cmd.name === "string" ? cmd.name.trim().slice(0, 80) : undefined;
+    /* v8 ignore next -- the receiver that handed the message over is in cfg, unless `control off` ran mid-flight */
     const rec = this.cfg.receivers.find((x) => x.control === r.control && x.machine === r.machine) ?? r;
     if (rec.keys.some((x) => x.id === k.id))
       return this.finish(r, id, { outcome: "delivered", detail: "that device was already trusted" }, sent);
@@ -1541,7 +1559,7 @@ export class ControlDaemon {
       rec.keys = rec.keys.filter((x) => x.id !== k.id);
       return this.finish(r, id, {
         outcome: "failed",
-        detail: `couldn't save the key: ${String((e as Error)?.message || e)}`,
+        detail: `couldn't save the key: ${String(/* v8 ignore next -- writeControl throws fs Errors */ (e as Error)?.message || e)}`,
       });
     }
     this.deps.log(
@@ -1583,7 +1601,13 @@ export class ControlDaemon {
         : null;
       stream.close();
       this.finish(r, id, { outcome: "delivered", mode, ...(answer ? { reply: answer } : {}) }, sent);
-    })().catch((e) => this.finish(r, id, { outcome: "delivered", mode, detail: String((e as Error)?.message || e) }));
+    })().catch((e) =>
+      this.finish(r, id, {
+        outcome: "delivered",
+        mode,
+        detail: String(/* v8 ignore next -- awaitAnswer throws fs Errors */ (e as Error)?.message || e),
+      }),
+    );
   }
 
   /** The answer so far, sent as a `progress` ack: whole, with a rising seq, at most
@@ -1617,6 +1641,7 @@ export class ControlDaemon {
     try {
       return await fn();
     } finally {
+      /* v8 ignore next -- a session being let go of was always held */
       const n = (this.ownRuns.get(session) ?? 1) - 1;
       if (n > 0) this.ownRuns.set(session, n);
       else this.ownRuns.delete(session);

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { answerIn, awaitAnswer, transcriptEnd } from "../src/control/reply.js";
+import { kindPath, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
@@ -43,12 +44,41 @@ describe("awaitAnswer", () => {
     appendFileSync(f, line.slice(10));
     expect(await done).toBe("new answer");
   });
+  it("a turn that ended without a word is no answer", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
+    const f = path.join(dir, "t.jsonl");
+    writeFileSync(f, "");
+    appendFileSync(f, `${asst("end_turn", [{ type: "tool_use", name: "Edit" }])}\n`);
+    expect(await awaitAnswer(f, 0, { timeoutMs: 3000, pollMs: 20 })).toBeNull();
+  });
   it("gives up after its timeout when the turn never ends", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
     const f = path.join(dir, "t.jsonl");
     writeFileSync(f, "");
     appendFileSync(f, `${asst("tool_use", [{ type: "text", text: "working" }])}\n`);
     expect(await awaitAnswer(f, 0, { timeoutMs: 150, pollMs: 20 })).toBeNull();
+  });
+});
+
+describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
+  it("a harness with an input API gets `api` before any cold start; a kind nobody knows is unsupported", () => {
+    const view = {
+      harness: "opencode",
+      sdk: false,
+      waiter: false,
+      midTurn: false,
+      live: false,
+      known: true,
+      canFork: false,
+    };
+    expect(routePrompt({ ...view, api: true })).toEqual({ mode: "api" });
+    expect(routePrompt({ ...view, api: false })).toHaveProperty("unsupported");
+    expect(kindPath("permission.answer", "gemini-cli")).toEqual({
+      unsupported: "Gemini CLI has no permission answer channel",
+    });
+    expect(kindPath("permission.answer", "codex")).toBe("permission");
+    expect(kindPath("cancel", "codex")).toBe("cancel");
+    expect(kindPath("restart" as never, "codex")).toEqual({ unsupported: "unknown kind restart" });
   });
 });
 

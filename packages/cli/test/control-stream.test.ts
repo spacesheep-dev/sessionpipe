@@ -60,6 +60,24 @@ describe("AnswerStream", () => {
     expect(sent).toEqual(["a", "abc"]);
     s.close();
   });
+  it("nothing to say is nothing sent: an empty delta, the same text again, only whitespace", async () => {
+    const sent: string[] = [];
+    const s = new AnswerStream(async (t) => {
+      sent.push(t);
+    }, 5);
+    s.feed(delta(""));
+    s.set("   ");
+    await settle(20);
+    expect(sent).toEqual([]);
+    s.set("a");
+    s.set("a");
+    await settle(20);
+    // Trailing whitespace is no new answer.
+    s.set("a ");
+    await settle(20);
+    expect(sent).toEqual(["a"]);
+    s.close();
+  });
   it("a failed send is not fatal and nothing is sent after close", async () => {
     let n = 0;
     const s = new AnswerStream(async () => {
