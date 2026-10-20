@@ -1,0 +1,43 @@
+{
+  "harness": "claude-code",
+  "event": "Stop",
+  "recorded": {
+    "at": "2026-10-20T21:32:26.206Z",
+    "harness_version": "2.1.305",
+    "how": "claude -p --allowedTools=Bash with the installed hooks recording each payload (SESSIONPIPE_STATE=<dir> SESSIONPIPE_NO_WORKER=1); the prompt asked for `sleep 40` with run_in_background and a one-word reply, so the Stop came with the command still running"
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "Stop"
+    ],
+    "stdin": "{\"session_id\":\"4e960f0a-fc94-4b51-a223-9c810563a481\",\"transcript_path\":\"/Users/me/.claude/projects/-Users-me-rec-ws/4e960f0a-fc94-4b51-a223-9c810563a481.jsonl\",\"cwd\":\"/Users/me/rec/ws\",\"prompt_id\":\"736712d6-71a4-4ea1-958c-5f1a98f078c8\",\"permission_mode\":\"bypassPermissions\",\"effort\":{\"level\":\"medium\"},\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"started\",\"background_tasks\":[{\"id\":\"bmbcplyb0\",\"type\":\"shell\",\"status\":\"running\",\"description\":\"Run sleep 40 in background\",\"command\":\"sleep 40\"}],\"session_crons\":[]}\n",
+    "env": {
+      "CLAUDE_CONFIG_DIR": "/Users/me/.claude",
+      "CLAUDE_PROJECT_DIR": "/Users/me/rec/ws"
+    },
+    "cwd": "/Users/me/rec/ws"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "claude-code",
+        "event": "Stop"
+      },
+      "session": {
+        "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+        "cwd": "/Users/me/rec/ws",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+        "reason": "stop",
+        "background": 1
+      }
+    }
+  ]
+}
