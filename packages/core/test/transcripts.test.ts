@@ -79,6 +79,31 @@ describe("isInjected", () => {
     expect(isInjected("fix <the> thing")).toBe(false);
     expect(isInjected("plain words")).toBe(false);
   });
+
+  it("a wrapper whose tag carries attributes is injected too: another session's message", () => {
+    const peer =
+      '<cross-session-message from="uds:/tmp/cc-socks/76094.sock" from-name="gyroscope-b4" from-mode="bypass">\n' +
+      "Agreed.\n</cross-session-message>";
+    expect(isInjected(peer)).toBe(true);
+    expect(isInjected("<task-notification>\n<task-id>w0wdh6zft</task-id>\n</task-notification>")).toBe(true);
+    // The person's own words that merely contain or start with markup are kept.
+    expect(isInjected("Use <b>bold</b> for the title")).toBe(false);
+    expect(isInjected('<a href="https://x.test">this link</a> is broken, fix it')).toBe(false);
+    expect(isInjected("Fix the bug")).toBe(false);
+  });
+
+  it("readClaude skips another session's message written as a user record", () => {
+    const peer = JSON.stringify({
+      type: "user",
+      timestamp: T0,
+      message: { content: '<cross-session-message from="uds:/x.sock" from-name="b4">Done.</cross-session-message>' },
+    });
+    // Not an unanswered ask either: no `open`, and the cursor may pass it.
+    expect(readClaude([user("hello"), assistant("hi"), peer, ""], 0)).toEqual({
+      turns: [{ user: "hello", assistant: "hi", at: Date.parse(T0), endLine: 1 }],
+      line: 3,
+    });
+  });
 });
 
 describe("readClaude", () => {

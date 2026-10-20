@@ -144,3 +144,123 @@ describe("turn.progress", () => {
     expect(openTurn({ turns: [], line: 0 }, { base: 0, at: 9 })).toBeNull();
   });
 });
+
+// A message sent while a turn runs is absorbed by that turn: Claude Code writes it as a
+// `queued_command` attachment and fires UserPromptSubmit with the running turn's own
+// prompt_id (2.1.301, recorded 2026-10-20). Its reading went out numbered as the next
+// turn, which the transcript never delivers, and the receiver kept that reading, its
+// reply empty, in place of the running turn ("Starting on it…" for 1 h 20 min).
+describe("turn.progress: a message absorbed mid-turn", () => {
+  const sid = "absorb-1";
+  const tr = path.join(tmp, "absorb.jsonl");
+  writeFileSync(tr, "");
+  const rec = (r: Record<string, unknown>) => appendFileSync(tr, `${JSON.stringify(r)}\n`);
+  const ask = (text: string, at: string, origin: Record<string, unknown> = { kind: "human" }) =>
+    rec({ type: "user", timestamp: at, origin, message: { role: "user", content: text } });
+  const say = (text: string, at: string) =>
+    rec({ type: "assistant", timestamp: at, message: { role: "assistant", content: [{ type: "text", text }] } });
+  const queued = (prompt: string, origin: Record<string, unknown>, at: string) =>
+    rec({
+      type: "attachment",
+      timestamp: at,
+      attachment: { type: "queued_command", prompt, commandMode: "prompt", origin, timestamp: at },
+    });
+  let t = Date.parse("2026-10-20T19:49:03.000Z");
+  const hook = (event: string, extra: Record<string, unknown> = {}) => ({
+    harness: "claude-code",
+    event,
+    argv: ["claude-code", event],
+    stdin: JSON.stringify({ session_id: sid, cwd: tmp, hook_event_name: event, transcript_path: tr, ...extra }),
+    cwd: tmp,
+    env: { CLAUDE_CONFIG_DIR: tmp },
+    at: t,
+  });
+  const toolDone = (prompt_id: string, n: string) =>
+    hook("PostToolUse", {
+      prompt_id,
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+      tool_response: "ok",
+      tool_use_id: n,
+    });
+  const mine = () => sent().filter((e) => e.session?.id === sid);
+  const readings = () =>
+    mine()
+      .filter((e) => e.type === "turn.progress")
+      .map((e) => e.data);
+  const delivered = () =>
+    mine()
+      .filter((e) => e.type === "turn.transcript")
+      .map((e) => e.data.turn);
+
+  it("another session's message keeps the reading on the turn that absorbed it", async () => {
+    const P = "b55c909a-463d-456d-8c3a-635713272ac3";
+    await runJob(hook("SessionStart", { source: "startup" }), { state: tmp });
+    await runJob(hook("UserPromptSubmit", { prompt_id: P, prompt: "Write the hub update" }), { state: tmp });
+    ask("Write the hub update", "2026-10-20T19:49:03.100Z");
+    say("All 12 readers came back.", "2026-10-20T19:49:12.797Z");
+    t += PROGRESS_MS;
+    await runJob(toolDone(P, "t1"), { state: tmp });
+    const peer =
+      '<cross-session-message from="uds:/tmp/cc-socks/76094.sock" from-name="gyroscope-b4" from-mode="bypass">' +
+      "Agreed: I won't touch the hub until your commit lands.</cross-session-message>";
+    t += 60_000;
+    await runJob(hook("UserPromptSubmit", { prompt_id: P, prompt: peer }), { state: tmp });
+    queued(peer, { kind: "peer", name: "gyroscope-b4" }, "2026-10-20T19:51:43.392Z");
+    say("The second workflow is running.", "2026-10-20T19:58:17.469Z");
+    t += PROGRESS_MS;
+    await runJob(toolDone(P, "t2"), { state: tmp });
+    t += 5_000;
+    await runJob(hook("Stop", { prompt_id: P }), { state: tmp });
+    expect(delivered()).toEqual([0]);
+    expect(readings().map((r) => r.turn)).toEqual([0, 0, 0, 0]);
+    expect(readings().some((r) => String(r.user).includes("cross-session-message"))).toBe(false);
+    expect(readings().at(-1)).toMatchObject({
+      user: "Write the hub update",
+      assistant: "All 12 readers came back.\n\nThe second workflow is running.",
+    });
+  });
+
+  it("the person's own mid-turn message opens no turn the transcript won't deliver", async () => {
+    const Q = "9e6a05a5-2448-4d2e-bb55-2f6e39a45a71";
+    t += 60_000;
+    await runJob(hook("UserPromptSubmit", { prompt_id: Q, prompt: "Troubleshoot the session page" }), { state: tmp });
+    ask("Troubleshoot the session page", "2026-10-20T21:14:52.869Z");
+    say("Reading the board row first.", "2026-10-20T21:16:30.000Z");
+    t += PROGRESS_MS;
+    await runJob(toolDone(Q, "t3"), { state: tmp });
+    const also = "Also, the other session should be under Working.";
+    t += 10_000;
+    await runJob(hook("UserPromptSubmit", { prompt_id: Q, prompt: also }), { state: tmp });
+    queued(also, { kind: "human" }, "2026-10-20T21:16:43.004Z");
+    say("Noted; looking at that one too.", "2026-10-20T21:18:05.000Z");
+    t += PROGRESS_MS;
+    await runJob(toolDone(Q, "t4"), { state: tmp });
+    t += 5_000;
+    await runJob(hook("Stop", { prompt_id: Q }), { state: tmp });
+    // Whichever turn the transcript files the message under, every reading is of a
+    // turn it delivers: none is left standing for the receiver to show.
+    const turns = readings()
+      .slice(4)
+      .map((r) => r.turn);
+    expect(turns.length).toBeGreaterThan(0);
+    for (const n of turns) expect(delivered()).toContain(n);
+  });
+
+  it("a task notification starts a turn without being its ask", async () => {
+    const R = "0efce330-aa04-4bed-aed9-33c376e56e30";
+    const note =
+      "<task-notification>\n<task-id>w0wdh6zft</task-id>\n<status>completed</status>\n" +
+      '<summary>Workflow "readers" completed</summary>\n</task-notification>';
+    t += 60_000;
+    const before = readings().length;
+    await runJob(hook("UserPromptSubmit", { prompt_id: R, prompt: note }), { state: tmp });
+    ask(note, "2026-10-20T21:30:00.000Z", { kind: "task-notification", producer: "session-task" });
+    expect(readings()).toHaveLength(before); // nothing to read yet, and the notification is no ask
+    say("The readers are back.", "2026-10-20T21:30:09.000Z");
+    t += PROGRESS_MS;
+    await runJob(toolDone(R, "t5"), { state: tmp });
+    expect(readings().at(-1)).toMatchObject({ user: "", assistant: "The readers are back." });
+    expect(readings().some((r) => String(r.user).startsWith("<task-notification>"))).toBe(false);
+  });
+});

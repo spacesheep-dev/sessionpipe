@@ -43,9 +43,13 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
   return out;
 }
 
-/** Injected context the person never typed: <tag>…</tag> wrappers, HTML comments, slash-command expansions. */
+/** Injected context the person never typed: <tag>…</tag> wrappers (the tag may carry
+ *  attributes, as Claude Code's `<cross-session-message from="…">` does), HTML comments,
+ *  slash-command expansions. */
 export const isInjected = (text: string): boolean =>
-  (/^<[a-z_-]+>/i.test(text) && /<\/[a-z_-]+>\s*$/i.test(text)) || /^<!--\s/.test(text) || /^<command-/.test(text);
+  (/^<[a-z_-]+(?:\s[^>]*)?>/i.test(text) && /<\/[a-z_-]+>\s*$/i.test(text)) ||
+  /^<!--\s/.test(text) ||
+  /^<command-/.test(text);
 
 const parse = (raw: string): Record<string, unknown> | null => {
   try {

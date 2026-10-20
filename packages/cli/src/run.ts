@@ -23,6 +23,7 @@ import {
   FileSink,
   filterEvent,
   gitFacts,
+  isInjected,
   machineName,
   makeEvent,
   Outbox,
@@ -239,8 +240,11 @@ export function openTurn(
   });
   if (read.open) return fresh(read.open.user, read.open.at);
   // The prompt the hook just reported, unless the transcript already has its reply.
+  // Text the person never typed (a task notification, another session's message) opens
+  // no turn: the readers skip it, so that turn would never be delivered, and its
+  // reading would stand in for the turn that is running until the next one lands.
   const prompt = o.prompt?.trim();
-  if (prompt && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
+  if (prompt && !isInjected(prompt) && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
   if (!last) return null;
   return {
     turn: o.base + read.turns.length - 1,
@@ -354,13 +358,18 @@ export async function runJob(
     // delivers the whole turn when it ends.
     const ending = r.events.some((e) => e.type === "turn.ended" || e.type === "session.ended");
     const starting = r.events.some((e) => e.type === "turn.started");
+    // A message sent while a turn runs is absorbed by that turn, and Claude Code reports
+    // it as a prompt with the running turn's own id. It is not a new turn: where it
+    // belongs is the transcript's to say, so its text is no reading of its own.
+    const startedId = r.events.find((e) => e.type === "turn.started")?.data.turn_id;
+    const absorbed = starting && typeof startedId === "string" && facts.get(job.harness, id).open_turn === startedId;
     if (wantsTranscript && r.transcript && !ending && (starting || r.events.some((e) => e.type === "tool.ended"))) {
       const cur = facts.get(job.harness, id);
       const at = opts.now ?? job.at;
       if (starting || at - (Number(cur.progress_at) || 0) >= PROGRESS_MS) {
         const p = openTurn(adapter.readTranscript(r.transcript, Number(cur.transcript_line) || 0), {
           base: Number(cur.transcript_turns) || 0,
-          prompt: typeof r.hints?.prompt === "string" ? r.hints.prompt : undefined,
+          prompt: !absorbed && typeof r.hints?.prompt === "string" ? r.hints.prompt : undefined,
           at,
         });
         const sig = p && `${p.turn}:${p.user.length}:${p.assistant.length}`;
@@ -379,6 +388,9 @@ export async function runJob(
         }
       }
     }
+    // The turn running now, by its prompt's id, until it ends (for `absorbed`).
+    if (starting && typeof startedId === "string" && !absorbed) facts.save(job.harness, id, { open_turn: startedId });
+    if (ending) facts.save(job.harness, id, { open_turn: null });
     // Tier 2: after a turn ends, the transcript's new turns become turn.transcript events.
     if (
       wantsTranscript &&
