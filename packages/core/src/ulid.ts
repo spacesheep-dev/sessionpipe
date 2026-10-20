@@ -21,7 +21,7 @@ export function ulid(now: number = Date.now()): string {
   if (now === lastTime) {
     // increment the random part
     for (let i = lastRand.length - 1; i >= 0; i--) {
-      const v = (lastRand[i] ?? 0) + 1;
+      const v = (lastRand[i] as number) + 1;
       if (v < 32) {
         lastRand[i] = v;
         break;
@@ -30,8 +30,7 @@ export function ulid(now: number = Date.now()): string {
     }
   } else {
     lastTime = now;
-    const b = randomBytes(16);
-    lastRand = Array.from({ length: 16 }, (_, i) => (b[i] ?? 0) % 32);
+    lastRand = Array.from(randomBytes(16), (b) => b % 32);
   }
   return encodeTime(now) + lastRand.map((v) => ALPHABET[v]).join("");
 }

@@ -83,18 +83,13 @@ export interface Notify {
 export function readNotify(text: string): Notify | null {
   const { head, tail, at } = split(text);
   const m = NOTIFY_LINE.exec(head);
-  if (m)
-    return {
-      raw: m[1] ?? "",
-      argv: parseArgv(m[1] ?? ""),
-      index: m.index,
-      length: m[0].length,
-      misplaced: false,
-      other: !OURS.test(m[1] ?? ""),
-    };
+  if (m) {
+    const raw = m[1] as string;
+    return { raw, argv: parseArgv(raw), index: m.index, length: m[0].length, misplaced: false, other: !OURS.test(raw) };
+  }
   const k = NOTIFY_KEY.exec(head);
   if (k) {
-    const rest = head.slice(k.index).split("\n")[0] ?? "";
+    const rest = head.slice(k.index).split("\n")[0] as string;
     return {
       raw: rest.replace(NOTIFY_KEY, "").trim(),
       argv: null,
@@ -105,15 +100,11 @@ export function readNotify(text: string): Notify | null {
     };
   }
   const t = NOTIFY_LINE.exec(tail);
-  if (t && OURS.test(t[1] ?? ""))
-    return {
-      raw: t[1] ?? "",
-      argv: parseArgv(t[1] ?? ""),
-      index: at + t.index,
-      length: t[0].length,
-      misplaced: true,
-      other: false,
-    };
+  if (t) {
+    const raw = t[1] as string;
+    if (OURS.test(raw))
+      return { raw, argv: parseArgv(raw), index: at + t.index, length: t[0].length, misplaced: true, other: false };
+  }
   return null;
 }
 
@@ -136,10 +127,8 @@ export function withNotify(text: string, line: string): string {
   return insertTopLevel(text, line);
 }
 
-/** The config with its top-level notify line replaced by `line`. */
-export function replaceNotify(text: string, line: string): string | null {
-  const n = readNotify(text);
-  if (!n || n.misplaced || !n.length) return null;
+/** The config with its notify line `n` (as readNotify found it in `text`) replaced by `line`. */
+export function replaceNotify(text: string, n: Notify, line: string): string {
   return text.slice(0, n.index) + line + text.slice(n.index + n.length);
 }
 

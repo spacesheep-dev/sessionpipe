@@ -98,7 +98,6 @@ export interface FilterOptions {
 export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: FilterOptions = {}): Event | null {
   const minTier = TYPE_TIER[event.type];
   if (minTier !== undefined && minTier > tier) return null;
-  if (event.type === "native" && tier < 3) return null;
 
   const session: Record<string, unknown> = {};
   for (const k of SESSION_ALLOW)

@@ -29,7 +29,6 @@ import { formatJson, readJsonFile } from "./claude-shaped.js";
 import type {
   Adapter,
   BackfillRow,
-  FactsState,
   HookCommand,
   HookInput,
   HookResult,
@@ -181,19 +180,17 @@ export const antigravity: Adapter = {
     return readAntigravity(text.split("\n"), fromLine);
   },
 
-  facts(session, transcript, hints, state): SessionFacts {
+  facts(session, transcript, hints): SessionFacts {
     if (!transcript) return {};
     return antigravityFacts(transcript, {
       conversation: session.id,
       workspaces: (hints.workspaces as string[] | undefined) ?? (session.cwd ? [session.cwd] : []),
-      state,
       env: process.env,
     });
   },
 
   backfill(sinceMs, env = process.env): BackfillRow[] {
     const rows: BackfillRow[] = [];
-    const noState: FactsState = { get: () => ({}), save: () => {} };
     for (const data of dataDirs(env)) {
       let ids: string[] = [];
       try {
@@ -206,7 +203,7 @@ export const antigravity: Adapter = {
         } catch {
           continue;
         }
-        const facts = antigravityFacts(f, { conversation: id, workspaces: [], state: noState, env });
+        const facts = antigravityFacts(f, { conversation: id, workspaces: [], env });
         if (!facts.started_at || !facts.last_at) continue;
         const { started_at, last_at, first_ask: _fa, harness_version: _hv, ...rest } = facts;
         rows.push({ session: { id, ...rest }, started_at, last_at });
@@ -322,7 +319,7 @@ export function antigravityRemoteUrl(
 
 export function antigravityFacts(
   file: string,
-  opts: { conversation: string; workspaces: string[]; state: FactsState; env: NodeJS.ProcessEnv },
+  opts: { conversation: string; workspaces: string[]; env: NodeJS.ProcessEnv },
 ): SessionFacts {
   const { head, tail } = ends(file, 128 * 1024, 64 * 1024);
   const H = parseLines(head);
@@ -333,7 +330,7 @@ export function antigravityFacts(
   for (const j of H) {
     if (j.type !== "USER_INPUT" || typeof j.content !== "string") continue;
     const m = /<USER_REQUEST>([\s\S]*?)(?:<\/USER_REQUEST>|$)/.exec(j.content);
-    const text = (m ? (m[1] ?? "") : j.content).trim();
+    const text = (m ? (m[1] as string) : j.content).trim();
     const line = (text.split("\n").find((l) => l.trim()) ?? "").trim();
     if (!line || /^<[a-z_-]+>/i.test(line)) continue;
     out.title = line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line;

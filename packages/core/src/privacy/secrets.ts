@@ -68,12 +68,12 @@ function redactAssignments(text: string): string {
   let last = 0;
   NAME_SEP.lastIndex = 0;
   for (let m = NAME_SEP.exec(text); m; m = NAME_SEP.exec(text)) {
-    const name = m[1] ?? "";
+    const name = m[1] as string;
     if (!isSecretName(name)) continue;
     VALUE.lastIndex = NAME_SEP.lastIndex;
     const v = VALUE.exec(text);
     if (!v) continue;
-    const value = v[1] ?? v[2] ?? v[3] ?? v[4] ?? "";
+    const value = (v[1] ?? v[2] ?? v[3] ?? v[4]) as string;
     NAME_SEP.lastIndex = VALUE.lastIndex;
     if (isPlaceholder(value) || value.includes(REDACTED)) continue;
     // `max_tokens: 4096`, `input_tokens=12k` — a token COUNT, not a token.
@@ -149,7 +149,7 @@ export function redactSecrets(text: string): string {
   let out = text;
   for (const re of TOKEN_PATTERNS) out = out.replace(re, REDACTED);
   out = out.replace(URL_CREDENTIALS, (_m, head: string, _pw: string, at: string) => `${head}${REDACTED}${at}`);
-  out = out.replace(AUTH_HEADER, (m, head: string, v: string) => (v.includes(REDACTED) ? m : `${head}${REDACTED}`));
+  out = out.replace(AUTH_HEADER, (_m, head: string) => `${head}${REDACTED}`);
   out = redactAssignments(out);
   out = out.replace(PROSE, (m, head: string, q: string, v: string) =>
     !looksSecret(v) || v.includes(REDACTED) ? m : `${head}${q}${REDACTED}${q}`,

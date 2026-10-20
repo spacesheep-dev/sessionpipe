@@ -182,7 +182,8 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+/** Equal, compared whole: a mismatch costs the same as a match. */
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let d = 0;
   for (let i = 0; i < a.length; i++) d |= (a[i] as number) ^ (b[i] as number);
@@ -230,7 +231,7 @@ async function importKey(key: TrustedKey): Promise<CryptoKey | null> {
       const k = await crypto.subtle.importKey("spki", u8(spki), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, [
         "verify",
       ]);
-      const bits = (k.algorithm as { modulusLength?: number }).modulusLength ?? 0;
+      const bits = (k.algorithm as { modulusLength?: number }).modulusLength as number; // every RSA key has one
       return bits >= 2048 ? k : null;
     }
   } catch {}

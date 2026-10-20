@@ -173,8 +173,7 @@ export function uninstallClaudeShaped(
     unlinkSync(file);
     return { file, changed: true, note: "removed (sessionpipe created it)" };
   }
-  const next = formatJson(settings, f);
-  if (next !== f.raw) writeFileSync(file, next);
+  writeFileSync(file, formatJson(settings, f));
   return { file, changed: true };
 }
 

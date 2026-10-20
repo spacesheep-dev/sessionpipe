@@ -160,7 +160,7 @@ export function readAntigravity(lines: string[], from: number): TranscriptRead {
     const at = Date.parse(String(j.created_at ?? j.timestamp ?? "")) || Date.now();
     if (j.type === "USER_INPUT") {
       const m = /<USER_REQUEST>([\s\S]*?)(?:<\/USER_REQUEST>|$)/.exec(j.content);
-      const text = (m ? (m[1] ?? "") : j.content).trim();
+      const text = (m ? (m[1] as string) : j.content).trim();
       if (text) msgs.push({ role: "user", text, at, line: i });
     } else if (j.type === "PLANNER_RESPONSE") {
       const text = j.content.trim();

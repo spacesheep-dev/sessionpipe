@@ -83,11 +83,8 @@ function installNotify(cmd: HookCommand, env: NodeJS.ProcessEnv) {
           return { file, changed: false, note: "notify current (after Codex Computer Use)" };
       }
       if (!prev || toml.OURS.test(JSON.stringify(prev))) {
-        const next = toml.replaceNotify(text, `notify = ${toml.withPreviousRaw(n.raw, argv)}`);
-        if (next) {
-          write(next);
-          return { file, changed: true, note: "chained after Codex Computer Use (--previous-notify)" };
-        }
+        write(toml.replaceNotify(text, n, `notify = ${toml.withPreviousRaw(n.raw, argv)}`));
+        return { file, changed: true, note: "chained after Codex Computer Use (--previous-notify)" };
       }
     }
     return {
@@ -117,8 +114,7 @@ function uninstallNotify(env: NodeJS.ProcessEnv) {
   }
   const prev = toml.previousNotify(n.argv);
   if (toml.isComputerUse(n.argv) && prev && toml.OURS.test(JSON.stringify(prev))) {
-    const next = toml.replaceNotify(text, `notify = ${toml.stripPreviousRaw(n.raw)}`);
-    if (next) writeFileSync(file, next);
+    writeFileSync(file, toml.replaceNotify(text, n, `notify = ${toml.stripPreviousRaw(n.raw)}`));
     return { file, changed: true };
   }
   return { file, changed: false };
@@ -390,7 +386,7 @@ export function codexFacts(file: string): SessionFacts {
       .join("\n")
       .trim();
     if (!text || codexInjected(text)) continue;
-    const line = text.split("\n").find((l) => l.trim()) ?? "";
+    const line = text.split("\n")[0] as string; // trimmed, so its first line is its first non-blank one
     out.title = line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line;
     out.title_source = "first-ask";
     break;

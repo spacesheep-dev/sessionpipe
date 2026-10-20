@@ -189,7 +189,7 @@ export const geminiCli: Adapter = {
     const raw = first ? (first.content ?? first.message ?? first.text) : undefined;
     const text = typeof raw === "string" ? raw.trim() : "";
     if (text) {
-      const line = text.split("\n").find((l) => l.trim()) ?? "";
+      const line = text.split("\n")[0] as string; // trimmed, so its first line is its first non-blank one
       out.title = line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line;
       out.title_source = "first-ask";
     }

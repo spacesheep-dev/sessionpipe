@@ -119,7 +119,7 @@ export function agyError(stderr: string | undefined): string {
     const j = JSON.parse(raw) as Record<string, unknown>;
     for (const k of ["message", "error", "detail"]) if (typeof j[k] === "string" && j[k]) return j[k] as string;
   } catch {}
-  return raw.split("\n")[0]?.slice(0, 300) ?? "";
+  return (raw.split("\n")[0] as string).slice(0, 300);
 }
 
 /** An agy run read as it streams: the answer is the agent_response steps' text, and the

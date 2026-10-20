@@ -120,7 +120,7 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
       if (o.onLine) {
         const chunk = partial + b.toString("utf8");
         const lines = chunk.split("\n");
-        partial = lines.pop() ?? "";
+        partial = lines.pop() as string;
         for (const line of lines) {
           if (!line.trim()) continue;
           try {

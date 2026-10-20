@@ -230,7 +230,7 @@ describe("antigravity facts and transcript", () => {
   it("titles after the first USER_REQUEST, with the url and the first and last times", () => {
     const file = dataDir();
     project("proj-1", ["/w"]);
-    const facts = antigravityFacts(file, { conversation: CONV, workspaces: ["/w"], state: noState, env });
+    const facts = antigravityFacts(file, { conversation: CONV, workspaces: ["/w"], env });
     expect(facts).toEqual({
       url: `https://antigravity.google.com/r/${INSTALL}-v2?p=${encodeURIComponent(`c/${CONV}?section=proj-1`)}`,
       title: "Add a README to this project",
@@ -247,14 +247,19 @@ describe("antigravity facts and transcript", () => {
       JSON.stringify({ type: "USER_INPUT", content: "   \n" }),
       JSON.stringify({ type: "USER_INPUT", content: long }),
     ]);
-    const facts = antigravityFacts(file, { conversation: CONV, workspaces: [], state: noState, env });
+    const facts = antigravityFacts(file, { conversation: CONV, workspaces: [], env });
     expect(facts.title?.endsWith("…")).toBe(true);
     expect(facts.title?.length).toBeLessThanOrEqual(81);
     expect(facts.started_at).toBeUndefined();
     // A transcript outside every data dir still gets the url the data dirs' state files name.
-    expect(antigravityFacts("/nowhere.jsonl", { conversation: CONV, workspaces: [], state: noState, env })).toEqual({
+    expect(antigravityFacts("/nowhere.jsonl", { conversation: CONV, workspaces: [], env })).toEqual({
       url: `https://antigravity.google.com/r/${INSTALL}-v2`,
     });
+    // Without an installation id anywhere there is no url, and the rest stands.
+    rmSync(path.join(gemini, "antigravity", "antigravity_state.pbtxt"));
+    const noUrl = antigravityFacts(file, { conversation: CONV, workspaces: [], env });
+    expect(noUrl.url).toBeUndefined();
+    expect(noUrl.title_source).toBe("first-ask");
   });
   it("the adapter's facts take the workspaces from the hints, else the session's folder", () => {
     expect(antigravity.facts({ id: CONV }, undefined, {}, noState)).toEqual({});

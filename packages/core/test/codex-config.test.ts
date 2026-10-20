@@ -67,10 +67,9 @@ describe("codex config.toml, the corners", () => {
     expect(readNotify(`[t]\n${OURS}\n`)?.misplaced).toBe(true);
     expect(readNotify('[t]\nnotify = ["say", "hi"]\n')).toBeNull();
   });
-  it("replaceNotify needs a top-level line; withoutNotify leaves another tool's alone", () => {
-    expect(replaceNotify("a = 1\n", OURS)).toBeNull();
-    expect(replaceNotify(`[t]\n${OURS}\n`, OURS)).toBeNull();
-    expect(replaceNotify(`${OURS}\n`, 'notify = ["x"]')).toBe('notify = ["x"]\n');
+  it("replaceNotify swaps the line readNotify found; withoutNotify leaves another tool's alone", () => {
+    const text = `a = 1\n${OURS}\n[t]\n`;
+    expect(replaceNotify(text, readNotify(text)!, 'notify = ["x"]')).toBe('a = 1\nnotify = ["x"]\n[t]\n');
     expect(withoutNotify('notify = ["say", "hi"]\n')).toBe('notify = ["say", "hi"]\n');
     expect(withoutNotify(`a = 1\n[t]\n${OURS}\n`)).toBe("a = 1\n[t]\n");
     expect(withNotify(`a = 1\n${OURS}\n[t]\n`, 'notify = ["y"]')).toBe('a = 1\nnotify = ["y"]\n[t]\n');

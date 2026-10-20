@@ -65,7 +65,7 @@ export class Outbox {
     const lines = readFileSync(f, "utf8").trim().split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
-        const j = JSON.parse(lines[i] ?? "") as Event;
+        const j = JSON.parse(lines[i] as string) as Event;
         if (typeof j.session?.seq === "number") return j.session.seq;
       } catch {}
     }
