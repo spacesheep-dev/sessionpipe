@@ -15,9 +15,9 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Outbox, takeLock } from "@sessionpipe/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { aliasFile, readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
-import { claimJob, enqueueJob, jobsDir, runJob, sweepJobs } from "../src/run.js";
+import { claimJob, enqueueJob, hasJobs, jobsDir, log, runJob, sweepJobs, versionLine } from "../src/run.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-run-"));
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
@@ -200,4 +200,56 @@ describe("sessions the control daemon named (control/aliases.ts)", () => {
       }
     },
   );
+});
+
+describe("claims and sweeps, the edges", () => {
+  it("a claim fails on a job that is gone, or one that is not a job (its file is dropped)", () => {
+    mkdirSync(jobsDir(tmp), { recursive: true });
+    expect(claimJob(path.join(jobsDir(tmp), "gone.json"))).toBeNull();
+    const f = path.join(jobsDir(tmp), "bad.json");
+    writeFileSync(f, "{");
+    expect(claimJob(f)).toBeNull();
+    expect(readdirSync(jobsDir(tmp))).toEqual([]);
+  });
+  it("a sweep of a state dir without jobs is nothing", async () => {
+    expect(hasJobs(path.join(tmp, "nowhere"))).toBe(false);
+    expect(await sweepJobs(path.join(tmp, "nowhere"))).toBe(0);
+    enqueueJob(tmp, job("Stop"));
+    expect(hasJobs(tmp)).toBe(true);
+  });
+  it("a sweep leaves a job younger than olderThanMs to the worker its hook spawned", async () => {
+    enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    expect(await sweepJobs(tmp, 3000)).toBe(0);
+    expect(readdirSync(jobsDir(tmp))).toHaveLength(1);
+  });
+  it("two dead claims of one job give one job back; what is not a job file is skipped", async () => {
+    const { renameSync, utimesSync, copyFileSync } = await import("node:fs");
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const old = new Date(Date.now() - 10_000);
+    copyFileSync(f, `${f}.2147483646.running`);
+    renameSync(f, `${f}.2147483647.running`);
+    const dir = path.join(jobsDir(tmp), "zzz.json");
+    mkdirSync(dir);
+    for (const p of [`${f}.2147483646.running`, `${f}.2147483647.running`, dir]) utimesSync(p, old, old);
+    expect(await sweepJobs(tmp, 3000)).toBe(1);
+    expect(readdirSync(jobsDir(tmp))).toEqual([`zzz.json.${process.pid}.running`]);
+  });
+  it("the log turns over past 1 MiB", () => {
+    mkdirSync(tmp, { recursive: true });
+    writeFileSync(path.join(tmp, "log"), "x".repeat(1024 * 1024 + 1));
+    log(tmp, "next");
+    expect(existsSync(path.join(tmp, "log.1"))).toBe(true);
+    expect(readFileSync(path.join(tmp, "log"), "utf8")).toMatch(/ next\n$/);
+  });
+  it("the version is the one the build defines, else 0.0.0", async () => {
+    expect(versionLine()).toBe("sessionpipe 0.0.0");
+    vi.stubGlobal("__SESSIONPIPE_VERSION__", "9.9.9");
+    try {
+      vi.resetModules();
+      const built = await import("../src/run.js");
+      expect(built.versionLine()).toBe("sessionpipe 9.9.9");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
