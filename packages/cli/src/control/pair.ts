@@ -116,6 +116,8 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     folders: cfg.folders,
     mode: cfg.mode,
     ...(accounts.length ? { accounts } : {}),
+    // This daemon takes `files` on a start (an older one would start without them).
+    files: true,
   };
   /** One pairing code from the receiver. `machine` names the row a previous code
    *  made, so a renewal adds no second machine. */

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // A receiver that speaks the control half of HTTP.md §3, in-process, for the daemon
 // tests: well-known, pairing (with a passkey's proof), the per-machine poll with
-// redelivery until acked (paused by `taken`), acks, hello and off. The person's side
-// (signing) uses the core test authenticator, so every signature is real.
+// redelivery until acked (paused by `taken`), acks, hello, off and the files a start
+// names (GET {control}/files/{sha256}). The person's side (signing) uses the core
+// test authenticator, so every signature is real.
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { sha256 } from "../../../core/src/control/verify.js";
@@ -54,6 +55,26 @@ export class FakeReceiver {
   sessionTools: unknown = undefined;
   /** What the well-known file answers with; a receiver that is away answers nothing useful. */
   wellKnownStatus = 200;
+  /** Files by base64url sha256, as the person uploaded them (or as a bad receiver swaps them). */
+  readonly files = new Map<string, { bytes: Uint8Array; type: string }>();
+  /** How the files route misbehaves: `chunked` sends without content-length, in 64 KiB
+   *  pieces (a stream the machine must cap); `error` answers 500; `stall-headers` never
+   *  answers; `stall-body` sends the headers and then nothing. */
+  fileMode: "plain" | "chunked" | "error" | "stall-headers" | "stall-body" = "plain";
+  readonly fileGets: string[] = [];
+  /** Bytes of the last file request the server actually got written before the client hung up. */
+  lastFileSent = 0;
+
+  /** The person uploads a file: answers the entry a start's `files` names it with. */
+  async upload(
+    name: string,
+    type: string,
+    bytes: Uint8Array,
+  ): Promise<{ name: string; type: string; size: number; sha256: string }> {
+    const h = Buffer.from(await sha256(bytes)).toString("base64url");
+    this.files.set(h, { bytes, type });
+    return { name, type, size: bytes.length, sha256: h };
+  }
 
   async start(port = 0): Promise<void> {
     this.server = createServer((req, res) => void this.route(req, res));
@@ -199,6 +220,7 @@ export class FakeReceiver {
     }
     if (!u.pathname.startsWith(base)) return send(404);
     if (!machineAuth) return send(401);
+    if (u.pathname.startsWith(`${base}/files/`) && req.method === "GET") return this.serveFile(u, req, res);
     if (u.pathname === `${base}/hello`) {
       this.hellos.push(await this.body(req));
       return send(204);
@@ -239,5 +261,48 @@ export class FakeReceiver {
       }
     }
     return send(404);
+  }
+
+  private async serveFile(u: URL, req: IncomingMessage, res: import("node:http").ServerResponse): Promise<void> {
+    const base = "/api/sessionpipe/v1/control/files/";
+    const h = decodeURIComponent(u.pathname.slice(base.length));
+    this.fileGets.push(h);
+    const f = this.files.get(h);
+    if (!f) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    const gone = new Promise<void>((r) => req.once("close", () => r()));
+    this.lastFileSent = 0;
+    switch (this.fileMode) {
+      case "error":
+        res.writeHead(500);
+        res.end("boom");
+        return;
+      case "stall-headers":
+        await gone;
+        return;
+      case "stall-body":
+        res.writeHead(200, { "content-type": f.type });
+        res.flushHeaders();
+        await gone;
+        return;
+      case "chunked": {
+        res.writeHead(200, { "content-type": f.type });
+        for (let i = 0; i < f.bytes.length && !res.destroyed; i += 65_536) {
+          const chunk = f.bytes.subarray(i, i + 65_536);
+          if (!res.write(Buffer.from(chunk))) await new Promise((r) => res.once("drain", r).once("close", r));
+          if (!res.destroyed) this.lastFileSent += chunk.length;
+          await new Promise((r) => setTimeout(r, 1));
+        }
+        res.end();
+        return;
+      }
+      default:
+        res.writeHead(200, { "content-type": f.type, "content-length": String(f.bytes.length) });
+        res.end(Buffer.from(f.bytes));
+        this.lastFileSent = f.bytes.length;
+    }
   }
 }

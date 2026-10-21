@@ -264,6 +264,28 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "refused", code: "bad_session" });
   });
 
+  it("start with files: they land in the folder before codex runs, and the prompt lists them", {
+    timeout: 20_000,
+  }, async () => {
+    await startDaemon();
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(2048).fill(7));
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "look", files: [png] });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const saved = path.join(project, ".sessionpipe", "files", RECV, "shot.png");
+    expect(readFileSync(saved)).toEqual(Buffer.from(new Uint8Array(2048).fill(7)));
+    expect(statSync(saved).mode & 0o777).toBe(0o600);
+    expect(started()[0]?.argv?.at(-1)).toMatch(
+      new RegExp(
+        `^look\n\nAttached files \\(saved in this folder\\):\n- \\.sessionpipe/files/${RECV}/shot\\.png \\(image/png, 2 KB\\)\n\n\\(Sent via`,
+      ),
+    );
+    // A file that fails: no codex run at all.
+    rx.files.clear();
+    const q2 = await rx.send({ kind: "start", session: `codex:${FRESH}`, cwd: project, text: "look", files: [png] });
+    expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "failed", code: "file" });
+    expect(started()).toHaveLength(1);
+  });
+
   it("auto mode: --approve-for-me, never a bypass flag", { timeout: 20_000 }, async () => {
     await startDaemon({ mode: "auto" });
     const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });

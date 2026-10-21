@@ -30,6 +30,7 @@ import {
 } from "@sessionpipe/core";
 import { type ControlCommand, parseSessionRef, verifyCommand } from "@sessionpipe/core/control";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
+import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import { ask, type LocalReply, type LocalRequest } from "./local.js";
 import { awaitAnswer, transcriptEnd } from "./reply.js";
 import { type DeliveryMode, frame, frameStart, IN_PLACE_ANSWER, kindPath, routePrompt } from "./route.js";
@@ -171,6 +172,8 @@ export interface DaemonDeps {
   answerWaitMs?: number;
   /** Close an SDK session idle this long (a held session costs ~300 MB). */
   sdkIdleMs?: number;
+  /** How long one of a start's files may take to download (tests shorten it). */
+  fileTimeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   /** Is Claude Code signed in for this account, as this process sees it? Asked before
    *  a headless run, so a login the daemon can't read (a macOS keychain with nobody at
@@ -862,6 +865,8 @@ export class ControlDaemon {
         folders: this.cfg.folders,
         mode: this.cfg.mode,
         ...(accounts.length ? { accounts } : {}),
+        // This daemon takes `files` on a start (an older one would start without them).
+        files: true,
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
       const st = this.polling.get(r.control + r.machine);
@@ -1713,12 +1718,14 @@ export class ControlDaemon {
     const signedOut = await this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
     this.finish(r, id, { outcome: "taken" });
+    const text = await this.attached(r, id, cmd, ref, cwd);
+    if (text === null) return;
     if (this.deps.sdk) {
       const sdk = this.deps.sdk;
       const out = await this.slot(async () => {
         const s = sdk.start({ session: ref.id, cwd, mode: this.cfg.mode, allowedTools: this.allowedFor(r) });
         this.sdkSessions.set(ref.id, s);
-        return s.send(frameStart(cmd.text as string, r.url));
+        return s.send(frameStart(text, r.url));
       });
       return this.finish(
         r,
@@ -1743,7 +1750,7 @@ export class ControlDaemon {
           ...(this.allowedFor(r).length ? [`--allowedTools=${this.allowedFor(r).join(",")}`] : []),
           "--session-id",
           ref.id,
-          frameStart(cmd.text as string, r.url),
+          frameStart(text, r.url),
         ],
         {
           cwd,
@@ -1787,11 +1794,45 @@ export class ControlDaemon {
     const ready = await this.drivenProblem(drv);
     if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
     this.finish(r, id, { outcome: "taken" });
-    const args = drv.args({ mode: this.cfg.mode, prompt: frameStart(cmd.text as string, r.url), cwd });
+    const text = await this.attached(r, id, cmd, ref, cwd);
+    if (text === null) return;
+    const args = drv.args({ mode: this.cfg.mode, prompt: frameStart(text, r.url), cwd });
     this.deps.log(
       `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
     );
     await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null);
+  }
+
+  /** A start's text, with its files (CONTROL.md §6) fetched, checked and written under
+   *  `cwd` first — every check in §5 passed and the nonce is recorded by now, so the
+   *  `taken` ack is out and the download may take its time. Null when a file failed:
+   *  the command is acked `failed` with code `file`, nothing is kept, no session starts. */
+  private async attached(
+    r: PairedReceiver,
+    id: string,
+    cmd: ControlCommand,
+    ref: { id: string },
+    cwd: string,
+  ): Promise<string | null> {
+    const text = cmd.text as string;
+    if (!cmd.files) return text;
+    try {
+      const got = await fetchFiles(cmd.files, {
+        control: r.control,
+        token: r.token,
+        fetch: this.deps.fetch,
+        timeoutMs: this.deps.fileTimeoutMs,
+      });
+      const rel = writeFiles(cwd, ref.id, got);
+      this.deps.log(`${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}`);
+      return withFiles(text, got, rel);
+    } catch (e) {
+      // fetchFiles and writeFiles throw nothing but a FileProblem, and its message is the detail.
+      const detail = (e as Error).message;
+      this.deps.log(`${id.slice(-8)}: file — ${detail}`);
+      this.finish(r, id, { outcome: "failed", code: "file", detail });
+      return null;
+    }
   }
 
   private closeIdleSdk(): void {
