@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { HOME } from "../paths.js";
+import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readAntigravity } from "../readers/transcripts.js";
 import { formatJson, readJsonFile } from "./claude-shaped.js";
@@ -47,7 +47,7 @@ export const AG_STALE_PRETOOL =
   '{"decision":"ask","reason":"sessionpipe: an outdated PreToolUse hook is still loaded. Restart this conversation (or run sessionpipe install) to drop it."}\n';
 /** Antigravity's answer for one event: `{}` is "carry on" for every event we register. */
 export const antigravityAnswer = (event: string): string => (event === "PreToolUse" ? AG_STALE_PRETOOL : "{}\n");
-const gemini = (env: NodeJS.ProcessEnv) => env.GEMINI_CLI_HOME || path.join(HOME, ".gemini");
+const gemini = (env: NodeJS.ProcessEnv) => env.GEMINI_CLI_HOME || path.join(homeDir(), ".gemini");
 const hooksFile = (env: NodeJS.ProcessEnv) => path.join(gemini(env), "config", "hooks.json");
 const projectsDir = (env: NodeJS.ProcessEnv) => path.join(gemini(env), "config", "projects");
 const dataDirs = (env: NodeJS.ProcessEnv) =>

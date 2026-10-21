@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { HOME } from "../paths.js";
+import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readGemini } from "../readers/transcripts.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
@@ -24,7 +24,7 @@ export const GEMINI_EVENTS = [
   "SessionEnd",
 ] as const;
 const OPTS = { matcherFor: (e: string) => (/Tool/.test(e) ? ".*" : undefined), timeout: 5000 };
-const geminiDir = (env: NodeJS.ProcessEnv) => env.GEMINI_CLI_HOME || path.join(HOME, ".gemini");
+const geminiDir = (env: NodeJS.ProcessEnv) => env.GEMINI_CLI_HOME || path.join(homeDir(), ".gemini");
 const settings = (env: NodeJS.ProcessEnv) => path.join(geminiDir(env), "settings.json");
 const validTool = (n: unknown): n is string => typeof n === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(n);
 const eventsFor = (lean?: boolean) => (lean ? GEMINI_EVENTS.filter((e) => e !== "BeforeTool") : [...GEMINI_EVENTS]);

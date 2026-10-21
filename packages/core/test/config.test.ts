@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Config, DEFAULT_CONFIG, machineName, readConfig, writeConfig } from "../src/config.js";
 import { makeEvent } from "../src/events.js";
-import { configFile, HOME, safeId, stateDir, tilde } from "../src/paths.js";
+import { configFile, homeDir, safeId, stateDir, tilde } from "../src/paths.js";
 import { isUlid, ulid } from "../src/ulid.js";
 
 const dirs: string[] = [];
@@ -130,22 +130,22 @@ describe("paths", () => {
     expect(configFile({ SESSIONPIPE_CONFIG: "rel/c.json" })).toBe(path.resolve("rel/c.json"));
     onPlatform("linux", () => {
       expect(configFile({ XDG_CONFIG_HOME: "/xdg" })).toBe(path.join("/xdg", "sessionpipe", "config.json"));
-      expect(configFile({})).toBe(path.join(HOME, ".config", "sessionpipe", "config.json"));
+      expect(configFile({})).toBe(path.join(homeDir(), ".config", "sessionpipe", "config.json"));
     });
   });
   it("stateDir: SESSIONPIPE_STATE wins, then XDG_STATE_HOME, then ~/.local/state", () => {
     expect(stateDir({ SESSIONPIPE_STATE: "/s" })).toBe(path.resolve("/s"));
     onPlatform("linux", () => {
       expect(stateDir({ XDG_STATE_HOME: "/xdg-state" })).toBe(path.join("/xdg-state", "sessionpipe"));
-      expect(stateDir({})).toBe(path.join(HOME, ".local", "state", "sessionpipe"));
+      expect(stateDir({})).toBe(path.join(homeDir(), ".local", "state", "sessionpipe"));
     });
   });
   it("on Windows: %APPDATA% and %LOCALAPPDATA%, with a fallback under the home", () => {
     onPlatform("win32", () => {
       expect(configFile({ APPDATA: "C:\\Roaming" })).toBe(path.join("C:\\Roaming", "sessionpipe", "config.json"));
-      expect(configFile({})).toBe(path.join(HOME, "AppData", "Roaming", "sessionpipe", "config.json"));
+      expect(configFile({})).toBe(path.join(homeDir(), "AppData", "Roaming", "sessionpipe", "config.json"));
       expect(stateDir({ LOCALAPPDATA: "C:\\Local" })).toBe(path.join("C:\\Local", "sessionpipe"));
-      expect(stateDir({})).toBe(path.join(HOME, "AppData", "Local", "sessionpipe"));
+      expect(stateDir({})).toBe(path.join(homeDir(), "AppData", "Local", "sessionpipe"));
       expect(configFile({ SESSIONPIPE_CONFIG: "/c.json" })).toBe(path.resolve("/c.json"));
     });
   });
@@ -155,7 +155,7 @@ describe("paths", () => {
     expect(tilde("/Users/m/x/y", "/Users/m")).toBe("~/x/y");
     expect(tilde("/Users/m2/x", "/Users/m")).toBe("/Users/m2/x");
     expect(tilde("/etc", "/Users/m")).toBe("/etc");
-    expect(tilde(path.join(HOME, "code"))).toBe(`~${path.sep}code`);
+    expect(tilde(path.join(homeDir(), "code"))).toBe(`~${path.sep}code`);
   });
   it("safeId keeps [A-Za-z0-9_.-], replaces the rest, cuts at 160", () => {
     expect(safeId("s/1:a b")).toBe("s_1_a_b");

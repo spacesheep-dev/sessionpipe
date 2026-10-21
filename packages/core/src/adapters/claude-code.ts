@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { HOME } from "../paths.js";
+import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { gitFacts } from "../readers/git.js";
 import { isInjected, readClaude } from "../readers/transcripts.js";
@@ -59,7 +59,7 @@ const DESKTOP_ID = /^local_[A-Za-z0-9-]{1,64}$/;
 /** Every Claude Code config dir on this machine. `home` follows the env's HOME, so a
  *  caller with its own env (a test) never reaches the real ~/.claude: the install test
  *  once rewrote a real settings.json with its fake hook paths on every run. */
-export function claudeDirs(env: NodeJS.ProcessEnv = process.env, home = env.HOME || HOME): string[] {
+export function claudeDirs(env: NodeJS.ProcessEnv = process.env, home = env.HOME || homeDir()): string[] {
   const out: string[] = [];
   const add = (d?: string) => {
     if (!d) return;
@@ -428,7 +428,7 @@ function parentOf(): (pid: number) => number {
 const EMAIL_RE = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
 /** Who a config dir is signed in as, from its .claude.json (the default dir keeps it
  *  at ~/.claude.json): the account id, and the email it signs in with. */
-function claudeLogin(dir: string, home = HOME): { id: string; email?: string } | null {
+function claudeLogin(dir: string, home = homeDir()): { id: string; email?: string } | null {
   const files = [path.join(dir, ".claude.json")];
   if (path.resolve(dir) === path.join(home, ".claude")) files.unshift(path.join(home, ".claude.json"));
   for (const f of files) {
@@ -457,7 +457,7 @@ function claudeAccount(dir: string): string | null {
 }
 /** Every account signed in across these config dirs, read fresh (a person signs in to
  *  another account without restarting anything), for control's pair and hello. */
-export function claudeAccounts(dirs: string[], home = HOME): HarnessAccount[] {
+export function claudeAccounts(dirs: string[], home = homeDir()): HarnessAccount[] {
   const out: HarnessAccount[] = [];
   for (const d of dirs) {
     const l = claudeLogin(d, home);

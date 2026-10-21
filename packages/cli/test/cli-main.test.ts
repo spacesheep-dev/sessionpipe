@@ -750,7 +750,8 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       },
     ]);
     const again = await run("connect", rx.url, "--mode", "bogus");
-    expect(again.text).toContain(`Folders from your recent sessions: ${proj}`);
+    // Printed as the person sees it: under the sandbox HOME, so with a tilde.
+    expect(again.text).toContain("Folders from your recent sessions: ~/proj");
     expect(controlMain).toHaveBeenCalledWith(
       ["control", "pair", rx.url, "--mode", "auto", "--tier", "3", "--name", "box", "--folder", proj],
       expect.any(Function),
@@ -837,9 +838,7 @@ describe.skipIf(process.platform === "win32")("status", () => {
     expect(text).toContain("hook:     in-process p50 9 ms over 2 runs");
     expect(text).toContain("jobs:     1 waiting");
     const j = JSON.parse((await run("status", "--json")).lines.join("\n"));
-    expect(j.harnesses["claude-code"]).toEqual([
-      { file: path.join(home, ".claude", "settings.json"), state: "current" },
-    ]);
+    expect(j.harnesses["claude-code"]).toEqual([{ file: "~/.claude/settings.json", state: "current" }]);
     expect(j.harnesses["gemini-cli"][0]).toMatchObject({ state: "missing", note: expect.stringContaining("gemini") });
     expect(j.sinks.map((s: { pending_sessions: number }) => s.pending_sessions)).toEqual([2, 2, 0]);
   });

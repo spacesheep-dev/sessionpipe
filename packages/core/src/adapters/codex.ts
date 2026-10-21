@@ -6,7 +6,7 @@
 // notify (Codex Computer Use) is chained through --previous-notify, never replaced.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { HOME } from "../paths.js";
+import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { codexInjected, readCodex } from "../readers/transcripts.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
@@ -41,7 +41,7 @@ export const CODEX_EVENTS = [
 const OPTS = { matcherFor: (e: string) => (/Tool|Permission/.test(e) ? "" : undefined), timeout: 5 };
 const eventsFor = (lean?: boolean) => (lean ? CODEX_EVENTS.filter((e) => e !== "PreToolUse") : [...CODEX_EVENTS]);
 
-const codexHome = (env: NodeJS.ProcessEnv) => env.CODEX_HOME || path.join(HOME, ".codex");
+const codexHome = (env: NodeJS.ProcessEnv) => env.CODEX_HOME || path.join(homeDir(), ".codex");
 const hooksFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "hooks.json");
 const configFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "config.toml");
 const sessionsDir = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "sessions");

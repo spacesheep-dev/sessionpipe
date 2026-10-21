@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readlinkSync } from "node:fs";
 import path from "node:path";
-import { HOME } from "../paths.js";
+import { homeDir } from "../paths.js";
 import { querySqlite } from "../readers/sqlite.js";
 import { pairTurns } from "../readers/transcripts.js";
 import { installClaudeShaped, installedClaudeShaped, readJson, uninstallClaudeShaped } from "./claude-shaped.js";
@@ -69,7 +69,7 @@ export function foreignEvent(file: string): string | undefined {
   return Object.keys(hooks).find((k) => !ok.includes(k));
 }
 
-const homeOf = (env: NodeJS.ProcessEnv) => env.HOME || HOME;
+const homeOf = (env: NodeJS.ProcessEnv) => env.HOME || homeDir();
 const appData = (env: NodeJS.ProcessEnv) => env.APPDATA || path.join(homeOf(env), "AppData", "Roaming");
 /** `~/.config/devin`, `$XDG_CONFIG_HOME/devin`, or `%APPDATA%\devin`. */
 export const devinConfigDir = (env: NodeJS.ProcessEnv = process.env): string =>
