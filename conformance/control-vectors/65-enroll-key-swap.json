@@ -5,15 +5,15 @@
     "machine": "m_testmachine0000000001",
     "code": "K7Q2-9XMV",
     "key": {
-      "id": "tD8X-pFYQk5WfJ-BSriR1KErnnGB7FwV",
+      "id": "8R-nRBXP7SjgOqJMDsnUeMYFuCVtscyh",
       "alg": -7,
-      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEQqEjuyIHyphYHeqUYdt07j-5eVdW1BDVrsNv7PeOyHmLspZD0xsNGJjwMylmdL6oCqoMJP09s0Cs1IApUDAIRw"
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEehhqq4BuIdSR14uVQ2gokAmL_b5kkf6l_mBqvHc-K-XWT125nvirxMINJ-iZmqbdoGH2q11eHtQgK_9W1uXDBQ"
     },
     "proof": {
-      "cred": "VSklUPxovOAW0n0smAuApt2vRcDBsRSu",
+      "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
       "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
       "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUHlBYzEtVUl1Vi1SUDluTklRNjZXMU9ubnlJcndpai1WZ0ZHWW9qTl90MCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
-      "sig": "MEUCIQD2mnFaZTlshP389UA3DVFNA_Kj4lRVCcbVF79q404KEQIgfb-_Tm0uiD92du-cT_nCmVbnu92tH6R2BedyvzU0vaY"
+      "sig": "MEYCIQCuEC72DwiaCwpFdyrKs15pcKPGyxfFWU8Ts2JWerBh0gIhAKjBwzw9uZxKtku8YhxjkxyfvvTr2CK6Jd4SGeuaL8Ma"
     },
     "rp_id": "receiver.example"
   },

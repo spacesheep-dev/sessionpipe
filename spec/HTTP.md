@@ -25,7 +25,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
     "native":  "/api/sessionpipe/v1/native"
   },
   "batch":   { "max_events": 50, "max_bytes": 262144 },
-  "control": { "wait_max_s": 25, "signing": { "rp_id": "receiver.example", "algs": [-7, -257] } }
+  "control": { "wait_max_s": 25, "signing": { "rp_id": "receiver.example", "algs": [-7, -257] }, "files": true }
 }
 ```
 
@@ -37,7 +37,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
 | `auth` | `bearer` only in v1. |
 | `endpoints` | Paths relative to the origin, or absolute URLs. |
 | `batch` | The largest request the receiver takes. A sender MUST NOT exceed either bound. Defaults when absent: 50 / 262 144. |
-| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
+| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
 
 Schema: [`well-known.json`](https://sessionpipe.org/schema/v1/well-known.json).
 
@@ -108,10 +108,11 @@ long-poll per receiver, whatever the number of sessions.
 | `GET {control}?machine=<id>&wait=<s>` | the machine's token | → `200` [`control-poll.json`](https://sessionpipe.org/schema/v1/control-poll.json) when a message is waiting, `204` when none arrived within `wait` (≤ `wait_max_s`) |
 | `POST {control}/ack` | the machine's token | [`control-ack.json`](https://sessionpipe.org/schema/v1/control-ack.json) → `202` |
 | `POST {control}/off` | the machine's token | → `204`; the machine, its token and its queue are gone |
+| `GET {control}/files/{sha256}` | the machine's token | → `200` with the file's bytes and its `content-type`; `404` when there is no such file for this machine's account (never uploaded, or expired) |
 
-- The machine's token opens these four machine calls for that one machine and nothing
-  else of the account. A receiver MUST refuse a sink token on them, and the machine's
-  token everywhere else.
+- The machine's token opens these machine calls (hello, poll, ack, off, files) for
+  that one machine and nothing else of the account. A receiver MUST refuse a sink
+  token on them, and the machine's token everywhere else.
 - A receiver MUST keep re-delivering a message on every poll until it is acked or its
   `expires_at` passes, then drop it. A `taken` ack pauses redelivery for 35 minutes
   (CONTROL.md §10); a final ack ends it. A machine MAY receive the same message twice; the
@@ -119,6 +120,14 @@ long-poll per receiver, whatever the number of sessions.
 - A poll is also the machine's heartbeat: a receiver MAY show a machine that polled
   within `2 × wait_max_s` as online, and SHOULD hand a session the waiter (CONTROL.md
   §8) only while its machine is online.
+- **Files.** A receiver that accepts `files` on a `start` (CONTROL.md §3.1) holds each
+  file's bytes, named by the base64url SHA-256 the command carries, and serves them at
+  `GET {control}/files/{sha256}` to the machines of the account that uploaded them
+  and to no one else. It MUST keep them at least until the command's `expires_at`.
+  How the bytes reach the receiver is the receiver's business. The machine checks
+  length and hash itself (CONTROL.md §6) and stops reading past the signed `size`;
+  a receiver SHOULD send `content-length`. A receiver SHOULD NOT queue a `start` with
+  `files` for a machine whose hello did not say `files: true`.
 - `401` on a machine call means the token is gone (the machine was removed): the daemon
   stops polling that receiver and says so. `404` on `/pair?code=` means no such pairing.
 

@@ -69,8 +69,11 @@ credential: without the `poll_key` nobody is handed the machine's token.
 
 The pairing request and every hello MAY carry the machine's allowed `folders` and its
 `mode` (`safe`: nothing that needs approval runs unattended; `auto`: the harness's auto
-mode), so a receiver can offer a folder picker for a new session. They are
-informational: the machine checks its own list again (§5 step 6).
+mode), so a receiver can offer a folder picker for a new session, and `files: true`
+when the machine takes attachments on a `start` (§6). They are informational: the
+machine checks its own list again (§5 step 6). A machine that does not say `files:
+true` may predate attachments and start the session without them, so a receiver
+SHOULD NOT send it a `start` with `files`.
 
 They MAY also carry `accounts`: the harness accounts signed in on the machine, each
 `{harness, id, email}`, where `id` is what events carry as `session.account_id` and
@@ -121,11 +124,31 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `for`, `decision` | `permission.answer` only: the `attention_id` being answered, and `allow` or `deny`. |
 | `note` | Optional, ≤ 2 000 characters: shown to the model beside a decision or a cancel. |
 | `cwd` | `start` only: the absolute folder the new session runs in. |
+| `files` | `start` only, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
 | `iat` | Epoch milliseconds on the signing device's clock, an integer. |
 
-A field that does not belong to the kind makes the command malformed. The whole
-string is at most **48 000** characters (the text, JSON-escaped, and the rest).
+A field that does not belong to the kind makes the command malformed (`bad_fields`),
+`files` on any kind but `start` included. The whole string is at most **48 000**
+characters (the text, JSON-escaped, and the rest).
+
+Each entry of `files` ([`control-command.json`](https://sessionpipe.org/schema/v1/control-command.json)):
+
+```json
+"files":[{"name":"screenshot.png","type":"image/png","size":183402,"sha256":"<43 base64url characters>"}]
+```
+
+| Field | Rule |
+|-------|------|
+| `name` | 1 – **200** characters after Unicode NFC; no `/`, `\`, NUL or other control character (below U+0020, and U+007F); not `.` or `..`, and not starting with `.` (no dotfiles). The machine writes it under this name, NFC. |
+| `type` | 1 – **100** characters, a media type `type/subtype`, matching `^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$` without regard to case. |
+| `size` | The file's length in bytes, an integer, 1 – **26 214 400** (25 MiB). |
+| `sha256` | SHA-256 of the bytes, base64url without padding: exactly 43 characters. |
+
+Together the sizes are at most **52 428 800** bytes (50 MiB), and no two names are
+equal after NFC, ignoring case. Any of these broken is `bad_fields`. The bytes are
+not in the command: the receiver holds them ([HTTP.md §3](HTTP.md#3-control-control)),
+and because the hash is signed on the device, a receiver cannot swap a file.
 
 ### 3.2 Signatures
 
@@ -289,6 +312,41 @@ beyond that. A daemon SHOULD also cap the headless processes it runs at once and
 the rest wait their turn rather than fail. A receiver SHOULD rate-limit starts before
 it queues them; that limit is its policy, the machine's is the gate.
 
+**Files.** A `start` with `files` is handled only after every check in §5 passed and
+the nonce is recorded, and the same way for every harness the machine can start: the
+files land in `cwd` before the run, and nothing about them is the harness's. Before
+the session starts, the machine:
+
+1. Downloads each file (one after another is fine) with
+   `GET {control}/files/{sha256}` and the machine's token. It MUST stop reading a
+   response once it passes `size` bytes, and MUST NOT write a file whose length is not
+   `size` or whose SHA-256 is not `sha256`.
+2. Writes the files to `<cwd>/.sessionpipe/files/<session id>/<name>` (the id the
+   command names, which is the session's name everywhere, above), creating
+   `<cwd>/.sessionpipe/.gitignore` with the single line `*` when it is absent (the
+   folder ignores itself, so a repository never picks it up). It never follows a
+   symlink: `.sessionpipe`, `files` and the session's folder MUST be real directories
+   inside `cwd` (a symlink there refuses the files), the session's folder MUST be new,
+   and each file is created exclusively (never over an existing path) with mode
+   `0600`.
+3. Starts the session with the command's text followed by the list of files, paths
+   relative to `cwd` (so the model reads them without leaving the project):
+
+   ```
+   <text>
+
+   Attached files (saved in this folder):
+   - .sessionpipe/files/<session id>/screenshot.png (image/png, 179 KB)
+   - .sessionpipe/files/<session id>/notes.pdf (application/pdf, 1.2 MB)
+   ```
+
+   (sizes in units of 1 024 bytes), framed like any other `start`.
+
+If any file cannot be downloaded (a `404`: gone or expired), is too long or too
+short, has another hash, or cannot be written, the command is acked `failed` with
+code `file` and a `detail` naming the file and the reason, nothing that was written
+for it is kept, and **no session starts**.
+
 ## 7. Attention lifecycle
 
 `attention.needed` (kind `permission`) → optional verified `permission.answer` →
@@ -335,7 +393,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s file could not be fetched, checked or written (§6). |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -348,8 +406,9 @@ send → delivered time.
 ## 11. Fixtures
 
 - `conformance/control-vectors/` — signed commands, valid and broken, with the verdict
-  every verifier must reach (§5), and enrollment proofs (§2). The reference verifier
-  and every receiver that pre-checks MUST agree with all of them.
+  every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
+  `start`'s `files` (§3.1). The reference verifier and every receiver that pre-checks
+  MUST agree with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll

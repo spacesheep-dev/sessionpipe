@@ -3,23 +3,23 @@
   "description": "rp id localhost: a plain-http origin on any port is allowed.",
   "input": {
     "signed": {
-      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"NaWBnMG_VOeRMaTtcCwnpw\",\"iat\":1790800000000}",
-      "csig": "_60zET20-_xyxhfFXFcT9XjhPknWlcQFcxAheP6dquu2XNw-3IcHfzt2-1-BNVCFdE0LGXv311NaN40kUBaJgA",
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"p0edKhy940RWF2m3LwNfaA\",\"iat\":1790800000000}",
+      "csig": "2ks6gqiyu86fqV1a5zHvyr2xdt74-Jo0TxRvg9hoc-cETNTWvexcNu277j86KL-ZdyNsy44RaCzTa7cB9SyO3w",
       "grant": {
-        "cred": "5f-PcLBqM08l6f8CimqPydFj2ePLNcX6",
+        "cred": "FE7TX8apLpjBUvpzBnRTQtrX-S3DP7a1",
         "ad": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
-        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiS2FMUnZJN2VaSHlIaGVsenNwY09rUWZGMHRDU0xCWHNnQXJQUUh5VHQ5QSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6ODg5MSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
-        "sig": "MEYCIQD4mrC0Ws-A-n0y4b05CAOHDdvhyE3aZ6gd4sUX9hf60QIhAIeFIp5b17cqXtqDKkczcJrvikpd2piASNIL3cTjkugk",
-        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEq0sZOXjcYCk4VqcXts93qkPK32jsGLmuLaYj6veiSY29gycOtxkDCNN7cwmvtwnivVVETj7kHaUpkSse__1Bew\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"localhost\"}"
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoieEVjbklOVThuVVJwaEpTcC1oQURjcGFzczhmY3h5Z0FfM3Zoakp0REFpSSIsIm9yaWdpbiI6Imh0dHA6Ly9sb2NhbGhvc3Q6ODg5MSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEYCIQDpC8iu6ByDYY22fkP87yn2M0Z9GFlmRcCvdtO4IaEbjgIhAIJ1qSUz8HTvpKF6bSH1MAxM5s7Wk9jRC2iVu0Kgu_7Y",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExzaXYZTe_WEhPIqiUUsYjH5ezr9uDxy5snmDVGErl1rnfzIHfdvsQ7MD6ohNFjrzaR30jeSvPXCxnB_p7LvMZQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"localhost\"}"
       }
     },
     "machine": "m_testmachine0000000001",
     "rp_id": "localhost",
     "trusted": [
       {
-        "id": "5f-PcLBqM08l6f8CimqPydFj2ePLNcX6",
+        "id": "FE7TX8apLpjBUvpzBnRTQtrX-S3DP7a1",
         "alg": -7,
-        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMrRbfUsKw9FKMqNTi7Y5GDGnLQRkXxceNvUjmXDRyosirB7gQhn6Cmu3TyvTVB1Ika39Skh_yx5v7ExUO3rUvA"
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELo7upM5w-l4Kvd4md79Eblv95Bdp1qCQx9K7OEY1UjtvKIjht9KYJ4DsWIWse6adBcgyEpnUrGwIGOiBgaI4ow"
       }
     ],
     "now": 1790800060000

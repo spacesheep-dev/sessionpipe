@@ -7,6 +7,7 @@ import {
   type Assertion,
   b64url,
   derToRaw,
+  filesProblem,
   fromB64url,
   KEY_STORE_SESSION,
   keyUsable,
@@ -76,6 +77,42 @@ describe("verifyCommand", () => {
     expect(parseSessionRef(":x")).toBeNull();
   });
 
+  it("checks a start's files: lengths after NFC, names unique across case and form, only on a start", () => {
+    const f = { name: "a.png", type: "image/png", size: 10, sha256: "A".repeat(43) };
+    expect(filesProblem([f])).toBeNull();
+    // 201 code units as sent, 200 characters after NFC: allowed.
+    expect(filesProblem([{ ...f, name: `${"n".repeat(195)}e\u0301.bin` }])).toBeNull();
+    expect(filesProblem([{ ...f, name: `${"n".repeat(196)}e\u0301.bin` }])).toMatch(/1 to 200/);
+    // The same name in NFC and NFD is the same file on a Mac.
+    expect(
+      filesProblem([
+        { ...f, name: "caf\u00e9.png" },
+        { ...f, name: "CAFE\u0301.png" },
+      ]),
+    ).toMatch(/same name/);
+    expect(filesProblem([{ ...f, name: 5 }])).toMatch(/no name/);
+    expect(filesProblem([{ ...f, type: 5 }])).toMatch(/media type/);
+    expect(filesProblem([{ ...f, type: `${"x".repeat(100)}/y` }])).toMatch(/media type/);
+    expect(filesProblem([{ ...f, type: "image/png; charset=x" }])).toMatch(/media type/);
+    expect(filesProblem([{ ...f, sha256: 5 }])).toMatch(/sha256/);
+    expect(filesProblem([null])).toMatch(/object/);
+    // Only a start carries files: every other kind is refused for them alone.
+    const key = { id: "A".repeat(16), alg: -7, spki: "A".repeat(40) };
+    for (const fields of [
+      { kind: "permission.answer", text: undefined, for: "perm-1", decision: "deny" },
+      { kind: "cancel", text: undefined },
+      { kind: "key.add", text: undefined, session: KEY_STORE_SESSION, key },
+    ])
+      expect(parseCommand(commandStr({ ...fields, files: [f] }))).toMatchObject({
+        ok: false,
+        code: "bad_fields",
+        why: "only a start carries files",
+      });
+    const st = (files: unknown) => parseCommand(commandStr({ kind: "start", cwd: "/tmp", files }));
+    expect(st([f]).ok).toBe(true);
+    expect(st(null)).toMatchObject({ ok: false, code: "bad_fields" });
+  });
+
   it("decodes base64url strictly", () => {
     expect(fromB64url("AQID")).toEqual(new Uint8Array([1, 2, 3]));
     expect(fromB64url("AQI")).toEqual(new Uint8Array([1, 2]));
@@ -133,7 +170,7 @@ describe("parseCommand", () => {
     expect(code({ kind: "start", text: undefined, cwd: "/x" })).toMatch(/^bad_fields: a new session needs text/);
     expect(code({ kind: "start", cwd: "rel" })).toMatch(/^bad_fields: .*absolute folder/);
     expect(code({ kind: "start" })).toMatch(/^bad_fields: .*absolute folder/);
-    expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe("bad_fields: a start carries text and cwd");
+    expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe("bad_fields: a start carries text, cwd and files");
   });
   it("permission.answer: for and decision, no text", () => {
     expect(code({ kind: "permission.answer", text: undefined, for: "a", decision: "deny" })).toBe("ok");

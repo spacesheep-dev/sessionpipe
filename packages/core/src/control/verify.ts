@@ -30,6 +30,16 @@ export const TEXT_MAX = 20_000;
 export const NOTE_MAX = 2_000;
 /** A grant string. */
 export const GRANT_STR_MAX = 2_000;
+/** Attachments on a `start` (CONTROL.md §3.1): at most this many files, */
+export const FILES_MAX = 10;
+/** each at most this many bytes, */
+export const FILE_SIZE_MAX = 26_214_400;
+/** together at most this many, */
+export const FILES_TOTAL_MAX = 52_428_800;
+/** with a name of at most this many characters (after NFC) */
+export const FILE_NAME_MAX = 200;
+/** and a media type of at most this many. */
+export const FILE_TYPE_MAX = 100;
 
 export const COMMAND_TYPE = "sessionpipe.control";
 export const GRANT_TYPE = "sessionpipe.grant";
@@ -74,6 +84,17 @@ export interface Grant {
   exp: number;
   rp: string;
 }
+/** One file attached to a `start`: the bytes live on the receiver, named by their hash. */
+export interface ControlFile {
+  /** The file name the machine writes (NFC). */
+  name: string;
+  /** Media type, `type/subtype`. */
+  type: string;
+  /** Bytes. */
+  size: number;
+  /** SHA-256 of the bytes, base64url without padding (43 characters). */
+  sha256: string;
+}
 export interface ControlCommand {
   v: 1;
   t: typeof COMMAND_TYPE;
@@ -90,6 +111,8 @@ export interface ControlCommand {
   key?: { id: string; alg: -7 | -257; spki: string };
   /** key.add only: what the person calls the device ("iPhone"), for `control keys`. */
   name?: string;
+  /** start only: files to download, verify and write into the new session's folder. */
+  files?: ControlFile[];
   nonce: string;
   iat: number;
 }
@@ -142,6 +165,10 @@ const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const SESSION_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const B64URL_RE = /^[A-Za-z0-9_-]*$/;
+const SHA256_RE = /^[A-Za-z0-9_-]{43}$/;
+const MEDIA_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are exactly what it rejects
+const BAD_NAME_CHAR_RE = /[/\\\x00-\x1f\x7f]/;
 const UP = 0x01;
 const UV = 0x04;
 
@@ -392,7 +419,11 @@ export function parseCommand(str: unknown): Parsed {
       if (!text()) return bad("bad_fields", `a new session needs text, at most ${TEXT_MAX} characters`);
       if (typeof c.cwd !== "string" || !isAbsolute(c.cwd) || c.cwd.length > 1024)
         return bad("bad_fields", "a new session needs an absolute folder");
-      if (has("for") || has("decision")) return bad("bad_fields", "a start carries text and cwd");
+      if (has("for") || has("decision")) return bad("bad_fields", "a start carries text, cwd and files");
+      if (has("files")) {
+        const why = filesProblem(c.files);
+        if (why) return bad("bad_fields", why);
+      }
       break;
     case "permission.answer":
       if (typeof c.for !== "string" || !c.for || c.for.length > 128) return bad("bad_fields", "which attention?");
@@ -426,9 +457,45 @@ export function parseCommand(str: unknown): Parsed {
     }
   }
   if (c.kind !== "key.add" && (has("key") || has("name"))) return bad("bad_fields", "only a key.add carries a key");
+  if (c.kind !== "start" && has("files")) return bad("bad_fields", "only a start carries files");
   if (has("note") && (typeof c.note !== "string" || c.note.length > NOTE_MAX))
     return bad("bad_fields", `a note is text, at most ${NOTE_MAX} characters`);
   return { ok: true, cmd: c as unknown as ControlCommand };
+}
+
+/** Why a start's `files` breaks the rules (CONTROL.md §3.1), or null when it doesn't. */
+export function filesProblem(files: unknown): string | null {
+  if (!Array.isArray(files) || files.length < 1 || files.length > FILES_MAX)
+    return `files is a list of 1 to ${FILES_MAX} files`;
+  const seen = new Set<string>();
+  let total = 0;
+  for (const f of files as unknown[]) {
+    if (!f || typeof f !== "object" || Array.isArray(f)) return "each file is an object";
+    const { name, type, size, sha256: hash } = f as Record<string, unknown>;
+    const why = fileNameProblem(name);
+    if (why) return why;
+    const key = (name as string).normalize("NFC").toLowerCase();
+    if (seen.has(key)) return "two files have the same name";
+    seen.add(key);
+    if (typeof type !== "string" || type.length > FILE_TYPE_MAX || !MEDIA_TYPE_RE.test(type))
+      return "a file's type isn't a media type";
+    if (!isNum(size) || !Number.isInteger(size) || size < 1 || size > FILE_SIZE_MAX)
+      return `a file is 1 byte to ${FILE_SIZE_MAX / 1_048_576} MiB`;
+    total += size;
+    if (typeof hash !== "string" || !SHA256_RE.test(hash)) return "a file's sha256 isn't 43 base64url characters";
+  }
+  if (total > FILES_TOTAL_MAX) return `the files add up to more than ${FILES_TOTAL_MAX / 1_048_576} MiB`;
+  return null;
+}
+
+/** A file name the machine can write inside the session's folder and nowhere else. */
+function fileNameProblem(name: unknown): string | null {
+  if (typeof name !== "string") return "a file has no name";
+  const n = name.normalize("NFC");
+  if (n.length < 1 || n.length > FILE_NAME_MAX) return `a file name is 1 to ${FILE_NAME_MAX} characters`;
+  if (BAD_NAME_CHAR_RE.test(n)) return "a file name has a slash, a backslash or a control character";
+  if (n.startsWith(".")) return "a file name can't start with a dot";
+  return null;
 }
 
 function isAbsolute(p: string): boolean {

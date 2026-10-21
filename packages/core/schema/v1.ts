@@ -222,6 +222,34 @@ export const SessionRef = z.string().regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-
 export const ControlKind = z.enum(["prompt", "permission.answer", "cancel", "start", "key.add"]);
 export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
 
+/** A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
+ *  (`GET {control}/files/{sha256}`); the signed hash is what the machine checks.
+ *  Beyond this shape the verifier also checks: the name's length after NFC, names
+ *  unique case-insensitively, and the sizes adding up to at most 50 MiB. */
+export const ControlFile = z.object({
+  /** Written as is (NFC) into the session's folder: no slash, backslash or control
+   *  character, not starting with a dot. */
+  name: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it rejects
+      /^[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*$/,
+      "a file name: no slash, backslash, control character or leading dot",
+    ),
+  /** Media type, `type/subtype` (case-insensitive). */
+  type: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/, "type/subtype"),
+  /** Bytes: 1 to 25 MiB. */
+  size: z.int().min(1).max(26_214_400),
+  /** SHA-256 of the bytes, base64url without padding. */
+  sha256: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "43 base64url characters"),
+});
+
 /** The signed command, as the device writes it. The machine verifies the EXACT string
  *  it received (control.json `cmd`) and never re-serializes it. */
 export const ControlCommand = z.object({
@@ -250,6 +278,9 @@ export const ControlCommand = z.object({
     .optional(),
   /** key.add: what the person calls the device. */
   name: z.string().min(1).max(80).optional(),
+  /** start only: 1–10 files, together at most 50 MiB, downloaded and checked by hash
+   *  before the session starts. */
+  files: z.array(ControlFile).min(1).max(10).optional(),
   /** At least 16 random bytes, base64url. */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/),
   /** Epoch ms, the signing device's clock. */
@@ -322,7 +353,8 @@ export const ControlAck = z.object({
         mode: DeliveryMode.optional(),
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
-        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`). */
+        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`);
+         *  failed: `file` when a start's attachment couldn't be fetched, checked or written. */
         code: z
           .string()
           .regex(/^[a-z_]{1,40}$/)
@@ -370,6 +402,9 @@ export const ControlPairStart = z.object({
   /** The harness accounts signed in here, so the receiver's board can name each
    *  `session.account_id` (CONTROL.md §2). */
   accounts: z.array(HarnessAccount).max(20).optional(),
+  /** The machine takes `files` on a start (downloads, checks and writes them). A
+   *  machine that doesn't say so may ignore them: a receiver SHOULD NOT send it files. */
+  files: z.boolean().optional(),
 });
 
 /** The receiver's answer: where the person confirms, and the digits both screens show. */
@@ -414,6 +449,8 @@ export const ControlHello = z.object({
   mode: z.enum(["safe", "auto"]).optional(),
   /** As in control-pair.json: read again for every hello, so a new sign-in is named. */
   accounts: z.array(HarnessAccount).max(20).optional(),
+  /** As in control-pair.json. */
+  files: z.boolean().optional(),
 });
 
 export const WellKnown = z.object({
@@ -443,6 +480,9 @@ export const WellKnown = z.object({
         rp_id: z.string().min(1).max(253),
         algs: z.array(z.union([z.literal(-7), z.literal(-257)])).min(1),
       }),
+      /** Informational: the receiver accepts `files` on a start and serves
+       *  `GET {control}/files/{sha256}`. */
+      files: z.boolean().optional(),
     })
     .optional(),
 });

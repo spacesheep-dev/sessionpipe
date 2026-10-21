@@ -120,6 +120,9 @@
             "rp_id",
             "algs"
           ]
+        },
+        "files": {
+          "type": "boolean"
         }
       },
       "required": [

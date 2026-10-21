@@ -12,6 +12,9 @@ import {
   type Assertion,
   b64url,
   CMD_MAX,
+  FILE_NAME_MAX,
+  FILE_SIZE_MAX,
+  FILES_MAX,
   fromB64url,
   RECEIVER_MAX_AGE_MS,
   RS256,
@@ -515,10 +518,107 @@ describe.runIf(WRITE)("write control vectors", () => {
       },
     ];
 
+    // --- attachments on a start (written after the enrollment vectors, so the
+    // numbers of the vectors above never move) ---
+    const split = out.length;
+    const NEW = "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+    const hashOf = async (s: string) => b64url(await sha256(s));
+    const png = { name: "screenshot.png", type: "image/png", size: 183_402, sha256: await hashOf("png bytes") };
+    const pdf = { name: "notes.pdf", type: "application/pdf", size: 1_258_291, sha256: await hashOf("pdf bytes") };
+    const start = (files: unknown, extra: Record<string, unknown> = {}) =>
+      commandStr({
+        kind: "start",
+        session: NEW,
+        cwd: "/Users/misha/spacesheep",
+        text: "What's wrong here?",
+        files,
+        ...extra,
+      });
+    const withFile = (f: Record<string, unknown>) => start([{ ...png, ...f }]);
+    ok(
+      "valid-start-with-files",
+      "A new session with an image and a PDF attached, each named by its SHA-256.",
+      await signed(pk, day, start([png, pdf])),
+      "grant",
+      "start",
+    );
+    {
+      const big = (i: number) => ({
+        name: `${String(i)}${"n".repeat(FILE_NAME_MAX - 5)}.bin`,
+        type: "application/octet-stream",
+        size: FILE_SIZE_MAX,
+        sha256: png.sha256,
+      });
+      ok(
+        "valid-files-at-limits",
+        `Two files of exactly 25 MiB (50 MiB together), names of exactly ${FILE_NAME_MAX} characters.`,
+        await signed(pk, day, start([big(1), big(2)])),
+        "grant",
+        "start",
+      );
+    }
+    ok(
+      "valid-ten-files",
+      `${FILES_MAX} small files, a decomposed (NFD) name among them, types in any case.`,
+      await signed(
+        pk,
+        day,
+        start(
+          Array.from({ length: FILES_MAX }, (_, i) => ({
+            ...png,
+            name: i === 0 ? "cafe\u0301.txt" : `page-${i}.PNG`,
+            type: i === 0 ? "Text/Plain" : "image/png",
+            size: 1,
+          })),
+        ),
+      ),
+      "grant",
+      "start",
+    );
+    const fileShape = async (name: string, description: string, cmd: string) =>
+      refuse(name, description, await signed(pk, day, cmd), "bad_fields");
+    await fileShape("files-on-prompt", "Only a start may carry files.", commandStr({ files: [png] }));
+    await fileShape("files-empty", "An empty list of files.", start([]));
+    await fileShape("files-not-a-list", "files as an object.", start(png));
+    await fileShape(
+      "files-too-many",
+      `${FILES_MAX + 1} files.`,
+      start(Array.from({ length: FILES_MAX + 1 }, (_, i) => ({ ...png, name: `f${i}.png`, size: 1 }))),
+    );
+    await fileShape("file-name-slash", "A name with a slash.", withFile({ name: "img/screenshot.png" }));
+    await fileShape("file-name-backslash", "A name with a backslash.", withFile({ name: "img\\screenshot.png" }));
+    await fileShape("file-name-dotdot", "The name `..`.", withFile({ name: ".." }));
+    await fileShape("file-name-dotfile", "A dotfile (`.env`).", withFile({ name: ".env" }));
+    await fileShape("file-name-nul", "A name with a NUL.", withFile({ name: "a\u0000.png" }));
+    await fileShape("file-name-control", "A name with a newline.", withFile({ name: "a\n.png" }));
+    await fileShape("file-name-empty", "An empty name.", withFile({ name: "" }));
+    await fileShape(
+      "file-name-too-long",
+      `A name of ${FILE_NAME_MAX + 1} characters.`,
+      withFile({ name: `${"n".repeat(FILE_NAME_MAX - 3)}.png` }),
+    );
+    await fileShape("file-type-no-subtype", "A type that isn't type/subtype.", withFile({ type: "image" }));
+    await fileShape("file-size-zero", "An empty file.", withFile({ size: 0 }));
+    await fileShape("file-size-too-big", "A file of 25 MiB and one byte.", withFile({ size: FILE_SIZE_MAX + 1 }));
+    await fileShape("file-size-not-integer", "A size that isn't an integer.", withFile({ size: 10.5 }));
+    await fileShape("file-sha256-padded", "A sha256 in padded base64.", withFile({ sha256: `${png.sha256}=` }));
+    await fileShape("file-sha256-hex", "A sha256 in hex.", withFile({ sha256: "ab".repeat(32) }));
+    await fileShape("file-no-sha256", "A file with no hash.", withFile({ sha256: undefined }));
+    await fileShape(
+      "files-total-too-big",
+      "Three files of 20 MiB: more than 50 MiB together.",
+      start([1, 2, 3].map((i) => ({ ...png, name: `f${i}.png`, size: 20 * 1_048_576 }))),
+    );
+    await fileShape(
+      "files-same-name",
+      "Two files whose names differ only in case.",
+      start([png, { ...pdf, name: "Screenshot.PNG" }]),
+    );
+
     mkdirSync(dir, { recursive: true });
     for (const f of readdirSync(dir)) if (f.endsWith(".json")) rmSync(path.join(dir, f));
     let n = 0;
-    for (const v of [...out, ...enroll])
+    for (const v of [...out.slice(0, split), ...enroll, ...out.slice(split)])
       writeFileSync(
         path.join(dir, `${String(++n).padStart(2, "0")}-${v.name}.json`),
         `${JSON.stringify(v, null, 2)}\n`,
