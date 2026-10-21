@@ -63,7 +63,7 @@ describe("awaitAnswer", () => {
 describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
   it("a harness with an input API gets `api` before any cold start; a kind nobody knows is unsupported", () => {
     const view = {
-      harness: "opencode",
+      harness: "kiro",
       sdk: false,
       waiter: false,
       midTurn: false,
