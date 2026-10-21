@@ -128,9 +128,17 @@ describe("claudePid", () => {
       expect(claudePid(e)).toBeNull();
     });
   });
-  posix("elsewhere it asks ps for the table", async () => {
+  posix("elsewhere it asks ps for the table; with no ps the table is empty and the walk stops at once", async () => {
     const { env: e } = env();
     await onPlatform("darwin", () => expect(claudePid(e)).toBeNull());
+    // A runner whose ancestry ps lists to the top never misses a pid; an empty PATH does.
+    const realPath = process.env.PATH;
+    process.env.PATH = mkdtempSync(path.join(tmp, "no-ps-"));
+    try {
+      await onPlatform("darwin", () => expect(claudePid(e)).toBeNull());
+    } finally {
+      process.env.PATH = realPath;
+    }
   });
 });
 
