@@ -453,12 +453,12 @@ export class ControlDaemon {
 
   reload(cfg: ControlConfig): void {
     const known = new Set(this.cfg.receivers.map((r) => r.control + r.machine));
-    const told = JSON.stringify([this.cfg.folders, this.cfg.mode]);
+    const told = JSON.stringify([this.cfg.folders, this.cfg.mode, this.cfg.name]);
     this.cfg = cfg;
     for (const r of cfg.receivers) if (!known.has(r.control + r.machine)) void this.pollLoop(r);
-    // `control folders` or `control mode` changed what a hello says: say it now, so the
-    // receiver's folder picker doesn't wait up to ten minutes for the next one.
-    if (this.running && JSON.stringify([cfg.folders, cfg.mode]) !== told) void this.helloAll();
+    // `control folders`, `control mode` or a `--rename-machine` changed what a hello says:
+    // say it now, so the receiver doesn't wait up to ten minutes for the next one.
+    if (this.running && JSON.stringify([cfg.folders, cfg.mode, cfg.name]) !== told) void this.helloAll();
   }
 
   status(): Status {

@@ -595,6 +595,10 @@ describe.runIf(unix)("hello", () => {
     d?.reload({ ...cfg(), folders: [project, kimi] });
     await new Promise((r) => setTimeout(r, 200));
     expect(rx.hellos).toHaveLength(2);
+    // A rename (`--rename-machine`) is said at once too: the receiver shows one machine.
+    d?.reload({ ...cfg(), folders: [project, kimi], name: "box-two" });
+    for (let i = 0; i < 100 && rx.hellos.length < 3; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(rx.hellos[2]?.name).toBe("box-two");
   });
   it("names the accounts signed in, read again for each hello", async () => {
     const file = path.join(tmp, "claude-config", ".claude.json");

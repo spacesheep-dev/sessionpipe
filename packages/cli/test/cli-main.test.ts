@@ -383,20 +383,26 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(cfg().machine).toBe(os.hostname().replace(/\.local$/, ""));
   });
 
-  it("refuses --machine without a name, and a rename away from the paired daemon's name", async () => {
+  it("refuses --machine without a name; an explicit rename renames the paired daemon too", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     expect((await run("install", "--rename-machine")).err).toHaveBeenCalledWith(
       "sessionpipe: --machine NAME is required when naming or renaming a machine\n",
     );
     expect((await run("install", "--machine", "--backfill")).err).toHaveBeenCalled();
-    put(path.join(tmp, "config", "control.json"), { name: "paired-box", folders: [], mode: "safe", receivers: [] });
-    const r = await run("install", "--rename-machine", "--machine", "other", "--backfill", "0");
-    expect(r.err).toHaveBeenCalledWith(
-      "sessionpipe: refusing to rename machine to other: the control daemon is configured as paired-box. Setup cannot rename a paired daemon; keep its existing name.\n",
-    );
+    const control = path.join(tmp, "config", "control.json");
+    put(control, { name: "paired-box", folders: ["/p"], mode: "safe", receivers: [] });
     // The daemon's name is the machine's when the config has none.
     await run("install", "--backfill", "0");
     expect(cfg().machine).toBe("paired-box");
+    // A rename moves both names together, so the hooks and the daemon stay one machine.
+    const r = await run("install", "--rename-machine", "--machine", "other", "--backfill", "0");
+    expect(r.err).not.toHaveBeenCalled();
+    expect(r.text).toContain("Renamed the control daemon paired-box → other; its next hello tells each receiver.");
+    expect(cfg().machine).toBe("other");
+    expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({ name: "other", folders: ["/p"], mode: "safe" });
+    // Already the same name: nothing to say, nothing rewritten.
+    const again = await run("install", "--rename-machine", "--machine", "other", "--backfill", "0");
+    expect(again.text).not.toContain("Renamed the control daemon");
   });
 
   it("on Windows the hook names this node and hook.js by path, no launcher", async () => {

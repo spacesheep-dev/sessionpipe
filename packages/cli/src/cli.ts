@@ -44,7 +44,7 @@ import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from
 import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
-import { moveControlSecrets, pairedCount, readControl } from "./control/store.js";
+import { moveControlSecrets, pairedCount, readControl, writeControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
@@ -214,11 +214,14 @@ function setupConfig(): Config {
     cfg.machine = current;
   } else {
     const name = machine || current || machineName(cfg, os.hostname());
-    // receivers[].machine is a receiver-issued id, not the daemon's display name.
-    if (machine && control && control.name !== name)
-      throw new Error(
-        `refusing to rename machine to ${name}: the control daemon is configured as ${control.name}. Setup cannot rename a paired daemon; keep its existing name.`,
-      );
+    // The daemon goes by the same name as the hooks, or a receiver shows one machine
+    // twice. An explicit rename renames the paired daemon too: control.json carries the
+    // name, the daemon re-reads it and says it in its next hello (receivers key machines
+    // by id, so the pairing holds). receivers[].machine is that id, not the name.
+    if (machine && control && control.name !== name) {
+      writeControl({ ...control, name });
+      out(`  Renamed the control daemon ${control.name} → ${name}; its next hello tells each receiver.`);
+    }
     cfg.machine = name;
   }
   return cfg;

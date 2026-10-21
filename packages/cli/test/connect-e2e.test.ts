@@ -129,19 +129,17 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
     expect(readFileSync(controlFile, "utf8")).toBe(control);
   }, 30_000);
 
-  it("an explicit rename cannot split the paired daemon", async () => {
+  it("an explicit rename renames the hooks and the paired daemon together", async () => {
     const configFile = env.SESSIONPIPE_CONFIG as string;
     const controlFile = path.join(tmp, "config", "control.json");
-    const config = readFileSync(configFile, "utf8");
-    const control = readFileSync(controlFile, "utf8");
-    const hook = readFileSync(path.join(tmp, "data", "hook.js"));
-    const worker = readFileSync(path.join(tmp, "data", "worker.js"));
+    const before = JSON.parse(readFileSync(controlFile, "utf8")) as { name: string; receivers: unknown[] };
     const r = await run(["connect", rx.url, "--no-service", "--machine", "Intel-mbp", "--rename-machine"]);
-    expect(r.code, r.out).toBe(1);
-    expect(r.out).toContain("refusing to rename");
-    expect(readFileSync(configFile, "utf8")).toBe(config);
-    expect(readFileSync(controlFile, "utf8")).toBe(control);
-    expect(readFileSync(path.join(tmp, "data", "hook.js"))).toEqual(hook);
-    expect(readFileSync(path.join(tmp, "data", "worker.js"))).toEqual(worker);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain(`Renamed the control daemon ${before.name} → Intel-mbp`);
+    expect(JSON.parse(readFileSync(configFile, "utf8")).machine).toBe("Intel-mbp");
+    const after = JSON.parse(readFileSync(controlFile, "utf8")) as { name: string; receivers: unknown[] };
+    expect(after.name).toBe("Intel-mbp");
+    // The pairing itself is untouched: same receivers, same ids, same keys.
+    expect(after.receivers).toEqual(before.receivers);
   }, 30_000);
 });

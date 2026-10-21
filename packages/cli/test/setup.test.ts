@@ -176,13 +176,19 @@ fs.writeFileSync(path.join(target, 'bin/sessionpipe'), script, { mode: 0o755 });
       });
     }
 
-    it(`${args[0]} refuses an explicit rename that would split a paired daemon before npm or hook writes`, () => {
-      put(path.join(tmp, "config/control.json"), JSON.stringify({ name: "Intel", receivers: [{ machine: "Intel" }] }));
-      const before = snapshot(tmp);
+    it(`${args[0]} renames the hooks and the paired daemon together on an explicit rename`, () => {
+      const control = path.join(tmp, "config/control.json");
+      put(control, JSON.stringify({ name: "Intel", receivers: [{ machine: "opaque-id", keys: [{ id: "k1" }] }] }));
       const r = run([...args, "--machine", "Intel-mbp", "--rename-machine", "--allow-downgrade"]);
-      expect(r.code, r.out).toBe(1);
-      expect(r.out).toContain("refusing to rename");
-      expect(snapshot(tmp)).toEqual(before);
+      // connect goes on to reach receiver.invalid and fails there; the rename came first.
+      if (args[0] === "install") expect(r.code, r.out).toBe(0);
+      expect(r.out).toContain("Renamed the control daemon Intel → Intel-mbp");
+      expect(config().machine).toBe("Intel-mbp");
+      // The name moves; the pairing (its id and keys) does not.
+      expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({
+        name: "Intel-mbp",
+        receivers: [{ machine: "opaque-id", keys: [{ id: "k1" }] }],
+      });
     });
   }
 
@@ -265,13 +271,13 @@ fs.writeFileSync(path.join(target, 'bin/sessionpipe'), script, { mode: 0o755 });
     expect(config().machine).toBe("Intel");
   });
 
-  it("a locally configured daemon also cannot be renamed by setup", () => {
-    put(path.join(tmp, "config/control.json"), JSON.stringify({ name: "Intel", receivers: [] }));
-    const before = snapshot(tmp);
+  it("a locally configured daemon with no pairing yet is renamed by setup too", () => {
+    const control = path.join(tmp, "config/control.json");
+    put(control, JSON.stringify({ name: "Intel", receivers: [] }));
     const r = run([...installArgs, "--machine", "Intel-mbp", "--rename-machine"], directCli);
-    expect(r.code, r.out).toBe(1);
-    expect(r.out).toContain("refusing to rename");
-    expect(snapshot(tmp)).toEqual(before);
+    expect(r.code, r.out).toBe(0);
+    expect(config().machine).toBe("Intel-mbp");
+    expect(JSON.parse(readFileSync(control, "utf8")).name).toBe("Intel-mbp");
   });
 
   it("--machine sets the initial name; the default hostname is also persisted", () => {

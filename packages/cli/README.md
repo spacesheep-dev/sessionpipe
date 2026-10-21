@@ -23,10 +23,9 @@ replace it. Already-published older CLIs do not gain this guard retroactively.
 `--machine NAME` sets the initial name. On later runs, setup keeps the configured
 name and says when it ignores a different `--machine`, so a copied setup command
 cannot separate sessions from their daemon or reset the identity used for backoff.
-For an unpaired machine, `--machine NAME --rename-machine` explicitly renames it.
-If control is configured under a different name, setup refuses the rename before
-any writes: renaming a paired daemon requires coordinated pairing changes, which
-these setup commands do not perform.
+`--machine NAME --rename-machine` explicitly renames it, the paired daemon included:
+control.json takes the name and the daemon says it in its next hello. A receiver keys
+machines by their id, so the pairing holds and its two cards become one.
 
 | Tier | What leaves |
 |-----:|-------------|
