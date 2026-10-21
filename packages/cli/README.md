@@ -65,6 +65,12 @@ After upgrading, run `sessionpipe control pair <receiver>` again (without
 already-running daemon afterward with `systemctl --user restart sessionpipe-control.service`;
 macOS pairing reloads the LaunchAgent.
 
+A new session started from the receiver may bring files (screenshots, PDFs: up to 10,
+50 MiB together), whichever harness it is for. The daemon downloads each one, checks
+it against the hash you signed, saves it under `<folder>/.sessionpipe/files/<session>/`
+(a folder that git-ignores itself) and tells the session where they are. If any file
+is missing or doesn't match, the session doesn't start.
+
 One daemon per computer holds one long-poll per receiver and delivers each message the
 cheapest way the session allows: to `sessionpipe wait` parked in the session's
 background (in place, ~60 ms, no network), at the session's next Stop if it is

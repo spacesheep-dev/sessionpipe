@@ -5,6 +5,19 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+- Control: a `start` may carry `files` (CONTROL.md §3.1, §6; HTTP.md §1, §3; still
+  Draft). Up to 10 files, 25 MiB each and 50 MiB together, each named in the signed
+  command by its SHA-256 (base64url), so a receiver cannot swap one. The receiver
+  holds the bytes and serves them at `GET {control}/files/{sha256}` with the machine's
+  token; the machine stops reading past the signed size, checks length and hash,
+  writes them under `<cwd>/.sessionpipe/files/<session id>/` (self-ignoring
+  `.gitignore`, no symlinks followed, mode 0600) and starts the session — of any
+  harness it can start — with the text plus the list of relative paths. Any file
+  problem acks `failed` with code `file` and starts nothing. `files` on another kind,
+  `null` or empty is `bad_fields`. Schemas: `control-command` gains `files`;
+  `control-pair` and `control-hello` gain `files: true` (the machine takes attachments
+  — a receiver should not send files to one that doesn't say so); the well-known
+  `control` object may say `files: true`. 24 new control vectors (`66`–`89`).
 - Control: `start` is no longer Claude Code's alone (CONTROL.md §6; asked for by the
   maintainer on 2026-10-04, so the spec change ships with its code). A `start` names a
   session of any harness the machine can drive headlessly — the reference daemon drives
