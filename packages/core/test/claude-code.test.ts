@@ -213,6 +213,74 @@ describe("claude-code fromHook", () => {
     });
     expect(hook("PostToolUse", { tool_name: "Bash" }, { HOME: home })?.hints).toEqual({});
   });
+  // PROTOCOL.md §4: the harness's own word, forwarded verbatim, and the injected flag.
+  // The recorded fixtures prove the shapes 2.1.304 sends; these are the rest.
+  it("turn.started: submitted_by is forwarded as given, never mapped; a bad shape is dropped", () => {
+    for (const w of ["user", "sdk", "system", "loop_wakeup", "schedule_wakeup", "poll_event", "a_word_we_dont_know"])
+      expect(hook("UserPromptSubmit", { prompt: "hi", source: w })?.events[0]?.data).toEqual({
+        prompt_chars: 2,
+        submitted_by: w,
+      });
+    // The shape the spec allows is the whole guard, tier 0 being unredacted: a sentence, an
+    // over-long word, a leading space, an empty string, a leading _, a non-string all go.
+    for (const bad of ["a person typed it", "x".repeat(41), " user", "", "_user", 7, null, { kind: "user" }])
+      expect(hook("UserPromptSubmit", { prompt: "hi", source: bad })?.events[0]?.data).toEqual({ prompt_chars: 2 });
+    expect(hook("UserPromptSubmit", { prompt: "hi", source: "x".repeat(40) })?.events[0]?.data).toEqual({
+      prompt_chars: 2,
+      submitted_by: "x".repeat(40),
+    });
+    // session.started.source is this spec's own enum, a different vocabulary: the same word
+    // is normalised there and forwarded here.
+    expect(hook("SessionStart", { source: "loop_wakeup" })?.events[0]?.data).toEqual({ source: "unknown" });
+  });
+  it("turn.started: injected marks one of Claude Code's own wrappers, trimmed, and nothing else", () => {
+    for (const p of [
+      "<task-notification>\n<status>completed</status>\n</task-notification>",
+      "\n  <task-notification>\n<status>completed</status>\n</task-notification>\n",
+      "<task-notification/>",
+      '<cross-session-message from="uds:/tmp/x.sock">\nAgreed.\n</cross-session-message>',
+      "<system-reminder>x</system-reminder>",
+      "<local-command-stdout>x</local-command-stdout>",
+      "<command-name>/clear</command-name>",
+    ])
+      expect(hook("UserPromptSubmit", { prompt: p })?.events[0]?.data).toEqual({
+        prompt_chars: [...p].length,
+        injected: true,
+      });
+    for (const p of [
+      "fix the build",
+      "1 < 2 and 3 > 2",
+      // Prompts the transcript reader's wider isInjected calls injected: a pasted JSX
+      // element, an SVG, an HTML comment, a tag that merely starts like a wrapper. Marking
+      // one of these would drop a turn the person started, the costly direction.
+      "<Component>hello</Component>",
+      '<svg viewBox="0 0 1 1"><path d="M0 0h1v1z"/></svg>',
+      "<!-- why is this commented out? -->",
+      "<taskmaster>plan it</taskmaster>",
+      // The two gaps the spec admits: a peer message with no wrapper, a cron's own text.
+      "status from another session",
+      "run the nightly report",
+    ])
+      expect(hook("UserPromptSubmit", { prompt: p })?.events[0]?.data).toEqual({ prompt_chars: [...p].length });
+    // An empty prompt still counts 0 chars; a non-string prompt is left unread.
+    expect(hook("UserPromptSubmit", { prompt: "" })?.events[0]?.data).toEqual({ prompt_chars: 0 });
+    expect(hook("UserPromptSubmit", { prompt: [{ type: "text", text: "hi" }] })?.events[0]?.data).toEqual({});
+  });
+  it("turn.started: a message absorbed mid-turn repeats the turn_id, injected and all", () => {
+    // Claude Code fires a second UserPromptSubmit with the RUNNING turn's prompt_id when it
+    // absorbs a message. Both events go out; PROTOCOL.md §4 is what stops a receiver
+    // letting the second one reclassify a turn it already accepted as the person's.
+    const peer = '<cross-session-message from="uds:/tmp/x.sock">\nAgreed.\n</cross-session-message>';
+    expect(hook("UserPromptSubmit", { prompt: "fix the build", prompt_id: "p9" })?.events[0]?.data).toEqual({
+      turn_id: "p9",
+      prompt_chars: 13,
+    });
+    expect(hook("UserPromptSubmit", { prompt: peer, prompt_id: "p9" })?.events[0]?.data).toEqual({
+      turn_id: "p9",
+      prompt_chars: [...peer].length,
+      injected: true,
+    });
+  });
 });
 
 describe("claude-code config dirs and the registry pid", () => {

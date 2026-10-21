@@ -1,0 +1,43 @@
+{
+  "harness": "claude-code",
+  "event": "UserPromptSubmit",
+  "recorded": {
+    "at": "2026-10-21T20:38:24.249Z",
+    "harness_version": "2.1.304",
+    "how": "SESSIONPIPE_STATE=<scratch> SESSIONPIPE_NO_WORKER=1 claude -p '<a prompt that starts a background sleep, then waits for it>' --allowedTools=Bash; the background command's completion woke a second turn, and this is that turn's UserPromptSubmit. The home directory, the config-dir name and the scratchpad slug were rewritten to a neutral /Users/dev record workspace; no key was added or dropped. Those paths are shorter than the recorded ones, so the expected prompt_chars is 406 where the recording's prompt was 482 characters. The payload carries no `source` key at all: 2.1.304 does not send one yet."
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "UserPromptSubmit"
+    ],
+    "stdin": "{\"session_id\":\"f40b8a7f-bc3e-47b2-815a-ea30975a245e\",\"transcript_path\":\"/Users/dev/.claude-dev/projects/-Users-dev--local-state-sessionpipe-record-ws/f40b8a7f-bc3e-47b2-815a-ea30975a245e.jsonl\",\"cwd\":\"/Users/dev/.local/state/sessionpipe/record/ws\",\"prompt_id\":\"f1858118-96d3-4fad-bcb4-fe66a1ad9985\",\"permission_mode\":\"bypassPermissions\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"<task-notification>\\n<task-id>bu35jkmee</task-id>\\n<tool-use-id>toolu_01QvoyYdhCxzsZTsvik9ZdnR</tool-use-id>\\n<output-file>/Users/dev/.ctmp/-Users-dev--local-state-sessionpipe-record-ws/f40b8a7f-bc3e-47b2-815a-ea30975a245e/tasks/bu35jkmee.output</output-file>\\n<status>completed</status>\\n<summary>Background command \\\"Sleep six seconds then print a marker\\\" completed (exit code 0)</summary>\\n</task-notification>\"}\n",
+    "env": {
+      "CLAUDE_CONFIG_DIR": "/Users/dev/.claude-dev",
+      "CLAUDE_PROJECT_DIR": "/Users/dev/.local/state/sessionpipe/record/ws"
+    },
+    "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.started",
+      "harness": {
+        "name": "claude-code",
+        "event": "UserPromptSubmit"
+      },
+      "session": {
+        "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+        "cwd": "/Users/dev/.local/state/sessionpipe/record/ws",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+        "prompt_chars": 406,
+        "injected": true
+      }
+    }
+  ]
+}
