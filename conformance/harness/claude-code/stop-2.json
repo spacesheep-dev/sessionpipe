@@ -35,7 +35,8 @@
       },
       "data": {
         "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
-        "reason": "stop"
+        "reason": "stop",
+        "background": 0
       }
     }
   ]
