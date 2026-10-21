@@ -26,7 +26,10 @@ branches, functions and statements. A branch only another platform or a failing 
 reaches is tested by faking that (`process.platform`, one `fs` call); code nothing can
 reach is deleted, not ignored. A number never goes down. Run it locally before opening a PR.
 Two more gates: a PR that touches `packages/core/src/adapters/` must also touch
-`conformance/harness/` (as a spec change must touch `conformance/` or `schemas/`), and
+`conformance/harness/` or `packages/core/test/` (a hook mapping is proved by a recorded
+fixture; what an adapter reads from the harness's own files, facts, transcripts, install,
+has no payload to record and is proved by a test), as a spec change must touch
+`conformance/` or `schemas/`; and
 `packages/core/test/registry.test.ts` holds every adapter in the registry to at least
 one fixture, and every fixture directory to a registered adapter. A new harness is one
 adapter file + fixtures for every event it handles + a row in `spec/ADAPTERS.md`; a

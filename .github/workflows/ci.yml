@@ -98,21 +98,24 @@ jobs:
           echo "ok"
 
   adapter-fixture:
-    name: An adapter change carries a fixture
+    name: An adapter change carries a fixture or a test
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: packages/core/src/adapters/ changed → conformance/harness/ changed too
+      - name: packages/core/src/adapters/ changed → conformance/harness/ or packages/core/test/ changed too
         run: |
           base="${{ github.event.pull_request.base.sha }}"
           changed=$(git diff --name-only "$base"...HEAD)
           adapter=$(echo "$changed" | grep -E '^packages/core/src/adapters/' || true)
-          fixture=$(echo "$changed" | grep -E '^conformance/harness/' || true)
+          # A hook mapping is proved by a recorded fixture; what an adapter reads from the
+          # harness's own files (facts, transcripts, install) has no payload to record, so a
+          # test under packages/core/test/ proves that.
+          fixture=$(echo "$changed" | grep -E '^(conformance/harness/|packages/core/test/)' || true)
           if [ -n "$adapter" ] && [ -z "$fixture" ]; then
-            echo "::error::adapter changed ($adapter) with no change under conformance/harness/ — add the fixture that proves it"
+            echo "::error::adapter changed ($adapter) with no change under conformance/harness/ or packages/core/test/ — add the fixture or test that proves it"
             exit 1
           fi
           echo "ok"
