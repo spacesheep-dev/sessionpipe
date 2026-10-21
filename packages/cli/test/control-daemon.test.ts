@@ -453,7 +453,9 @@ describe.runIf(unix)("delivery", () => {
   });
 
   it("signed out: a new session fails the same way; a Claude Code that can't say never blocks", async () => {
-    await startDaemon({ login: async () => ({ loggedIn: false }) });
+    // The daemon's env names no account dir: the default account is asked about.
+    const { CLAUDE_CONFIG_DIR: _, ...noDir } = env;
+    await startDaemon({ login: async () => ({ loggedIn: false }), extra: { env: noDir } });
     const NEW = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a91";
     const q = await rx.send({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "hello" });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "failed" });

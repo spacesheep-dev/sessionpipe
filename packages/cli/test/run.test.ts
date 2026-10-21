@@ -230,6 +230,8 @@ describe("sessions the control daemon named (control/aliases.ts)", () => {
         }),
       );
       await new Promise<void>((r) => server.listen(sock, () => r()));
+      // The sandbox points SESSIONPIPE_SOCKET elsewhere; the fake daemon is here.
+      vi.stubEnv("SESSIONPIPE_SOCKET", sock);
       try {
         const ws = path.join(tmp, "ws");
         mkdirSync(ws, { recursive: true });
@@ -256,6 +258,7 @@ describe("sessions the control daemon named (control/aliases.ts)", () => {
         const facts = JSON.parse(readFileSync(path.join(tmp, "facts", "antigravity", "start-2.json"), "utf8"));
         expect(facts.cwd).toBe(ws);
       } finally {
+        vi.unstubAllEnvs();
         await new Promise<void>((r) => server.close(() => r()));
       }
     },

@@ -9,6 +9,6 @@
       "@sessionpipe/core/control": ["./packages/core/src/control/index.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "scripts/**/*.ts"],
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "exclude": ["**/dist/**", "**/node_modules/**"]
 }

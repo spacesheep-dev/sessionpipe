@@ -6,7 +6,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agMatchProject,
   agPath,
@@ -336,6 +336,14 @@ describe("antigravity detect, install and uninstall", () => {
     mkdirSync(path.join(gemini, "antigravity-ide"), { recursive: true });
     expect(antigravity.detect(env)).toBe(true);
     expect(antigravity.configFiles(env)).toEqual([path.join(gemini, "config", "hooks.json")]);
+    // No GEMINI_CLI_HOME: ~/.gemini under the home (HOME here, USERPROFILE on Windows).
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home);
+    try {
+      expect(antigravity.detect({})).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     expect(typeof antigravity.detect()).toBe("boolean");
     expect(antigravity.configFiles()).toHaveLength(1);
   });

@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     include: ["packages/*/test/**/*.test.ts", "scripts/**/*.test.ts"],
+    // Each file starts in a sandbox home; the real one is watched. See the file.
+    setupFiles: ["test/sandbox-home.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

@@ -166,6 +166,14 @@ describe("gemini-cli install and installed", () => {
     mkdirSync(path.join(gemini, "tmp"));
     expect(geminiCli.detect(env)).toBe(true);
     expect(geminiCli.configFiles(env)).toEqual([settings]);
+    // No GEMINI_CLI_HOME: ~/.gemini under the home (HOME here, USERPROFILE on Windows).
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home);
+    try {
+      expect(geminiCli.detect({})).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     expect(typeof geminiCli.detect()).toBe("boolean");
     expect(geminiCli.configFiles()).toHaveLength(1);
     expect(geminiCli.backfill(0, env)).toEqual([]);

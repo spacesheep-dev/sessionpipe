@@ -224,6 +224,10 @@ describe("moving sinks' keys", () => {
       ]);
       k.items.set(sinkAccount("kc"), "already");
       expect(sinkAccount("kc")).toMatch(/^sink:kc:token@[0-9a-f]{8}$/);
+      // No SESSIONPIPE_CONFIG: the machine has one config, so the name alone.
+      vi.stubEnv("SESSIONPIPE_CONFIG", undefined as never);
+      expect(sinkAccount("kc")).toBe("sink:kc:token");
+      vi.stubEnv("SESSIONPIPE_CONFIG", file);
       expect(moveSinkSecrets("keychain", { run: k.run })).toEqual({ moved: ["rx"], kept: [] });
       expect(readConfig(file).sinks.map((s) => s.token_in)).toEqual(["keychain", undefined, "keychain"]);
       expect(k.items.get(sinkAccount("rx"))).toBe("ss_key");

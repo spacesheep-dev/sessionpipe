@@ -137,6 +137,8 @@ describe("runJob with a harness that says little", () => {
         }),
       );
       await new Promise<void>((r) => server.listen(sock, () => r()));
+      // The sandbox points SESSIONPIPE_SOCKET elsewhere; the fake daemon is here.
+      vi.stubEnv("SESSIONPIPE_SOCKET", sock);
       try {
         fake.result = { session: { id: "s1" }, events: [] };
         fake.facts = { harness_version: "1.2.3", branch: "dev", title: "t" };
@@ -156,6 +158,7 @@ describe("runJob with a harness that says little", () => {
         expect(events[0]?.session).toMatchObject({ id: "s1", branch: "dev", title: "t" });
         expect(events[0]?.session).not.toHaveProperty("cwd");
       } finally {
+        vi.unstubAllEnvs();
         await new Promise<void>((r) => server.close(() => r()));
       }
     },
