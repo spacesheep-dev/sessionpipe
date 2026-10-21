@@ -468,6 +468,37 @@ const FAQ = [
     .replace("{{version}}", version)
     .replace("{{commands}}", `\`\`\`sh\n${publicCommands.map(usageLine).join("\n")}\n\`\`\``);
   twin("/", agent);
+  // The architecture diagram with its colours resolved, for places that take an <img>
+  // and have no stylesheet (the README): one copy per theme, from the same source.
+  mkdirSync(path.join(out, "diagrams"), { recursive: true });
+  const THEMES = {
+    light: {
+      bg: "#fbfbfd",
+      bg2: "#f1f2f7",
+      fg: "#15172b",
+      fg2: "#4b4f6b",
+      line: "#dcdfe9",
+      brand: "#3b3fd8",
+      "brand-text": "#2f33c4",
+      card: "#ffffff",
+    },
+    dark: {
+      bg: "#0f1220",
+      bg2: "#161a2e",
+      fg: "#e8eaf6",
+      fg2: "#a6abc8",
+      line: "#2a2f4a",
+      brand: "#5b60ff",
+      "brand-text": "#9aa0ff",
+      card: "#171b31",
+    },
+  };
+  for (const [theme, vars] of Object.entries(THEMES)) {
+    const svg = diagram("architecture")
+      .replace(/var\(--([a-z0-9-]+)\)/g, (m, v) => vars[v] ?? m)
+      .replace(/<svg /, `<svg style="background:${vars.bg}" `);
+    writeFileSync(path.join(out, "diagrams", `architecture-${theme}.svg`), svg);
+  }
   writeFileSync(path.join(out, "agent.md"), twins.get("/"));
   // Everything with Markdown behind it, in reading order, in one file.
   const order = ["/", "/docs/", "/get-started/", "/receivers/", ...specs.map((s) => s[0]), "/changelog/"];
