@@ -64,9 +64,10 @@ describe("runHeadless", () => {
   posix(
     "streaming: a line over the cap never breaks the stream, a listener that throws is survived, the last line needs no newline",
     async () => {
-      // How much of the 1.1 MB line survives depends on how the OS chunks the pipe (whole
-      // on one, nothing on another): only what holds for any chunking is asserted.
-      const bin = script("lines", "head -c 1100000 /dev/zero | tr '\\0' 'y'; printf '\\nlast'");
+      // How much of the 1.2 MB line survives depends on how the OS chunks the pipe (whole
+      // on one, nothing on another): only what holds for any chunking is asserted. The
+      // line is over the cap by more than two 64 KiB reads, so some read sees it over.
+      const bin = script("lines", "head -c 1200000 /dev/zero | tr '\\0' 'y'; printf '\\nlast'");
       const lines: string[] = [];
       const r = await runHeadless(bin, [], {
         cwd: tmp,
