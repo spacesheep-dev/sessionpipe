@@ -10,7 +10,7 @@ a sink gets a tier, the tier is an allowlist, and two rulesets scrub what remain
 
 | Tier | Name | Carries |
 |-----:|------|---------|
-| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`), timing, machine, cwd, repo, branch, model, title, url, account_id. Enough for "working / needs you / done" and a link to open the session. |
+| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`), timing, machine, cwd, repo, branch, model, title, url, account_id. Enough for "working / needs you / done" and a link to open the session. `turn.started` carries `submitted_by` and `injected`: who started the turn, and whether its prompt was the harness's own block — never any of the prompt's words, but `injected` is one bit read off the prompt's first characters, where the prompt's bare length (`prompt_chars`) is tier 1. `submitted_by` is a bare word (PROTOCOL.md §4) because tier 0 is not scrubbed by `secrets@1`. |
 | 1 | actions | + tool names, `call_id`, durations, ok/error text, `files.changed` paths, attention `tool` and `message` (redacted, ≤ 200 chars), `prompt_chars`, subagents, compactions. Enough for an activity feed. |
 | 2 | conversation | + `turn.transcript`: the person's prompts and the assistant's text, redacted, ≤ 20 000 chars a side, and `turn.progress`, the same for a turn still running. Enough for memory, search, recaps. |
 | 3 | full | + tool `input` and `output` (≤ 64 KB each), thinking where the harness exposes it, the native lane's raw lines. Full replay; meant for a receiver you own. |
