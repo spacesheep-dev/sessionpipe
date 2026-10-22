@@ -249,6 +249,67 @@ describe("the heartbeat throttle: a tool event is a job once a minute when no si
   });
 });
 
+describe("Claude Code's status line: the limits on screen, a job only when they change", () => {
+  const limits = (five: number, extra: Record<string, unknown> = {}) =>
+    claude({
+      transcript_path: "/x.jsonl",
+      rate_limits: {
+        five_hour: { used_percentage: five, resets_at: 1738425600 },
+        seven_day: { used_percentage: 41.2 },
+        ...extra,
+      },
+    });
+  const line = (stdin: string, env: NodeJS.ProcessEnv = {}, stdout?: (t: string) => void) =>
+    run(["claude-code", "StatusLine"], stdin, env, stdout);
+  const tier1 = () => writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] }));
+
+  it("prints the windows it knows by a short name, and any other by its own", async () => {
+    await line(limits(23.5, { spend_limit: { used_percentage: 62.8 }, other_cap: { used_percentage: 7 } }));
+    expect(out).toEqual(["5h 24% · week 41% · spend 63% · other_cap 7%\n"]);
+  });
+  it("no sink at tier ≥ 1: on screen only, never a job", async () => {
+    await line(limits(10));
+    expect(jobs()).toEqual([]);
+    expect(timing()[0]).toMatchObject({ event: "StatusLine", spawned: false });
+  });
+  it("a change goes, the same limits never again, a second change only after a minute", async () => {
+    tier1();
+    await line(limits(10));
+    await line(limits(10));
+    expect(jobs().map((j) => j.event)).toEqual(["StatusLine"]);
+    await line(limits(11));
+    expect(jobs()).toHaveLength(1);
+    const stamp = path.join(state, "beats", readdirSync(path.join(state, "beats"))[0] as string);
+    const old = new Date(Date.now() - 2 * 60_000);
+    utimesSync(stamp, old, old);
+    await line(limits(11));
+    expect(jobs()).toHaveLength(2);
+  });
+  it("each config dir (one account each) has its own minute", async () => {
+    tier1();
+    await line(limits(10));
+    await line(limits(12), { CLAUDE_CONFIG_DIR: "/Users/x/.claude-work" });
+    expect(jobs()).toHaveLength(2);
+    expect(readdirSync(path.join(state, "beats"))).toHaveLength(2);
+  });
+  it("nothing to show and nothing to send before the first response, or from a payload that is not JSON", async () => {
+    tier1();
+    await line(claude({ transcript_path: "/x.jsonl" }));
+    await line(claude({ rate_limits: { five_hour: { used_percentage: "high" } } }));
+    await line("not json");
+    expect(out).toEqual([]);
+    expect(jobs()).toEqual([]);
+  });
+  it("a closed stdout, or a stamp that cannot be written, still lets the job go", async () => {
+    tier1();
+    writeFileSync(path.join(state, "beats"), "");
+    await line(limits(10), {}, () => {
+      throw new Error("EPIPE");
+    });
+    expect(jobs()).toHaveLength(1);
+  });
+});
+
 describe("Antigravity reads stdout", () => {
   it("`{}` to what sessionpipe hooks, an ask to a leftover PreToolUse", async () => {
     const stdin = JSON.stringify({ conversationId: "c1", toolCall: { name: "run_command" } });

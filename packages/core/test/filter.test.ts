@@ -112,6 +112,7 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
+  "limits.observed": { 1: ["windows", "plan"] },
 };
 /** Every key any type carries, plus one the spec never names. */
 const EVERY_KEY: Record<string, unknown> = {
@@ -143,6 +144,8 @@ const EVERY_KEY: Record<string, unknown> = {
   trigger: "auto",
   submitted_by: "loop_wakeup",
   injected: true,
+  windows: [{ id: "five_hour", used_percent: 23.5 }],
+  plan: "max",
   extra: "never sent",
 };
 const TIERS: Tier[] = [0, 1, 2, 3];

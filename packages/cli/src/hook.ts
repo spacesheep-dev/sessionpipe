@@ -69,6 +69,18 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         stdin = buf.subarray(0, 1024 * 1024).toString("utf8");
       } catch {}
     }
+    // Claude Code's status line (install --status-line) runs on every refresh. It shows
+    // the account's limits, and only a change becomes a job (limits.observed): at most
+    // one a minute per config dir, and none when no sink takes tier 1.
+    if (harness === "claude-code" && event === "StatusLine") {
+      const limits = statusLimits(stdin);
+      if (limits.line) {
+        try {
+          io.stdout(`${limits.line}\n`);
+        } catch {}
+      }
+      if (!limits.sig || !anySinkAbove(0) || !limitsDue(limits.sig)) return finish(false);
+    }
     // Tool events are the bulk of what a harness fires. When no sink takes tier ≥ 1
     // they are only a "still working" signal: one heartbeat a minute per session.
     const TOOL = /^(PreToolUse|PostToolUse|PostToolUseFailure|BeforeTool|AfterTool|PostInvocation)$/;
@@ -233,6 +245,37 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
   function sessionIdOf(stdin: string): string {
     const m = /"(?:session_id|sessionId|conversationId)"\s*:\s*"([^"]{1,128})"/.exec(stdin);
     return m?.[1] ?? "";
+  }
+  /** The status line's `rate_limits` as one short line (`5h 23% · week 41%`), and as
+   *  the text a change is told by. Empty when the account has none. */
+  function statusLimits(stdin: string): { line: string; sig: string } {
+    let rl: unknown;
+    try {
+      rl = (JSON.parse(stdin) as { rate_limits?: unknown }).rate_limits;
+    } catch {}
+    if (!rl || typeof rl !== "object") return { line: "", sig: "" };
+    const label: Record<string, string> = { five_hour: "5h", seven_day: "week", spend_limit: "spend" };
+    const parts = Object.entries(rl as Record<string, { used_percentage?: unknown }>)
+      .filter(([, w]) => typeof w?.used_percentage === "number")
+      .map(([id, w]) => `${label[id] ?? id} ${Math.round(w.used_percentage as number)}%`);
+    return parts.length ? { line: parts.join(" · "), sig: JSON.stringify(rl) } : { line: "", sig: "" };
+  }
+  /** A change of limits, at most one a minute per config dir (one account each): the
+   *  stamp holds the last limits sent, its mtime when. */
+  function limitsDue(sig: string): boolean {
+    const dir = createHash("sha256")
+      .update(env.CLAUDE_CONFIG_DIR ?? "")
+      .digest("hex")
+      .slice(0, 12);
+    const stamp = path.join(state, "beats", `${harness}-limits-${dir}`);
+    try {
+      if (readFileSync(stamp, "utf8") === sig || Date.now() - statSync(stamp).mtimeMs < 60_000) return false;
+    } catch {}
+    try {
+      mkdirSync(path.dirname(stamp), { recursive: true, mode: 0o700 });
+      writeFileSync(stamp, sig, { mode: 0o600 });
+    } catch {}
+    return true;
   }
   /** One heartbeat per minute per session: the stamp file's mtime is the clock. */
   function beatDue(id: string): boolean {

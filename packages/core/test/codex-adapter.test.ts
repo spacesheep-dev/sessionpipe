@@ -245,3 +245,64 @@ describe("codex notify in config.toml", () => {
     expect(codex.uninstall(env)[1]).toEqual({ file: toml, changed: false });
   });
 });
+
+describe("codex limits: the newest rate_limits a turn wrote in the rollout", () => {
+  const rec = (o: unknown) => JSON.stringify(o);
+  const tokens = (rate_limits: unknown) =>
+    rec({
+      type: "event_msg",
+      timestamp: "2026-10-21T20:23:13.395Z",
+      payload: { type: "token_count", info: null, rate_limits },
+    });
+  const file = (lines: string[]) => {
+    const f = path.join(home, "rollout.jsonl");
+    // A rollout opens with its session_meta (a short file's tail read skips line one).
+    writeFileSync(f, `${[rec({ type: "session_meta", payload: { id: SID } }), ...lines].join("\n")}\n`);
+    return f;
+  };
+  // Recorded 2026-10-21, codex-cli 0.163.0-alpha.11 (a Pro Lite account: one weekly window).
+  const recorded = {
+    limit_id: "codex",
+    limit_name: null,
+    primary: { used_percent: 6.0, window_minutes: 10080, resets_at: 1793099533 },
+    secondary: null,
+    credits: { has_credits: false, unlimited: false, balance: "0" },
+    individual_limit: null,
+    spend_control_reached: null,
+    plan_type: "prolite",
+    rate_limit_reached_type: null,
+  };
+
+  it("reads the last token_count that carries them, past later records without", () => {
+    const f = file([
+      tokens({ primary: { used_percent: 1, window_minutes: 300, resets_at: 1793000000 } }),
+      tokens(recorded),
+      tokens(null),
+      rec({ type: "event_msg", payload: { type: "agent_message", message: "done" } }),
+      "not json",
+    ]);
+    expect(codex.limits?.(f)).toEqual({
+      windows: [{ id: "primary", used_percent: 6, window_minutes: 10080, resets_at: "2026-10-27T11:12:13.000Z" }],
+      plan: "prolite",
+    });
+  });
+  it("keeps both windows, and only what each one says", () => {
+    const f = file([
+      tokens({
+        primary: { used_percent: 23.5, window_minutes: 300 },
+        secondary: { used_percent: 41, window_minutes: 1.5, resets_at: "soon" },
+      }),
+    ]);
+    expect(codex.limits?.(f)).toEqual({
+      windows: [
+        { id: "primary", used_percent: 23.5, window_minutes: 300 },
+        { id: "secondary", used_percent: 41 },
+      ],
+    });
+  });
+  it("is null with no window to read, no token_count, or no file", () => {
+    expect(codex.limits?.(file([tokens({ primary: null, secondary: { used_percent: -1 } })]))).toBeNull();
+    expect(codex.limits?.(file([]))).toBeNull();
+    expect(codex.limits?.(path.join(home, "missing.jsonl"))).toBeNull();
+  });
+});

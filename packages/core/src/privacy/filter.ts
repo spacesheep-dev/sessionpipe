@@ -26,6 +26,7 @@ export const TYPE_TIER: Record<string, Tier> = {
   "subagent.started": 1,
   "subagent.ended": 1,
   "context.compacted": 1,
+  "limits.observed": 1,
   native: 3,
 };
 
@@ -48,6 +49,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
+  "limits.observed": { 1: ["windows", "plan"] },
 };
 
 const SESSION_ALLOW = [

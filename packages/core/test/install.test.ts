@@ -252,3 +252,61 @@ describe("issue #12: a lean install hooks one tool event", () => {
     expect(claudeCode.installed(cmd, env, { lean: true }).find((r) => r.file === file)?.state).toBe("stale");
   });
 });
+
+describe("--status-line: Claude Code's limits come only through a status line", () => {
+  const file = () => path.join(home, ".claude", "settings.json");
+  const mine = (r: { file: string }) => r.file === file();
+  const line = () => JSON.parse(readFileSync(file(), "utf8")).statusLine;
+
+  it("writes ours where there is none, keeps it while current, and uninstall restores the bytes", () => {
+    const before = `${JSON.stringify({ model: "opus" }, null, 2)}\n`;
+    writeFileSync(file(), before);
+    const r1 = claudeCode.install(cmd, env, { statusLine: true }).filter(mine);
+    expect(r1.map((r) => r.note)).toEqual([undefined, "status line written (account limits)"]);
+    expect(line()).toEqual({ type: "command", command: cmd(["claude-code", "StatusLine"]).command });
+    expect(claudeCode.install(cmd, env, { statusLine: true }).filter(mine)).toHaveLength(1);
+    // Left alone when the person said nothing either way; a moved node path is rewritten.
+    claudeCode.install(cmd2, env);
+    expect(line().command).toBe(cmd(["claude-code", "StatusLine"]).command);
+    claudeCode.install(cmd2, env, { statusLine: true });
+    expect(line().command).toBe(cmd2(["claude-code", "StatusLine"]).command);
+    claudeCode.uninstall(env);
+    expect(readFileSync(file(), "utf8")).toBe(before);
+  });
+  it("never replaces a status line of the person's own, and says so", () => {
+    writeFileSync(file(), JSON.stringify({ statusLine: { type: "command", command: "~/bin/my-line" } }));
+    const r = claudeCode.install(cmd, env, { statusLine: true }).filter(mine);
+    expect(r[1]).toMatchObject({
+      changed: false,
+      skipped: true,
+      note: "a status line of your own is set; limits are not read",
+    });
+    expect(line().command).toBe("~/bin/my-line");
+    claudeCode.uninstall(env);
+    expect(line().command).toBe("~/bin/my-line");
+  });
+  it("--no-status-line takes ours away, and is nothing to do when there is none", () => {
+    claudeCode.install(cmd, env, { statusLine: true });
+    expect(claudeCode.install(cmd, env, { statusLine: false }).filter(mine)[1]?.note).toBe("status line removed");
+    expect(line()).toBeUndefined();
+    expect(claudeCode.install(cmd, env, { statusLine: false }).filter(mine)).toHaveLength(1);
+  });
+  it("uninstall reports the status line when it was all of ours left, and deletes a file it created", () => {
+    claudeCode.install(cmd, env, { statusLine: true });
+    const hooksOnly = JSON.parse(readFileSync(file(), "utf8"));
+    delete hooksOnly.hooks;
+    writeFileSync(file(), JSON.stringify(hooksOnly));
+    expect(claudeCode.uninstall(env).find(mine)).toMatchObject({ changed: true, note: "status line removed" });
+    rmSync(file());
+    const created = claudeCode.install(cmd, env, { statusLine: true }).filter(mine);
+    expect(created[0]?.created).toBe(true);
+    claudeCode.uninstall(env, { created: [file()] });
+    expect(existsSync(file())).toBe(false);
+  });
+  it("a file that is not plain JSON gets one report, the hooks' refusal", () => {
+    writeFileSync(file(), "{ // mine\n}");
+    const r = claudeCode.install(cmd, env, { statusLine: true }).filter(mine);
+    expect(r).toHaveLength(1);
+    expect(r[0]?.skipped).toBe(true);
+  });
+});

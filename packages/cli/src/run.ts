@@ -465,6 +465,30 @@ export async function runJob(
       }
       if (read.turns.length) facts.save(job.harness, id, { transcript_line: read.line, transcript_turns: turnNo });
     }
+    // Tier 1: the account's limits, when the turn left new numbers in the transcript
+    // (Codex's rollout; Claude Code's come from its status line, through fromHook).
+    if (
+      adapter.limits &&
+      r.transcript &&
+      ending &&
+      cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1)
+    ) {
+      const limits = adapter.limits(r.transcript);
+      const sig = limits && JSON.stringify(limits);
+      if (limits && sig !== facts.get(job.harness, id).limits_sig) {
+        events.push(
+          makeEvent(
+            { type: "limits.observed", harnessEvent: job.event, data: limits },
+            {
+              harness: { name: job.harness, ...(version ? { version } : {}) },
+              session: { ...session, seq: outbox.nextSeq(ref) },
+              now: opts.now ?? job.at,
+            },
+          ),
+        );
+        facts.save(job.harness, id, { limits_sig: sig });
+      }
+    }
     // At rest the outbox holds redacted strings (advisory GHSA-8f6f-c3c9-j5p6): the
     // tier-3 fields stay, with their secrets already gone; filterEvent runs the same
     // idempotent pass again per sink.

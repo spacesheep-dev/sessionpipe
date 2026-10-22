@@ -11,15 +11,23 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { gitFacts } from "../readers/git.js";
 import { isInjected, readClaude } from "../readers/transcripts.js";
-import type { HarnessAccount } from "../types.js";
-import { installClaudeShaped, installedClaudeShaped, readJson, uninstallClaudeShaped } from "./claude-shaped.js";
+import type { DataOf, HarnessAccount } from "../types.js";
+import {
+  formatJson,
+  installClaudeShaped,
+  installedClaudeShaped,
+  OURS,
+  readJson,
+  readJsonFile,
+  uninstallClaudeShaped,
+} from "./claude-shaped.js";
 import type {
   Adapter,
   BackfillRow,
@@ -28,6 +36,7 @@ import type {
   HookInput,
   HookResult,
   InstallOptions,
+  InstallReport,
   SessionFacts,
 } from "./types.js";
 
@@ -102,11 +111,19 @@ export const claudeCode: Adapter = {
   detect: (env = process.env) => claudeDirs(env).some((d) => existsSync(d)),
   configFiles: (env = process.env) => claudeDirs(env).map(settingsIn),
   install: (cmd, env = process.env, opts: InstallOptions = {}) =>
-    claudeDirs(env).map((d) => installClaudeShaped(settingsIn(d), NAME, eventsFor(opts.lean), cmd, OPTS)),
+    claudeDirs(env).flatMap((d) => {
+      const hooks = installClaudeShaped(settingsIn(d), NAME, eventsFor(opts.lean), cmd, OPTS);
+      const line = opts.statusLine === undefined ? null : statusLine(settingsIn(d), opts.statusLine, cmd);
+      return line ? [hooks, line] : [hooks];
+    }),
   uninstall: (env = process.env, opts: InstallOptions = {}) =>
-    claudeDirs(env).map((d) =>
-      uninstallClaudeShaped(settingsIn(d), CLAUDE_EVENTS, { created: opts.created?.includes(settingsIn(d)) }),
-    ),
+    claudeDirs(env).map((d) => {
+      const line = statusLine(settingsIn(d), false);
+      const hooks = uninstallClaudeShaped(settingsIn(d), CLAUDE_EVENTS, {
+        created: opts.created?.includes(settingsIn(d)),
+      });
+      return line && !hooks.changed ? line : hooks;
+    }),
   installed: (cmd, env = process.env, opts: InstallOptions = {}) =>
     claudeDirs(env).map((d) => ({
       file: settingsIn(d),
@@ -270,6 +287,14 @@ export const claudeCode: Adapter = {
       case "SessionEnd":
         events.push(ev("session.ended", { reason: endReason(s.reason) }));
         break;
+      case "StatusLine": {
+        // Not a hook: our status line command (install --status-line), which hook.ts
+        // hands on only when the limits changed.
+        const limits = claudeLimits(s.rate_limits);
+        if (!limits) return null;
+        events.push(ev("limits.observed", limits));
+        break;
+      }
       default:
         return null;
     }
@@ -341,6 +366,51 @@ export const claudeCode: Adapter = {
     return rows;
   },
 };
+
+/** Claude Code hands an account's limits only to its status line command
+ *  (https://code.claude.com/docs/en/statusline), so with `--status-line` ours is that
+ *  command. Someone else's status line is never replaced. Null: nothing to report. */
+function statusLine(file: string, want: boolean, cmd?: HookCommand): InstallReport | null {
+  const f = readJsonFile(file);
+  if (!f.ok) return null; // the hooks' report already says why
+  const cur = f.value.statusLine as { command?: unknown } | undefined;
+  const ours = typeof cur?.command === "string" && OURS.test(cur.command);
+  const command = cmd?.([NAME, "StatusLine"]).command;
+  if (want && cur && !ours)
+    return { file, changed: false, skipped: true, note: "a status line of your own is set; limits are not read" };
+  if (want ? ours && cur?.command === command : !ours) return null;
+  if (want) f.value.statusLine = { type: "command", command };
+  else delete f.value.statusLine;
+  writeFileSync(file, formatJson(f.value, f));
+  return { file, changed: true, note: want ? "status line written (account limits)" : "status line removed" };
+}
+
+/** Epoch seconds as RFC 3339; anything that is not a plausible time is no time. */
+const epochIso = (t: unknown): string | undefined =>
+  typeof t === "number" && t > 0 && t < 1e11 ? new Date(t * 1000).toISOString() : undefined;
+
+const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, seven_day: 10_080 };
+
+/** The status line's `rate_limits`: `five_hour`, `seven_day` and, behind a gateway,
+ *  `spend_limit`, each with `used_percentage` and `resets_at` in epoch seconds. Only
+ *  Pro and Max accounts (or a gateway) have them, and only after a session's first
+ *  response; a window drops out once it resets. */
+export function claudeLimits(rl: unknown): DataOf<"limits.observed"> | null {
+  if (!rl || typeof rl !== "object" || Array.isArray(rl)) return null;
+  const windows: DataOf<"limits.observed">["windows"] = [];
+  for (const [id, w] of Object.entries(rl as Record<string, { used_percentage?: unknown; resets_at?: unknown }>)) {
+    if (!/^[a-z0-9_]{1,64}$/.test(id) || typeof w?.used_percentage !== "number" || w.used_percentage < 0) continue;
+    windows.push(
+      prune({
+        id,
+        used_percent: w.used_percentage,
+        window_minutes: WINDOW_MINUTES[id],
+        resets_at: epochIso(w.resets_at),
+      }),
+    );
+  }
+  return windows.length ? { windows: windows.slice(0, 8) } : null;
+}
 
 function prune<T extends Record<string, unknown>>(o: T): T {
   for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];

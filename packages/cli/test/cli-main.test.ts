@@ -337,6 +337,23 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(text).toContain("✓ Backfill: 1 session from the last 30 days");
   });
 
+  it("--status-line makes ours Claude Code's status line and is remembered; --no-status-line takes it away", async () => {
+    const settings = path.join(home, ".claude", "settings.json");
+    put(settings, {});
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    const line = () => JSON.parse(readFileSync(settings, "utf8")).statusLine;
+    const on = await run("install", "--claude-code", "--status-line", "--backfill", "0");
+    expect(on.text).toMatch(/✓ claude-code: .*settings\.json — status line written \(account limits\)/);
+    expect(line().command).toMatch(/ claude-code StatusLine$/);
+    expect(cfg().harnesses["claude-code"]).toMatchObject({ status_line: true });
+    await run("install", "--claude-code", "--backfill", "0");
+    expect(line().command).toMatch(/ claude-code StatusLine$/);
+    const off = await run("install", "--claude-code", "--no-status-line", "--backfill", "0");
+    expect(off.text).toContain("status line removed");
+    expect(line()).toBeUndefined();
+    expect(cfg().harnesses["claude-code"]?.status_line).toBeUndefined();
+  });
+
   it("devin: the note about a hooks file Devin drops whole, unless its config was skipped", async () => {
     const devinConfig = path.join(home, ".config", "devin", "config.json");
     put(devinConfig, {});

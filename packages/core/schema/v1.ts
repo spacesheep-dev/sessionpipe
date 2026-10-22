@@ -30,6 +30,7 @@ export const KNOWN_TYPES = [
   "subagent.started",
   "subagent.ended",
   "context.compacted",
+  "limits.observed",
   "native",
 ] as const;
 
@@ -52,6 +53,7 @@ export const TYPE_TIER: Record<(typeof KNOWN_TYPES)[number], 0 | 1 | 2 | 3> = {
   "subagent.started": 1,
   "subagent.ended": 1,
   "context.compacted": 1,
+  "limits.observed": 1,
   native: 3,
 };
 
@@ -138,6 +140,15 @@ export const Event = z.object({
 const Loose = z.object({}).loose();
 export const AttentionKind = z.enum(["permission", "question", "elicitation", "idle", "error"]);
 
+/** One usage window of an account: `id` is the harness's own name for it (`five_hour`,
+ *  `seven_day`, `primary` …); `used_percent` passes 100 once a spend limit is exceeded. */
+export const LimitWindow = Loose.extend({
+  id: z.string().regex(/^[a-z0-9_]{1,64}$/),
+  used_percent: z.number().min(0),
+  resets_at: Rfc3339.optional(),
+  window_minutes: z.int().min(1).optional(),
+});
+
 export const EventData = z.object({
   "session.started": Loose.extend({ source: z.enum(["startup", "resume", "clear", "compact", "fork", "unknown"]) }),
   "session.heartbeat": Loose,
@@ -216,6 +227,11 @@ export const EventData = z.object({
   "subagent.started": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
   "subagent.ended": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
   "context.compacted": Loose.extend({ trigger: z.enum(["manual", "auto"]) }),
+  /** The account's usage limits as the harness last reported them: one per window. */
+  "limits.observed": Loose.extend({
+    windows: z.array(LimitWindow).min(1).max(8),
+    plan: z.string().max(64).optional(),
+  }),
   native: Loose,
 });
 

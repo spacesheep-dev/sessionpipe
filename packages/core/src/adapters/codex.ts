@@ -9,6 +9,7 @@ import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { codexInjected, readCodex } from "../readers/transcripts.js";
+import type { DataOf } from "../types.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
 import * as toml from "./codex-config.js";
 import { codexReplayBoundary, codexSubagent } from "./codex-rollout.js";
@@ -362,11 +363,48 @@ export const codex: Adapter = {
     }
     return rows;
   },
+
+  limits: (transcript) => codexLimits(transcript),
 };
+
+/** Epoch seconds as RFC 3339; anything that is not a plausible time is no time. */
+const epochIso = (t: unknown): string | undefined =>
+  typeof t === "number" && t > 0 && t < 1e11 ? new Date(t * 1000).toISOString() : undefined;
 
 function prune<T extends Record<string, unknown>>(o: T): T {
   for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
   return o;
+}
+
+/** The account's limits from the last `token_count` that carries them (recorded
+ *  2026-10-21, codex-cli 0.163): `rate_limits.primary` / `secondary`, each with
+ *  `used_percent`, `window_minutes` and `resets_at` in epoch seconds, and `plan_type`.
+ *  Every turn writes one, so the tail is enough. */
+export function codexLimits(file: string): DataOf<"limits.observed"> | null {
+  const { tail } = ends(file, 0, 256 * 1024);
+  for (const r of parseLines(tail).reverse()) {
+    const p = r.payload as { type?: unknown; rate_limits?: unknown } | undefined;
+    if (r.type !== "event_msg" || p?.type !== "token_count") continue;
+    if (!p.rate_limits || typeof p.rate_limits !== "object") continue;
+    const rl = p.rate_limits as Record<string, unknown>;
+    const windows: DataOf<"limits.observed">["windows"] = [];
+    for (const id of ["primary", "secondary"]) {
+      const w = rl[id] as { used_percent?: unknown; window_minutes?: unknown; resets_at?: unknown } | null;
+      if (typeof w?.used_percent !== "number" || w.used_percent < 0) continue;
+      windows.push(
+        prune({
+          id,
+          used_percent: w.used_percent,
+          window_minutes:
+            Number.isInteger(w.window_minutes) && Number(w.window_minutes) > 0 ? Number(w.window_minutes) : undefined,
+          resets_at: epochIso(w.resets_at),
+        }),
+      );
+    }
+    if (!windows.length) return null;
+    return prune({ windows, plan: typeof rl.plan_type === "string" ? rl.plan_type.slice(0, 64) : undefined });
+  }
+  return null;
 }
 
 /** Codex keeps no title; its first real ask stands in. A fork's replay is not its ask. */

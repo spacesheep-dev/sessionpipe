@@ -30,7 +30,8 @@ export interface SinkConfig {
 export interface Config {
   machine?: string;
   sinks: SinkConfig[];
-  harnesses: Record<string, { enabled?: boolean; created?: string[] }>;
+  /** `status_line`: Claude Code's status line is ours (install --status-line). */
+  harnesses: Record<string, { enabled?: boolean; created?: string[]; status_line?: boolean }>;
   update_check?: boolean;
   keep_days?: number;
   /** Ask a harness's own service for a session's name (an adapter's `remoteFacts`):

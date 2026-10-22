@@ -185,9 +185,9 @@ function help(): void {
   out(`sessionpipe ${VERSION} — an open protocol for what your coding agents are doing
 
 Usage:
-  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]…
+  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line]
                                   (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
+  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]
   sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin | --all] [--keep-state]
   sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--name N]
   sessionpipe sink list | remove <name> | test <name>
@@ -287,10 +287,12 @@ function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: C
       out(`  ✓ hook launcher: ${tilde(l.launcher)} (node ${tilde(node)}, or any node on PATH once that one is gone)`);
   }
   const hc = hookCommand();
+  const wantLine = has("--status-line") ? true : has("--no-status-line") ? false : undefined;
   for (const a of adapters) {
     const prev = cfg.harnesses[a.name] ?? {};
     const created = new Set(prev.created ?? []);
-    const reports = a.install(hc, process.env, { lean, created: [...created] });
+    const statusLine = wantLine ?? prev.status_line;
+    const reports = a.install(hc, process.env, { lean, created: [...created], statusLine });
     for (const r of reports) {
       if (r.created) created.add(r.file);
       const mark = r.skipped ? "!" : r.changed ? "✓" : "=";
@@ -298,7 +300,11 @@ function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: C
         `  ${mark} ${a.name}: ${tilde(r.file)}${r.note ? ` — ${r.note}` : r.changed ? " written" : " already current"}`,
       );
     }
-    cfg.harnesses[a.name] = { enabled: true, ...(created.size ? { created: [...created] } : {}) };
+    cfg.harnesses[a.name] = {
+      enabled: true,
+      ...(created.size ? { created: [...created] } : {}),
+      ...(statusLine && a.name === "claude-code" ? { status_line: true } : {}),
+    };
     if (a.name === "gemini-cli")
       out("    note: Gemini CLI's own telemetry defaults logPrompts on; that is Google's setting, not sessionpipe's.");
     if (a.name === "devin" && !reports.some((r) => r.skipped))
@@ -323,7 +329,7 @@ async function connect(): Promise<void> {
   const raw = args[1];
   if (!raw || raw.startsWith("-"))
     return out(
-      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--no-service]",
+      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line] [--no-service]",
     );
   const cfg = setupConfig();
   if (viaNpx(distDir)) return rerunGlobally(args, out, { allowDowngrade: has("--allow-downgrade") });

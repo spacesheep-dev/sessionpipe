@@ -3,7 +3,7 @@
 // harness. It maps a hook invocation to protocol events, says where its config
 // lives and how to write the hooks there, reads its transcript for tier 2, and
 // gathers facts (title, url, model, account) from the harness's own files.
-import type { Session } from "../types.js";
+import type { DataOf, Session } from "../types.js";
 
 export interface HookInput {
   /** [harness, event, ...] as the hook was invoked. */
@@ -83,6 +83,9 @@ export interface InstallOptions {
   /** Files sessionpipe created on an earlier install (from the config), so
    *  uninstall may delete them once they are empty again. */
   created?: string[];
+  /** Claude Code: make sessionpipe its status line, the one place it reports the
+   *  account's limits (`limits.observed`); false takes ours away again. */
+  statusLine?: boolean | undefined;
 }
 
 export type InstalledState = "current" | "stale" | "missing" | "misplaced" | "inactive";
@@ -132,6 +135,9 @@ export interface Adapter {
     env?: NodeJS.ProcessEnv,
   ): Promise<Partial<SessionFacts>>;
   backfill(sinceMs: number, env?: NodeJS.ProcessEnv): BackfillRow[];
+  /** The account's limits as the transcript last recorded them (`limits.observed` data),
+   *  for a harness that writes them there; null when it holds none. */
+  limits?(transcript: string): DataOf<"limits.observed"> | null;
 }
 
 /** Small per-session memory the facts pass keeps under <state>/facts/. */

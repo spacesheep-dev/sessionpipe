@@ -883,3 +883,53 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
     expect(state.mem.remote_title).toHaveLength(200);
   });
 });
+
+describe("StatusLine: the account's limits, as the status line is handed them", () => {
+  it("maps each window, with the minutes of the two Claude Code names and RFC 3339 resets", () => {
+    const r = hook("StatusLine", {
+      transcript_path: "/x.jsonl",
+      model: { id: "claude-opus-5-5", display_name: "Opus 5.5" },
+      rate_limits: {
+        five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
+        seven_day: { used_percentage: 41.2, resets_at: 1738857600 },
+        spend_limit: { used_percentage: 102, resets_at: 1740787200, used_usd: 51, limit_usd: 50, period: "monthly" },
+      },
+    });
+    expect(r?.session.model).toBeUndefined();
+    expect(r?.events).toEqual([
+      {
+        type: "limits.observed",
+        harnessEvent: "StatusLine",
+        data: {
+          windows: [
+            { id: "five_hour", used_percent: 23.5, window_minutes: 300, resets_at: "2025-02-01T16:00:00.000Z" },
+            { id: "seven_day", used_percent: 41.2, window_minutes: 10_080, resets_at: "2025-02-06T16:00:00.000Z" },
+            { id: "spend_limit", used_percent: 102, resets_at: "2025-03-01T00:00:00.000Z" },
+          ],
+        },
+      },
+    ]);
+  });
+  it("reports nothing before the first response, or for an account without limits", () => {
+    expect(hook("StatusLine", { transcript_path: "/x.jsonl" })).toBeNull();
+    expect(hook("StatusLine", { transcript_path: "/x.jsonl", rate_limits: [] })).toBeNull();
+    expect(hook("StatusLine", { transcript_path: "/x.jsonl", rate_limits: {} })).toBeNull();
+  });
+  it("skips a window it cannot read, keeps at most eight, and drops a reset that is no time", () => {
+    const rate_limits: Record<string, unknown> = {
+      "Not-An-Id": { used_percentage: 1 },
+      gone: null,
+      text: { used_percentage: "5" },
+      negative: { used_percentage: -1 },
+      zero: { used_percentage: 0, resets_at: 0 },
+      far: { used_percentage: 1, resets_at: 1e12 },
+    };
+    for (let i = 0; i < 9; i++) rate_limits[`w${i}`] = { used_percentage: i };
+    const w = hook("StatusLine", { transcript_path: "/x.jsonl", rate_limits })?.events[0]?.data.windows as {
+      id: string;
+    }[];
+    expect(w.map((x) => x.id)).toEqual(["zero", "far", "w0", "w1", "w2", "w3", "w4", "w5"]);
+    expect(w[0]).toEqual({ id: "zero", used_percent: 0 });
+    expect(w[1]).toEqual({ id: "far", used_percent: 1 });
+  });
+});

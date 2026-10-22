@@ -120,6 +120,7 @@ Per-type `data` shapes are normative in
 | `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool ran, a turn ended), or a control answer. |
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?` | Subagent hooks; the subagent's own events carry `session.parent_id`. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
+| `limits.observed` | 1 | `windows[]` (1–8): `id` (the harness's own name for the window: `five_hour`, `seven_day`, `primary` …), `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?`, `window_minutes?`; `plan?` | The account's usage limits, when the harness reports new numbers: Codex's rollout after a turn, Claude Code's status line where the person made it ours (ADAPTERS.md). The numbers belong to the account, not the session: a receiver SHOULD keep the newest per (harness, `session.account_id`), or per machine when there is no account id. OPTIONAL for senders. |
 | `native` | 3 | the raw hook JSON | Only on the native lane (HTTP.md §6); never emitted by the client. |
 
 Rules for all types:

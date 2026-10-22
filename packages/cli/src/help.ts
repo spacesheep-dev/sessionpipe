@@ -4,8 +4,8 @@
 export function usageTable(harnesses: readonly string[]): Record<string, string> {
   return {
     connect:
-      "connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--no-service]",
-    install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]`,
+      "connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line] [--no-service]",
+    install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]`,
     sink: "sink add|list|remove|test (use --help after a subcommand for its options)",
     "sink add": "sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--secret S] [--pii] [--name N]",
     "sink list": "sink list",
