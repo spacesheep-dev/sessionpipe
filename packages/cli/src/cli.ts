@@ -205,8 +205,14 @@ function setupConfig(): Config {
     throw new Error("--machine NAME is required when naming or renaming a machine");
   const machine = requested?.slice(0, 80);
   const control = readControl();
-  const current =
-    cfg.machine || control?.name || (existsSync(configFile()) ? machineName(cfg, os.hostname()) : undefined);
+  const hooksName = existsSync(configFile()) ? machineName(cfg, os.hostname()) : undefined;
+  // A daemon paired as `<host>.local` (what `control pair` did before 0.9.0 on a Mac) is
+  // this machine under the hooks' name, `<host>`: that name keeps a receiver's sessions
+  // in one place, and the daemon is renamed to it below, which costs nothing since
+  // receivers key a pairing by id. A daemon named on purpose keeps its name.
+  const pairedName =
+    control && hooksName && machineName({} as Config, control.name) === hooksName ? hooksName : control?.name;
+  const current = cfg.machine || pairedName || hooksName;
   if (current && machine && machine !== current && !has("--rename-machine")) {
     out(
       `  Keeping configured machine name ${current}; ignoring --machine ${machine}. Use --rename-machine with --machine NAME for an explicit rename.`,
@@ -218,7 +224,7 @@ function setupConfig(): Config {
     // twice. An explicit rename renames the paired daemon too: control.json carries the
     // name, the daemon re-reads it and says it in its next hello (receivers key machines
     // by id, so the pairing holds). receivers[].machine is that id, not the name.
-    if (machine && control && control.name !== name) {
+    if (control && control.name !== name && (machine || name === pairedName)) {
       writeControl({ ...control, name });
       out(`  Renamed the control daemon ${control.name} → ${name}; its next hello tells each receiver.`);
     }

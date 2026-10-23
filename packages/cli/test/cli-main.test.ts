@@ -405,6 +405,22 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(again.text).not.toContain("Renamed the control daemon");
   });
 
+  it("a config without a name keeps the hooks' hostname name and renames a daemon paired under another", async () => {
+    put(path.join(home, ".claude", "settings.json"), {});
+    const control = path.join(tmp, "config", "control.json");
+    const hooks = os.hostname().replace(/\.(local|lan|home)$/i, "");
+    // Paired before 0.9.0 on a Mac: the daemon said `<host>.local`, the events said `<host>`.
+    writeConfig({ ...cfg(), machine: undefined } as never);
+    put(control, { name: `${hooks}.local`, folders: ["/p"], mode: "safe", receivers: [] });
+    const r = await run("install", "--backfill", "0");
+    expect(r.err).not.toHaveBeenCalled();
+    expect(cfg().machine).toBe(hooks);
+    expect(r.text).toContain(
+      `Renamed the control daemon ${hooks}.local → ${hooks}; its next hello tells each receiver.`,
+    );
+    expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({ name: hooks, folders: ["/p"], mode: "safe" });
+  });
+
   it("on Windows the hook names this node and hook.js by path, no launcher", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     onPlatform("win32");
