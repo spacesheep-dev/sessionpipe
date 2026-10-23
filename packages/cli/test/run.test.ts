@@ -47,6 +47,12 @@ describe("runJob", () => {
     expect(events).toHaveLength(4);
     expect(events.map((e) => e.session.seq)).toEqual([0, 1, 2, 3]);
   });
+  it("a job whose environment names a launcher writes launched_by into the event", async () => {
+    const launcher = "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc";
+    const started = { ...job("SessionStart", { source: "startup" }), env: { SESSIONPIPE_LAUNCHED_BY: launcher } };
+    const { events } = await runJob(started, { state: tmp });
+    expect(events[0]?.session.launched_by).toBe(launcher);
+  });
   it("stores tool input redacted at rest, in 0600 files under 0700 dirs", async () => {
     await runJob(
       job("PostToolUse", {

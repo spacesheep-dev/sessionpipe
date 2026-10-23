@@ -177,11 +177,20 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
   });
   it("only the session fields the spec names survive", () => {
     const out = filterEvent(
-      base({ session: { id: "s", seq: 1, machine: "m", email: "x@y.z", parent_id: null } as Event["session"] }),
+      base({
+        session: {
+          id: "s",
+          seq: 1,
+          machine: "m",
+          email: "x@y.z",
+          parent_id: null,
+          launched_by: "codex:l",
+        } as Event["session"],
+      }),
       3,
       false,
     )!;
-    expect(out.session).toEqual({ id: "s", seq: 1, machine: "m", parent_id: null });
+    expect(out.session).toEqual({ id: "s", seq: 1, machine: "m", parent_id: null, launched_by: "codex:l" });
   });
   it("is idempotent without pii", () => {
     for (const type of Object.keys(SPEC))

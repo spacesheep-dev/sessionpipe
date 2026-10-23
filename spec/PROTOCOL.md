@@ -82,6 +82,7 @@ blanks an earlier full value.
 | `url` | A link that opens the session (a Remote Control link, a web remote). |
 | `account_id` | An opaque id for the harness account, never an email. A receiver the person paired with for control learns the email that goes with it from the pairing request and the daemon's hellos (`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)). |
 | `parent_id` | For a subagent's own events: the parent session's id. `null` or absent otherwise. |
+| `launched_by` | The session that started this one, as `<harness>:<id>` (the form [CONTROL.md](CONTROL.md) uses for a command's session): a script that runs `claude -p` for a session sets `SESSIONPIPE_LAUNCHED_BY` in the child's environment, and the hook carries it. It names at most the nearest launcher: environments are inherited, so anything that starts a further session MUST unset or reset it, and a value that names the session itself is ignored. Absent for a subagent, whose launcher is its `parent_id`, and when nothing says. A receiver MAY group on it and MUST NOT read it as a subagent. |
 
 **Short id.** Where a session is named to a person (a log line, a notification, a
 search box), senders and receivers use its short id: the first 8 hex digits, lowercase,

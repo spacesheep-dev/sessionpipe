@@ -108,13 +108,14 @@ async function daemon(sock: string, reply: (req: Record<string, unknown>) => unk
 }
 
 describe("the hook writes one job and spawns the worker", () => {
-  it("the job carries argv, stdin, the five env keys and nothing else; the worker is detached", async () => {
+  it("the job carries argv, stdin, the six env keys and nothing else; the worker is detached", async () => {
     const env = {
       CLAUDE_CODE_HOST_SESSION_ID: "host-1",
       CLAUDE_CONFIG_DIR: "/c",
       CLAUDE_PROJECT_DIR: "/p",
       CODEX_HOME: "/x",
       GEMINI_CLI_HOME: "/g",
+      SESSIONPIPE_LAUNCHED_BY: "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
       HOME: "/not/copied",
     };
     await run(["claude-code", "UserPromptSubmit", "extra"], claude({ prompt: "hi" }), env);
@@ -128,7 +129,7 @@ describe("the hook writes one job and spawns the worker", () => {
       cwd: process.cwd(),
       ppid: process.ppid,
     });
-    expect(Object.keys(job?.env ?? {})).toHaveLength(5);
+    expect(Object.keys(job?.env ?? {})).toHaveLength(6);
     const jobFile = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
     expect(spawned.spawn).toHaveBeenCalledWith(process.execPath, [path.resolve(here, "../src/worker.js"), jobFile], {
       detached: true,

@@ -29,6 +29,7 @@ import {
   Outbox,
   processAlive,
   readConfig,
+  readHook,
   redactDeep,
   type Session,
   type Sink,
@@ -272,7 +273,7 @@ export async function runJob(
     log(state, `${job.harness} ${job.event}: no adapter for harness "${job.harness}"; event dropped`);
     return { events: [], delivered: {} };
   }
-  const r = adapter.fromHook({ argv: job.argv, stdin: job.stdin, env: { ...process.env, ...job.env }, cwd: job.cwd });
+  const r = readHook(adapter, { argv: job.argv, stdin: job.stdin, env: { ...process.env, ...job.env }, cwd: job.cwd });
   // The adapter did not claim the payload (another harness ran our entry out of a
   // shared hooks file, an event name it does not map, a payload with no session id).
   // Dropped either way, but never in silence: this is where a wrongly-named event
@@ -357,6 +358,7 @@ export async function runJob(
       machine: machineName(cfg, os.hostname()),
       ...(cwdRaw ? { cwd: tilde(cwdRaw) } : {}),
       ...(r.session.model ? { model: r.session.model } : {}),
+      ...(r.session.launched_by ? { launched_by: r.session.launched_by } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
     for (const a of r.events) {
