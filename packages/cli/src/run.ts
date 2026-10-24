@@ -254,6 +254,8 @@ export function openTurn(
   };
 }
 const MAX_TURN_SIDE = 20_000;
+/** What session.attended is read from, the desktop app's link included (hook.ts picks all three). */
+const ATTENDED_ENV = ["CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_HOST_SESSION_ID", "SESSIONPIPE_CONTROL_JOB"];
 
 /** Run one hook job end to end: events → outbox → sinks. Returns what happened.
  *  `claimed` is the job file this run holds: released once the events are in the
@@ -272,7 +274,11 @@ export async function runJob(
     log(state, `${job.harness} ${job.event}: no adapter for harness "${job.harness}"; event dropped`);
     return { events: [], delivered: {} };
   }
-  const r = adapter.fromHook({ argv: job.argv, stdin: job.stdin, env: { ...process.env, ...job.env }, cwd: job.cwd });
+  // Who attends a session is the job's own word, never the worker's: a worker another
+  // session's hook spawned (sweepJobs) carries that session's. A key the job lacks stays absent.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const k of ATTENDED_ENV) delete env[k];
+  const r = adapter.fromHook({ argv: job.argv, stdin: job.stdin, env: { ...env, ...job.env }, cwd: job.cwd });
   // The adapter did not claim the payload (another harness ran our entry out of a
   // shared hooks file, an event name it does not map, a payload with no session id).
   // Dropped either way, but never in silence: this is where a wrongly-named event

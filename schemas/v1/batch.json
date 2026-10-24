@@ -107,6 +107,9 @@
                 "type": "string",
                 "maxLength": 128
               },
+              "attended": {
+                "type": "boolean"
+              },
               "parent_id": {
                 "anyOf": [
                   {

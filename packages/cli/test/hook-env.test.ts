@@ -71,6 +71,17 @@ describe.skipIf(process.platform === "win32" || !existsSync(dist))("the job file
     expect(job.env.GEMINI_CLI_HOME).toBe(path.join(tmp, "gemini"));
   });
 
+  it("carries what session.attended is read from: Claude Code's word and the control daemon's mark", async () => {
+    await runHook(
+      "claude-code",
+      "SessionStart",
+      { session_id: "8c132906-8c3f-4814-870a-afc3d05e1d2e", source: "startup" },
+      // CLAUDE_CODE_ENVIRONMENT_KIND says nothing about this session (a nested `claude -p` inherits it).
+      { CLAUDE_CODE_SESSION_ATTENDED: "0", CLAUDE_CODE_ENVIRONMENT_KIND: "bridge", SESSIONPIPE_CONTROL_JOB: "1" },
+    );
+    expect(oneJob().env).toEqual({ CLAUDE_CODE_SESSION_ATTENDED: "0", SESSIONPIPE_CONTROL_JOB: "1" });
+  });
+
   it("carries nothing that was not set", async () => {
     await runHook("devin", "SessionStart", { session_id: "zest-lantana", source: "startup" }, {});
     expect(Object.keys(oneJob().env)).toEqual([]);

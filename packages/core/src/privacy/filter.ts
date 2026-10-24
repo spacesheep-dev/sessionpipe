@@ -62,6 +62,7 @@ const SESSION_ALLOW = [
   "title_source",
   "url",
   "account_id",
+  "attended",
   "parent_id",
 ];
 const MAX_SIDE = 20_000;
