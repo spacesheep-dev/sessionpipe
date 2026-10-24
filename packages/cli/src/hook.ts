@@ -93,12 +93,16 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         // (run.ts sweepJobs runs any stale job file, whatever spawned the worker).
         "APPDATA",
         "CLAUDE_CODE_HOST_SESSION_ID",
+        // session.attended: Claude Code's own word, and SESSIONPIPE_CONTROL_JOB below, the
+        // control daemon's mark on a turn it runs for a person's message.
+        "CLAUDE_CODE_SESSION_ATTENDED",
         "CLAUDE_CONFIG_DIR",
         "CLAUDE_PROJECT_DIR",
         "CODEX_HOME",
         // Devin's payload names no folder at all; this is the only thing that does.
         "DEVIN_PROJECT_DIR",
         "GEMINI_CLI_HOME",
+        "SESSIONPIPE_CONTROL_JOB",
         // Devin's config file and session store are both resolved through these.
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",

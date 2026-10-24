@@ -102,6 +102,8 @@ export const Session = z.object({
   url: z.url().max(1024).optional(),
   /** An id, never an email. */
   account_id: z.string().max(128).optional(),
+  /** Whether a person attends the session, in the harness's own word. Absent = unknown, never false. */
+  attended: z.boolean().optional(),
   parent_id: SessionId.nullable().optional(),
 });
 
