@@ -242,7 +242,9 @@ export const codex: Adapter = {
       const j: unknown = input.stdin ? JSON.parse(input.stdin) : {};
       if (j && typeof j === "object" && !Array.isArray(j)) s = j as Record<string, unknown>;
     } catch {}
-    const id = s.session_id as string | undefined;
+    const id = (s.session_id ?? s.thread_id ?? s.conversation_id ?? s["thread-id"] ?? s["session-id"]) as
+      | string
+      | undefined;
     if (!id) return null;
     // `transcript_path: null` is an ephemeral thread (recorded on codex-cli 0.160.0):
     // Codex Desktop's own background threads (ambient suggestions and their safety

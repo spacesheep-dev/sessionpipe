@@ -156,6 +156,58 @@ describe("runJob", () => {
     );
   });
 
+  it.each(["codex", "claude-code", "gemini-cli", "antigravity", "devin"])(
+    "%s logs only unclaimed payload keys and the hook name at the default log tier",
+    async (harness) => {
+      const payload = {
+        cwd: "/private/unclaimed-project",
+        hook_event_name: "private-payload-event",
+        prompt: "private prompt text",
+        extra: { nested_secret: "private nested value" },
+      };
+      const r = await runJob(
+        { ...job("SessionStart"), harness, argv: [harness, "SessionStart"], stdin: JSON.stringify(payload) },
+        { state: tmp },
+      );
+      expect(r.events).toEqual([]);
+      const text = readFileSync(path.join(tmp, "log"), "utf8");
+      expect(text).toContain(`${harness} SessionStart:`);
+      expect(text).toContain("keys: cwd, hook_event_name, prompt, extra");
+      for (const value of [payload.cwd, payload.hook_event_name, payload.prompt, payload.extra.nested_secret])
+        expect(text).not.toContain(value);
+      expect(text).not.toContain("nested_secret");
+    },
+  );
+
+  it("logs keys from an unclaimed notify JSON argument, never its values", async () => {
+    const payload = { type: "private-notify-type", prompt: "private-notify-prompt" };
+    await runJob(
+      { ...job("notify"), argv: ["codex", "notify", JSON.stringify(payload)], stdin: '{"ignored":"private-stdin"}' },
+      { state: tmp },
+    );
+    const text = readFileSync(path.join(tmp, "log"), "utf8");
+    expect(text).toContain("codex notify:");
+    expect(text).toContain("keys: type, prompt");
+    for (const value of [...Object.values(payload), "ignored", "private-stdin"]) expect(text).not.toContain(value);
+  });
+
+  it.each([
+    "",
+    "null",
+    "[]",
+    '["private-array-value"]',
+    '"private-string-value"',
+    "42",
+    "{ private-invalid-json",
+    "{}",
+  ])("logs no keys or values for an unclaimed non-object or invalid payload: %s", async (stdin) => {
+    await runJob({ ...job("SessionStart"), stdin }, { state: tmp });
+    const text = readFileSync(path.join(tmp, "log"), "utf8");
+    expect(text).toContain("codex SessionStart:");
+    expect(text).toContain("keys: (none)");
+    expect(text).not.toContain("private-");
+  });
+
   // The facts pass gets the HOOK's environment, not the worker's. It matters because
   // sweepJobs runs any stale job file: a devin job can be processed by a worker that a
   // Claude Code hook spawned, and devin resolves its config and its session store from

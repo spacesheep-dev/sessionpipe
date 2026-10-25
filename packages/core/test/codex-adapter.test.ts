@@ -39,6 +39,27 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 const notifyState = () => codex.installed(cmd, env)[1]?.state;
 
 describe("codex fromHook", () => {
+  // Synthetic compatibility fixtures: no dropped Desktop payload has been captured.
+  it.each(["thread_id", "conversation_id"])("claims a hook carrying only %s", (key) => {
+    const file = new URL(`./fixtures/codex-hook-${key.replaceAll("_", "-")}.json`, import.meta.url);
+    const stdin = readFileSync(file, "utf8");
+    const payload = JSON.parse(stdin);
+    expect(payload.session_id).toBeUndefined();
+    expect(hook("SessionStart", stdin, env)).toMatchObject({
+      session: { id: payload[key], cwd: payload.cwd },
+      events: [{ type: "session.started", data: { source: "startup" }, harnessEvent: "SessionStart" }],
+    });
+  });
+  it.each(["session_id", "thread_id", "conversation_id", "thread-id", "session-id"])(
+    "prefers %s over later id aliases and skips null aliases",
+    (key) => {
+      const keys = ["session_id", "thread_id", "conversation_id", "thread-id", "session-id"];
+      const payload = Object.fromEntries(keys.map((k, i) => [k, i < keys.indexOf(key) ? null : `id-${k}`]));
+      expect(hook("SessionStart", JSON.stringify(payload), env)?.session.id).toBe(`id-${key}`);
+      expect(hook("SessionStart", JSON.stringify({ [key]: SID }), env)?.session.id).toBe(SID);
+      expect(hook("SessionStart", JSON.stringify({ [key]: SID, transcript_path: null }), env)).toBeNull();
+    },
+  );
   /** The thread's rollout under this test's CODEX_HOME: what makes a notify a session's. */
   const rollout = (id: string) => {
     const day = path.join(home, ".codex", "sessions", "2026", "09", "27");

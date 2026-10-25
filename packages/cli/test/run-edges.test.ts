@@ -124,6 +124,17 @@ describe("runJob with a harness that says little", () => {
     expect(http.send).not.toHaveBeenCalled();
   });
 
+  it("logs only payload keys when the adapter returns an empty session id", async () => {
+    fake.result = { session: { id: "" }, events: [beat] };
+    expect(await runJob({ ...job(), stdin: '{"prompt":"private-empty-id-prompt"}' })).toEqual({
+      events: [],
+      delivered: {},
+    });
+    expect(logged()).toContain("fake Stop:");
+    expect(logged()).toContain("keys: prompt");
+    expect(logged()).not.toContain("private-empty-id-prompt");
+  });
+
   // The fake daemon is a Unix socket; Windows has none.
   it.runIf(process.platform !== "win32")(
     "the facts pass keeps a harness version and a branch; a session with no folder has none; nothing is logged as nothing",

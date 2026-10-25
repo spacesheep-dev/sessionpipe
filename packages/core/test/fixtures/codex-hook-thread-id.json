@@ -1,0 +1,6 @@
+{
+  "thread_id": "01a17427-0add-7000-8000-000000000001",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "cwd": "/synthetic/project"
+}

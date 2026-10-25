@@ -278,7 +278,17 @@ export async function runJob(
   // Dropped either way, but never in silence: this is where a wrongly-named event
   // lands, and the log is the only thing on the machine that can say so.
   if (!r || !r.session.id) {
-    log(state, `${job.harness} ${job.event}: the ${job.harness} adapter did not claim this payload; event dropped`);
+    let keys: string[] = [];
+    try {
+      // Some hooks pass JSON in argv instead of stdin. Only the top-level names
+      // belong in this default log: values can contain prompts, paths or secrets.
+      const payload: unknown = JSON.parse(job.argv.find((a) => a.startsWith("{")) ?? job.stdin);
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) keys = Object.keys(payload);
+    } catch {}
+    log(
+      state,
+      `${job.harness} ${job.event}: the ${job.harness} adapter did not claim this payload; event dropped; keys: ${keys.join(", ") || "(none)"}`,
+    );
     return { events: [], delivered: {} };
   }
   // A session the control daemon started goes by the id its start command named, not
