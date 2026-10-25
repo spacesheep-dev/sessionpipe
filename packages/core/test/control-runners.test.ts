@@ -156,9 +156,30 @@ describe("codex exec --json", () => {
     );
     expect(codexArgs({ mode: "auto", prompt: "x", cwd: "/w" })).toContain("--approve-for-me");
     expect(codexArgs({ mode: "safe", prompt: "x" })).not.toContain("-C");
-    // Never a bypass flag, in either mode.
-    for (const mode of ["safe", "auto"] as const)
-      expect(codexArgs({ mode, prompt: "x", cwd: "/w" }).join(" ")).not.toMatch(/dangerously|full-auto/);
+    // Inherit: no sandbox or approval flag and no config override, a new session's or a
+    // resume's, so the person's own config.toml decides.
+    expect(codexArgs({ mode: "inherit", prompt: "x", cwd: "/w" })).toEqual([
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-C",
+      "/w",
+      "--",
+      "x",
+    ]);
+    expect(codexArgs({ mode: "inherit", prompt: "go on", resume: THREAD })).toEqual([
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+      "--",
+      THREAD,
+      "go on",
+    ]);
+    // Never a bypass flag, in any mode, a new session's or a resume's.
+    for (const mode of ["safe", "auto", "inherit"] as const)
+      for (const o of [{ cwd: "/w" }, { resume: THREAD }])
+        expect(codexArgs({ mode, prompt: "x", ...o }).join(" ")).not.toMatch(/dangerously|full-auto/);
   });
 
   it("reads the id, the messages, and error items as warnings", () => {
@@ -255,7 +276,16 @@ describe("agy --output-format stream-json", () => {
     ]);
     // A message that starts with a dash is still the prompt.
     expect(agyArgs({ mode: "safe", prompt: "--help me" })[1]).toBe(" --help me");
-    for (const mode of ["safe", "auto"] as const)
+    // Inherit: no permission flag, as in safe.
+    expect(agyArgs({ mode: "inherit", prompt: "go on", resume: CONV })).toEqual([
+      "--conversation",
+      CONV,
+      "-p",
+      "go on",
+      "--output-format",
+      "stream-json",
+    ]);
+    for (const mode of ["safe", "auto", "inherit"] as const)
       expect(agyArgs({ mode, prompt: "x" }).join(" ")).not.toMatch(/dangerously|skip-permissions/);
   });
 

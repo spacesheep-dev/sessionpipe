@@ -11,7 +11,10 @@ import path from "node:path";
 export const JOB_TIMEOUT_MS = 30 * 60_000;
 const OUT_CAP = 1024 * 1024;
 
-export type Mode = "safe" | "auto";
+/** How a turn the daemon runs may act (spec/CONTROL.md §2), chosen at the machine's own
+ *  terminal: safe, the harness's auto mode, or inherit (no permission flag, so the
+ *  harness starts in its own default on this machine). */
+export type Mode = "safe" | "auto" | "inherit";
 
 export function isExe(p: string): boolean {
   try {

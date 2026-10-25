@@ -139,7 +139,7 @@ code; 89 shared vectors pin them.
 ```sh
 sessionpipe control pair https://your-receiver.example   # once, at the machine's own terminal
 sessionpipe control folders add ~/work                   # where messaged sessions may run
-sessionpipe control mode safe                            # or auto; what a messaged session may do
+sessionpipe control mode safe                            # or auto or inherit; what a messaged session may do
 ```
 
 ## Three promises

@@ -69,11 +69,16 @@ credential: without the `poll_key` nobody is handed the machine's token.
 
 The pairing request and every hello MAY carry the machine's allowed `folders` and its
 `mode` (`safe`: nothing that needs approval runs unattended; `auto`: the harness's auto
-mode), so a receiver can offer a folder picker for a new session, and `files: true`
-when the machine takes attachments on a `start` (§6). They are informational: the
-machine checks its own list again (§5 step 6). A machine that does not say `files:
-true` may predate attachments and start the session without them, so a receiver
-SHOULD NOT send it a `start` with `files`.
+mode; `inherit`: no permission flag, so each harness starts in its own default on the
+machine, as the person's own sessions there do), so a receiver can offer a folder
+picker for a new session, and `files: true` when the machine takes attachments on a
+`start` (§6). They are informational: the machine checks its own list again (§5 step
+6). The mode, like the folders, is the person's choice at the machine's own terminal,
+and no command changes it. In `inherit` a turn may run with permission checks off, if
+that is what the harness's own settings say, so a machine MUST NOT run in `inherit`
+unless the person chose it there.
+A machine that does not say `files: true` may predate attachments and start the
+session without them, so a receiver SHOULD NOT send it a `start` with `files`.
 
 They MAY also carry `accounts`: the harness accounts signed in on the machine, each
 `{harness, id, email}`, where `id` is what events carry as `session.account_id` and

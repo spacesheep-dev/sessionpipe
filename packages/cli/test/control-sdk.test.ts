@@ -133,6 +133,11 @@ describe("loadSdk", () => {
     // An empty tool list is no list at all.
     host!.start({ session: "s2", cwd: tmp, mode: "safe", allowedTools: [] }).close();
     expect(seen.options[1]).not.toHaveProperty("allowedTools");
+    // Inherit: no permission mode at all, so the SDK starts in the settings' defaultMode.
+    host!.start({ session: "s3", cwd: tmp, mode: "inherit" }).close();
+    expect(seen.options[2]).toMatchObject({ sessionId: "s3", cwd: tmp });
+    expect(seen.options[2]).not.toHaveProperty("permissionMode");
+    expect(seen.options[2]).not.toHaveProperty("allowDangerouslySkipPermissions");
     s.close();
   });
 

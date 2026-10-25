@@ -23,7 +23,8 @@ export function findAgy(env: NodeJS.ProcessEnv = process.env, home = os.homedir(
 }
 
 /** Permission flags for the machine's mode. Safe: none — agy denies every tool call
- *  nobody is there to approve, and says which. Auto: `--mode accept-edits`. Never
+ *  nobody is there to approve, and says which. Auto: `--mode accept-edits`. Inherit:
+ *  none either, so agy runs as it would by itself. Never
  *  `--dangerously-skip-permissions`: no path here writes it. */
 export function agyModeFlags(mode: Mode): string[] {
   return mode === "auto" ? ["--mode", "accept-edits"] : [];

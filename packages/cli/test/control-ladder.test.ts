@@ -362,6 +362,24 @@ describe.runIf(unix)("headless runs", () => {
     expect(await rx.waitAck(s.id)).toMatchObject({ outcome: "refused", code: "mode" });
   });
 
+  it("inherit mode: a resume and a start pass no permission flag, so Claude Code picks its own default", async () => {
+    // A Claude Code with neither auto nor bypassPermissions in its --help: nothing to refuse.
+    await startDaemon({ cfg: { mode: "inherit" }, caps: { hasMode: false, modes: [] } });
+    const q = await rx.send({ session: SESSION, text: "resume" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const s = await rx.send({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "start" });
+    expect(await rx.waitAck(s.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const calls = readFileSync(claudeLog, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as string[]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(expect.arrayContaining(["-p", "--resume", SID]));
+    expect(calls[1]).toEqual(expect.arrayContaining(["-p", "--session-id", NEW]));
+    for (const c of calls) expect(c.join(" ")).not.toMatch(/--permission-mode|--permission-prompts|dangerously/);
+    expect(log.some((l) => l.includes(`claude -p --resume ${SID} in `))).toBe(true);
+  });
+
   it("no Claude Code on this machine: a resume and a start fail in words", async () => {
     await startDaemon({ claude: () => null });
     const q = await rx.send({ session: SESSION, text: "resume" });

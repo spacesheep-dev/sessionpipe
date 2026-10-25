@@ -48,11 +48,18 @@ export interface PairedReceiver {
   paired_at: string;
 }
 
+/** How sessions run when a message arrives (CONTROL.md §2): the person's choice at
+ *  this machine, never a receiver's. */
+export const MODES = ["safe", "auto", "inherit"] as const;
+export type ControlMode = (typeof MODES)[number];
+export const parseMode = (m: unknown): ControlMode | null =>
+  (MODES as readonly unknown[]).includes(m) ? (m as ControlMode) : null;
+
 export interface ControlConfig {
   name: string;
   /** Folders sessions may run in; compared on whole path segments, real paths. */
   folders: string[];
-  mode: "safe" | "auto";
+  mode: ControlMode;
   receivers: PairedReceiver[];
   /** Caps this machine keeps whatever a receiver sends (defaults in daemon.ts,
    *  LIMITS): new sessions running at once and per hour, headless Claude Code runs
@@ -81,7 +88,7 @@ export function readControl(env: NodeJS.ProcessEnv = process.env, run: Runner = 
     return {
       name: j.name || "machine",
       folders: j.folders ?? [],
-      mode: j.mode === "auto" ? "auto" : "safe",
+      mode: parseMode(j.mode) ?? "safe",
       receivers: j.receivers.map((r) =>
         r.token_in ? { ...r, token: secretGet(r.token_in, controlAccount(r.machine), run) ?? "" } : r,
       ),

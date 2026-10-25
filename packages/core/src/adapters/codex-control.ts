@@ -41,9 +41,12 @@ export function findCodex(
 
 /** Sandbox flags for the machine's mode. Safe: workspace-write, and nothing escalates
  *  unattended (exec never asks). Auto: approval requests go through Codex's own
- *  automatic review. Never `--dangerously-bypass-approvals-and-sandbox` or
- *  `--dangerously-bypass-hook-trust`: no path here writes them. */
+ *  automatic review. Inherit: none, so `sandbox_mode` and `approval_policy` come from the
+ *  person's own config.toml, a new session's and a resume's alike. Never
+ *  `--dangerously-bypass-approvals-and-sandbox` or `--dangerously-bypass-hook-trust`: no
+ *  path here writes them. */
 export function codexModeFlags(mode: Mode, resume = false): string[] {
+  if (mode === "inherit") return [];
   // `codex exec resume` takes neither `-s` nor `--approve-for-me` (0.160: "unexpected
   // argument"), so a resume says the same thing as config overrides, which it does take.
   if (resume)

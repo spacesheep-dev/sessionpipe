@@ -92,7 +92,13 @@ Permission prompts can be answered from the receiver too: while the terminal sho
 its prompt, the PermissionRequest hook waits for your signed answer, and whichever
 comes first wins. Nothing is ever auto-allowed. Safe mode (the default) runs headless
 turns with `--permission-mode dontAsk`, so nothing that needs approval runs while
-you're away.
+you're away. Auto mode runs them with `--permission-mode auto`; where Claude Code's
+settings turn auto mode off (`permissions.disableAutoMode`), Claude Code runs them in
+its default mode instead, which refuses whatever needs approval. Inherit mode
+(`sessionpipe control mode inherit`, chosen only at the machine) passes no permission
+flag, so each turn starts in the mode Claude Code picks by itself there, its
+settings' `permissions.defaultMode`: messaged sessions run the way your own do,
+`bypassPermissions` included if that is what you set.
 
 Codex and Antigravity sessions are reached headlessly too, when `codex` or `agy` is
 installed (the daemon looks on PATH, beside its own Node, in `~/.local/bin`, or where
@@ -101,7 +107,9 @@ installed (the daemon looks on PATH, beside its own Node, in `~/.local/bin`, or 
 message is `codex exec resume <thread>` or `agy --conversation <id>`. Safe mode runs
 Codex in its `workspace-write` sandbox and agy with no permission flag (it denies, and
 the reply lists, what it wasn't allowed to do); auto mode passes `--approve-for-me` /
-`--mode accept-edits`. The bypass flags are never passed. Both CLIs pick a new
+`--mode accept-edits`; inherit mode passes no flag, so Codex follows the
+`approval_policy` and `sandbox_mode` in your `config.toml`. The bypass flags are never
+passed. Both CLIs pick a new
 session's id themselves, so the daemon keeps the one your start named: it records the
 pair in `~/.local/state/sessionpipe/control/aliases.json`, and your receiver keeps
 seeing one session under one id. A message to a Codex session someone has open (its
