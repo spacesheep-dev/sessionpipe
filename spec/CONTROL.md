@@ -327,7 +327,8 @@ session no process holds reopens it with `session/load` when the agent said it c
 agent. The agent's `session/request_permission` is answered by the machine's mode and
 never by a receiver: `safe` picks a `reject_once` option, else `reject_always`, else
 answers `cancelled`, and the reply lists what was refused; `auto` picks `allow_once`,
-else `allow_always`, and answers `cancelled` when neither is offered. The mode governs
+else `allow_always`, and answers `cancelled` when neither is offered; `inherit` answers
+as `safe` does, since the agent asked because its own settings want a person. The mode governs
 what the daemon answers, not what the agent asks: an agent that runs a tool without
 asking (OpenCode 2.1 wrote a file in `safe` mode with no `session/request_permission`)
 is bound only by its own settings, as it would be at its own terminal.

@@ -118,7 +118,9 @@ interface Option {
 }
 
 /** Which permission option the machine's mode picks, or null for `cancelled`: safe
- *  refuses (once, else always), auto allows (once, else always). Never the other way. */
+ *  refuses (once, else always), auto allows (once, else always). Inherit refuses as safe
+ *  does: the agent asked because its own settings want a person, and none is there.
+ *  Never the other way. */
 export function permissionChoice(options: unknown, mode: Mode): Option | null {
   const list = (Array.isArray(options) ? options : [])
     .map(obj)

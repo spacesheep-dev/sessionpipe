@@ -271,6 +271,8 @@ describe("the agents and where they are", () => {
     ];
     expect(permissionChoice(opts, "safe")).toEqual({ optionId: "d", kind: "reject_once" });
     expect(permissionChoice(opts, "auto")).toEqual({ optionId: "b", kind: "allow_once" });
+    // Inherit answers as safe: the agent asked because its own settings want a person.
+    expect(permissionChoice(opts, "inherit")).toEqual({ optionId: "d", kind: "reject_once" });
     expect(permissionChoice(opts.slice(0, 1), "auto")).toEqual({ optionId: "a", kind: "allow_always" });
     expect(permissionChoice(opts.slice(2, 3), "safe")).toEqual({ optionId: "c", kind: "reject_always" });
     expect(permissionChoice(opts.slice(0, 2), "safe")).toBeNull();
