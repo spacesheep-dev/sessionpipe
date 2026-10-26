@@ -135,7 +135,21 @@ export const EventData = z.object({
   "session.ended": Loose.extend({ reason: z.enum(["clear", "logout", "exit", "other"]) }),
   "session.backfill": Loose.extend({ started_at: Rfc3339, last_at: Rfc3339, turns: z.int().min(0).optional() }),
   "session.forgotten": Loose,
-  "turn.started": Loose.extend({ turn_id: z.string().max(128).optional(), prompt_chars: z.int().min(0).optional() }),
+  "turn.started": Loose.extend({
+    turn_id: z.string().max(128).optional(),
+    prompt_chars: z.int().min(0).optional(),
+    /** The harness's OWN word for who submitted the prompt, forwarded verbatim; not an enum
+     *  of this spec (Claude Code: user, sdk, system, loop_wakeup, schedule_wakeup,
+     *  poll_event), and a different vocabulary from session.started.source. A bare word:
+     *  tier 0 is not redacted, so the shape is the only guard. */
+    submitted_by: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/, "a bare word, at most 40 characters")
+      .optional(),
+    /** True when the prompt text is a block the harness wrote rather than words a person
+     *  typed; never a claim that no person caused the turn. */
+    injected: z.boolean().optional(),
+  }),
   "turn.ended": Loose.extend({
     turn_id: z.string().max(128).optional(),
     reason: z.enum(["stop", "interrupt", "error"]),

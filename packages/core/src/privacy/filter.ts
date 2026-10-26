@@ -36,7 +36,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "session.ended": { 0: ["reason"] },
   "session.backfill": { 0: ["started_at", "last_at", "turns"] },
   "session.forgotten": { 0: [] },
-  "turn.started": { 0: ["turn_id"], 1: ["prompt_chars"] },
+  "turn.started": { 0: ["turn_id", "submitted_by", "injected"], 1: ["prompt_chars"] },
   "turn.ended": { 0: ["turn_id", "reason", "ms", "background"], 1: ["error"] },
   "turn.transcript": { 2: ["turn", "user", "assistant", "at"] },
   "turn.progress": { 2: ["turn", "user", "assistant", "at"] },

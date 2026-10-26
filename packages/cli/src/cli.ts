@@ -1109,7 +1109,13 @@ async function tail(): Promise<void> {
         detail = `source=${d.source}  ${e.session.cwd ?? ""} ${e.session.branch ?? ""}`;
         break;
       case "turn.started":
-        detail = d.prompt_chars !== undefined ? `prompt_chars=${d.prompt_chars}` : "";
+        detail = [
+          d.submitted_by !== undefined ? `submitted_by=${d.submitted_by}` : "",
+          d.injected ? "injected" : "",
+          d.prompt_chars !== undefined ? `prompt_chars=${d.prompt_chars}` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
         break;
       case "tool.started":
         detail = String(d.tool ?? "");

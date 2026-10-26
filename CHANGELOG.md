@@ -5,6 +5,21 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+- `turn.started` can say who started the turn (PROTOCOL.md §4; PRIVACY.md §1;
+  ADAPTERS.md). Two new OPTIONAL tier-0 fields: `submitted_by`, the harness's **own** word
+  for who submitted the prompt, forwarded verbatim and never mapped onto a vocabulary of
+  this spec (a bare word, `[A-Za-z0-9][A-Za-z0-9_.-]{0,39}`, because tier 0 is not
+  scrubbed; a different vocabulary from `session.started.source`, which a receiver MUST NOT
+  merge with it); and `injected`, `true` when the prompt **text** is a block the harness
+  wrote rather than words a person typed. `injected: true` says only that the prompt is not
+  the person's words — never that no person caused the turn, since a harness may deliver a
+  person's message inside such a block. A receiver MUST read an absent field as unknown,
+  MUST keep a `submitted_by` it does not recognise, and MUST NOT let a second `turn.started`
+  for a `turn_id` it already accepted reclassify that turn. Claude Code fills `injected`
+  from a closed list of its own wrappers and would fill `submitted_by` from
+  `UserPromptSubmit.source`, which no build in the field sends yet; fixture
+  `conformance/harness/claude-code/user-prompt-submit-injected.json`. Additive: a receiver
+  that does not know the fields keeps them as extra keys on `data`.
 - Control: a `start` may carry `files` (CONTROL.md §3.1, §6; HTTP.md §1, §3; still
   Draft). Up to 10 files, 25 MiB each and 50 MiB together, each named in the signed
   command by its SHA-256 (base64url), so a receiver cannot swap one. The receiver

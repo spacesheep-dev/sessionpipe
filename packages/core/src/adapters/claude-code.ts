@@ -143,14 +143,29 @@ export const claudeCode: Adapter = {
       case "SessionStart":
         events.push(ev("session.started", { source: pickSource(s.source ?? s.trigger) }));
         break;
-      case "UserPromptSubmit":
+      case "UserPromptSubmit": {
+        // Only a string prompt is read; anything else is left unread rather than guessed at.
+        const prompt = typeof s.prompt === "string" ? s.prompt : undefined;
         events.push(
           ev("turn.started", {
             turn_id,
-            prompt_chars: typeof s.prompt === "string" ? [...s.prompt].length : undefined,
+            prompt_chars: prompt === undefined ? undefined : [...prompt].length,
+            // Claude Code's hook schema documents `source`
+            // (user | sdk | system | loop_wakeup | schedule_wakeup | poll_event) and says a
+            // payload may omit it while the field rolls out; 2.1.304's payload has no such
+            // key at all. Forwarded verbatim, shape-guarded only: the list is the harness's
+            // to extend.
+            submitted_by: harnessWord(s.source),
+            // One of Claude Code's own prompt wrappers: the prompt is a block the harness
+            // wrote, so it is not the person's words. Absent is unknown, never "the person" —
+            // and `true` is never "no person caused this turn", because a Talk or
+            // `sessionpipe wait` delivery hands the person's own message over inside a
+            // <task-notification> (PROTOCOL.md §4).
+            injected: prompt !== undefined && injectedBlock(prompt) ? true : undefined,
           }),
         );
         break;
+      }
       case "PreToolUse":
         if (tool) events.push(ev("tool.started", { tool, call_id, turn_id, agent_id, input: s.tool_input }));
         break;
@@ -325,6 +340,25 @@ export function notClaudeCode(id: string, s: Record<string, unknown>): boolean {
 function pickSource(v: unknown): string {
   return typeof v === "string" && ["startup", "resume", "clear", "compact", "fork"].includes(v) ? v : "unknown";
 }
+/** One of the harness's own words for who submitted a prompt, forwarded as is (PROTOCOL.md
+ *  §4, `turn.started.submitted_by`). Not an enum of ours: a value we have never seen is
+ *  still carried, so the guard is the shape the spec allows — a bare word of at most 40
+ *  characters, which is all a receiver may show or group by. Tier 0 is not redacted
+ *  (PRIVACY.md §2), so that shape is the only guard there is. */
+const harnessWord = (v: unknown): string | undefined =>
+  typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/.test(v) ? v : undefined;
+/** Claude Code's own prompt wrappers, as a CLOSED list: a task notification, a peer message,
+ *  a system reminder, a local command's output, a slash command's expansion — with or
+ *  without a closing tag, after trimming. Narrower than the reader's `isInjected` on
+ *  purpose, because the two directions do not cost the same. A wrapper we have not recorded
+ *  yet reads as unknown and a receiver keeps the turn, which is what it does today; a shape
+ *  test wide enough to catch every wrapper also fires on a person who pasted nothing but an
+ *  SVG, an HTML page or a JSX element, and a recency board acting on that would drop one of
+ *  the person's own turns. Dropping one record from a transcript costs little, which is why
+ *  the reader's test stays wide; ADAPTERS.md (Claude Code · Quirks) says why they differ. */
+const WRAPPER =
+  /^<(?:task-notification|cross-session-message|system-reminder|local-command-stdout|command-[a-z-]+)[\s/>]/i;
+const injectedBlock = (prompt: string): boolean => WRAPPER.test(prompt.trim());
 function errText(v: unknown): string | undefined {
   if (typeof v === "string") return v.slice(0, 2000);
   if (v && typeof v === "object") {

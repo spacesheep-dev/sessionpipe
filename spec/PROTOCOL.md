@@ -107,7 +107,7 @@ Per-type `data` shapes are normative in
 | `session.ended` | 0 | `reason`: `clear` · `logout` · `exit` · `other` | The harness's session-end hook. Four harnesses never fire one (ADAPTERS.md); a receiver infers "done" from silence and MUST present that as its own reading. |
 | `session.backfill` | 0 | `started_at`, `last_at`, `turns?` | One per historical session found in local files at install. `seq` is 0 and the session block carries what the files say. |
 | `session.forgotten` | 0 | — | The person ran `sessionpipe forget`. A receiver MUST delete everything it holds for the session and answer as for any accepted event. |
-| `turn.started` | 0 | `turn_id?`; tier 1 adds `prompt_chars` | A prompt was submitted. |
+| `turn.started` | 0 | `turn_id?`, `submitted_by?` (the harness's own word for who submitted the prompt), `injected?` (`true`: the prompt text is a block the harness wrote); tier 1 adds `prompt_chars` | A prompt was submitted. |
 | `turn.ended` | 0 | `turn_id?`, `reason`: `stop` · `interrupt` · `error`, `ms?`, `background?` (integer); tier 1 adds `error` (the harness's error class when the reason is `error`) | The Stop / AfterAgent / agentStop hook; Claude Code's `StopFailure` (a turn that ended on an API error) with `reason: error`. `background` is how much background work the harness reports still in flight as the turn ends, each piece of which wakes the session when it finishes (a background shell command, a monitor, a subagent, a workflow); it is a count, never what that work runs. A session whose last turn ended with `background` > 0 is paused waiting on its own work, not done: a receiver MAY show it as working until its next event. Absent when the harness doesn't say. |
 | `turn.transcript` | 2 | `turn` (integer), `user`, `assistant` (each ≤ 20 000 chars, redacted), `at` | Read from the harness's transcript file by the worker after a turn ends; one event per completed exchange, in order. |
 | `turn.progress` | 2 | `turn` (integer), `user`, `assistant` (each ≤ 20 000 chars, redacted; over the cap the `assistant` side keeps its **end**), `at` | The turn still running: its prompt as the turn starts, then what the assistant has said so far, at most every 20 s on a tool call and only when it changed. `turn` is the number its `turn.transcript` will carry. A receiver keeps the latest per session and drops it once that `turn.transcript` (or the turn's end) arrives; it is a reading, never history. OPTIONAL for senders. |
@@ -130,6 +130,32 @@ Rules for all types:
 - `attention_id`, `turn_id`, `call_id`, `agent_id` are opaque strings the sender
   chooses; when the harness provides one (`tool_use_id`, `prompt_id`) it SHOULD be
   used as is.
+- **Who started a turn.** `turn.started.submitted_by` is the harness's **own** word for
+  who submitted the prompt (Claude Code: `user` · `sdk` · `system` · `loop_wakeup` ·
+  `schedule_wakeup` · `poll_event`). It is a different vocabulary from
+  `session.started.source`, which is this spec's own enum; a receiver MUST NOT merge the
+  two. `turn.started.injected` is `true` when the prompt **text** is a block the harness
+  wrote around something rather than words a person typed. Both fields are OPTIONAL for
+  senders.
+  - A sender whose harness supplies the word MUST forward it verbatim and MUST NOT map it
+    onto a vocabulary of this spec, because a harness may extend its own list at any time.
+    The value is a bare word, `[A-Za-z0-9][A-Za-z0-9_.-]{0,39}`, because tier 0 is not
+    redacted ([PRIVACY.md](PRIVACY.md) §2); a sender whose harness supplies something else,
+    or supplies nothing, MUST omit the field rather than guess.
+  - `injected: true` says only that the prompt is **not the person's words**. It MUST NOT be
+    read as "no person caused this turn": a harness may hand a person's message to a session
+    inside an injected block, as Claude Code does with a `<task-notification>`. A sender MAY
+    decide it from the prompt's shape, which is a reading and can be wrong in either
+    direction; each sender's gaps belong in [ADAPTERS.md](ADAPTERS.md).
+  - A receiver MUST read an absent field as **unknown** — never as "a person submitted
+    this" — and MUST keep a value it does not recognise. A receiver that acts on either
+    field MUST NOT read silence as the opposite.
+  - A receiver that separates the person's own activity from the harness's (a recency board)
+    MAY act on `injected: true` **together with** whatever else it knows about who caused
+    the turn, or on a `submitted_by` that the sender's harness documents as non-human. A
+    harness MAY fire a further `turn.started` for a `turn_id` already seen, when it absorbs
+    a message into a running turn; a receiver MUST NOT let a later `injected: true`
+    reclassify a turn it has already accepted without it.
 
 ## 5. Tiers
 

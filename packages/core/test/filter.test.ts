@@ -100,7 +100,7 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "session.ended": { 0: ["reason"] },
   "session.backfill": { 0: ["started_at", "last_at", "turns"] },
   "session.forgotten": {},
-  "turn.started": { 0: ["turn_id"], 1: ["prompt_chars"] },
+  "turn.started": { 0: ["turn_id", "submitted_by", "injected"], 1: ["prompt_chars"] },
   "turn.ended": { 0: ["turn_id", "reason", "ms"], 1: ["error"] },
   "turn.transcript": { 2: ["turn", "user", "assistant", "at"] },
   "turn.progress": { 2: ["turn", "user", "assistant", "at"] },
@@ -141,6 +141,8 @@ const EVERY_KEY: Record<string, unknown> = {
   how: "answered",
   agent_type: "x",
   trigger: "auto",
+  submitted_by: "loop_wakeup",
+  injected: true,
   extra: "never sent",
 };
 const TIERS: Tier[] = [0, 1, 2, 3];
