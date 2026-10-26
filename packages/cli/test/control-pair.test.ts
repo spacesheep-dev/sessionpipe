@@ -323,10 +323,12 @@ describe("pairing (CONTROL.md §2)", () => {
         accounts: [
           { harness: "claude-code", id: "a", email: "a@x.io" },
           { harness: "claude-code", id: "b", email: "b@x.io" },
+          // A home on another API is named by its host (ADAPTERS.md, Claude Code facts).
+          { harness: "claude-code", id: "api-4a5b20f59185f589", name: "api.z.ai" },
         ],
       }),
     );
-    expect(said()).toContain("names your Claude Code accounts: a@x.io, b@x.io");
+    expect(said()).toContain("names your Claude Code accounts: a@x.io, b@x.io, api.z.ai");
     // The receiver hands over no token the second time; the first one stays.
     const phone = await Passkey.create({ rpId: RP, origin: URL_ });
     out = [];
