@@ -120,14 +120,15 @@ long-poll per receiver, whatever the number of sessions.
 - A poll is also the machine's heartbeat: a receiver MAY show a machine that polled
   within `2 × wait_max_s` as online, and SHOULD hand a session the waiter (CONTROL.md
   §8) only while its machine is online.
-- **Files.** A receiver that accepts `files` on a `start` (CONTROL.md §3.1) holds each
+- **Files.** A receiver that accepts `files` on a `start` or a `prompt` (CONTROL.md §3.1) holds each
   file's bytes, named by the base64url SHA-256 the command carries, and serves them at
   `GET {control}/files/{sha256}` to the machines of the account that uploaded them
   and to no one else. It MUST keep them at least until the command's `expires_at`.
   How the bytes reach the receiver is the receiver's business. The machine checks
   length and hash itself (CONTROL.md §6) and stops reading past the signed `size`;
   a receiver SHOULD send `content-length`. A receiver SHOULD NOT queue a `start` with
-  `files` for a machine whose hello did not say `files: true`.
+  `files` for a machine whose hello did not say `files: true`, nor a `prompt` with
+  `files` for one whose hello did not say `prompt_files: true`.
 - `401` on a machine call means the token is gone (the machine was removed): the daemon
   stops polling that receiver and says so. `404` on `/pair?code=` means no such pairing.
 

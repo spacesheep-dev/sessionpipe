@@ -72,11 +72,12 @@ The pairing request and every hello MAY carry the machine's allowed `folders` an
 mode; `inherit`: no permission flag, so each harness starts in its own default on the
 machine, as the person's own sessions there do), so a receiver can offer a folder
 picker for a new session, and `files: true` when the machine takes attachments on a
-`start` (§6). They are informational: the machine checks its own list again (§5 step
-6). The mode, like the folders, is the person's choice at the machine's own terminal,
-and no command changes it. In `inherit` a turn may run with permission checks off, if
-that is what the harness's own settings say, so a machine MUST NOT run in `inherit`
-unless the person chose it there.
+`start` (§6), and `prompt_files: true` when it takes them on a `prompt` too. They are
+informational: the machine checks its own list again (§5 step 6). The mode, like the
+folders, is the person's choice at the machine's own terminal, and no command changes
+it. In `inherit` a turn may run with permission checks off, if that is what the
+harness's own settings say, so a machine MUST NOT run in `inherit` unless the person
+chose it there.
 A receiver that predates `inherit` reads it as an unknown mode and is likely to show
 the machine as `safe`, so the person would approve, and later send to, a machine
 described as safer than it runs. A receiver that shows `inherit` as what it is says
@@ -86,7 +87,9 @@ say `control.inherit: true`, and MUST NOT switch to `inherit` while it is paired
 one; it says why at the terminal and keeps the mode it had. A receiver that sets
 `control.inherit` MUST accept `mode: "inherit"` in a pairing request and a hello.
 A machine that does not say `files: true` may predate attachments and start the
-session without them, so a receiver SHOULD NOT send it a `start` with `files`.
+session without them, so a receiver SHOULD NOT send it a `start` with `files`; one that
+does not say `prompt_files: true` refuses a `prompt` with `files` (`bad_fields`), so a
+receiver SHOULD NOT send it one.
 
 And they MAY carry `start`: for each harness in `harnesses` that takes options on a
 `start`, what it takes ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):
@@ -169,7 +172,7 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `for`, `decision` | `permission.answer` only: the `attention_id` being answered, and `allow` or `deny`. |
 | `note` | Optional, ≤ 2 000 characters: shown to the model beside a decision or a cancel. |
 | `cwd` | `start` only: the folder the new session runs in: absolute, or `~` or `~/…` (`~\…`), which the machine reads under the home of the user its daemon runs as. That is how events write a session's folder ([PROTOCOL.md](PROTOCOL.md)), so a receiver can start a session in another one's folder without ever knowing the machine's home; `~user` and relative folders are `bad_fields`. |
-| `files` | `start` only, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
+| `files` | `start` and `prompt`, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
 | `permission` | `start` only, optional: `read`, `safe`, `edits` or `auto` (below). Any other value is `bad_fields`. |
 | `model` | `start` only, optional: the model the harness should run, 1 – **100** characters matching `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$` (never a leading `-`). The harness's own name for it; the machine passes it as one argument, never through a shell. |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
@@ -177,9 +180,9 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 
 Each kind carries the fields of this table that name it, and `v`, `t`, `machine`, `kind`,
 `session`, `nonce`, `iat` and `note`; any other field (one this table doesn't list
-included) makes the command malformed (`bad_fields`), `files`, `permission` or `model` on
-any kind but `start` included. The whole string is at most **48 000** characters (the
-text, JSON-escaped, and the rest).
+included) makes the command malformed (`bad_fields`): `files` on any kind but `start`
+and `prompt`, and `permission` or `model` on any kind but `start`, included. The whole
+string is at most **48 000** characters (the text, JSON-escaped, and the rest).
 
 **Permission levels.** A `start` MAY say how much the new session may do without anyone
 approving it:
@@ -326,6 +329,19 @@ the harness continues the turn with it. A harness sets `stop_hook_active` on the
 that follows; the hook blocks again only for another queued message, so a delivered
 message never loops. In `resume` and `fork` the ack carries the agent's `reply`
 (redacted by the secrets ruleset).
+
+A `prompt` MAY carry `files`, to a machine whose hello says `prompt_files: true`. The
+machine fetches and checks them exactly as for a start (§6 `start`, **Files**, step 1),
+writes them to `<cwd>/.sessionpipe/files/<session id>/<nonce>/<name>` (the session's
+folder, and the command's signed `nonce`, which is unique and safe in a path where the
+receiver's message `id` is not signed), with the same rules (real directories, the
+message's folder new, each file created exclusively, `0600`), and appends the same
+**Attached files** block to the text, with paths relative to `cwd`, inside the frame.
+All of it happens before the message is delivered, in every mode: for `resume`, `fork`
+and `sdk` the block is part of the message the run gets; for `waiter` and `turn` the
+files are on disk before the waiter or the Stop hook hands the text over. A file that
+fails is acked `failed` with code `file`, nothing written for it is kept, and the
+message is not delivered.
 
 In the in-place modes (`waiter`, `turn`) the session answers in its own turn, so the
 daemon acks `taken` when it hands the message over and follows the session's own
@@ -516,7 +532,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -531,8 +547,9 @@ send → delivered time.
 - `conformance/control-vectors/` — signed commands, valid and broken, with the verdict
   every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
   `start`'s `files` (§3.1); `91`–`106` are a `start`'s options and the closed field
-  set, and `107`–`108` a `start` in a folder under `~` (§3.1). The reference verifier
-  and every receiver that pre-checks MUST agree with all of them.
+  set, `107`–`108` a `start` in a folder under `~` (§3.1), and `109`–`110` `files` on a
+  `prompt`. The reference verifier and every receiver that pre-checks MUST agree with
+  all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll

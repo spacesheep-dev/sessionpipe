@@ -318,8 +318,9 @@ export const ControlCommand = z.object({
     .optional(),
   /** key.add: what the person calls the device. */
   name: z.string().min(1).max(80).optional(),
-  /** start only: 1–10 files, together at most 50 MiB, downloaded and checked by hash
-   *  before the session starts. */
+  /** start, prompt: 1–10 files, together at most 50 MiB, downloaded and checked by hash
+   *  before the session starts or the message is delivered. On a prompt, only to a
+   *  machine whose hello says `prompt_files`. */
   files: z.array(ControlFile).min(1).max(10).optional(),
   /** start only: the level the new session runs at, at most the machine's mode. Send
    *  it only to a machine whose hello advertises it for the harness (`start`). */
@@ -504,6 +505,9 @@ export const ControlHello = z.object({
   accounts: z.array(HarnessAccount).max(20).optional(),
   /** As in control-pair.json. */
   files: z.boolean().optional(),
+  /** The machine takes `files` on a prompt too (CONTROL.md §6 `prompt`). One that
+   *  doesn't say so refuses them: a receiver SHOULD NOT send it a prompt with files. */
+  prompt_files: z.boolean().optional(),
   /** Per harness in `harnesses`: the options a start may carry (CONTROL.md §2). No
    *  entry: neither `permission` nor `model`. */
   start: z

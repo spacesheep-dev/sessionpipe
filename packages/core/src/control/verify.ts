@@ -30,7 +30,7 @@ export const TEXT_MAX = 20_000;
 export const NOTE_MAX = 2_000;
 /** A grant string. */
 export const GRANT_STR_MAX = 2_000;
-/** Attachments on a `start` (CONTROL.md §3.1): at most this many files, */
+/** Attachments on a `start` or a `prompt` (CONTROL.md §3.1): at most this many files, */
 export const FILES_MAX = 10;
 /** each at most this many bytes, */
 export const FILE_SIZE_MAX = 26_214_400;
@@ -130,7 +130,7 @@ export interface ControlCommand {
   key?: { id: string; alg: -7 | -257; spki: string };
   /** key.add only: what the person calls the device ("iPhone"), for `control keys`. */
   name?: string;
-  /** start only: files to download, verify and write into the new session's folder. */
+  /** start, prompt: files to download, verify and write into the session's folder. */
   files?: ControlFile[];
   /** start only: the level the new session runs at (never above the machine's mode). */
   permission?: StartPermission;
@@ -200,7 +200,7 @@ const UV = 0x04;
  *  on a machine that predates it instead of being ignored. */
 const COMMON_FIELDS: readonly string[] = ["v", "t", "machine", "kind", "session", "nonce", "iat", "note"];
 const FIELDS: Record<ControlKind, readonly string[]> = {
-  prompt: ["text"],
+  prompt: ["text", "files"],
   "permission.answer": ["for", "decision"],
   cancel: [],
   start: ["text", "cwd", "files", "permission", "model"],
@@ -448,7 +448,11 @@ export function parseCommand(str: unknown): Parsed {
   switch (c.kind as ControlKind) {
     case "prompt":
       if (!text()) return bad("bad_fields", `a prompt needs text, at most ${TEXT_MAX} characters`);
-      if (has("for") || has("decision") || has("cwd")) return bad("bad_fields", "a prompt carries only text");
+      if (has("for") || has("decision") || has("cwd")) return bad("bad_fields", "a prompt carries text and files");
+      if (has("files")) {
+        const why = filesProblem(c.files);
+        if (why) return bad("bad_fields", why);
+      }
       break;
     case "start":
       if (!text()) return bad("bad_fields", `a new session needs text, at most ${TEXT_MAX} characters`);
@@ -497,7 +501,8 @@ export function parseCommand(str: unknown): Parsed {
     }
   }
   if (c.kind !== "key.add" && (has("key") || has("name"))) return bad("bad_fields", "only a key.add carries a key");
-  if (c.kind !== "start" && has("files")) return bad("bad_fields", "only a start carries files");
+  if (c.kind !== "start" && c.kind !== "prompt" && has("files"))
+    return bad("bad_fields", "only a start or a prompt carries files");
   if (c.kind !== "start" && (has("permission") || has("model")))
     return bad("bad_fields", "only a start carries a model or a permission");
   const allowed = FIELDS[c.kind as ControlKind];
@@ -509,7 +514,7 @@ export function parseCommand(str: unknown): Parsed {
   return { ok: true, cmd: c as unknown as ControlCommand };
 }
 
-/** Why a start's `files` breaks the rules (CONTROL.md §3.1), or null when it doesn't. */
+/** Why a start's or a prompt's `files` breaks the rules (CONTROL.md §3.1), or null when it doesn't. */
 export function filesProblem(files: unknown): string | null {
   if (!Array.isArray(files) || files.length < 1 || files.length > FILES_MAX)
     return `files is a list of 1 to ${FILES_MAX} files`;

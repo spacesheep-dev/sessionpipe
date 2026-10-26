@@ -37,6 +37,16 @@ describe("writeFiles", () => {
     expect(rel).toEqual([".sessionpipe/files/s1/a.txt", ".sessionpipe/files/s1/b.txt"]);
     expect(readdirSync(path.join(tmp, ".sessionpipe", "files", "s1")).sort()).toEqual(["a.txt", "b.txt"]);
   });
+  it("a prompt's files: a folder of its own inside the session's, which may be there; the message's must be new", () => {
+    writeFiles(tmp, "s1", [file("a.txt")]);
+    expect(writeFiles(tmp, "s1", [file("a.txt")], "n1")).toEqual([".sessionpipe/files/s1/n1/a.txt"]);
+    expect(writeFiles(tmp, "s2", [file("b.txt")], "n1")).toEqual([".sessionpipe/files/s2/n1/b.txt"]);
+    expect(() => writeFiles(tmp, "s1", [file("c.txt")], "n1")).toThrow(".sessionpipe/files/s1/n1 already exists");
+    // An id the protocol allows that is no folder of its own.
+    expect(() => writeFiles(tmp, "..", [file("c.txt")], "n2")).toThrow("no folder ..");
+    expect(() => writeFiles(tmp, "s1", [file("c.txt")], ".")).toThrow("no folder .");
+    expect(readdirSync(path.join(tmp, ".sessionpipe", "files", "s1")).sort()).toEqual(["a.txt", "n1"]);
+  });
   it("a second file that can't be created (wx) removes the first with the session's folder", () => {
     // The verifier never lets two names collide; the exclusive create is the last line.
     expect(() => writeFiles(tmp, "s1", [file("a.txt"), file("a.txt")])).toThrow(/couldn't save the files: EEXIST/);

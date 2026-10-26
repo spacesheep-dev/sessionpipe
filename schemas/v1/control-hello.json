@@ -102,6 +102,9 @@
     "files": {
       "type": "boolean"
     },
+    "prompt_files": {
+      "type": "boolean"
+    },
     "start": {
       "type": "object",
       "propertyNames": {
