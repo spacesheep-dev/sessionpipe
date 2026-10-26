@@ -869,6 +869,11 @@ details > p {
   max-width: 15ch;
   margin: 0 0 24px;
 }
+/* The headline's two orange phrases: what it is (open protocol) and what it watches (doing). */
+.home .hero h1 .hl {
+  font-style: normal;
+  color: var(--accent-ui);
+}
 .home .lead {
   font-size: clamp(17px, 2vw, 20px);
   line-height: 1.5;
