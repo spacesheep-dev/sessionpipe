@@ -93,20 +93,25 @@ function run(bin: string, args: string[], o: { cwd: string }): Promise<RunResult
 async function startDaemon(
   o: { mode?: ControlConfig["mode"]; caps?: string[]; sdk?: SdkHost; extra?: Partial<DaemonDeps> } = {},
 ) {
-  d = new ControlDaemon(cfg(o.mode ?? "safe"), path.join(tmp, "state", "control"), path.join(tmp, "control.sock"), {
-    now: Date.now,
-    fetch,
-    log: process.env.SP_DEBUG ? (s: string) => console.error(`[daemon] ${s}`) : () => {},
-    claudeDirs: () => [configDir],
-    claude: () => ({ bin: "claude", caps: { hasMode: true, modes: o.caps ?? ALL, promptsNone: false, fork: true } }),
-    codex: () => "codex",
-    agy: () => "agy",
-    codexModels: () => ["gpt-6-astra", "gpt-5.6-sol"],
-    run: run as DaemonDeps["run"],
-    sdk: o.sdk ?? null,
-    env: { ...process.env, CODEX_HOME: path.join(tmp, "codex-home") },
-    ...o.extra,
-  });
+  d = new ControlDaemon(
+    cfg(o.mode ?? "safe"),
+    path.join(tmp, "state", "control"),
+    process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock"),
+    {
+      now: Date.now,
+      fetch,
+      log: process.env.SP_DEBUG ? (s: string) => console.error(`[daemon] ${s}`) : () => {},
+      claudeDirs: () => [configDir],
+      claude: () => ({ bin: "claude", caps: { hasMode: true, modes: o.caps ?? ALL, promptsNone: false, fork: true } }),
+      codex: () => "codex",
+      agy: () => "agy",
+      codexModels: () => ["gpt-6-astra", "gpt-5.6-sol"],
+      run: run as DaemonDeps["run"],
+      sdk: o.sdk ?? null,
+      env: { ...process.env, CODEX_HOME: path.join(tmp, "codex-home") },
+      ...o.extra,
+    },
+  );
   await d.start();
 }
 
