@@ -123,6 +123,9 @@
         },
         "files": {
           "type": "boolean"
+        },
+        "inherit": {
+          "type": "boolean"
         }
       },
       "required": [

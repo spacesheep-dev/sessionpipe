@@ -11,7 +11,7 @@ import path from "node:path";
 import { readConfig, writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "../src/control/cli.js";
-import { installService, off, pair, uninstallService } from "../src/control/pair.js";
+import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
 
 vi.mock("../src/control/pair.js", async (original) => ({
@@ -20,6 +20,7 @@ vi.mock("../src/control/pair.js", async (original) => ({
   off: vi.fn(async () => undefined),
   installService: vi.fn(() => "launchd agent (stand-in)"),
   uninstallService: vi.fn(),
+  withoutInherit: vi.fn(async () => [] as string[]),
 }));
 const rl = vi.hoisted(() => ({ answers: [] as string[], closed: 0 }));
 vi.mock("node:readline/promises", () => ({
@@ -237,6 +238,27 @@ describe("control mode, keys, off, status, help", () => {
     await run("mode", "bypass");
     expect(said()).toContain("mode: inherit");
     expect(readControl()?.mode).toBe("inherit");
+  });
+
+  it("mode inherit: only when every paired receiver knows it; otherwise says why and keeps the mode", async () => {
+    writeControl({ name: "lab", folders: [project], mode: "auto", receivers: [receiver] });
+    vi.mocked(withoutInherit).mockResolvedValueOnce([
+      "https://rx.test doesn't know inherit mode yet; it would show this machine as safe while the sessions you message run with no permission flag",
+    ]);
+    await run("mode", "inherit");
+    expect(withoutInherit).toHaveBeenCalledWith([RX]);
+    expect(said()).toContain("✗ https://rx.test doesn't know inherit mode yet; it would show this machine as safe");
+    expect(said()).toContain("Mode stays auto.");
+    expect(readControl()?.mode).toBe("auto");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+    out = [];
+    await run("mode", "inherit");
+    expect(readControl()?.mode).toBe("inherit");
+    // Already in inherit: nothing to ask the receivers.
+    vi.mocked(withoutInherit).mockClear();
+    await run("mode", "inherit");
+    expect(withoutInherit).not.toHaveBeenCalled();
   });
 
   it("keys: lists each receiver's keys with their algorithm, removes one by id, says when there is none", async () => {
