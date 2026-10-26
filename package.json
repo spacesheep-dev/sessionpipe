@@ -29,14 +29,14 @@
     "vectors": "SESSIONPIPE_WRITE_VECTORS=1 vitest run packages/core/test/control-vectors.gen.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "^2.6.2",
     "@changesets/cli": "^3.0.3",
-    "@types/node": "^26.6.4",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "esbuild": "^0.28.2",
-    "marked": "^18.0.14",
+    "marked": "^18.1.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   }
 }
