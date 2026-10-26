@@ -1,6 +1,6 @@
 {
   "name": "sessionpipe",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "sessionpipe: an open protocol for what your coding agents are doing. One install hooks Claude Code, Codex, Gemini CLI, Antigravity, Devin and more; four privacy tiers; secrets removed on your machine; sent to your server or to none.",
   "license": "Apache-2.0",
   "type": "module",

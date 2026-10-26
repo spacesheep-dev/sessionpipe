@@ -1,6 +1,6 @@
 {
   "name": "sessionpipe-conformance",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Runs the sessionpipe conformance fixtures against a receiver URL or an adapter. (published unscoped until the @sessionpipe npm org exists; the code is the same)",
   "license": "Apache-2.0",
   "type": "module",
