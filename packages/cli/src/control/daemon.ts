@@ -20,6 +20,7 @@ import {
   codexControl,
   deniedNote,
   type HarnessAccount,
+  HELLO_HARNESSES_MAX,
   JOB_TIMEOUT_MS,
   jobEnv,
   type Login,
@@ -861,8 +862,16 @@ export class ControlDaemon {
   private async helloAll(): Promise<void> {
     void this.refreshSessionTools();
     const waiting = [...this.live].filter(([, l]) => l.waiter).map(([k]) => k);
-    const modes: DeliveryMode[] = ["waiter", "turn", "resume", "fork", ...(this.deps.sdk ? (["sdk"] as const) : [])];
     const harnesses = this.harnesses();
+    const modes: DeliveryMode[] = [
+      "waiter",
+      "turn",
+      "resume",
+      "fork",
+      ...(this.deps.sdk ? (["sdk"] as const) : []),
+      // Every ACP agent's turn is acked `api` (§6).
+      ...(harnesses.some((h) => acpControl.acpAgent(h)) ? (["api"] as const) : []),
+    ];
     const accounts = this.accounts();
     for (const r of this.cfg.receivers) {
       const body = {
@@ -1170,16 +1179,17 @@ export class ControlDaemon {
     }
   }
 
-  /** The harnesses this machine can run a message in, for hello. */
+  /** The harnesses this machine can run a message in, for hello: at most
+   *  HELLO_HARNESSES_MAX, the three with their own drivers first. */
   private harnesses(): string[] {
-    if (this.deps.harnesses) return this.deps.harnesses();
+    if (this.deps.harnesses) return this.deps.harnesses().slice(0, HELLO_HARNESSES_MAX);
     const acp = this.deps.acp;
     return [
       ...(this.deps.claude() ? ["claude-code"] : []),
       ...(this.deps.codex?.() ? ["codex"] : []),
       ...(this.deps.agy?.() ? ["antigravity"] : []),
       ...(acp ? acpControl.ACP_HARNESSES.filter((h) => acp(h)) : []),
-    ];
+    ].slice(0, HELLO_HARNESSES_MAX);
   }
 
   private allowed(dir: string): string | null {

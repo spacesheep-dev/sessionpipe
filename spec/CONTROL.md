@@ -284,7 +284,11 @@ ACP `session/cancel` for a session the daemon holds in `api` mode; OpenCode
 
 A new session of the command's harness, in `cwd`, for any harness the machine can drive
 headlessly (it lists them in its hello's `harnesses`; any other is acked
-`unsupported`). Claude Code: with the command's session id, through the Agent SDK when
+`unsupported`). The pairing request and the hello list at most **20**: Claude Code,
+Codex and Antigravity first, then the ACP agents below in the registry's order, so a
+machine with more agents installed than that advertises the first 20 and still starts
+any of the rest a command names. Their `modes` include `api` whenever one of the
+listed harnesses is an ACP agent. Claude Code: with the command's session id, through the Agent SDK when
 the daemon has it, else `claude -p --session-id`. Codex: `codex exec`. Antigravity:
 `agy -p`. Acked `delivered` with mode `sdk` or `resume`, and the reply.
 

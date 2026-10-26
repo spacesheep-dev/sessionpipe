@@ -20,7 +20,7 @@ import {
   permissionChoice,
   startAcp,
 } from "../src/adapters/acp-control.js";
-import { drivableHarnesses } from "../src/adapters/index.js";
+import { drivableHarnesses, HELLO_HARNESSES_MAX } from "../src/adapters/index.js";
 
 const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sp-acp-")));
 const project = path.join(tmp, "project");
@@ -245,6 +245,21 @@ describe("the agents and where they are", () => {
       });
     });
   });
+  it.runIf(process.platform !== "win32")(
+    "a machine with every agent installed lists 20: the three with their own drivers first, then the registry's order",
+    () => {
+      const all = path.join(tmp, "all");
+      for (const n of ["claude", "codex", "agy", ...ACP_AGENTS.map((a) => a.bin)]) script(path.join(all, n));
+      const listed = drivableHarnesses({ PATH: all, SESSIONPIPE_CLAUDE: path.join(all, "claude") });
+      expect(listed).toHaveLength(HELLO_HARNESSES_MAX);
+      expect(listed).toEqual([
+        "claude-code",
+        "codex",
+        "antigravity",
+        ...ACP_HARNESSES.slice(0, HELLO_HARNESSES_MAX - 3),
+      ]);
+    },
+  );
   it("permissionChoice: safe refuses, auto allows, once before always, and nothing fitting is null", () => {
     const opts = [
       { optionId: "a", kind: "allow_always" },

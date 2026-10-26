@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runHeadless } from "@sessionpipe/core";
+import { acpControl, runHeadless } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
@@ -171,14 +171,29 @@ describe("which kinds go where", () => {
   });
 });
 
+const { ACP_HARNESSES } = acpControl;
+
 describe.runIf(unix)("hello", () => {
-  it("advertises the agents installed here", async () => {
+  it("advertises the agents installed here, and the `api` mode their turns are acked in", async () => {
     await startDaemon();
     expect(await hello()).toMatchObject({ harnesses: ["gemini-cli", "goose"] });
+    expect(rx.hellos[0]?.modes).toContain("api");
     await d?.stop();
     rx.hellos.length = 0;
     await startDaemon({ noAcp: true });
     expect(await hello()).toMatchObject({ harnesses: [] });
+    expect(rx.hellos[0]?.modes).not.toContain("api");
+  });
+  it("lists at most 20 harnesses, the first 20 it is given (control-hello.json)", async () => {
+    await startDaemon({ noAcp: true, extra: { harnesses: () => ["claude-code", ...ACP_HARNESSES] } });
+    const h = (await hello()) as { harnesses: string[]; modes: string[] };
+    expect(h.harnesses).toEqual(["claude-code", ...ACP_HARNESSES.slice(0, 19)]);
+    expect(h.modes).toContain("api");
+    await d?.stop();
+    rx.hellos.length = 0;
+    // Every agent installed, none of the three: still 20, in the registry's order.
+    await startDaemon({ extra: { acp: () => ({ bin: process.execPath, args: [fake] }) } });
+    expect(((await hello()) as { harnesses: string[] }).harnesses).toEqual(ACP_HARNESSES.slice(0, 20));
   });
 });
 
