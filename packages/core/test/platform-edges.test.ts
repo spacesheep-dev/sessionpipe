@@ -235,7 +235,7 @@ describe("WebCrypto that throws", () => {
     const challenge = await sha256("c");
     const good = await pk.assert(challenge);
     vi.spyOn(crypto.subtle, "verify").mockRejectedValue(new Error("boom"));
-    expect(await verifyAssertion(challenge, good, pk.key, rp)).toEqual({
+    expect(await verifyAssertion(challenge, good, pk.key, rp, "confirm")).toEqual({
       ok: false,
       why: "the passkey signature doesn't verify",
     });

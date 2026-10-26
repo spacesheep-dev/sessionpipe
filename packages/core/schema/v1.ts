@@ -245,6 +245,11 @@ export const MachineId = z.string().regex(/^m_[A-Za-z0-9_-]{16,40}$/, "m_ + 16�
 /** `<harness>:<id>`; the id follows its adapter's rule (Claude Code: a UUID). */
 export const SessionRef = z.string().regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/, "<harness>:<session id>");
 export const ControlKind = z.enum(["prompt", "permission.answer", "cancel", "start", "key.add"]);
+/** The kinds of key a machine or a receiver handles (CONTROL.md §2). Absent: passkeys only. */
+export const KeyTypes = z
+  .array(z.enum(["passkey", "device"]))
+  .min(1)
+  .max(2);
 export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
 /** How much a started session may do without anyone approving it (CONTROL.md §3.1),
  *  narrowest first. Closed: nothing is wider than `auto`. */
@@ -307,15 +312,10 @@ export const ControlCommand = z.object({
   /** start: the folder the new session runs in: absolute, or `~` / `~/…` under the
    *  home of the user the machine's daemon runs as, as events write it. */
   cwd: z.string().max(1024).optional(),
-  /** key.add (session `sessionpipe:keys`): the new device's passkey, which the machine
-   *  trusts once a key it already trusts signed this command. */
-  key: z
-    .object({
-      id: z.string().regex(/^[A-Za-z0-9_-]{16,1400}$/),
-      alg: z.union([z.literal(-7), z.literal(-257)]),
-      spki: z.string().regex(/^[A-Za-z0-9_-]{40,2000}$/),
-    })
-    .optional(),
+  /** key.add (session `sessionpipe:keys`): the new device's key (a passkey or a device
+   *  key, control-key.json), which the machine trusts once a key it already trusts
+   *  signed this command. */
+  key: z.lazy(() => ControlKey).optional(),
   /** key.add: what the person calls the device. */
   name: z.string().min(1).max(80).optional(),
   /** start, prompt: 1–10 files, together at most 50 MiB, downloaded and checked by hash
@@ -353,12 +353,38 @@ export const ControlAssertion = z.object({
   sig: B64Url.min(1),
 });
 
-/** A key enrolled on a machine: a passkey's credential id, COSE alg, SPKI. */
-export const ControlKey = z.object({
-  id: B64Url.min(16).max(1400),
-  alg: z.union([z.literal(-7), z.literal(-257)]),
-  spki: B64Url.min(1),
+/** A device key's signature (CONTROL.md §3.2): its id and 64 bytes r‖s over
+ *  `sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>`. Nothing else. The shape
+ *  only, like an assertion's: the machine reads the key from its own record and checks
+ *  the rest (a 43-character id, exactly 64 bytes), so a carrier never decides a kind. */
+export const ControlDeviceSignature = z.strictObject({
+  cred: B64Url.min(1),
+  /** 64 bytes r‖s, base64url without padding. */
+  sig: B64Url.min(1),
 });
+
+/** A key enrolled on a machine, closed: a passkey (credential id, COSE alg, SPKI), or a
+ *  device key an app holds in hardware (CONTROL.md §2 "Device keys"), which names
+ *  itself by its SPKI's SHA-256 and says how it is held. A machine refuses any other
+ *  field or value, so a kind added later is refused by every machine that predates it. */
+export const ControlKey = z.xor([
+  z.strictObject({
+    id: B64Url.min(16).max(1400),
+    alg: z.union([z.literal(-7), z.literal(-257)]),
+    spki: B64Url.min(1),
+  }),
+  z.strictObject({
+    /** SHA-256 of the SPKI bytes, base64url without padding. */
+    id: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "SHA-256 of the spki, base64url"),
+    alg: z.literal(-7),
+    spki: B64Url.min(1),
+    type: z.literal("device"),
+    /** The private key was made in a hardware key store and never leaves it. */
+    store: z.literal("hardware"),
+    /** The store will not sign without verifying the person, every time. */
+    uv: z.literal("each-use"),
+  }),
+]);
 
 /** One message as a receiver carries it: its own envelope around the signed bytes. */
 export const ControlMessage = z.object({
@@ -368,12 +394,17 @@ export const ControlMessage = z.object({
   cmd: z.string().min(1).max(48_000),
   /** The day key's ECDSA P-256 / SHA-256 signature over cmd: raw r‖s, base64url. */
   csig: B64Url.nullable().optional(),
-  /** The grant vouching for the day key: its string plus the passkey's assertion over sha256(str). */
-  grant: ControlAssertion.extend({ str: z.string().min(1).max(2000) })
+  /** The grant vouching for the day key: its string plus the passkey's assertion over
+   *  sha256(str), or a device key's signature over it (CONTROL.md §3.2). */
+  grant: z
+    .xor([
+      ControlAssertion.extend({ str: z.string().min(1).max(2000) }),
+      ControlDeviceSignature.extend({ str: z.string().min(1).max(2000) }),
+    ])
     .nullable()
     .optional(),
-  /** Instead of csig + grant: one passkey assertion over sha256(cmd). */
-  confirm: ControlAssertion.nullable().optional(),
+  /** Instead of csig + grant: one passkey assertion (or device signature) over sha256(cmd). */
+  confirm: z.xor([ControlAssertion, ControlDeviceSignature]).nullable().optional(),
   /** The receiver's clock. */
   at: Rfc3339,
   /** After this the machine MUST NOT act and acks `expired`; at most 24 h after `at`. */
@@ -459,6 +490,9 @@ export const ControlPairStart = z.object({
   /** The machine takes `files` on a start (downloads, checks and writes them). A
    *  machine that doesn't say so may ignore them: a receiver SHOULD NOT send it files. */
   files: z.boolean().optional(),
+  /** The kinds of key this machine takes (unique; absent means `["passkey"]`). A
+   *  client offers a device key only to a machine that lists `device`. */
+  key_types: KeyTypes.optional(),
 });
 
 /** The receiver's answer: where the person confirms, and the digits both screens show. */
@@ -475,8 +509,10 @@ export const ControlPairStarted = z.object({
  *  over sha256("sessionpipe.pair:<machine>:<code>") before it trusts `key`. */
 export const ControlPaired = z.object({
   status: z.enum(["pending", "paired", "expired"]),
+  /** The key approved, whole: a device key keeps its type, store and uv. */
   key: ControlKey.optional(),
-  proof: ControlAssertion.optional(),
+  /** The key's proof: a passkey assertion, or a device signature for purpose `pair`. */
+  proof: z.xor([ControlAssertion, ControlDeviceSignature]).optional(),
   /** The machine's own bearer for polls, acks and hello: opens nothing else. Minted
    *  once, at the first pairing of a machine. */
   token: z.string().min(16).max(256).optional(),
@@ -528,6 +564,8 @@ export const ControlHello = z.object({
     .refine((o) => Object.keys(o).length <= 50, "at most 50 harnesses")
     .meta({ maxProperties: 50 })
     .optional(),
+  /** As in control-pair.json. */
+  key_types: KeyTypes.optional(),
 });
 
 export const WellKnown = z.object({
@@ -556,6 +594,9 @@ export const WellKnown = z.object({
       signing: z.object({
         rp_id: z.string().min(1).max(253),
         algs: z.array(z.union([z.literal(-7), z.literal(-257)])).min(1),
+        /** The kinds of key the receiver stores and carries whole (CONTROL.md §2).
+         *  Absent means `["passkey"]`. */
+        key_types: KeyTypes.optional(),
       }),
       /** Informational: the receiver accepts `files` on a start and serves
        *  `GET {control}/files/{sha256}`. */

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Passkey } from "../../core/test/helpers/authenticator.js";
+import { DeviceKeySim, Passkey } from "../../core/test/helpers/authenticator.js";
 import {
   discover,
   ensureLinger,
@@ -250,6 +250,52 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(await withoutInherit(["https://gone.test"], down)).toEqual([
       "couldn't check that https://gone.test knows inherit mode (fetch failed)",
     ]);
+  });
+
+  it("pairing with an app's device key: a device proof for purpose pair, the record kept whole", async () => {
+    const mac = await DeviceKeySim.create({ rpId: RP });
+    rx.posts = [started()];
+    rx.gets = [
+      {
+        status: 200,
+        body: { status: "paired", key: mac.key, proof: await mac.enroll(MACHINE, "CODE-1"), token: "machine-token" },
+      },
+    ];
+    await pair(opts());
+    expect(rx.seen[1]?.body).toMatchObject({ key_types: ["passkey", "device"] });
+    expect(readControl(env)?.receivers[0]?.keys[0]).toMatchObject(mac.key);
+    expect(said()).toContain("It approved with an app's device key: held in hardware, verified each use.");
+  });
+
+  it("a device key's proof made for another use, or a device key that breaks a rule, trusts nothing", async () => {
+    const mac = await DeviceKeySim.create({ rpId: RP });
+    rx.posts = [started()];
+    rx.gets = [
+      {
+        status: 200,
+        body: {
+          status: "paired",
+          key: mac.key,
+          proof: await mac.enroll(MACHINE, "CODE-1", { purpose: "confirm" }),
+          token: "machine-token",
+        },
+      },
+    ];
+    await expect(pair(opts())).rejects.toThrow(/nothing was trusted/);
+    rx.posts = [started()];
+    rx.gets = [
+      {
+        status: 200,
+        body: {
+          status: "paired",
+          key: { ...mac.key, uv: "once" },
+          proof: await mac.enroll(MACHINE, "CODE-1"),
+          token: "machine-token",
+        },
+      },
+    ];
+    await expect(pair(opts())).rejects.toThrow(/in a shape this machine can't use/);
+    expect(readControl(env)).toBeNull();
   });
 
   it("a receiver that answers 200 to the start is fine; one that refuses says why, or doesn't", async () => {

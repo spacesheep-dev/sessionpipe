@@ -49,6 +49,20 @@ receiver's choice, so use a receiver's scoped, sessions-only token when it offer
 (see *Sink tokens, for receivers* below) — spacesheep's is *Sessions only* in Settings →
 API keys. Revoke it at the receiver and `sessionpipe sink remove` it.
 
+**What does a device key promise?** A desktop or phone app can't run WebAuthn in its
+own window, so it signs with a **device key** instead (`spec/CONTROL.md` §2): a P-256
+key the app makes in a hardware key store (the Secure Enclave on a Mac or an iPhone)
+that won't sign without Touch ID, Face ID or the device passcode, every time. Its
+`store: "hardware"` and `uv: "each-use"` are the app's word, declared when the key is
+made and approved by you at the terminal's digits or from a device the machine already
+trusts. A machine can't prove them, just as it can't prove the flags of a passkey made
+without attestation. What it does check: the key names itself by its SPKI's hash, its
+fields and values are exactly the spec's (so a weaker kind added later is refused by
+every machine that predates it), and each signature binds its purpose and the rp id,
+so one made for one use or one receiver counts for no other. A machine that predates
+device keys stores one as a passkey and refuses every signature from it. Remove a lost
+device's key with `sessionpipe control keys remove <id>`.
+
 **Sink tokens, for receivers.** A sink's token sits in a config file on every machine
 that reports, next to the hooks: the most-copied, least-guarded place a credential
 lives. A receiver that has accounts, APIs or data of its own should issue scoped

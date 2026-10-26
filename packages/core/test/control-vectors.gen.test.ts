@@ -14,6 +14,7 @@ import {
   type Assertion,
   b64url,
   CMD_MAX,
+  type DeviceSignature,
   FILE_NAME_MAX,
   FILE_SIZE_MAX,
   FILES_MAX,
@@ -26,7 +27,16 @@ import {
   TEXT_MAX,
   type TrustedKey,
 } from "../src/control/verify.js";
-import { commandStr, DayKey, MACHINE, nonce, Passkey, signed } from "./helpers/authenticator.js";
+import {
+  commandStr,
+  DayKey,
+  DeviceKeySim,
+  deviceSigned,
+  MACHINE,
+  nonce,
+  Passkey,
+  signed,
+} from "./helpers/authenticator.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dir = path.join(root, "conformance/control-vectors");
@@ -57,7 +67,7 @@ interface Vector {
 interface EnrollVector {
   name: string;
   description: string;
-  input: { machine: string; code: string; key: TrustedKey; proof: Assertion; rp_id: string };
+  input: { machine: string; code: string; key: TrustedKey; proof: Assertion | DeviceSignature; rp_id: string };
   expect: { ok: boolean };
 }
 
@@ -750,11 +760,239 @@ describe.runIf(WRITE)("write control vectors", () => {
       commandStr({ kind: "cancel", text: undefined, files: [png] }),
     );
 
+    // --- device keys (CONTROL.md §2, §3.2): 111–136, written last so no number moves ---
+    const device: (Vector | EnrollVector)[] = [];
+    {
+      const dev = await DeviceKeySim.create({ rpId: RP });
+      const both = [pk.key, dev.key];
+      const dv = (
+        name: string,
+        description: string,
+        s: SignedCommand,
+        expect: Vector["expect"],
+        extra: Partial<Vector["input"]> = {},
+      ) => device.push({ name, description, input: { signed: s, ...base({ trusted: both, ...extra }) }, expect });
+      const okv = (via: "grant" | "confirm", kind: string) => ({ ok: true as const, via, kind });
+      const no = (code: string) => ({ ok: false as const, code });
+      const grantWith = async (sign: Parameters<DeviceKeySim["sign"]>[2], extraGrant: object = {}) => {
+        const c = commandStr({});
+        const g = await day.deviceGrant(dev, { iat: T - 60_000, exp: T + H, sign });
+        return { cmd: c, csig: await day.sign(c), grant: { ...g, ...extraGrant } };
+      };
+
+      dv(
+        "valid-device-grant-prompt",
+        "A prompt signed by a day key under a grant from an app's device key: its signature over sessionpipe.device.v1⏎grant⏎<rp id>⏎b64url(sha256(str)).",
+        await deviceSigned(dev, day, commandStr({})),
+        okv("grant", "prompt"),
+      );
+      dv(
+        "valid-device-confirm-prompt",
+        "A prompt confirmed by the device key's signature for purpose confirm over sha256(cmd).",
+        await deviceSigned(dev, day, commandStr({}), { confirm: true }),
+        okv("confirm", "prompt"),
+      );
+      {
+        const phone = await Passkey.create({ rpId: RP });
+        const c = commandStr({
+          kind: "key.add",
+          session: "sessionpipe:keys",
+          text: undefined,
+          key: phone.key,
+          name: "iPhone",
+        });
+        dv(
+          "valid-device-confirm-key-add",
+          "The app's device key vouches for a phone's passkey, with a confirm.",
+          await deviceSigned(dev, day, c, { confirm: true }),
+          okv("confirm", "key.add"),
+        );
+      }
+      const mac = await DeviceKeySim.create({ rpId: RP });
+      const addDevice = (key: object) =>
+        commandStr({ kind: "key.add", session: "sessionpipe:keys", text: undefined, key, name: "Mac app" });
+      dv(
+        "valid-key-add-device-key",
+        "A trusted passkey's grant vouches for an app's device key: type, store and uv are inside the signed bytes.",
+        await signed(pk, day, addDevice(mac.key)),
+        okv("grant", "key.add"),
+      );
+      dv(
+        "device-grant-other-rp",
+        "The device key signed the grant with another rp id in its message (evil.example).",
+        await grantWith({ rpId: "evil.example" }),
+        no("bad_assertion"),
+      );
+      dv(
+        "device-grant-signed-as-confirm",
+        "The grant's signature was made for purpose confirm.",
+        await grantWith({ purpose: "confirm" }),
+        no("bad_assertion"),
+      );
+      {
+        const c = commandStr({});
+        dv(
+          "device-confirm-signed-as-grant",
+          "A confirm whose signature was made for purpose grant.",
+          { cmd: c, confirm: await dev.sign("confirm", await sha256(c), { purpose: "grant" }) },
+          no("bad_assertion"),
+        );
+      }
+      {
+        const c = commandStr({});
+        const str = day.grantStr({ iat: T - 60_000, exp: T + H, rp: RP });
+        dv(
+          "device-grant-no-context",
+          "The device key signed the bare sha256(str), with no context, purpose or rp id lines.",
+          {
+            cmd: c,
+            csig: await day.sign(c),
+            grant: { ...(await dev.sign("grant", new Uint8Array(), { raw: await sha256(str) })), str },
+          },
+          no("bad_assertion"),
+        );
+      }
+      dv(
+        "device-sig-der",
+        "The device key's grant signature in DER instead of raw r‖s.",
+        await grantWith({ der: true }),
+        no("bad_assertion"),
+      );
+      {
+        const s = await grantWith({});
+        const pa = await pk.assert(await sha256(s.grant.str));
+        dv(
+          "device-assertion-with-ad-cd",
+          "WebAuthn authenticatorData and clientDataJSON beside a device key's signature.",
+          { ...s, grant: { ...s.grant, ad: pa.ad, cd: pa.cd } },
+          no("bad_assertion"),
+        );
+      }
+      {
+        const c = commandStr({});
+        const g = await day.grant(pk, { iat: T - 60_000, exp: T + H });
+        dv(
+          "passkey-assertion-without-ad-cd",
+          "A device-shaped {cred, sig, str} grant from a key the machine holds as a passkey.",
+          { cmd: c, csig: await day.sign(c), grant: { cred: g.cred, sig: g.sig, str: g.str } },
+          no("bad_assertion"),
+        );
+      }
+      {
+        const { type: _t, store: _s, uv: _u, ...asPasskey } = dev.key;
+        dv(
+          "device-key-stored-as-passkey",
+          "A valid device grant, but the machine's record of the key has no type (an old daemon's store): verified as a passkey, refused.",
+          await deviceSigned(dev, day, commandStr({})),
+          no("bad_assertion"),
+          { trusted: [pk.key, asPasskey] },
+        );
+      }
+      {
+        const c = commandStr({});
+        dv(
+          "device-confirm-other-command",
+          "A device confirm made for a different command.",
+          { cmd: c, confirm: await dev.sign("confirm", await sha256(commandStr({}))) },
+          no("bad_assertion"),
+        );
+      }
+      {
+        const c = commandStr({});
+        const s = await deviceSigned(dev, day, c);
+        dv(
+          "device-grant-tampered-cmd",
+          "The text was changed after the day key signed it under a device grant.",
+          { ...s, cmd: c.replace("Add the Oct 8 row", "rm -rf ~") },
+          no("bad_csig"),
+        );
+      }
+      const addBad = async (name: string, description: string, key: object) =>
+        dv(name, description, await signed(pk, day, addDevice(key)), no("bad_fields"));
+      await addBad(
+        "key-add-device-id-not-spki-hash",
+        "A device key whose id is 43 base64url characters but not its SPKI's SHA-256.",
+        { ...mac.key, id: b64url(crypto.getRandomValues(new Uint8Array(32))) },
+      );
+      await addBad("key-add-device-store-software", "A device key declaring software storage.", {
+        ...mac.key,
+        store: "software",
+      });
+      await addBad("key-add-device-uv-once", "A device key verified once, not each use.", { ...mac.key, uv: "once" });
+      await addBad("key-add-device-rs256", "A device key with alg -257.", { ...mac.key, alg: RS256 });
+      await addBad("key-add-unknown-type", "A key of a type the spec does not define.", { ...mac.key, type: "tpm" });
+      {
+        const phone = await Passkey.create({ rpId: RP });
+        await addBad("key-add-passkey-with-store", "A passkey carrying a device key's store.", {
+          ...phone.key,
+          store: "hardware",
+        });
+      }
+      await addBad("key-add-key-extra-field", "A device key with a field the spec does not list.", {
+        ...mac.key,
+        attestation: "none",
+      });
+
+      const ecode = "K7Q2-9XMV";
+      const ev = (
+        name: string,
+        description: string,
+        key: TrustedKey,
+        proof: Assertion | DeviceSignature,
+        ok: boolean,
+      ) =>
+        device.push({
+          name,
+          description,
+          input: { machine: MACHINE, code: ecode, key, proof, rp_id: RP },
+          expect: { ok },
+        });
+      ev(
+        "enroll-device-valid",
+        'A device key proves itself with a signature for purpose pair over sha256("sessionpipe.pair:<machine>:<code>").',
+        dev.key,
+        await dev.enroll(MACHINE, ecode),
+        true,
+      );
+      ev(
+        "enroll-device-other-code",
+        "A device proof made for another pairing code.",
+        dev.key,
+        await dev.enroll(MACHINE, "AAAA-BBBB"),
+        false,
+      );
+      ev(
+        "enroll-device-other-rp",
+        "A device proof made for another rp id.",
+        dev.key,
+        await dev.enroll(MACHINE, ecode, { rpId: "evil.example" }),
+        false,
+      );
+      {
+        const p = await dev.enroll(MACHINE, ecode);
+        const pa = await pk.enroll(MACHINE, ecode);
+        ev(
+          "enroll-device-webauthn-shaped-proof",
+          "WebAuthn authenticatorData and clientDataJSON beside a device key's pairing proof.",
+          dev.key,
+          { ...p, ad: pa.ad, cd: pa.cd } as Assertion,
+          false,
+        );
+      }
+      ev(
+        "enroll-device-store-software",
+        "A valid proof from a key that declares software storage.",
+        { ...dev.key, store: "software" } as unknown as TrustedKey,
+        await dev.enroll(MACHINE, ecode),
+        false,
+      );
+    }
+
     mkdirSync(dir, { recursive: true });
     const names = new Set<string>();
     let n = 0;
     let wrote = 0;
-    const all = [...out.slice(0, split), ...enroll, ...out.slice(split, files), ...out.slice(files)];
+    const all = [...out.slice(0, split), ...enroll, ...out.slice(split, files), ...out.slice(files), ...device];
     for (const v of all) {
       do n++;
       while (RESERVED.has(n));

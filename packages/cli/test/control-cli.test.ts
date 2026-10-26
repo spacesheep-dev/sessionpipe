@@ -48,6 +48,16 @@ const receiver = {
   keys: [
     { id: "es256key0123456789abcdef", alg: -7 as const, spki: "k", added_at: "2026-10-01T10:00:00Z" },
     { id: "rs256key0123456789abcdef", alg: -257 as const, spki: "k", added_at: "2026-10-02T10:00:00Z" },
+    {
+      id: "devicekey0123456789abcdefghijklmnopqrstuvw",
+      alg: -7 as const,
+      spki: "k",
+      type: "device" as const,
+      store: "hardware" as const,
+      uv: "each-use" as const,
+      name: "Mac app",
+      added_at: "2026-10-03T10:00:00Z",
+    },
   ],
   paired_at: "2026-10-01T10:00:00Z",
 };
@@ -261,7 +271,7 @@ describe("control mode, keys, off, status, help", () => {
     expect(withoutInherit).not.toHaveBeenCalled();
   });
 
-  it("keys: lists each receiver's keys with their algorithm, removes one by id, says when there is none", async () => {
+  it("keys: lists each receiver's keys with their kind and algorithm, removes one by id, says when there is none", async () => {
     await run("keys");
     expect(said()).toContain("control isn't paired on this machine");
     writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [receiver] });
@@ -269,8 +279,9 @@ describe("control mode, keys, off, status, help", () => {
     await run("keys");
     expect(out).toEqual([
       `  ${RX} · machine m_0123456789abcdef`,
-      "    es256key01234567…  ES256  added 2026-10-01",
-      "    rs256key01234567…  RS256  added 2026-10-02",
+      "    es256key01234567…  passkey  ES256  added 2026-10-01",
+      "    rs256key01234567…  passkey  RS256  added 2026-10-02",
+      "    devicekey0123456…  device   ES256  added 2026-10-03  Mac app",
     ]);
     out = [];
     await run("keys", "remove", "rs256key");

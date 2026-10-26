@@ -127,14 +127,15 @@ you point it anywhere.**
 ## Control: the channel back
 
 A receiver carries commands; it can never forge one. Every command is signed on your
-device with a passkey (or a day key the passkey vouched for), and the machine checks
+device with a passkey, or with a desktop or phone app's device key held in hardware
+(or a day key either one vouched for), and the machine checks
 the exact bytes against keys enrolled at its own terminal, the nonce, the age, the
 folder allowlist, and that a permission you answer is still open. Then it delivers
 through the harness's own documented hooks: a message for the next turn, a permission
 answer while the terminal shows its prompt (nothing is ever auto-allowed), a cancel, or
 a new session started headlessly for any harness the machine can drive, with files if
 the command carries them. [CONTROL.md](spec/CONTROL.md) has every rule and refusal
-code; 89 shared vectors pin them.
+code; 136 shared vectors pin them.
 
 ```sh
 sessionpipe control pair https://your-receiver.example   # once, at the machine's own terminal

@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // A stand-in authenticator and signing device, so every control check runs on real
 // signatures: a passkey (ES256 or RS256) that answers WebAuthn assertions the way a
-// platform authenticator does, and a browser day key (P-256) that signs commands.
-// Test keys only; they are made fresh per run and never leave the test.
+// platform authenticator does, a browser day key (P-256) that signs commands, and an
+// app's device key (DeviceKeySim) that signs the device message (CONTROL.md §3.2).
+// Test keys only; they are made fresh per run and never leave the test. A software
+// key can't be honest about `store: "hardware"`: DeviceKeySim only claims it for tests.
 import {
   type Assertion,
   b64url,
   COMMAND_TYPE,
+  type DeviceGrant,
+  type DevicePurpose,
+  type DeviceSignature,
+  deviceKeyId,
+  deviceMessage,
   GRANT_TYPE,
   type GrantBundle,
   pairChallenge,
@@ -133,9 +140,77 @@ export class DayKey {
     return { ...a, str } satisfies GrantBundle;
   }
 
+  /** The same grant, signed by an app's device key instead of a passkey. */
+  async deviceGrant(
+    device: DeviceKeySim,
+    o: { iat: number; exp: number; rp?: string; str?: string; sign?: DeviceSignOptions | undefined },
+  ): Promise<DeviceGrant> {
+    const str = o.str ?? this.grantStr({ iat: o.iat, exp: o.exp, rp: o.rp ?? device.rpId });
+    return { ...(await device.sign("grant", await sha256(str), o.sign)), str };
+  }
+
   async sign(cmd: string): Promise<string> {
     return b64url(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.priv, enc.encode(cmd) as Bytes));
   }
+}
+
+export interface DeviceSignOptions {
+  /** Sign with this purpose line instead of the one asked for. */
+  purpose?: DevicePurpose;
+  /** Sign with this rp id line instead of the key's. */
+  rpId?: string;
+  /** Sign these bytes as they are instead of the device message. */
+  raw?: Uint8Array;
+  /** Write the signature in DER, as WebAuthn would, instead of r‖s. */
+  der?: boolean;
+}
+
+/** An app's device key (CONTROL.md §2): a P-256 key that names itself by its SPKI's
+ *  hash and signs `sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>` with raw r‖s. */
+export class DeviceKeySim {
+  constructor(
+    readonly key: TrustedKey,
+    private readonly priv: CryptoKey,
+    readonly rpId: string,
+  ) {}
+
+  static async create(o: { rpId?: string } = {}): Promise<DeviceKeySim> {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const spki = b64url(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const key: TrustedKey = {
+      id: await deviceKeyId(spki),
+      alg: -7,
+      spki,
+      type: "device",
+      store: "hardware",
+      uv: "each-use",
+    };
+    return new DeviceKeySim(key, pair.privateKey, o.rpId ?? "receiver.example");
+  }
+
+  async sign(purpose: DevicePurpose, challenge: Uint8Array, o: DeviceSignOptions = {}): Promise<DeviceSignature> {
+    const msg = o.raw ?? deviceMessage(o.purpose ?? purpose, o.rpId ?? this.rpId, challenge);
+    const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.priv, msg as Bytes));
+    return { cred: this.key.id, sig: b64url(o.der ? rawToDer(raw) : raw) };
+  }
+
+  /** The enrollment proof for a machine's pairing code. */
+  async enroll(machine: string, code: string, o: DeviceSignOptions = {}): Promise<DeviceSignature> {
+    return this.sign("pair", await pairChallenge(machine, code), o);
+  }
+}
+
+/** A command signed by a device key: its day grant plus csig, or a confirm. */
+export async function deviceSigned(
+  device: DeviceKeySim,
+  day: DayKey,
+  cmd: string,
+  o: { confirm?: boolean; grantIat?: number; grantExp?: number } = {},
+): Promise<SignedCommand> {
+  if (o.confirm) return { cmd, confirm: await device.sign("confirm", await sha256(cmd)) };
+  const iat = o.grantIat ?? (JSON.parse(cmd).iat as number) - 60_000;
+  const grant = await day.deviceGrant(device, { iat, exp: o.grantExp ?? iat + 12 * 3600_000 });
+  return { cmd, csig: await day.sign(cmd), grant };
 }
 
 export const nonce = (n = 16) => b64url(crypto.getRandomValues(new Uint8Array(n)));

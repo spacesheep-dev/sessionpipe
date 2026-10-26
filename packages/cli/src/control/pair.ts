@@ -15,7 +15,7 @@ import {
   type HarnessAccount,
   HELLO_HARNESSES_MAX,
 } from "@sessionpipe/core";
-import { type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
+import { KEY_TYPES, type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
 import type { Exec } from "@sessionpipe/core/service";
 import * as core from "@sessionpipe/core/service";
 import {
@@ -152,6 +152,8 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     ...(accounts.length ? { accounts } : {}),
     // This daemon takes `files` on a start (an older one would start without them).
     files: true,
+    // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
+    key_types: [...KEY_TYPES],
   };
   /** One pairing code from the receiver. `machine` names the row a previous code
    *  made, so a renewal adds no second machine. */
@@ -226,7 +228,7 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     }
     const { machine, code } = cur;
     const key = p.key as TrustedKey;
-    const proof = p.proof as { cred: string; ad: string; cd: string; sig: string };
+    const proof = p.proof as { cred: string; ad: string; cd: string; sig: string } | { cred: string; sig: string };
     const v = await verifyEnrollment({ machine, code, key, proof, rpId });
     if (!v.ok) throw new Error(`the receiver's key didn't prove itself (${v.why}); nothing was trusted`);
     const token = existing?.token || (typeof p.token === "string" ? p.token : "");
@@ -244,6 +246,8 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     if (!existing) cfg.receivers.push(rec);
     writeControl(cfg, o.env);
     o.out(`  ✓ Paired with ${rec.url} as ${machine} · ${rec.keys.length} key(s) trusted on this machine`);
+    // Say so when the approving key is an app's device key rather than a passkey.
+    if (key.type === "device") o.out("  It approved with an app's device key: held in hardware, verified each use.");
     const named = accounts.flatMap((a) => (a.email ? [a.email] : a.name ? [a.name] : []));
     if (named.length)
       o.out(`  Its session board names your Claude Code account${named.length > 1 ? "s" : ""}: ${named.join(", ")}`);

@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { sha256 } from "../../../core/src/control/verify.js";
-import { commandStr, DayKey, nonce, Passkey } from "../../../core/test/helpers/authenticator.js";
+import { commandStr, DayKey, DeviceKeySim, nonce, Passkey } from "../../../core/test/helpers/authenticator.js";
 
 export interface Queued {
   id: string;
@@ -93,13 +93,26 @@ export class FakeReceiver {
    *  signed only, so several can be enqueued together and arrive in one poll). */
   async send(
     fields: Record<string, unknown>,
-    o: { confirm?: boolean; expiresInMs?: number; tamper?: (c: string) => string; as?: Passkey; hold?: boolean } = {},
+    o: {
+      confirm?: boolean;
+      expiresInMs?: number;
+      tamper?: (c: string) => string;
+      as?: Passkey | DeviceKeySim;
+      hold?: boolean;
+    } = {},
   ): Promise<Queued> {
     const now = Date.now();
     const cmd = commandStr({ machine: this.machine, iat: now, nonce: nonce(), ...fields });
     let signed: { cmd: string; csig?: string; grant?: unknown; confirm?: unknown };
     const pk = o.as ?? this.passkey;
-    if (o.confirm) signed = { cmd, confirm: await pk.assert(await sha256(cmd)) };
+    if (pk instanceof DeviceKeySim) {
+      // An app's device key: its signature over the device message (CONTROL.md §3.2).
+      if (o.confirm) signed = { cmd, confirm: await pk.sign("confirm", await sha256(cmd)) };
+      else {
+        const grant = await this.day.deviceGrant(pk, { iat: now - 60_000, exp: now + 3600_000 });
+        signed = { cmd, csig: await this.day.sign(cmd), grant };
+      }
+    } else if (o.confirm) signed = { cmd, confirm: await pk.assert(await sha256(cmd)) };
     else {
       const grant = await this.day.grant(pk, { iat: now - 60_000, exp: now + 3600_000 });
       signed = { cmd, csig: await this.day.sign(cmd), grant };

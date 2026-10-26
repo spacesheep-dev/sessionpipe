@@ -57,6 +57,20 @@ except the first item, which tightens what a machine accepts, on purpose.
   turns are acked in delivery mode `api`, and an ack's `session` may be
   `<acp-harness>:<id>`. They take no start options. A receiver shows a harness it has no
   label for by its raw name.
+- **Device keys** (CONTROL.md §2, §3.2; HTTP.md §1). A desktop or phone app whose web
+  view can't run WebAuthn signs with a P-256 key held in hardware and verified each use,
+  `{id, alg: -7, spki, type: "device", store: "hardware", uv: "each-use"}`, and its
+  signature is `{cred, sig}` (plus `str` in a grant) where a passkey's `{cred, ad, cd,
+  sig}` would stand. A 0.10.0 machine says `key_types: ["passkey","device"]` in its
+  pairing request and every hello. **To accept device keys**, a receiver stores and
+  carries such a key whole, all six fields, in a pairing's `key` and in a `key.add`'s
+  `key` (never trimmed to `id`, `alg`, `spki`); passes a `{cred, sig}` grant, confirm or
+  pairing proof through as it came; and says `control.signing.key_types:
+  ["passkey","device"]` in its well-known file. A device key reaches a machine only as a
+  passkey does: approved at the terminal's pairing code, or by a `key.add` that a key the
+  machine already trusts signed. **A receiver that doesn't know device keys keeps
+  working:** with no `key_types` it is passkeys only, an app offers it none, and nothing
+  about passkeys changed.
 
 Adopting 0.10.0 while machines still run 0.9.0:
 
@@ -70,14 +84,34 @@ Adopting 0.10.0 while machines still run 0.9.0:
 - Never sign `inherit` as a command's `permission`: it only ever comes from the machine.
 - Read an absent `attended`, `background`, `submitted_by`, `injected` or `launched_by`
   as unknown: never `false`, `0` or "a person". Keep a `submitted_by` you don't know.
+- Offer a device key for a machine only when its latest hello lists `device` in
+  `key_types`. A 0.9.0 machine would store it as a passkey and refuse every signature it
+  makes (vector `122`).
 - Gate per machine on its latest hello, cloud boxes included: one asleep on an old
   snapshot may still poll on 0.9.0.
 - A receiver that pre-checks commands with a copy of the verifier re-vendors 0.10.0's
   `sessionpipe-core/control` and its vectors (`69` is now `files-on-permission-answer`;
-  `90`–`110` are new).
+  `90`–`136` are new; `verifyAssertion` now takes the signature's purpose).
 
 ### Protocol changes
 
+- Control: **device keys** (CONTROL.md §2, §3.2, §5, §11; HTTP.md §1; still Draft). An
+  app whose web view can't run WebAuthn (a desktop or phone app) signs with a P-256
+  key held in hardware and verified each use: `{id, alg: -7, spki, type: "device",
+  store: "hardware", uv: "each-use"}`, its id the SHA-256 of its SPKI. Its signature
+  is `{cred, sig}` (plus `str` in a grant), raw r‖s over
+  `sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>`, purposes `grant`, `confirm`
+  and `pair`; the challenge is the one a passkey would sign, so the day grant, confirms,
+  pairing and `key.add` work unchanged. A machine verifies by its own record of the key,
+  never the message. No new refusal codes. Machines advertise `key_types` in the pairing
+  request and every hello, receivers in `control.signing.key_types`; a client offers a
+  device key only where both list `device`. A `key.add` key is now checked like an
+  enrollment (an SPKI the machine can import, and every device rule), `bad_fields`
+  otherwise, so an unimportable key is never stored. Key fields are closed: a passkey
+  carries `id`, `alg`, `spki` only. Schemas: `control-key` is a closed `oneOf`
+  (passkey | device), `control-command` and `control-paired` use it, grant, confirm and
+  pairing proof take either signature shape, `control-pair`, `control-hello` and the
+  well-known `control.signing` gain `key_types`. 26 new control vectors (`111`–`136`).
 - `turn.started` can say who started the turn (PROTOCOL.md §4; PRIVACY.md §1;
   ADAPTERS.md). Two new OPTIONAL tier-0 fields: `submitted_by`, the harness's **own** word
   for who submitted the prompt, forwarded verbatim and never mapped onto a vocabulary of

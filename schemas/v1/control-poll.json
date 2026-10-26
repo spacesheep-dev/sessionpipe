@@ -31,40 +31,70 @@
           "grant": {
             "anyOf": [
               {
-                "type": "object",
-                "properties": {
-                  "cred": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "cred": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "ad": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "cd": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "sig": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "str": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "cred",
+                      "ad",
+                      "cd",
+                      "sig",
+                      "str"
+                    ]
                   },
-                  "ad": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
-                  },
-                  "cd": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
-                  },
-                  "sig": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
-                  },
-                  "str": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2000
+                  {
+                    "type": "object",
+                    "properties": {
+                      "cred": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "sig": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "str": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "cred",
+                      "sig",
+                      "str"
+                    ],
+                    "additionalProperties": false
                   }
-                },
-                "required": [
-                  "cred",
-                  "ad",
-                  "cd",
-                  "sig",
-                  "str"
                 ]
               },
               {
@@ -75,34 +105,58 @@
           "confirm": {
             "anyOf": [
               {
-                "type": "object",
-                "properties": {
-                  "cred": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "cred": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "ad": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "cd": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "sig": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      }
+                    },
+                    "required": [
+                      "cred",
+                      "ad",
+                      "cd",
+                      "sig"
+                    ]
                   },
-                  "ad": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
-                  },
-                  "cd": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
-                  },
-                  "sig": {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": "^[A-Za-z0-9_-]*$"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "cred": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      },
+                      "sig": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9_-]*$"
+                      }
+                    },
+                    "required": [
+                      "cred",
+                      "sig"
+                    ],
+                    "additionalProperties": false
                   }
-                },
-                "required": [
-                  "cred",
-                  "ad",
-                  "cd",
-                  "sig"
                 ]
               },
               {

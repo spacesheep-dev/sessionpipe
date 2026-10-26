@@ -34,6 +34,7 @@ import {
 } from "@sessionpipe/core";
 import {
   type ControlCommand,
+  KEY_TYPES,
   levelRank,
   narrower,
   parseSessionRef,
@@ -936,6 +937,8 @@ export class ControlDaemon {
         // …and on a prompt (CONTROL.md §6 `prompt`): an older daemon refuses those.
         prompt_files: true,
         start,
+        // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
+        key_types: [...KEY_TYPES],
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
       const st = this.polling.get(r.control + r.machine);
@@ -1800,10 +1803,14 @@ export class ControlDaemon {
     const rec = this.cfg.receivers.find((x) => x.control === r.control && x.machine === r.machine) ?? r;
     if (rec.keys.some((x) => x.id === k.id))
       return this.finish(r, id, { outcome: "delivered", detail: "that device was already trusted" }, sent);
+    // The whole key, as the verifier checked it (keyUsable): a device key keeps its
+    // type, store and uv, so its signatures are verified as a device key's.
+    const device = k.type === "device";
     rec.keys.push({
       id: k.id,
       alg: k.alg,
       spki: k.spki,
+      ...(device ? { type: k.type, store: k.store, uv: k.uv } : {}),
       ...(name ? { name } : {}),
       added_at: new Date(this.deps.now()).toISOString(),
     });
@@ -1817,7 +1824,7 @@ export class ControlDaemon {
       });
     }
     this.deps.log(
-      `trusted a new device${name ? ` (${name})` : ""} on ${r.url}: ${k.id.slice(0, 12)}…, vouched for by a key it already trusted`,
+      `trusted a new ${device ? "device key (hardware, verified each use)" : "device"}${name ? ` (${name})` : ""} on ${r.url}: ${k.id.slice(0, 12)}…, vouched for by a key it already trusted`,
     );
     this.finish(r, id, { outcome: "delivered", detail: `trusted ${name || "a new device"}` }, sent);
   }

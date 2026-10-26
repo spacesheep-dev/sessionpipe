@@ -83,7 +83,8 @@ for (const f of delivery) {
 }
 
 // Control vectors: every signed message fits control.json (the receiver's envelope
-// fields aside), and every command a vector expects to verify fits control-command.json.
+// fields aside), and every command a vector expects to verify fits control-command.json,
+// as every key a vector expects to enroll fits control-key.json.
 const vectors = walk(path.join(root, "conformance/control-vectors")).filter((f) => f.endsWith(".json"));
 const Carried = S.ControlMessage.omit({ id: true, at: true, expires_at: true });
 for (const f of vectors) {
@@ -104,8 +105,10 @@ for (const f of vectors) {
           problems.push(`cmd: ${c.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
       }
     } else if (v.input?.proof) {
-      const k = S.ControlKey.safeParse(v.input.key);
-      if (!k.success) problems.push("key does not fit control-key.json");
+      // Like a command: a broken vector may bring a key no machine takes, but a key a
+      // vector expects to enroll fits control-key.json.
+      if (v.expect.ok && !S.ControlKey.safeParse(v.input.key).success)
+        problems.push("key does not fit control-key.json");
     } else problems.push("input needs signed or proof");
   } catch (e) {
     problems.push(String(e.message));

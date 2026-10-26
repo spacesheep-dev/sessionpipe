@@ -13,7 +13,7 @@ the harness's back.
 
 | | Role | Holds |
 |---|---|---|
-| **Device** | Signs every command | A passkey, and a day key the passkey vouches for |
+| **Device** | Signs every command | A passkey or a device key (§2), and a day key the passkey or device key vouches for |
 | **Receiver** | Carries commands, queues them per machine | A bearer token per machine; no key that can sign |
 | **Machine daemon** | Verifies, then delivers | The keys enrolled at its own terminal |
 | **Session** | Receives the message | — |
@@ -32,6 +32,8 @@ paired with, whatever the number of sessions; each command names its session.
 A machine trusts **WebAuthn passkeys** (COSE `-7` ES256 P-256, or `-257` RS256 with a
 modulus of at least 2048 bits) made for the receiver's rp id, which the receiver
 declares in its well-known file (`control.signing.rp_id`, [HTTP.md §1](HTTP.md#1-discovery-get-well-knownsessionpipe)).
+A machine also trusts **device keys** (below): keys a client app holds in hardware
+where it has no passkey to offer.
 
 A key enters a machine's trust store **only from that machine's own terminal**:
 
@@ -142,12 +144,61 @@ be able to add, replace or remove a key on its own.
 keychain, and a phone often has a different one from the laptop that paired, so a
 person away from the machine's terminal adds a device this way: a device the machine
 already trusts signs a command of kind `key.add`, session `sessionpipe:keys`, carrying
-the new passkey (`key`: `id`, `alg`, `spki`) and an optional `name`. The machine runs
-every check of §5 on it — the signature from a key it already holds, the age, the
-nonce — and then adds the key to its store and acks `delivered`. The receiver only
-carries the command; it still can never add a key on its own. A receiver SHOULD make
-plain, while the person is at a device that can approve, that every device they will
-send from needs its own approval, and offer to add the next one right then.
+the new key (`key`: `id`, `alg`, `spki`, and for a device key `type`, `store` and `uv`)
+and an optional `name`. The machine runs every check of §5 on it — the signature from a
+key it already holds, the age, the nonce — and then adds the key to its store and acks
+`delivered`. It first checks the key as it would an enrollment: an SPKI it can import
+for that `alg`, and for a device key every rule of *Device keys* below. A key that fails
+is `bad_fields`, and nothing is stored. The receiver only carries the command; it still
+can never add a key on its own. A receiver SHOULD make plain, while the person is at a
+device that can approve, that every device they will send from needs its own approval,
+and offer to add the next one right then.
+
+**Device keys.** An app whose web view cannot run WebAuthn for the receiver's rp id
+(a desktop or phone app) holds a **device key** instead. It is a P-256 key that the
+platform makes in a hardware key store (Apple's Secure Enclave, for example), never
+lets out of it, and never uses without verifying the person (biometry or the device
+passcode) for each signature. A device key is not a passkey and does not stand in for
+one: its signatures carry no authenticator data and no client data, because no browser
+and no web origin is involved (§3.2).
+
+A device key is written ([`control-key.json`](https://sessionpipe.org/schema/v1/control-key.json)):
+
+```json
+{"id":"<43 base64url characters>","alg":-7,"spki":"MFkw…","type":"device","store":"hardware","uv":"each-use"}
+```
+
+| Field | Rule |
+|---|---|
+| `type` | `"device"`. Absent, the key is a passkey and everything else in this document applies to it unchanged. Any other value is refused. |
+| `alg` | `-7` (ES256, P-256). |
+| `spki` | The public key's SPKI, base64url. |
+| `id` | The SHA-256 of the `spki` bytes, base64url without padding: exactly 43 characters. A device key names itself, so its id can never stand for another key. |
+| `store` | `"hardware"`: the private key was made in a hardware key store and never leaves it. |
+| `uv` | `"each-use"`: the store will not sign without verifying the person, every time. |
+
+`store` and `uv` are the app's word, given when the key is made and approved by the
+person. A machine cannot prove them, just as it cannot prove the flags of a passkey
+made with attestation `"none"`. A machine MUST refuse a device key with any other
+value of `store` or `uv`, or with any field not listed here. That way a kind added
+later is refused by every machine that predates it. A passkey carries none of `type`,
+`store` or `uv`. An app MUST NOT make a device key where it cannot meet both rules
+(an emulator, a computer with no hardware key store). There it holds no key, and it
+says so.
+
+An app makes **one device key per rp id**, so no two receivers see the same public
+key.
+
+A device key enters a machine's store the same two ways a passkey does: approving a
+pairing at the terminal's code (step 2, the proof being a device signature for purpose
+`pair`, §3.2), or a `key.add` from a device the machine already trusts. A machine that
+takes device keys lists them in `key_types` (`["passkey","device"]`) in its pairing
+request and in every hello. A receiver lists them in `control.signing.key_types`
+([HTTP.md §1](HTTP.md#1-discovery-get-well-knownsessionpipe)) when it stores and
+carries them whole. An app MUST NOT offer a device key to a receiver, or for a
+machine, that does not list `device`. A machine that predates device keys would store
+one as a passkey and refuse every signature it makes. A receiver that predates them
+would drop the fields that make it one.
 
 ## 3. The signed command
 
@@ -226,21 +277,44 @@ and because the hash is signed on the device, a receiver cannot swap a file.
 
 Either path is enough:
 
-- **The day grant** (the usual one). Once a day the person confirms with their passkey,
-  and the device makes a non-extractable P-256 **day key**. The passkey signs a
-  **grant**: an assertion over `sha256(str)` where `str` is
+- **The day grant** (the usual one). Once a day the person confirms with their key (a
+  passkey or a device key), and the device makes a non-extractable P-256 **day key**.
+  The person's key signs a **grant**: an assertion over `sha256(str)` where `str` is
   ([`control-grant.json`](https://sessionpipe.org/schema/v1/control-grant.json))
   `{"v":1,"t":"sessionpipe.grant","pub":"<day key SPKI, base64url>","iat":…,"exp":…,"rp":"<rp id>"}`,
   with `exp − iat` at most 24 hours. Each command then carries `csig`, the day key's
   ECDSA P-256 / SHA-256 signature over the exact `cmd` bytes (raw `r‖s`, 64 bytes,
   base64url), and the grant (`str` plus the assertion).
-- **A confirm.** One passkey assertion over `sha256(cmd)` itself, for a command that
-  should need a fresh fingerprint (a receiver's second look may ask for one).
+- **A confirm.** One assertion by the person's key (a passkey or a device key) over
+  `sha256(cmd)` itself, for a command that should need a fresh fingerprint (a
+  receiver's second look may ask for one).
 
-Every assertion MUST be a `webauthn.get` for the rp id, from an https origin on the rp
-id or a subdomain of it (plain http only when the rp id is `localhost`), not
-cross-origin, with the user-present **and** user-verified flags set. ES256 signatures
-are strict DER.
+Every **passkey** assertion MUST be a `webauthn.get` for the rp id, from an https
+origin on the rp id or a subdomain of it (plain http only when the rp id is
+`localhost`), not cross-origin, with the user-present **and** user-verified flags set.
+ES256 assertion signatures are strict DER.
+
+A **device signature** stands where a passkey assertion stands (in a grant, a confirm
+or a pairing proof) when the key it names is a device key in the machine's store. It
+is `{"cred": "<the key's id>", "sig": "<64 bytes r‖s, base64url>"}`, plus `str` in a
+grant as before, and no other field. The signature is ECDSA P-256 / SHA-256, like
+`csig`, over the UTF-8 bytes of
+
+```
+sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>
+```
+
+where `⏎` is one line feed (U+000A) and there is none at the end. `<purpose>` is
+`grant`, `confirm` or `pair`. `<rp id>` is the receiver's rp id exactly as the machine
+recorded it at pairing. `<challenge>` is base64url without padding of the 32 bytes a
+passkey would sign for that purpose: `sha256(str)`, `sha256(cmd)`, or
+`sha256("sessionpipe.pair:" + machine + ":" + code)`.
+
+A machine decides how to verify a signature from **its own record of the key**, never
+from the signature. A device key's signature with `ad` or `cd`, a passkey's assertion
+without them, or a device signature that is not exactly 64 bytes is `bad_assertion`.
+The purpose line keeps a signature made for one use from answering for another. The
+rp id line keeps a signature made for one receiver from counting through another.
 
 ### 3.3 The receiver's envelope
 
@@ -267,10 +341,11 @@ the other only UUIDs). The caps were raised to 20 000 / 48 000 on 2026-10-01: a 
 
 1. It parses the **exact bytes** it received and never re-serializes them.
 2. `machine` is this machine.
-3. The signature: a grant whose assertion verifies against a key **enrolled on this
-   machine**, with the command's `iat` inside the grant's window (from `iat − 5 min`
-   to `exp`), and `csig` verifying against the grant's day key; or a confirm that
-   verifies over `sha256(cmd)`.
+3. The signature: a grant whose assertion (a passkey's, or a device key's signature,
+   §3.2) verifies against a key **enrolled on this machine**, with the command's `iat`
+   inside the grant's window (from `iat − 5 min` to `exp`), and `csig` verifying
+   against the grant's day key; or a confirm (either kind) that verifies over
+   `sha256(cmd)`.
 4. The command was signed at most **24 hours** ago and at most 5 minutes in the
    future. The machine judges by signing time, so a message sent while the lid was
    shut still runs when the machine wakes; `expires_at` bounds it too.
@@ -547,9 +622,12 @@ send → delivered time.
 - `conformance/control-vectors/` — signed commands, valid and broken, with the verdict
   every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
   `start`'s `files` (§3.1); `91`–`106` are a `start`'s options and the closed field
-  set, `107`–`108` a `start` in a folder under `~` (§3.1), and `109`–`110` `files` on a
-  `prompt`. The reference verifier and every receiver that pre-checks MUST agree with
-  all of them.
+  set, `107`–`108` a `start` in a folder under `~` (§3.1), `109`–`110` `files` on a
+  `prompt`, and `111`–`136` device keys (§2, §3.2): signatures for each purpose,
+  purposes and rp ids swapped, WebAuthn fields where they don't belong, a device key
+  a machine stored as a passkey, and `key.add` and enrollment of device keys, valid
+  and broken. The reference verifier and every receiver that pre-checks MUST agree
+  with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll

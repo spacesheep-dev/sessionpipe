@@ -272,7 +272,9 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       for (const r of c.receivers) {
         out(`  ${r.url} · machine ${r.machine}`);
         for (const k of r.keys)
-          out(`    ${k.id.slice(0, 16)}…  ${k.alg === -7 ? "ES256" : "RS256"}  added ${k.added_at.slice(0, 10)}`);
+          out(
+            `    ${k.id.slice(0, 16)}…  ${k.type === "device" ? "device " : "passkey"}  ${k.alg === -7 ? "ES256" : "RS256"}  added ${k.added_at.slice(0, 10)}${k.name ? `  ${k.name}` : ""}`,
+          );
       }
       return;
     }

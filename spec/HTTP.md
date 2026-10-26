@@ -25,7 +25,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
     "native":  "/api/sessionpipe/v1/native"
   },
   "batch":   { "max_events": 50, "max_bytes": 262144 },
-  "control": { "wait_max_s": 25, "signing": { "rp_id": "receiver.example", "algs": [-7, -257] }, "files": true }
+  "control": { "wait_max_s": 25, "signing": { "rp_id": "receiver.example", "algs": [-7, -257], "key_types": ["passkey", "device"] }, "files": true }
 }
 ```
 
@@ -37,7 +37,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
 | `auth` | `bearer` only in v1. |
 | `endpoints` | Paths relative to the origin, or absolute URLs. |
 | `batch` | The largest request the receiver takes. A sender MUST NOT exceed either bound. Defaults when absent: 50 / 262 144. |
-| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). `inherit`: OPTIONAL; `true` when it shows a machine whose `mode` is `inherit` as that, on its pairing page and wherever it shows the mode, and never as `safe` or `auto`; a daemon pairs in `inherit` mode only with a receiver that says so. ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
+| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `signing.key_types`: OPTIONAL, the kinds of key the receiver stores and carries whole (`passkey`, `device`; CONTROL.md §2); absent means `["passkey"]`. `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). `inherit`: OPTIONAL; `true` when it shows a machine whose `mode` is `inherit` as that, on its pairing page and wherever it shows the mode, and never as `safe` or `auto`; a daemon pairs in `inherit` mode only with a receiver that says so. ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
 
 Schema: [`well-known.json`](https://sessionpipe.org/schema/v1/well-known.json).
 

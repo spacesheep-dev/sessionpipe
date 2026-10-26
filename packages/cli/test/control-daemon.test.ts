@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
@@ -92,9 +93,12 @@ async function startDaemon(
     reread?: DaemonDeps["token"];
     /** Anything else the daemon is handed (the updater's hooks). */
     extra?: Partial<DaemonDeps>;
+    /** More keys in the store, as control.json has them. */
+    keys?: ControlConfig["receivers"][number]["keys"];
   } = {},
 ) {
   const c = cfg(o.folders);
+  if (o.keys) c.receivers = c.receivers.map((r) => ({ ...r, keys: [...r.keys, ...(o.keys ?? [])] }));
   if (o.token !== undefined)
     c.receivers = c.receivers.map((r) => ({ ...r, token: o.token as string, token_in: "keychain" as const }));
   d = new ControlDaemon({ ...c, ...(o.limits ? { limits: o.limits } : {}) }, path.join(tmp, "state", "control"), sock, {
@@ -221,8 +225,9 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(c.receivers[0]?.token).toBe(rx.token);
     expect(readControl(env)?.receivers[0]?.machine).toBe(rx.machine);
     expect(out.join("\n")).toContain("123456");
-    // The machine says it takes attachments, so the receiver may send it files.
-    expect(rx.pairs.at(-1)).toMatchObject({ files: true });
+    // The machine says it takes attachments, so the receiver may send it files, and
+    // device keys, so an app may offer one.
+    expect(rx.pairs.at(-1)).toMatchObject({ files: true, key_types: ["passkey", "device"] });
   });
   it("names the Claude Code accounts signed in here, so the board can label each account_id", async () => {
     rx.paired = true;
@@ -638,6 +643,50 @@ setTimeout(() => { fs.appendFileSync(${JSON.stringify(marks)}, "-\\n");
     expect(rx.acks.find((a) => a.id === after.id)?.outcome).toBe("taken");
   });
 
+  it("key.add of a device key: stored whole, and its own grant and confirm are verified as a device key's", async () => {
+    await startDaemon();
+    const mac = await DeviceKeySim.create({ rpId: "localhost" });
+    const before = await rx.send({ session: SESSION, text: "from the app" }, { as: mac });
+    expect(await rx.waitAck(before.id)).toMatchObject({ outcome: "refused", code: "untrusted_key" });
+    const add = await rx.send(
+      { kind: "key.add", session: "sessionpipe:keys", text: undefined, key: mac.key, name: "Mac app" },
+      { confirm: true },
+    );
+    expect(await rx.waitAck(add.id)).toMatchObject({ outcome: "delivered", detail: "trusted Mac app" });
+    const stored = readControl(env)?.receivers[0]?.keys.find((k) => k.id === mac.key.id);
+    expect(stored).toMatchObject({ ...mac.key, name: "Mac app" });
+    // The app's day grant, then a confirm, each verified against the device record.
+    const got = waitForMessage(SESSION, { env });
+    await new Promise((r) => setTimeout(r, 100));
+    const viaGrant = await rx.send({ session: SESSION, text: "sent from the app" }, { as: mac });
+    expect(await got).toContain("sent from the app");
+    for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === viaGrant.id); i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(rx.acks.find((a) => a.id === viaGrant.id)?.outcome).toBe("taken");
+    // A device key whose rules break is refused before anything is stored.
+    const bad = await rx.send(
+      {
+        kind: "key.add",
+        session: "sessionpipe:keys",
+        text: undefined,
+        key: { ...(await DeviceKeySim.create()).key, store: "software" },
+      },
+      { confirm: true },
+    );
+    expect(await rx.waitAck(bad.id)).toMatchObject({ outcome: "refused", code: "bad_fields" });
+    expect(readControl(env)?.receivers[0]?.keys).toHaveLength(2);
+  });
+
+  it("a device key stored without its type (an old daemon's record) verifies none of its signatures", async () => {
+    const mac = await DeviceKeySim.create({ rpId: "localhost" });
+    const { type: _t, store: _s, uv: _u, ...asPasskey } = mac.key;
+    await startDaemon({ keys: [{ ...asPasskey, added_at: new Date().toISOString() }] });
+    const g = await rx.send({ session: SESSION, text: "grant" }, { as: mac });
+    expect(await rx.waitAck(g.id)).toMatchObject({ outcome: "refused", code: "bad_assertion" });
+    const c = await rx.send({ session: SESSION, text: "confirm" }, { as: mac, confirm: true });
+    expect(await rx.waitAck(c.id)).toMatchObject({ outcome: "refused", code: "bad_assertion" });
+  });
+
   it("a message while the daemon's own start still runs waits and resumes it, never forks", {
     timeout: 30_000,
   }, async () => {
@@ -846,6 +895,8 @@ describe.runIf(unix)("attachments on a start (CONTROL.md §6)", () => {
     for (let i = 0; i < 100 && !rx.hellos.some((h) => h.files === true); i++)
       await new Promise((r) => setTimeout(r, 20));
     expect(rx.hellos.some((h) => h.files === true)).toBe(true);
+    // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
+    expect(rx.hellos.find((h) => h.files === true)?.key_types).toEqual(["passkey", "device"]);
   });
 
   it("a second session in the same folder: the .gitignore is already there and stays as it is", async () => {

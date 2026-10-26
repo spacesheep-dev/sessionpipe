@@ -71,11 +71,22 @@ export type ControlKind = (typeof CONTROL_KINDS)[number];
 export const ES256 = -7;
 export const RS256 = -257;
 
-/** A key enrolled on the machine: a passkey's credential id, COSE alg and SPKI (base64url). */
+/** The kinds of key a machine may trust (CONTROL.md §2): a WebAuthn passkey, or a
+ *  device key an app holds in hardware where it has no passkey to offer. */
+export const KEY_TYPES = ["passkey", "device"] as const;
+export type KeyType = (typeof KEY_TYPES)[number];
+
+/** A key enrolled on the machine: a passkey's credential id, COSE alg and SPKI
+ *  (base64url); a device key also says so (`type`), and what its app declared about
+ *  it (`store`, `uv`). The machine verifies by its own record, never by a message. */
 export interface TrustedKey {
   id: string;
   alg: number;
   spki: string;
+  /** Present only on a device key (CONTROL.md §2 "Device keys"). */
+  type?: "device";
+  store?: "hardware";
+  uv?: "each-use";
 }
 /** A WebAuthn assertion: credential id, authenticatorData, clientDataJSON, signature (base64url). */
 export interface Assertion {
@@ -84,16 +95,25 @@ export interface Assertion {
   cd: string;
   sig: string;
 }
+/** A device key's signature (CONTROL.md §3.2): its id and 64 bytes r‖s over deviceMessage(). */
+export interface DeviceSignature {
+  cred: string;
+  sig: string;
+}
 /** The day's grant: a passkey's assertion over sha256(str), where str names the day key. */
 export interface GrantBundle extends Assertion {
+  str: string;
+}
+/** The day's grant from a device key: its signature over deviceMessage("grant", rp, sha256(str)). */
+export interface DeviceGrant extends DeviceSignature {
   str: string;
 }
 /** What a receiver carries for one command (control.json minus the receiver's envelope). */
 export interface SignedCommand {
   cmd: string;
   csig?: string | null;
-  grant?: GrantBundle | null;
-  confirm?: Assertion | null;
+  grant?: GrantBundle | DeviceGrant | null;
+  confirm?: Assertion | DeviceSignature | null;
 }
 export interface Grant {
   v: 1;
@@ -126,8 +146,9 @@ export interface ControlCommand {
   decision?: "allow" | "deny";
   note?: string;
   cwd?: string;
-  /** key.add only: the passkey to trust from now on, as the receiver holds it. */
-  key?: { id: string; alg: -7 | -257; spki: string };
+  /** key.add only: the key to trust from now on, as the receiver holds it (a passkey,
+   *  or a device key with its `type`, `store` and `uv`). */
+  key?: TrustedKey;
   /** key.add only: what the person calls the device ("iPhone"), for `control keys`. */
   name?: string;
   /** start, prompt: files to download, verify and write into the session's folder. */
@@ -300,10 +321,38 @@ async function importKey(key: TrustedKey): Promise<CryptoKey | null> {
   return null;
 }
 
-/** Can this key be enrolled at all? A machine refuses to trust a key it could never verify with. */
+const PASSKEY_FIELDS = new Set(["id", "alg", "spki"]);
+const DEVICE_FIELDS = new Set(["id", "alg", "spki", "type", "store", "uv"]);
+/** The only fields a device signature has (`str` only in a grant). */
+export const DEVICE_SIG_FIELDS = ["cred", "sig", "str"] as const;
+
+/** A device key's id: the SHA-256 of its SPKI bytes, base64url without padding. */
+export async function deviceKeyId(spki: string): Promise<string> {
+  return b64url(await sha256(fromB64url(spki) ?? new Uint8Array()));
+}
+
+/** A device key's declared rules, ignoring any bookkeeping fields a store keeps beside
+ *  them (a name, when it was added): ES256, hardware, verified each use, named by its
+ *  SPKI's hash, and a P-256 key WebCrypto can import. */
+async function deviceRecordValid(key: TrustedKey): Promise<boolean> {
+  if (key.type !== "device" || key.alg !== ES256 || key.store !== "hardware" || key.uv !== "each-use") return false;
+  if (typeof key.id !== "string" || !SHA256_RE.test(key.id) || key.id !== (await deviceKeyId(key.spki))) return false;
+  return !!(await importKey(key));
+}
+
+/** Can this key be enrolled at all? A machine refuses to trust a key it could never
+ *  verify with. The key's fields are closed: a passkey is `id`, `alg`, `spki` and
+ *  nothing else; a device key adds exactly `type`, `store` and `uv` (CONTROL.md §2),
+ *  so a kind added later is refused by every machine that predates it. */
 export async function keyUsable(key: TrustedKey): Promise<boolean> {
+  if (!key || typeof key !== "object" || Array.isArray(key)) return false;
+  const fields = Object.keys(key).filter((k) => (key as unknown as Record<string, unknown>)[k] !== undefined);
+  if ("type" in key && key.type !== undefined) {
+    if (!fields.every((f) => DEVICE_FIELDS.has(f))) return false;
+    return deviceRecordValid(key);
+  }
+  if (!fields.every((f) => PASSKEY_FIELDS.has(f))) return false;
   return (
-    !!key &&
     typeof key.id === "string" &&
     /^[A-Za-z0-9_-]{16,1400}$/.test(key.id) &&
     (key.alg === ES256 || key.alg === RS256) &&
@@ -332,14 +381,79 @@ export function originAllowed(origin: unknown, rpId: string): boolean {
 type Check = { ok: true } | { ok: false; why: string };
 const no = (why: string): Check => ({ ok: false, why });
 
-/** One passkey assertion over `challenge`, made with `key`, by a verified person. */
+// --- device keys (CONTROL.md §3.2) ------------------------------------------------
+
+/** The first line of every message a device key signs. */
+export const DEVICE_CONTEXT = "sessionpipe.device.v1";
+/** What a device signature is for: one use can never answer for another. */
+export type DevicePurpose = "grant" | "confirm" | "pair";
+
+/** The exact bytes a device key signs: the context, the purpose, the rp id as the
+ *  machine recorded it, and the base64url (no padding) of the 32-byte challenge a
+ *  passkey would sign for that purpose, joined by single line feeds, none at the end. */
+export function deviceMessage(purpose: DevicePurpose, rpId: string, challenge: Uint8Array): Uint8Array {
+  return enc.encode(`${DEVICE_CONTEXT}\n${purpose}\n${rpId}\n${b64url(challenge)}`);
+}
+
+/** One device signature over `challenge` for `purpose`, made with the device key `key`. */
+async function verifyDeviceSignature(
+  challenge: Uint8Array,
+  a: object,
+  key: TrustedKey,
+  rpId: string,
+  purpose: DevicePurpose,
+): Promise<Check> {
+  const sig = a as Record<string, unknown>;
+  for (const f of Object.keys(sig)) {
+    if (f === "str" && purpose === "grant") continue;
+    if (f !== "cred" && f !== "sig") return no(`a device key's signature carries no ${f}`);
+  }
+  if (sig.cred !== key.id) return no("signed with a key this machine doesn't trust");
+  if (!(await deviceRecordValid(key))) return no("a trusted key is unusable");
+  const raw = fromB64url(sig.sig);
+  if (raw?.length !== 64) return no("a device key's signature is 64 bytes, r‖s");
+  const pub = await importKey(key);
+  /* v8 ignore next -- deviceRecordValid imported it already */
+  if (!pub) return no("a trusted key is unusable");
+  let good = false;
+  try {
+    good = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      pub,
+      u8(raw),
+      u8(deviceMessage(purpose, rpId, challenge)),
+    );
+  } catch {
+    /* v8 ignore next -- WebCrypto answers false for a bad signature; a throw is a broken runtime */
+    good = false;
+  }
+  return good ? { ok: true } : no("the device key's signature doesn't verify");
+}
+
+/** One signature over `challenge` by `key`, chosen from the machine's own record of
+ *  the key, never from the signature: a device key's signature for `purpose`
+ *  (CONTROL.md §3.2), or a passkey assertion made by a verified person. */
 export async function verifyAssertion(
   challenge: Uint8Array,
-  a: Assertion | null | undefined,
+  a: Assertion | DeviceSignature | null | undefined,
+  key: TrustedKey,
+  rpId: string,
+  purpose: DevicePurpose,
+): Promise<Check> {
+  if (!a || typeof a !== "object") return no("no passkey signature");
+  if (key.type !== undefined) {
+    if (key.type !== "device") return no("a trusted key is unusable");
+    return verifyDeviceSignature(challenge, a, key, rpId, purpose);
+  }
+  return verifyPasskeyAssertion(challenge, a as Assertion, key, rpId);
+}
+
+async function verifyPasskeyAssertion(
+  challenge: Uint8Array,
+  a: Assertion,
   key: TrustedKey,
   rpId: string,
 ): Promise<Check> {
-  if (!a || typeof a !== "object") return no("no passkey signature");
   if (a.cred !== key.id) return no("signed with a key this machine doesn't trust");
   const cdBytes = fromB64url(a.cd);
   const ad = fromB64url(a.ad);
@@ -388,11 +502,11 @@ export async function verifyEnrollment(o: {
   machine: string;
   code: string;
   key: TrustedKey;
-  proof: Assertion;
+  proof: Assertion | DeviceSignature;
   rpId: string;
 }): Promise<Check> {
   if (!(await keyUsable(o.key))) return no("the key is in a shape this machine can't use");
-  return verifyAssertion(await pairChallenge(o.machine, o.code), o.proof, o.key, o.rpId);
+  return verifyAssertion(await pairChallenge(o.machine, o.code), o.proof, o.key, o.rpId, "pair");
 }
 
 // --- the command ------------------------------------------------------------------
@@ -480,19 +594,29 @@ export function parseCommand(str: unknown): Parsed {
       break;
     case "key.add": {
       // A device the machine already trusts vouches for a new one (CONTROL.md §2): the
-      // new passkey's id, algorithm and public key are inside the signed bytes.
+      // new key's id, algorithm and public key (and, for a device key, its type, store
+      // and uv) are inside the signed bytes.
       if (c.session !== KEY_STORE_SESSION) return bad("bad_session", `a key.add names ${KEY_STORE_SESSION}`);
-      const k = c.key as { id?: unknown; alg?: unknown; spki?: unknown } | undefined;
+      const k = c.key as Record<string, unknown> | undefined;
       const b64 = (v: unknown, min: number, max: number) =>
         typeof v === "string" && v.length >= min && v.length <= max && /^[A-Za-z0-9_-]+$/.test(v);
       if (
         !k ||
         typeof k !== "object" ||
+        Array.isArray(k) ||
         !b64(k.id, 16, 1400) ||
         (k.alg !== -7 && k.alg !== -257) ||
         !b64(k.spki, 40, 2000)
       )
         return bad("bad_fields", "a key.add carries the key: id, alg (-7 or -257) and spki");
+      if (k.type !== undefined) {
+        if (k.type !== "device") return bad("bad_fields", "a key's type is device, or absent for a passkey");
+        if (k.alg !== ES256 || k.store !== "hardware" || k.uv !== "each-use" || !SHA256_RE.test(k.id as string))
+          return bad("bad_fields", "a device key is ES256, store hardware, uv each-use, named by its SPKI's hash");
+        if (Object.keys(k).some((f) => !DEVICE_FIELDS.has(f)))
+          return bad("bad_fields", "a device key carries id, alg, spki, type, store and uv");
+      } else if (Object.keys(k).some((f) => !PASSKEY_FIELDS.has(f)))
+        return bad("bad_fields", "a passkey carries id, alg and spki: store and uv belong to a device key");
       if (has("name") && (typeof c.name !== "string" || !c.name.trim() || c.name.length > 80))
         return bad("bad_fields", "a device name is text, at most 80 characters");
       if (has("text") || has("for") || has("decision") || has("cwd"))
@@ -619,7 +743,7 @@ export async function verifyCommand(s: SignedCommand | null | undefined, o: Veri
     const key = o.trusted.find((k) => k && k.id === s.confirm?.cred);
     if (!key) refusal = { code: "untrusted_key", why: "confirmed with a key this machine doesn't trust" };
     else {
-      const a = await verifyAssertion(await sha256(s.cmd), s.confirm, key, o.rpId);
+      const a = await verifyAssertion(await sha256(s.cmd), s.confirm, key, o.rpId, "confirm");
       if (a.ok) {
         via = "confirm";
         keyId = key.id;
@@ -630,6 +754,10 @@ export async function verifyCommand(s: SignedCommand | null | undefined, o: Veri
     if (refusal) return bad(refusal.code, refusal.why);
     return bad("unsigned", "the command isn't signed");
   }
+  // The key a key.add brings must be one this machine could ever verify with: an
+  // SPKI it can import for that alg, and every rule of a device key (CONTROL.md §2).
+  if (c.kind === "key.add" && !(await keyUsable(c.key as TrustedKey)))
+    return bad("bad_fields", "the key a key.add brings is in a shape this machine can't use");
   if (c.iat > o.now + SKEW_MS) return bad("future", "the command is dated in the future (is this clock right?)");
   if (o.now - c.iat > (o.maxAgeMs ?? MACHINE_MAX_AGE_MS)) return bad("too_old", "the command was signed too long ago");
   if (o.seenNonce) {
@@ -649,12 +777,12 @@ async function checkGrantPath(
   c: ControlCommand,
   o: VerifyOptions,
 ): Promise<{ ok: true; key: string } | { ok: false; code: RefusalCode; why: string }> {
-  const bundle = s.grant as GrantBundle;
+  const bundle = s.grant as GrantBundle | DeviceGrant;
   const g = parseGrant(bundle.str, o.rpId);
   if (!g.ok) return bad("bad_grant", g.why);
   const key = o.trusted.find((k) => k && k.id === bundle.cred);
   if (!key) return bad("untrusted_key", "the grant was signed with a key this machine doesn't trust");
-  const a = await verifyAssertion(await sha256(bundle.str), bundle, key, o.rpId);
+  const a = await verifyAssertion(await sha256(bundle.str), bundle, key, o.rpId, "grant");
   if (!a.ok) return bad("bad_assertion", a.why);
   if (!(await verifyCsig(s.cmd, s.csig, g.grant.pub)))
     return bad("bad_csig", "the command's signature doesn't verify — it was changed after it was signed");

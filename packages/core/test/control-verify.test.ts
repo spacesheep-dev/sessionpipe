@@ -6,10 +6,15 @@ import { describe, expect, it } from "vitest";
 import {
   type Assertion,
   b64url,
+  DEVICE_CONTEXT,
   derToRaw,
+  deviceKeyId,
+  deviceMessage,
   filesProblem,
   fromB64url,
+  type GrantBundle,
   KEY_STORE_SESSION,
+  KEY_TYPES,
   keyUsable,
   levelRank,
   MODEL_MAX,
@@ -28,7 +33,16 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "../src/control/verify.js";
-import { commandStr, DayKey, MACHINE, Passkey, signed } from "./helpers/authenticator.js";
+import {
+  commandStr,
+  DayKey,
+  DeviceKeySim,
+  deviceSigned,
+  MACHINE,
+  nonce,
+  Passkey,
+  signed,
+} from "./helpers/authenticator.js";
 
 const RP = "receiver.example";
 const T = 1_790_800_000_000;
@@ -410,22 +424,26 @@ describe("keys", () => {
     const pk = await Passkey.create({ rpId: RP });
     const challenge = await sha256("c");
     const good = await pk.assert(challenge);
-    expect(await verifyAssertion(challenge, good, pk.key, RP)).toEqual({ ok: true });
-    expect(await verifyAssertion(challenge, null, pk.key, RP)).toMatchObject({
+    expect(await verifyAssertion(challenge, good, pk.key, RP, "confirm")).toEqual({ ok: true });
+    expect(await verifyAssertion(challenge, null, pk.key, RP, "confirm")).toMatchObject({
       ok: false,
       why: "no passkey signature",
     });
     const enc = new TextEncoder();
     for (const cd of ["null", '"s"', "7"])
-      expect(await verifyAssertion(challenge, { ...good, cd: b64url(enc.encode(cd)) }, pk.key, RP)).toMatchObject({
+      expect(
+        await verifyAssertion(challenge, { ...good, cd: b64url(enc.encode(cd)) }, pk.key, RP, "confirm"),
+      ).toMatchObject({
         ok: false,
         why: "the passkey signature is malformed",
       });
-    expect(await verifyAssertion(challenge, { ...good, ad: b64url(new Uint8Array(10)) }, pk.key, RP)).toMatchObject({
+    expect(
+      await verifyAssertion(challenge, { ...good, ad: b64url(new Uint8Array(10)) }, pk.key, RP, "confirm"),
+    ).toMatchObject({
       ok: false,
       why: "the passkey signature is malformed",
     });
-    expect(await verifyAssertion(challenge, good, { ...pk.key, alg: 0 }, RP)).toMatchObject({
+    expect(await verifyAssertion(challenge, good, { ...pk.key, alg: 0 }, RP, "confirm")).toMatchObject({
       ok: false,
       why: "a trusted key is unusable",
     });
@@ -439,6 +457,182 @@ describe("keys", () => {
     expect(
       await verifyEnrollment({ machine: MACHINE, code: "123456", key: { ...pk.key, alg: 0 }, proof, rpId: RP }),
     ).toMatchObject({ ok: false, why: "the key is in a shape this machine can't use" });
+  });
+});
+
+describe("device keys (CONTROL.md §2, §3.2)", () => {
+  const dec = new TextDecoder();
+  const ch = new Uint8Array(32).map((_, i) => i * 7 + 1);
+
+  it("deviceMessage: the exact bytes, four lines, no trailing newline, base64url without padding", () => {
+    const m = deviceMessage("grant", "studio-mac.local", ch);
+    expect(dec.decode(m)).toBe(`sessionpipe.device.v1\ngrant\nstudio-mac.local\n${b64url(ch)}`);
+    expect(DEVICE_CONTEXT).toBe("sessionpipe.device.v1");
+    expect(b64url(ch)).toHaveLength(43);
+    expect(dec.decode(m).endsWith("\n")).toBe(false);
+    expect(dec.decode(m)).not.toMatch(/[=+/]/);
+    // A pinned challenge, so another implementation can compare bytes.
+    expect(Array.from(deviceMessage("pair", "localhost", new Uint8Array(32)))).toEqual(
+      Array.from(
+        new TextEncoder().encode("sessionpipe.device.v1\npair\nlocalhost\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+      ),
+    );
+    expect(KEY_TYPES).toEqual(["passkey", "device"]);
+  });
+
+  it("deviceKeyId: the SPKI bytes' SHA-256, base64url, 43 characters", async () => {
+    const d = await DeviceKeySim.create();
+    const spki = fromB64url(d.key.spki)!;
+    expect(await deviceKeyId(d.key.spki)).toBe(b64url(await sha256(spki)));
+    expect(d.key.id).toHaveLength(43);
+    expect(d.key.id).toBe(await deviceKeyId(d.key.spki));
+    // An SPKI that isn't base64url is no bytes: its id is the empty hash, which no key has.
+    expect(await deviceKeyId("not base64url!")).toBe(b64url(await sha256(new Uint8Array())));
+    expect(await keyUsable({ ...d.key, spki: "not base64url!", id: await deviceKeyId("not base64url!") })).toBe(false);
+  });
+
+  it("keyUsable: a device key's exact rules, and closed fields for both kinds", async () => {
+    const d = await DeviceKeySim.create();
+    const pk = await Passkey.create();
+    const rsa = await Passkey.create({ alg: RS256 });
+    expect(await keyUsable(d.key)).toBe(true);
+    expect(await keyUsable(pk.key)).toBe(true);
+    const bad = (k: object) => keyUsable(k as never);
+    expect(await bad({ ...d.key, store: "software" })).toBe(false);
+    expect(await bad({ ...d.key, uv: "once" })).toBe(false);
+    expect(await bad({ ...d.key, type: "tpm" })).toBe(false);
+    expect(await bad({ ...d.key, alg: RS256 })).toBe(false);
+    expect(await bad({ ...d.key, id: pk.key.id })).toBe(false); // not its SPKI's hash
+    expect(await bad({ ...d.key, id: await deviceKeyId(pk.key.spki), spki: pk.key.spki })).toBe(true); // any P-256
+    expect(
+      await bad({ ...rsa.key, id: await deviceKeyId(rsa.key.spki), type: "device", store: "hardware", uv: "each-use" }),
+    ).toBe(false);
+    expect(await bad({ ...d.key, name: "Mac" })).toBe(false); // closed
+    const { store: _s, ...noStore } = d.key;
+    expect(await bad(noStore)).toBe(false);
+    expect(await bad({ ...pk.key, store: "hardware" })).toBe(false); // a passkey carries none of them
+    expect(await bad({ ...pk.key, uv: "each-use" })).toBe(false);
+    expect(await bad({ ...pk.key, extra: 1 })).toBe(false);
+    expect(await bad({ ...pk.key, type: undefined })).toBe(true); // absent is absent
+    expect(await bad([])).toBe(false);
+  });
+
+  it("verifyAssertion dispatches on the machine's record of the key, for each purpose", async () => {
+    const d = await DeviceKeySim.create({ rpId: RP });
+    for (const purpose of ["grant", "confirm", "pair"] as const) {
+      const s = await d.sign(purpose, ch);
+      expect(await verifyAssertion(ch, s, d.key, RP, purpose)).toEqual({ ok: true });
+      for (const other of ["grant", "confirm", "pair"] as const)
+        if (other !== purpose) expect((await verifyAssertion(ch, s, d.key, RP, other)).ok).toBe(false);
+      // The same signature counts through no other rp id.
+      expect((await verifyAssertion(ch, s, d.key, "evil.example", purpose)).ok).toBe(false);
+    }
+    const g = { ...(await d.sign("grant", ch)), str: "{}" };
+    expect(await verifyAssertion(ch, g, d.key, RP, "grant")).toEqual({ ok: true });
+    expect(await verifyAssertion(ch, g, d.key, RP, "confirm")).toMatchObject({
+      why: "a device key's signature carries no str",
+    });
+    const s = await d.sign("confirm", ch);
+    expect(await verifyAssertion(ch, { ...s, ad: "AAAA", cd: "AAAA" } as never, d.key, RP, "confirm")).toMatchObject({
+      why: "a device key's signature carries no ad",
+    });
+    expect(await verifyAssertion(ch, { ...s, cred: "x" }, d.key, RP, "confirm")).toMatchObject({
+      why: "signed with a key this machine doesn't trust",
+    });
+    expect(await verifyAssertion(ch, await d.sign("confirm", ch, { der: true }), d.key, RP, "confirm")).toMatchObject({
+      why: "a device key's signature is 64 bytes, r‖s",
+    });
+    expect(await verifyAssertion(ch, await d.sign("confirm", ch, { raw: ch }), d.key, RP, "confirm")).toMatchObject({
+      why: "the device key's signature doesn't verify",
+    });
+    // A record that says device but breaks a rule verifies nothing.
+    expect(await verifyAssertion(ch, s, { ...d.key, store: "software" } as never, RP, "confirm")).toMatchObject({
+      why: "a trusted key is unusable",
+    });
+    expect(await verifyAssertion(ch, s, { ...d.key, type: "tpm" } as never, RP, "confirm")).toMatchObject({
+      why: "a trusted key is unusable",
+    });
+    // Bookkeeping beside a stored record (a name, when it was added) doesn't matter.
+    expect(await verifyAssertion(ch, s, { ...d.key, name: "Mac", added_at: "x" } as never, RP, "confirm")).toEqual({
+      ok: true,
+    });
+    // The same key stored without its type (an old daemon's record): a passkey, so no.
+    const { type: _t, store: _s, uv: _u, ...asPasskey } = d.key;
+    expect(await verifyAssertion(ch, s, asPasskey, RP, "confirm")).toMatchObject({
+      why: "the passkey signature is malformed",
+    });
+    // A passkey assertion is never read as a device signature, nor the other way round.
+    const pk = await Passkey.create({ rpId: RP });
+    expect((await verifyAssertion(ch, { cred: pk.key.id, sig: s.sig }, pk.key, RP, "confirm")).ok).toBe(false);
+  });
+
+  it("verifyCommand: a device key's grant and confirm, and the key.add gate", async () => {
+    const d = await DeviceKeySim.create({ rpId: RP });
+    const pk = await Passkey.create({ rpId: RP });
+    const day = await DayKey.create();
+    const o = { machine: MACHINE, rpId: RP, trusted: [d.key, pk.key], now: T + 60_000 };
+    expect(await verifyCommand(await deviceSigned(d, day, commandStr({})), o)).toMatchObject({
+      ok: true,
+      via: "grant",
+      key: d.key.id,
+    });
+    expect(await verifyCommand(await deviceSigned(d, day, commandStr({}), { confirm: true }), o)).toMatchObject({
+      ok: true,
+      via: "confirm",
+    });
+    const addCmd = (key: object) =>
+      commandStr({ kind: "key.add", session: KEY_STORE_SESSION, text: undefined, key, name: "iPhone" });
+    const phone = await DeviceKeySim.create({ rpId: RP });
+    expect(await verifyCommand(await signed(pk, day, addCmd(phone.key)), o)).toMatchObject({ ok: true });
+    // An SPKI nobody can import, signed by a trusted key: refused, nothing to store.
+    const junk = { id: "AAAAAAAAAAAAAAAAAAAAAA", alg: -7, spki: "A".repeat(91) };
+    expect(await verifyCommand(await signed(pk, day, addCmd(junk)), o)).toMatchObject({
+      ok: false,
+      code: "bad_fields",
+      why: "the key a key.add brings is in a shape this machine can't use",
+    });
+    // A device key whose id isn't its SPKI's hash passes the shape and fails the gate.
+    expect(
+      await verifyCommand(await signed(pk, day, addCmd({ ...phone.key, id: b64url(new Uint8Array(32)) })), o),
+    ).toMatchObject({
+      ok: false,
+      code: "bad_fields",
+    });
+    // The gate runs only after the signature: an unsigned one is still unsigned.
+    expect(await verifyCommand({ cmd: addCmd(junk) }, o)).toMatchObject({ ok: false, code: "unsigned" });
+  });
+
+  it("parseCommand: the device key shape in a key.add", async () => {
+    const d = await DeviceKeySim.create();
+    const add = (key: object) =>
+      parseCommand(commandStr({ kind: "key.add", session: KEY_STORE_SESSION, text: undefined, key, nonce: nonce() }));
+    const why = (key: object) => {
+      const p = add(key);
+      return p.ok ? "ok" : `${p.code}: ${p.why}`;
+    };
+    expect(why(d.key)).toBe("ok");
+    expect(why({ ...d.key, type: "tpm" })).toBe("bad_fields: a key's type is device, or absent for a passkey");
+    expect(why({ ...d.key, store: "software" })).toMatch(/^bad_fields: a device key is ES256/);
+    expect(why({ ...d.key, uv: "once" })).toMatch(/^bad_fields: a device key is ES256/);
+    expect(why({ ...d.key, alg: -257 })).toMatch(/^bad_fields: a device key is ES256/);
+    expect(why({ ...d.key, id: "AAAAAAAAAAAAAAAAAAAAAA" })).toMatch(/^bad_fields: a device key is ES256/);
+    expect(why({ ...d.key, name: "x" })).toBe("bad_fields: a device key carries id, alg, spki, type, store and uv");
+    const { type: _t, ...noType } = d.key;
+    expect(why(noType)).toBe("bad_fields: a passkey carries id, alg and spki: store and uv belong to a device key");
+    expect(why([])).toMatch(/^bad_fields: a key.add carries the key/);
+  });
+
+  it("verifyEnrollment: a device key proves itself for purpose pair, bound to machine, code and rp id", async () => {
+    const d = await DeviceKeySim.create({ rpId: RP });
+    const e = (proof: object, key = d.key, rpId = RP) =>
+      verifyEnrollment({ machine: MACHINE, code: "123456", key, proof: proof as never, rpId });
+    expect(await e(await d.enroll(MACHINE, "123456"))).toEqual({ ok: true });
+    expect((await e(await d.enroll(MACHINE, "654321"))).ok).toBe(false);
+    expect((await e(await d.enroll("m_anothermachine00000001", "123456"))).ok).toBe(false);
+    expect((await e(await d.enroll(MACHINE, "123456"), d.key, "other.example")).ok).toBe(false);
+    expect((await e(await d.enroll(MACHINE, "123456", { purpose: "confirm" }))).ok).toBe(false);
+    expect((await e({ ...(await d.enroll(MACHINE, "123456")), ad: "AAAA" })).ok).toBe(false);
+    expect((await e(await d.enroll(MACHINE, "123456"), { ...d.key, store: "software" } as never)).ok).toBe(false);
   });
 });
 
@@ -501,10 +695,10 @@ describe("fuzz: no mutation of a signed command verifies", () => {
           m.grant = { ...m.grant!, str: mutateStr(m.grant!.str) };
           break;
         case "grant":
-          m.grant = { ...m.grant!, ...mutateAssertion(m.grant!) };
+          m.grant = { ...m.grant!, ...mutateAssertion(m.grant as GrantBundle) };
           break;
         case "confirm":
-          m.confirm = mutateAssertion(m.confirm!);
+          m.confirm = mutateAssertion(m.confirm as Assertion);
           break;
         case "drop-grant":
           m.grant = null;
@@ -540,5 +734,9 @@ describe("fuzz: no mutation of a signed command verifies", () => {
 function decodeAll(s: SignedCommand) {
   const d = (x?: string | null) => (x ? Array.from(fromB64url(x) ?? []) : null);
   const a = (x?: Assertion | null) => (x ? { cred: x.cred, ad: d(x.ad), cd: d(x.cd), sig: d(x.sig) } : null);
-  return { csig: d(s.csig), grant: s.grant ? { str: s.grant.str, ...a(s.grant) } : null, confirm: a(s.confirm) };
+  return {
+    csig: d(s.csig),
+    grant: s.grant ? { str: s.grant.str, ...a(s.grant as GrantBundle) } : null,
+    confirm: a(s.confirm as Assertion | null),
+  };
 }
