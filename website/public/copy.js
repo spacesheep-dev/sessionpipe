@@ -52,10 +52,9 @@ if (dl) {
             : "mac";
   const primary = { mac: "mac", linux: "linux", other: "node" }[os];
   for (const note of dl.querySelectorAll("[data-for]")) note.hidden = note.dataset.for !== os;
-  for (const item of dl.querySelectorAll("[data-os]")) {
-    const on = item.dataset.os === primary;
-    if (item.dataset.os === "node") item.hidden = !on;
-    const button = item.querySelector(".btn");
+  for (const button of dl.querySelectorAll("[data-os]")) {
+    const on = button.dataset.os === primary;
+    if (button.dataset.os === "node") button.hidden = !on;
     button.classList.toggle("primary", on);
     button.classList.toggle("quiet", !on);
   }

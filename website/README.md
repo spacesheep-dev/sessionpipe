@@ -12,9 +12,9 @@ Latin Extended loaded only when a page uses it, and fallback faces sized to Geis
 swap moves no line. `src/og/og.html` is the source of `og.png`.
 
 **sessionpipe-gui.** The release the home page offers (its version, file names and sizes)
-is `gui` at the top of `build.mjs`; `home.html` reads it through `{{gui:…}}`, so a new
-release is one edit there. `public/copy.js` puts the visitor's system first (macOS without
-JS). The screenshots are `public/gui/{board,phone}-{light,dark}-<width>.webp`: real
-screenshots of demo data, the same scene in each scheme, at 960/1440 (board) and 390/585
-(phone) wide. Without them the section lays out without pictures, so the page never shows
-an older GUI than the one it offers.
+is `gui` at the top of `build.mjs`; `home.html` and `get-started.md` read it through
+`{{gui:…}}`, so a new release is one edit there. `public/copy.js` puts the visitor's system
+first (macOS without JS). The home page shows `public/gui/board-{light,dark}-<width>.webp`:
+real screenshots of demo data, the same scene in each scheme, 960 and 1440 wide (the
+`phone-*` files are kept for a /gui/ page). Without them the section lays out without a
+picture, so the page never shows an older GUI than the one it offers.

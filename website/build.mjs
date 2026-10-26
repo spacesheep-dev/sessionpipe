@@ -27,6 +27,18 @@ const gui = {
     tgz: [`sessionpipe-gui-${guiVersion}.tgz`],
   },
 };
+// {{gui:dmg}} in a page is that file's URL, {{gui:dmg-size}} its size, {{gui:version}} the release.
+const guiReleases = "https://github.com/spacesheep-dev/sessionpipe-gui/releases";
+const guiValues = { version: gui.version, releases: guiReleases };
+for (const [key, [file, bytes]] of Object.entries(gui.files)) {
+  guiValues[key] = `${guiReleases}/download/v${gui.version}/${file}`;
+  if (bytes) guiValues[`${key}-size`] = `${(bytes / 1e6).toFixed(1)}&nbsp;MB`;
+}
+const withGui = (text, file) =>
+  text.replace(/\{\{gui:([a-z-]+)\}\}/g, (_, k) => {
+    if (!(k in guiValues)) throw new Error(`${file}: no sessionpipe-gui value "${k}"`);
+    return guiValues[k];
+  });
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -135,7 +147,7 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="in"><a class="brand" href="/" aria-label="sessionpipe home"><picture><source srcset="/brand/lockup-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/lockup-light.svg" alt="" width="131" height="18"></picture></a><nav aria-label="Site">${navHtml}</nav></div></header>
 <main id="main">${bar}${body}</main>
-<footer><div><picture><source srcset="/brand/mark-dark.svg" media="(prefers-color-scheme: dark)"><img class="mark" src="/brand/mark-light.svg" alt="" width="40" height="40"></picture></div><div><p class="links"><a href="/docs/">Docs</a><a href="/protocol/">Protocol</a><a href="/receivers/">Receivers</a><a href="/security/">Security</a><a href="/legal/">Legal &amp; privacy</a><a href="/governance/">Governance</a><a href="/changelog/">Changelog</a><a href="https://github.com/spacesheep-dev/sessionpipe">GitHub</a>${edit ? `<a href="${edit}">Edit this page</a>` : ""}</p><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} "sessionpipe" and its logo are marks of Michael Makarov (<a href="/legal/#trademarks">trademarks</a>).</p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></div></footer>
+<footer><div><picture><source srcset="/brand/mark-dark.svg" media="(prefers-color-scheme: dark)"><img class="mark" src="/brand/mark-light.svg" alt="" width="40" height="40"></picture></div><div><p class="links"><a href="/docs/">Docs</a><a href="/protocol/">Protocol</a><a href="/receivers/">Receivers</a><a href="/security/">Security</a><a href="/legal/">Legal &amp; privacy</a><a href="/governance/">Governance</a><a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/CONTRIBUTING.md">Contributing</a><a href="/changelog/">Changelog</a><a href="/llms.txt">For agents</a><a href="https://github.com/spacesheep-dev/sessionpipe">GitHub</a>${edit ? `<a href="${edit}">Edit this page</a>` : ""}</p><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} "sessionpipe" and its logo are marks of Michael Makarov (<a href="/legal/#trademarks">trademarks</a>).</p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></div></footer>
 ${twin ? '<script src="/copy.js" defer></script>\n' : ""}</body>
 </html>
 `;
@@ -328,23 +340,21 @@ const day = (iso) =>
     year: "numeric",
     timeZone: "UTC",
   });
-function entryHtml(e, { full = true } = {}) {
+function entryHtml(e) {
   const [lead, rest] = splitLead(e.text);
-  const more = full && rest ? `<details><summary>Details</summary>${marked.parse(rest)}</details>` : "";
-  const meta = full
-    ? `<p class="meta">${e.hash ? `<a href="${REPO}/commit/${e.hash}">${e.hash}</a> · ` : ""}${e.packages.join(", ")}</p>`
-    : "";
+  const more = rest ? `<details><summary>Details</summary>${marked.parse(rest)}</details>` : "";
+  const meta = `<p class="meta">${e.hash ? `<a href="${REPO}/commit/${e.hash}">${e.hash}</a> · ` : ""}${e.packages.join(", ")}</p>`;
   return `<li><span class="bump ${e.bump}">${e.bump}</span><div><p class="what">${marked.parseInline(lead)}</p>${more}${meta}</div></li>`;
 }
 function releaseHtml(r) {
   const id = `v${r.version}`;
   const when = r.date ? ` <time datetime="${r.date}">${day(r.date)}</time>` : "";
-  return `<section class="release" id="${id}"><h2><a href="#${id}">${r.version}</a>${when}</h2><ul class="entries">${r.entries.map((e) => entryHtml(e)).join("")}</ul></section>`;
+  return `<section class="release" id="${id}"><h2><a href="#${id}">${r.version}</a>${when}</h2><ul class="entries">${r.entries.map(entryHtml).join("")}</ul></section>`;
 }
 {
   const { next, releases } = changelog;
   const nextHtml = next
-    ? `<section class="release next" id="next"><h2><a href="#next">${next.version}</a> <span class="pill">next</span></h2><p class="sub">Merged to main and waiting for the release. The version follows from the largest bump below.</p><ul class="entries">${next.entries.map((e) => entryHtml(e)).join("")}</ul></section>`
+    ? `<section class="release next" id="next"><h2><a href="#next">${next.version}</a> <span class="pill">next</span></h2><p class="sub">Merged to main and waiting for the release. The version follows from the largest bump below.</p><ul class="entries">${next.entries.map(entryHtml).join("")}</ul></section>`
     : "";
   const protocol = rewriteLinks(read("CHANGELOG.md"), rootPath, "")
     .replace(/^# .*\n/, "")
@@ -427,7 +437,7 @@ for (const [pathname, file, title, description] of [
     "Who speaks the sessionpipe protocol, and how to list yours.",
   ],
 ]) {
-  const md = rewriteLinks(read(file), { ...specPath, ...rootPath }, "spec/");
+  const md = rewriteLinks(withGui(read(file), file), { ...specPath, ...rootPath }, "spec/");
   twin(pathname, md);
   const body = `<article class="prose">${marked.parse(md)}</article>`;
   write(pathname, page({ title, description, body, pathname }));
@@ -565,77 +575,28 @@ const FAQ = [
     .map((p) => `<!-- ${SITE}${p} · Markdown: ${SITE}${p}index.md -->\n\n${twins.get(p)}`)
     .join("\n---\n\n");
   writeFileSync(path.join(out, "llms-full.txt"), full);
-  const kb = (s) => `${Math.round(Buffer.byteLength(s) / 1024)} KB`;
-  let home = read("website/src/pages/home.html");
-  home = home.replace("{{fullkb}}", kb(full)).replace("{{version}}", version);
+  let home = withGui(read("website/src/pages/home.html"), "home.html").replace("{{version}}", version);
   {
-    // sessionpipe-gui's release: {{gui:dmg}} is a file's URL, {{gui:dmg-size}} its size.
-    const releases = "https://github.com/spacesheep-dev/sessionpipe-gui/releases";
-    const values = { version: gui.version, releases };
-    for (const [key, [file, bytes]] of Object.entries(gui.files)) {
-      values[key] = `${releases}/download/v${gui.version}/${file}`;
-      if (bytes) values[`${key}-size`] = `${(bytes / 1e6).toFixed(1)}&nbsp;MB`;
-    }
-    // the npm command's URL, breakable after each slash and never inside a name
-    values["tgz-wbr"] = values.tgz.replace(/(?<=[^/])\/(?=[^/])/g, "/<wbr>");
-    home = home.replace(/\{\{gui:([a-z-]+)\}\}/g, (_, k) => {
-      if (!(k in values)) throw new Error(`home.html: no sessionpipe-gui value "${k}"`);
-      return values[k];
-    });
-    // Real screenshots, demo data, the same scene in each scheme: the board on a desktop and
-    // on a phone, sharing a bottom edge. <picture> fetches only the reader's scheme, and the
-    // slot stays empty without the files, so the page never shows an older GUI than it offers.
+    // A real screenshot, demo data, the same scene in each scheme. <picture> fetches only the
+    // reader's scheme, and the slot stays empty without the files, so the page never shows an
+    // older GUI than it offers. (public/gui/ also holds the phone's, for a /gui/ page later.)
     const has = (f) => existsSync(path.join(root, "website/public/gui", f));
     const set = (name, widths) => widths.map((w) => `/gui/${name}-${w}.webp ${w}w`).join(", ");
     const shot = (kind, widths, [width, height], sizes, alt, caption) =>
       has(`${kind}-light-${widths[0]}.webp`) && has(`${kind}-dark-${widths[0]}.webp`)
         ? `<figure class="${kind}"><picture><source media="(prefers-color-scheme: dark)" srcset="${set(`${kind}-dark`, widths)}" sizes="${sizes}"><img src="/gui/${kind}-light-${widths[0]}.webp" srcset="${set(`${kind}-light`, widths)}" sizes="${sizes}" alt="${alt}" width="${width}" height="${height}" loading="lazy" decoding="async"></picture><figcaption>${caption}</figcaption></figure>`
         : "";
-    const shots = [
-      shot(
-        "board",
-        [960, 1440],
-        [1440, 900],
-        "(max-width: 720px) calc(100vw - 32px), 800px",
-        "The sessionpipe-gui board, demo data: sessions from two machines grouped by state, the one that needs you first.",
-        `Board · macOS · ${gui.version}, demo data`,
-      ),
-      shot(
-        "phone",
-        [390, 585],
-        [585, 996],
-        "(max-width: 720px) 60vw, 300px",
-        "The same board on a phone.",
-        "Board · phone",
-      ),
-    ].join("");
-    home = home.replace("{{gui-shots}}", shots ? `<div class="gui-shots">${shots}</div>` : "");
+    const board = shot(
+      "board",
+      [960, 1440],
+      [1440, 900],
+      "(max-width: 720px) calc(100vw - 32px), (max-width: 1184px) calc(100vw - 64px), 1120px",
+      "The sessionpipe-gui board, demo data: sessions from two machines grouped by state, the one that needs you first.",
+      `Board · macOS · ${gui.version}, demo data`,
+    );
+    home = home.replace("{{gui-shots}}", board ? `<div class="gui-shots">${board}</div>` : "");
   }
   home = home.replace(/\{\{diagram:([a-z-]+)\}\}/g, (_, n) => diagram(n));
-  {
-    // The next release's headlines, then the last release's.
-    const { next, releases } = changelog;
-    const list = (entries) =>
-      `<ul class="entries brief">${entries.map((e) => entryHtml(e, { full: false })).join("")}</ul>`;
-    const shown = 5;
-    const parts = [];
-    if (next) {
-      const more = next.entries.length - shown;
-      parts.push(
-        `<h3 class="minor">Next: ${next.version} <span class="pill">on main</span></h3>${list(next.entries.slice(0, shown))}${more > 0 ? `<p class="more"><a href="/changelog/#next">and ${more} more</a></p>` : ""}`,
-      );
-    }
-    if (releases[0]) {
-      const r = releases[0];
-      parts.push(
-        `<h3 class="minor">${r.version}${r.date ? ` <time datetime="${r.date}">${day(r.date)}</time>` : ""}</h3>${list(r.entries.slice(0, shown + 1))}${r.entries.length > shown + 1 ? `<p class="more"><a href="/changelog/#v${r.version}">and ${r.entries.length - shown - 1} more in ${r.version}</a></p>` : ""}`,
-      );
-    }
-    parts.push(
-      `<p class="note"><a href="/changelog/">The full changelog</a>, ${releases.length} releases since ${releases.at(-1)?.version ?? "the start"}, each entry linked to its commit. Generated from the repository on every deploy. <a href="/changelog/feed.xml">Atom feed</a>.</p>`,
-    );
-    home = home.replace("{{changes}}", parts.join(""));
-  }
   home = home.replace("{{faq}}", FAQ.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join(""));
   const jsonld = {
     "@context": "https://schema.org",
