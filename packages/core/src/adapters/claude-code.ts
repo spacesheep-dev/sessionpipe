@@ -205,7 +205,16 @@ export const claudeCode: Adapter = {
         );
         break;
       case "Stop":
-        events.push(ev("turn.ended", { turn_id, reason: "stop" }));
+        // In-flight background work (shell commands, monitors, subagents, workflows)
+        // that will wake the session when it finishes: a paused session, not a done one
+        // (Claude Code's `background_tasks`, in every Stop recorded since 2.1.258). A count, never what they run.
+        events.push(
+          ev("turn.ended", {
+            turn_id,
+            reason: "stop",
+            background: Array.isArray(s.background_tasks) ? s.background_tasks.length : undefined,
+          }),
+        );
         break;
       case "StopFailure":
         // The turn ended on an API error (rate_limit, overloaded, authentication_failed,

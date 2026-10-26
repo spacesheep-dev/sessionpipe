@@ -142,6 +142,8 @@ export const EventData = z.object({
     /** The harness's error class when reason is error (rate_limit, overloaded, authentication_failed, server_error …). */
     error: z.string().max(200).optional(),
     ms: z.int().min(0).optional(),
+    /** Background work the harness reports still in flight as the turn ends, each of which wakes the session when it finishes (Claude Code: shell commands, monitors, subagents, workflows). Absent when the harness doesn't say. */
+    background: z.int().min(0).optional(),
   }),
   "turn.transcript": Loose.extend({
     turn: z.int().min(0),

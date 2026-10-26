@@ -40,6 +40,20 @@ describe("filterEvent", () => {
     const t3 = filterEvent(base({}), 3, false)!;
     expect(Object.keys(t3.data).sort()).toEqual(["call_id", "input", "ok", "output", "tool"]);
   });
+  it("a turn's end keeps its background count at tier 0, and its error only from tier 1", () => {
+    const end = base({
+      type: "turn.ended",
+      harness: { name: "claude-code", event: "Stop" },
+      data: { turn_id: "p1", reason: "stop", background: 2, error: "overloaded" },
+    });
+    expect(filterEvent(end, 0, false)!.data).toEqual({ turn_id: "p1", reason: "stop", background: 2 });
+    expect(filterEvent(end, 1, false)!.data).toEqual({
+      turn_id: "p1",
+      reason: "stop",
+      background: 2,
+      error: "overloaded",
+    });
+  });
   it("redacts above tier 0 and records the ruleset", () => {
     const t3 = filterEvent(base({}), 3, false)!;
     expect((t3.data.input as { command: string }).command).toBe(`export DB_PASSWORD=${REDACTED}`);

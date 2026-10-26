@@ -18,6 +18,14 @@ and released in lockstep. This file records protocol-level changes.
   `control-pair` and `control-hello` gain `files: true` (the machine takes attachments
   — a receiver should not send files to one that doesn't say so); the well-known
   `control` object may say `files: true`. 24 new control vectors (`66`–`89`).
+- `turn.ended` gains `background` (tier 0, optional): how much background work the
+  harness reports still in flight as the turn ends, each piece of which wakes the session
+  when it finishes. A receiver may keep such a session under working instead of reading
+  "done" (PROTOCOL.md). Claude Code fills it from the Stop hook's `background_tasks`,
+  in every Stop recorded since 2.1.258. Conformance: `harness/claude-code/stop-background.json`
+  (a background shell command running, 2.1.305); `stop.json` now pins `background: 1` (an
+  Explore subagent still running) and `stop-2.json` `background: 0`. Additive: a receiver
+  that doesn't know the field keeps it and carries on.
 - Control: `start` is no longer Claude Code's alone (CONTROL.md §6; asked for by the
   maintainer on 2026-10-04, so the spec change ships with its code). A `start` names a
   session of any harness the machine can drive headlessly — the reference daemon drives
