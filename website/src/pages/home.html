@@ -1,7 +1,7 @@
 <div class="home">
 <section class="hero" aria-labelledby="top-title">
 <p class="eyebrow"><a href="/changelog/">sessionpipe {{version}}</a> · protocol 1 · Apache-2.0</p>
-<h1 id="top-title">An open protocol for what your coding agents are <em class="hl">doing</em>.</h1>
+<h1 id="top-title">An open protocol, and a client, for what your coding agents are <em class="hl">doing</em>.</h1>
 <div class="hero-grid">
 <div class="hero-text">
 <p class="lead">One install hooks Claude Code, Codex, Gemini CLI, Antigravity and Devin. Every event is filtered to the privacy tier you choose, secrets are removed on your machine, and it goes to your server, to a file, or nowhere at all.</p>
@@ -59,7 +59,7 @@
 <div class="col ends right">
 <h3>Receivers</h3>
 <ul>
-<li><b>sessionpipe GUI</b><span>your laptop, your phones</span></li>
+<li><b>sessionpipe-gui</b><span>your laptop, your phones</span></li>
 <li><b>spacesheep.dev</b><span>hosted, tier 2</span></li>
 <li><b>sessionpipe-receiver</b><span>the reference</span></li>
 <li><b>a file, stdout</b><span>no server at all</span></li>
@@ -76,11 +76,12 @@
 </section>
 
 <section class="sec" id="gui" aria-labelledby="gui-h">
-<header class="sh"><span class="n">§02</span><h2 id="gui-h">sessionpipe GUI</h2><span class="aside">a receiver with a face · tier 3</span></header>
+<header class="sh"><span class="n">§02</span><h2 id="gui-h">sessionpipe-gui</h2><span class="aside">a separate project · Apache-2.0</span></header>
 <div class="gui">
 <div class="gui-intro">
 <h3>Every session on your machines, live, on one board.</h3>
-<p>The local GUI for sessionpipe: every coding-agent session on this laptop and the machines you connect, from your desk or your phone. Search everything your agents ever said, history from before sessionpipe included, with the network down. No account, no cloud, no telemetry.</p>
+<p>A separate open-source project, and the reference GUI for sessionpipe: every coding-agent session on this laptop and the machines you connect, live, from your desk or your phone. Search everything your agents ever said, history from before sessionpipe included, with the network down. No account, no cloud, no telemetry.</p>
+<p class="fine">The desktop app shows all of it; sending from the app comes later. For now you answer a prompt or send the next message from a browser, a phone's included, signed with your passkey.</p>
 </div>
 <div class="gui-get">
 <div class="dl">
@@ -187,7 +188,7 @@
 <section class="sec" id="receivers" aria-labelledby="receivers-h">
 <header class="sh"><span class="n">§06</span><h2 id="receivers-h">Receivers</h2><span class="aside">the other end of the stream</span></header>
 <dl class="rows">
-<div><dt><a href="#gui">sessionpipe GUI</a></dt><dd>Local. Every session on your machines, live, on a laptop or a phone; search across agent history, offline. Desktop apps for macOS and Linux.</dd><dd class="tier">tier 3</dd></div>
+<div><dt><a href="#gui">sessionpipe-gui</a></dt><dd>Local. Every session on your machines, live, on a laptop or a phone; search across agent history, offline. Desktop apps for macOS and Linux.</dd><dd class="tier">tier 3</dd></div>
 <div><dt><a href="https://spacesheep.dev">spacesheep.dev</a></dt><dd>Hosted. Sessions across machines, memory and recaps, messages from anywhere.</dd><dd class="tier">tier 2</dd></div>
 <div><dt><code>sessionpipe-receiver</code></dt><dd>The reference receiver. One process, JSONL files, a page you can answer from a phone. <code>npx sessionpipe-receiver</code>, or Docker.</dd><dd class="tier">tier 3</dd></div>
 <div><dt>Yours</dt><dd>Serve <code>/.well-known/sessionpipe</code> and one POST route, pass the conformance suite, and <a href="/receivers/">add it to the list</a>.</dd><dd class="tier">your call</dd></div>

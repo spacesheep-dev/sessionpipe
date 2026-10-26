@@ -29,7 +29,7 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* The type scale: one display size, one title, one running head, then text. Every heading
      on the site is one of these; mono labels are always 13px (12px only inside the tail). */
-  --fs-display: clamp(40px, 5.8vw, 72px);
+  --fs-display: clamp(40px, 5.2vw, 64px);
   --fs-title: clamp(28px, 3.3vw, 40px);
   --fs-head: 22px;
   --fs-h3: 17px;
@@ -359,10 +359,13 @@ footer {
   grid-template-columns: 200px minmax(0, 1fr);
   gap: 16px 48px;
 }
+/* the mark alone, small cut, in the ground's colours; its ink starts 6.25 u in, so it is
+   pulled left to sit on the text edge */
 footer .mark {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   display: block;
+  margin: -9px 0 0 -4px;
 }
 footer p {
   margin: 0 0 8px;
@@ -852,7 +855,7 @@ details > p {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--fg3);
 }
 .entries .what {
   margin: 0;
@@ -921,14 +924,15 @@ details > p {
 .home .hero h1 {
   font-size: var(--fs-display);
   line-height: 1;
-  letter-spacing: -0.042em;
+  letter-spacing: -0.035em;
   max-width: 20ch;
   margin: 0 0 clamp(32px, 4vw, 48px);
   /* optical: pull the A's left side bearing back onto the column edge */
   text-indent: -0.03em;
 }
 /* One orange word: "doing", the event. The same orange marks the attention.needed line in
-   the stream right under it, and nothing else in the hero. */
+   the stream right under it, and nothing else in the hero. A second highlight is one more
+   <em class="hl"> in home.html; nothing here changes. */
 .home .hero h1 .hl {
   font-style: normal;
   color: var(--accent-ui);
@@ -1417,6 +1421,10 @@ details > p {
   color: var(--fg2);
   max-width: 46ch;
 }
+.home .gui-intro .fine {
+  margin-top: 16px;
+  font-size: var(--fs-small);
+}
 .home .gui-get {
   justify-self: end;
   width: min(100%, 520px);
@@ -1783,7 +1791,7 @@ details > p {
     grid-template-columns: minmax(0, 1fr);
   }
   .home .hero h1 {
-    max-width: 15ch;
+    max-width: 18ch;
   }
   .home .lead {
     max-width: 52ch;

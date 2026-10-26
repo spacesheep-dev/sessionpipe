@@ -5,6 +5,7 @@ Who speaks the protocol. A listing carries a conformance badge that CI re-checks
 | Receiver | max_tier | Capabilities | Conformance |
 |----------|:--------:|--------------|-------------|
 | [sessionpipe-receiver](https://github.com/spacesheep-dev/sessionpipe/tree/main/packages/receiver) (reference) | 3 | events, backfill, forget, control, native | pending (M3) |
+| [sessionpipe-gui](https://github.com/spacesheep-dev/sessionpipe-gui) ([desktop app](/#gui)) | 3 | events, backfill, forget, control | pending |
 | [spacesheep.dev](https://spacesheep.dev) | 2 | events, backfill, forget; sessions-only tokens | pending (M5) |
 
 ## List yours
