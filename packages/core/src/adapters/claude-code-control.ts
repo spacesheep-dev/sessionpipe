@@ -10,6 +10,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { levelRank, type RunLevel, START_PERMISSIONS, type StartPermission } from "../control/verify.js";
 import {
   isExe,
   JOB_TIMEOUT_MS,
@@ -100,17 +101,28 @@ export function parseCaps(help: string): Caps {
   };
 }
 
-/** Permission flags for the machine's mode. Safe: `dontAsk` (nothing that needs
- *  approval runs). Auto: Claude Code's own auto mode, or a refusal. Inherit: none, so
- *  the turn starts in the mode Claude Code picks by itself here, its settings'
- *  `permissions.defaultMode` (a resume too: Claude Code never restores a session's
- *  earlier mode). Never bypassPermissions — no path here writes it. */
-export function modeFlags(mode: Mode, caps: Caps): { args: string[] } | { error: string } {
-  if (mode === "inherit") return { args: [] };
-  if (mode === "auto") {
-    if (!caps.modes.includes("auto"))
-      return { error: "this machine is in auto mode, but its Claude Code has no auto permission mode" };
-    return { args: ["--permission-mode", "auto"] };
+/** The `--permission-mode` each level (CONTROL.md §3.1) is, where it is one mode. */
+const LEVEL_MODE: Record<Exclude<StartPermission, "safe">, string> = {
+  read: "plan",
+  edits: "acceptEdits",
+  auto: "auto",
+};
+
+/** Permission flags for a level (a machine's mode is one: safe, auto, inherit). Read:
+ *  plan mode. Safe: `dontAsk` (nothing that needs approval runs). Edits: acceptEdits.
+ *  Auto: Claude Code's own auto mode. Inherit: none, so the turn starts in the mode
+ *  Claude Code picks by itself here, its settings' `permissions.defaultMode` (a resume
+ *  too: Claude Code never restores a session's earlier mode). A level this Claude Code
+ *  has no mode for is a refusal, never another level. Never bypassPermissions — no path
+ *  here writes it. */
+export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { error: string } {
+  if (level === "inherit") return { args: [] };
+  if (level === "auto" && !caps.modes.includes("auto"))
+    return { error: "this machine is in auto mode, but its Claude Code has no auto permission mode" };
+  if (level !== "safe") {
+    const m = LEVEL_MODE[level];
+    if (!caps.modes.includes(m)) return { error: `this machine's Claude Code has no ${m} permission mode` };
+    return { args: ["--permission-mode", m] };
   }
   if (caps.modes.includes("dontAsk")) return { args: ["--permission-mode", "dontAsk"] };
   const args: string[] = [];
@@ -121,6 +133,60 @@ export function modeFlags(mode: Mode, caps: Caps): { args: string[] } | { error:
     );
   if (caps.promptsNone) args.push("--permission-prompts", "none");
   return { args };
+}
+
+/** The widest level a start may name on a machine in `mode`: the mode itself, and safe
+ *  on an inherit machine, whose own default sessionpipe can't rank, so a message there may
+ *  only narrow to a level that never runs anything needing approval. */
+export const ceilingLevel = (mode: Mode): StartPermission => (mode === "inherit" ? "safe" : mode);
+
+/** The levels a start may ask Claude Code for on a machine in `mode`: never above its
+ *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always). */
+export function offeredLevels(mode: Mode, caps: Caps): StartPermission[] {
+  return START_PERMISSIONS.filter(
+    (l) => levelRank(l) <= levelRank(ceilingLevel(mode)) && (l === "safe" || caps.modes.includes(LEVEL_MODE[l])),
+  );
+}
+
+/** What a start that names no level gets: what the machine's mode means for Claude Code. */
+export const defaultLevel = (mode: Mode): RunLevel => mode;
+
+/** How a headless run prints: streamed where this Claude Code can, else one JSON at the end. */
+export function outputArgs(caps: { stream?: boolean }): string[] {
+  return caps.stream
+    ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+    : ["--output-format", "json"];
+}
+
+/** One headless `claude -p` run: a new session (`session`), or the next message of one
+ *  (`resume`, optionally as a fork). The model is its own argument after `--model`, and
+ *  a prompt that starts with a dash gets a leading space, so it is never read as a flag. */
+export function claudeArgs(o: {
+  caps: Caps;
+  level: RunLevel;
+  prompt: string;
+  session?: string;
+  resume?: string;
+  fork?: boolean;
+  model?: string;
+  allowedTools?: string[];
+}): { args: string[] } | { error: string } {
+  const mf = modeFlags(o.level, o.caps);
+  if ("error" in mf) return mf;
+  const where = o.resume
+    ? ["--resume", o.resume, ...(o.fork ? ["--fork-session"] : [])]
+    : ["--session-id", o.session as string];
+  return {
+    args: [
+      "-p",
+      ...outputArgs(o.caps),
+      ...mf.args,
+      ...(o.model ? ["--model", o.model] : []),
+      ...(o.allowedTools?.length ? [`--allowedTools=${o.allowedTools.join(",")}`] : []),
+      ...where,
+      o.prompt.startsWith("-") ? ` ${o.prompt}` : o.prompt,
+    ],
+  };
 }
 
 /** The env a headless turn runs with: ours, minus the markers that make Claude Code

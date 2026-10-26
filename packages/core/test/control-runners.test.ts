@@ -123,7 +123,7 @@ const AGY_RUN = [
 
 describe("codex exec --json", () => {
   it("command lines: a new session in its folder, a resume by id, the text after --", () => {
-    expect(codexArgs({ mode: "safe", prompt: "-v fix it", cwd: "/w" })).toEqual([
+    expect(codexArgs({ permission: "safe", prompt: "-v fix it", cwd: "/w" })).toEqual([
       "exec",
       "--json",
       "--skip-git-repo-check",
@@ -136,7 +136,7 @@ describe("codex exec --json", () => {
     ]);
     // `codex exec resume` takes neither -s nor --approve-for-me (0.160 refuses them as
     // unexpected arguments): a resume says the same in config overrides.
-    expect(codexArgs({ mode: "auto", prompt: "go on", resume: THREAD })).toEqual([
+    expect(codexArgs({ permission: "auto", prompt: "go on", resume: THREAD })).toEqual([
       "exec",
       "resume",
       "--json",
@@ -151,14 +151,14 @@ describe("codex exec --json", () => {
       THREAD,
       "go on",
     ]);
-    expect(codexArgs({ mode: "safe", prompt: "go on", resume: THREAD }).join(" ")).toContain(
+    expect(codexArgs({ permission: "safe", prompt: "go on", resume: THREAD }).join(" ")).toContain(
       '-c sandbox_mode="workspace-write" --',
     );
-    expect(codexArgs({ mode: "auto", prompt: "x", cwd: "/w" })).toContain("--approve-for-me");
-    expect(codexArgs({ mode: "safe", prompt: "x" })).not.toContain("-C");
+    expect(codexArgs({ permission: "auto", prompt: "x", cwd: "/w" })).toContain("--approve-for-me");
+    expect(codexArgs({ permission: "safe", prompt: "x" })).not.toContain("-C");
     // Inherit: no sandbox or approval flag and no config override, a new session's or a
     // resume's, so the person's own config.toml decides.
-    expect(codexArgs({ mode: "inherit", prompt: "x", cwd: "/w" })).toEqual([
+    expect(codexArgs({ permission: "inherit", prompt: "x", cwd: "/w" })).toEqual([
       "exec",
       "--json",
       "--skip-git-repo-check",
@@ -167,7 +167,7 @@ describe("codex exec --json", () => {
       "--",
       "x",
     ]);
-    expect(codexArgs({ mode: "inherit", prompt: "go on", resume: THREAD })).toEqual([
+    expect(codexArgs({ permission: "inherit", prompt: "go on", resume: THREAD })).toEqual([
       "exec",
       "resume",
       "--json",
@@ -176,10 +176,10 @@ describe("codex exec --json", () => {
       THREAD,
       "go on",
     ]);
-    // Never a bypass flag, in any mode, a new session's or a resume's.
-    for (const mode of ["safe", "auto", "inherit"] as const)
+    // Never a bypass flag, at any level or in inherit, a new session's or a resume's.
+    for (const permission of ["read", "safe", "edits", "auto", "inherit"] as const)
       for (const o of [{ cwd: "/w" }, { resume: THREAD }])
-        expect(codexArgs({ mode, prompt: "x", ...o }).join(" ")).not.toMatch(/dangerously|full-auto/);
+        expect(codexArgs({ permission, prompt: "x", ...o }).join(" ")).not.toMatch(/dangerously|full-auto/);
   });
 
   it("reads the id, the messages, and error items as warnings", () => {
@@ -263,8 +263,8 @@ describe("codex exec --json", () => {
 
 describe("agy --output-format stream-json", () => {
   it("command lines: a conversation in the folder it runs in, --conversation to go on", () => {
-    expect(agyArgs({ mode: "safe", prompt: "hi" })).toEqual(["-p", "hi", "--output-format", "stream-json"]);
-    expect(agyArgs({ mode: "auto", prompt: "go on", resume: CONV })).toEqual([
+    expect(agyArgs({ permission: "safe", prompt: "hi" })).toEqual(["-p", "hi", "--output-format", "stream-json"]);
+    expect(agyArgs({ permission: "auto", prompt: "go on", resume: CONV })).toEqual([
       "--conversation",
       CONV,
       "-p",
@@ -275,9 +275,9 @@ describe("agy --output-format stream-json", () => {
       "accept-edits",
     ]);
     // A message that starts with a dash is still the prompt.
-    expect(agyArgs({ mode: "safe", prompt: "--help me" })[1]).toBe(" --help me");
+    expect(agyArgs({ permission: "safe", prompt: "--help me" })[1]).toBe(" --help me");
     // Inherit: no permission flag, as in safe.
-    expect(agyArgs({ mode: "inherit", prompt: "go on", resume: CONV })).toEqual([
+    expect(agyArgs({ permission: "inherit", prompt: "go on", resume: CONV })).toEqual([
       "--conversation",
       CONV,
       "-p",
@@ -285,8 +285,8 @@ describe("agy --output-format stream-json", () => {
       "--output-format",
       "stream-json",
     ]);
-    for (const mode of ["safe", "auto", "inherit"] as const)
-      expect(agyArgs({ mode, prompt: "x" }).join(" ")).not.toMatch(/dangerously|skip-permissions/);
+    for (const permission of ["safe", "edits", "auto", "inherit"] as const)
+      expect(agyArgs({ permission, prompt: "x" }).join(" ")).not.toMatch(/dangerously|skip-permissions/);
   });
 
   it("reads the id, the text as it streams (a paragraph per response step), the result", () => {

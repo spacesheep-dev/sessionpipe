@@ -220,13 +220,27 @@ describe("acks not yet accepted", () => {
 describe("forks and aliases on disk", () => {
   it("state.json: the fork map, or nothing when it is missing or not a map", () => {
     const f = path.join(tmp, "state", "control", "state.json");
-    expect(readState(f)).toEqual({ copies: {} });
-    writeState(f, { copies: { a: "b" } });
-    expect(readState(f)).toEqual({ copies: { a: "b" } });
+    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    writeState(f, { copies: { a: "b" }, started: {} });
+    expect(readState(f)).toEqual({ started: {}, copies: { a: "b" } });
     writeFileSync(f, JSON.stringify({ copies: "b" }));
-    expect(readState(f)).toEqual({ copies: {} });
+    expect(readState(f)).toEqual({ started: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));
-    expect(readState(f)).toEqual({ copies: {} });
+    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    // What each started session runs with: a known level, and a model only when well-formed.
+    writeFileSync(
+      f,
+      JSON.stringify({
+        copies: {},
+        started: {
+          a: { permission: "read", model: "sonnet" },
+          b: { permission: "edits", model: "-bad" },
+          c: { permission: "bypassPermissions" },
+          d: null,
+        },
+      }),
+    );
+    expect(readState(f).started).toEqual({ a: { permission: "read", model: "sonnet" }, b: { permission: "edits" } });
   });
   it("aliases.json: only entries with an id and a folder; `at` is optional; anything else is no map", () => {
     const f = path.join(tmp, "state", "control", "aliases.json");
@@ -243,10 +257,15 @@ describe("forks and aliases on disk", () => {
       "codex:d": { id: "t4", cwd: 5 as never, at: "" },
       "codex:e": null as never,
       "codex:f": { id: "t6", cwd: "/q", at: 9 as never },
+      "codex:g": { id: "t7", cwd: "/q", at: "", permission: "read", model: "gpt-5.6-sol" },
+      "codex:h": { id: "t8", cwd: "/q", at: "", permission: "full" as never },
     });
     expect(readAliases(f)).toEqual({
       "codex:a": { id: "t1", cwd: "/p", at: "2026-10-04T00:00:00Z" },
       "codex:f": { id: "t6", cwd: "/q", at: "" },
+      // What a start ran with, kept; a level that isn't one is no record at all.
+      "codex:g": { id: "t7", cwd: "/q", at: "", permission: "read", model: "gpt-5.6-sol" },
+      "codex:h": { id: "t8", cwd: "/q", at: "" },
     });
     expect(receiverIdOf(readAliases(f), "codex", "t6")).toBe("f");
     expect(receiverIdOf(readAliases(f), "antigravity", "t6")).toBeNull();

@@ -101,6 +101,61 @@
     },
     "files": {
       "type": "boolean"
+    },
+    "start": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,39}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "permissions": {
+            "minItems": 1,
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "safe",
+                "edits",
+                "auto"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "permission": {
+            "type": "string",
+            "enum": [
+              "read",
+              "safe",
+              "edits",
+              "auto",
+              "inherit"
+            ]
+          },
+          "models": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+            }
+          },
+          "any_model": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "permissions",
+          "permission"
+        ]
+      },
+      "maxProperties": 50
     }
   },
   "required": [

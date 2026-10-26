@@ -88,6 +88,35 @@ one; it says why at the terminal and keeps the mode it had. A receiver that sets
 A machine that does not say `files: true` may predate attachments and start the
 session without them, so a receiver SHOULD NOT send it a `start` with `files`.
 
+And they MAY carry `start`: for each harness in `harnesses` that takes options on a
+`start`, what it takes ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):
+
+```json
+"start": {
+  "claude-code": {"permissions":["read","safe","edits","auto"],"permission":"auto","any_model":true},
+  "codex":       {"permissions":["read","safe","auto"],"permission":"auto","any_model":true,
+                  "models":["gpt-6-astra","gpt-5.6-sol"]}
+}
+```
+
+`permissions` are the levels (§3.1) this machine will start that harness at, **already
+capped by its `mode`**, and `permission` is the one a start gets when it names none (one
+of `permissions`, or `inherit` on an `inherit` machine: no permission flag at all).
+`models` are model ids the harness offers there (at most 50), a suggestion and not a
+promise. `any_model: true` means any well-formed `model` is passed to the harness,
+which may still reject it (§10, `failed` `model`). A harness with neither
+`models` nor `any_model` takes no `model`. A harness with no entry, or a hello with no
+`start`, takes neither field: a sender MUST NOT put `model` or `permission` on a `start`
+the last hello didn't advertise them for, and a receiver SHOULD NOT queue one. (A daemon
+that predates them ignores both, and would run at its own mode.) A receiver drops an
+entry for a harness that isn't in `harnesses`. The daemon works the object out again for
+every hello, from what each harness's binary says it supports.
+
+A machine that sends `start`, even an empty one, also takes a `start` whose `cwd` is
+`~` or `~/…` (§3.1). One that doesn't send it predates that and refuses such a `start`
+(`bad_fields`), so a receiver SHOULD send it an absolute `cwd`, such as one from
+`folders`. No hello names the machine's home folder: the daemon reads `~` itself.
+
 They MAY also carry `accounts`: the harness accounts signed in on the machine, each
 `{harness, id, email}`, where `id` is what events carry as `session.account_id` and
 `email` is the address the account signs in with, so the receiver's board can name an
@@ -139,14 +168,38 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `text` | `prompt`, `start`: the message for the model, 1 – **20 000** characters, not all whitespace (a real task brief runs to pages). |
 | `for`, `decision` | `permission.answer` only: the `attention_id` being answered, and `allow` or `deny`. |
 | `note` | Optional, ≤ 2 000 characters: shown to the model beside a decision or a cancel. |
-| `cwd` | `start` only: the absolute folder the new session runs in. |
+| `cwd` | `start` only: the folder the new session runs in: absolute, or `~` or `~/…` (`~\…`), which the machine reads under the home of the user its daemon runs as. That is how events write a session's folder ([PROTOCOL.md](PROTOCOL.md)), so a receiver can start a session in another one's folder without ever knowing the machine's home; `~user` and relative folders are `bad_fields`. |
 | `files` | `start` only, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
+| `permission` | `start` only, optional: `read`, `safe`, `edits` or `auto` (below). Any other value is `bad_fields`. |
+| `model` | `start` only, optional: the model the harness should run, 1 – **100** characters matching `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$` (never a leading `-`). The harness's own name for it; the machine passes it as one argument, never through a shell. |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
 | `iat` | Epoch milliseconds on the signing device's clock, an integer. |
 
-A field that does not belong to the kind makes the command malformed (`bad_fields`),
-`files` on any kind but `start` included. The whole string is at most **48 000**
-characters (the text, JSON-escaped, and the rest).
+Each kind carries the fields of this table that name it, and `v`, `t`, `machine`, `kind`,
+`session`, `nonce`, `iat` and `note`; any other field (one this table doesn't list
+included) makes the command malformed (`bad_fields`), `files`, `permission` or `model` on
+any kind but `start` included. The whole string is at most **48 000** characters (the
+text, JSON-escaped, and the rest).
+
+**Permission levels.** A `start` MAY say how much the new session may do without anyone
+approving it:
+
+| Level | The session may, without asking |
+|-------|------------------------------------|
+| `read` | Read and plan. Nothing that changes the folder or runs a command that could. |
+| `safe` | What the machine's safe mode allows for that harness ([ADAPTERS.md](ADAPTERS.md)): only what the folder's own settings already allow; anything that would ask is denied and named in the reply. |
+| `edits` | Also edit files inside `cwd`. A command that would ask is still denied. |
+| `auto` | What the harness's own automatic approval allows (Claude Code's auto mode, Codex's automatic review). |
+
+The machine's `mode` is the ceiling: a `safe` machine starts at `read` or `safe`, an
+`auto` machine at any of the four. An `inherit` machine's own default is the harness's,
+which sessionpipe cannot rank, so a start there may only name `read` or `safe`, and one
+that names none inherits. A start without `permission` gets the harness's default
+(§2, `start`), which is what the machine's mode means for it. `inherit` is never a
+command's `permission`: only the person at the machine chooses it. There is no level above
+`auto`: no command may turn a harness's approval off, and a daemon never writes a flag
+that does (`bypassPermissions`, `--dangerously-*`, `danger-full-access`, `--yolo`,
+`--force`). Wider access is the person's own choice at their own terminal, outside control.
 
 Each entry of `files` ([`control-command.json`](https://sessionpipe.org/schema/v1/control-command.json)):
 
@@ -226,17 +279,23 @@ the other only UUIDs). The caps were raised to 20 000 / 48 000 on 2026-10-01: a 
    start ran in).
 7. `permission.answer` with `allow` needs `for` to name an attention that is open
    **right now** on that session (§7).
+8. For a `start` with `permission`: the level is one the machine advertises for that
+   harness, which is never above its `mode`, or the command is refused `permission`. With
+   `model`: the harness takes a model on this machine, and the id is on its list when the
+   machine keeps a closed one, or the command is refused `model`. A machine never runs a
+   start at another level or with another model than the one asked for.
 
 A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `not_a_command`, `wrong_machine`, `unknown_kind`, `bad_session`, `bad_fields`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
-(`folder`, `no_attention`, `no_session`, `start_limit`).
+(`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`). A daemon up
+to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
 runs in a Worker, a browser and Node). A receiver SHOULD run it on arrival as an early
 word — against the account's keys, with a 10-minute age window — so a bad command is
-refused where the person can see why. That check is a courtesy; step 1–7 on the
+refused where the person can see why. That check is a courtesy; steps 1–8 on the
 machine are the gate.
 
 ## 6. Delivery
@@ -355,6 +414,20 @@ blocked by the machine's safe mode. A daemon passes them as allowed tools to eve
 it starts for that receiver, and MUST ignore any entry that is not an MCP server name —
 a receiver can never allow a built-in tool (a shell, a file write) on the machine.
 
+**Options.** The machine turns a `start`'s `permission` (or the harness's default) and
+`model` into the harness's own flags, and the table in ADAPTERS.md says which ones, per
+harness. It records both with the session, and every later run it starts of that session
+(a `resume`, a `fork`) is at the narrower of the recorded level and the machine's mode at
+that time, with the recorded model. On an `inherit` machine that is the narrower of the
+recorded level and `safe`, and a session that inherited (or recorded no level) runs at the
+machine's mode at that time. A session started at `read` stays read, and a machine
+turned down to safe takes every session down with it at its next run. A session the
+daemon holds (`sdk`) keeps its options while it is held. Its `taken` and `delivered` acks
+carry `applied`: what it ran with, `{"permission":"edits","model":"sonnet"}`, where
+`permission` is `"inherit"` for a start that inherited and `model` is there only when one
+was asked for. A receiver shows `applied`, never what was asked: a start that
+asked for options and came back without `applied` reached a machine that ignored them.
+
 A start is a whole agent run on the person's computer, so the machine caps them
 itself, whatever a receiver sends: at most a few running at once and a few an hour
 (the reference daemon: 2 and 10, set in its control config), refused `start_limit`
@@ -434,7 +507,7 @@ hook waits or prints.
 ## 10. Acks
 
 `POST {control}/ack` with [`control-ack.json`](https://sessionpipe.org/schema/v1/control-ack.json):
-`{"acks":[{"id","outcome","at","mode?","session?","code?","detail?","reply?"}]}`.
+`{"acks":[{"id","outcome","at","mode?","session?","code?","detail?","reply?","applied?"}]}`.
 
 | Outcome | Meaning |
 |---------|---------|
@@ -443,7 +516,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s file could not be fetched, checked or written (§6). |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -457,12 +530,15 @@ send → delivered time.
 
 - `conformance/control-vectors/` — signed commands, valid and broken, with the verdict
   every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
-  `start`'s `files` (§3.1). The reference verifier and every receiver that pre-checks
-  MUST agree with all of them.
+  `start`'s `files` (§3.1); `91`–`106` are a `start`'s options and the closed field
+  set, and `107`–`108` a `start` in a folder under `~` (§3.1). The reference verifier
+  and every receiver that pre-checks MUST agree with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
   until acked; a start the machine refuses `start_limit`, final at once.
+- `conformance/delivery/20`–`22`: a start refused `permission`, final at once; a
+  `delivered` with `applied`; a hello with `start`.
 - `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
   whose `mode` is `inherit` (§2).
 

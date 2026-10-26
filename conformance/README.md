@@ -17,7 +17,8 @@
   `packages/core/test/transcripts.test.ts`.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
-  `packages/core/test/control-vectors.test.ts`; regenerate with `npm run vectors`.
+  `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet
+  there and keeps the rest (`SESSIONPIPE_WRITE_VECTORS=all` rewrites every one).
 
 Filled in M1. Run with `npm run conformance`, or against a live receiver with
 `npx @sessionpipe/conformance https://host`.

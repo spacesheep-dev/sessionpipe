@@ -5,7 +5,8 @@
 //   state/control/nonces.jsonl  every verified nonce for 25 h, fsync'd before a
 //                               command runs (a failed write refuses it)
 //   state/control/acks.jsonl    acks not yet accepted by their receiver
-//   state/control/state.json    forks: which copy a message to a session goes to
+//   state/control/state.json    forks: which copy a message to a session goes to, and
+//                               the options each session the daemon started runs with
 import {
   appendFileSync,
   chmodSync,
@@ -20,7 +21,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { configFile, stateDir } from "@sessionpipe/core";
-import { NONCE_TTL_MS, type TrustedKey } from "@sessionpipe/core/control";
+import { levelRank, MODEL_RE, NONCE_TTL_MS, type RunLevel, type TrustedKey } from "@sessionpipe/core/control";
 import {
   controlAccount,
   defaultRunner,
@@ -225,6 +226,26 @@ export interface Ack {
   code?: string;
   detail?: string;
   reply?: string;
+  /** A start's taken and delivered: what it ran with (CONTROL.md §6, Options). */
+  applied?: StartOptions;
+}
+
+/** What a session the daemon started runs with: its level and, when one was asked for,
+ *  its model. Recorded at the start; every later run of the session reads it. */
+export interface StartOptions {
+  /** A level, or `inherit`: started on an inherit machine with none named. */
+  permission: RunLevel;
+  model?: string;
+}
+
+/** A recorded entry as read back from disk, or null when it isn't one. */
+export function startOptionsOf(v: unknown): StartOptions | null {
+  const o = v as { permission?: unknown; model?: unknown } | null;
+  if (!o || typeof o !== "object" || (levelRank(o.permission) < 0 && o.permission !== "inherit")) return null;
+  return {
+    permission: o.permission as RunLevel,
+    ...(typeof o.model === "string" && MODEL_RE.test(o.model) ? { model: o.model } : {}),
+  };
 }
 
 /** Acks not yet accepted: appended before they are sent, rewritten when sent, so a
@@ -258,14 +279,23 @@ export class AckOutbox {
 export interface DaemonState {
   /** Original session → the fork its messages go to. */
   copies: Record<string, string>;
+  /** Claude Code sessions the daemon started → what they run with (Codex and
+   *  Antigravity keep theirs in the alias entry, aliases.ts). */
+  started: Record<string, StartOptions>;
 }
 
 export function readState(file: string): DaemonState {
   try {
-    const j = JSON.parse(readFileSync(file, "utf8")) as DaemonState;
-    return { copies: j.copies && typeof j.copies === "object" ? j.copies : {} };
+    const j = JSON.parse(readFileSync(file, "utf8")) as { copies?: unknown; started?: unknown };
+    const started: Record<string, StartOptions> = {};
+    if (j.started && typeof j.started === "object")
+      for (const [k, v] of Object.entries(j.started)) {
+        const o = startOptionsOf(v);
+        if (o) started[k] = o;
+      }
+    return { copies: j.copies && typeof j.copies === "object" ? (j.copies as Record<string, string>) : {}, started };
   } catch {
-    return { copies: {} };
+    return { copies: {}, started: {} };
   }
 }
 export const writeState = (file: string, s: DaemonState) => writePrivate(file, s);

@@ -61,6 +61,28 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "applied": {
+            "type": "object",
+            "properties": {
+              "permission": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "safe",
+                  "edits",
+                  "auto",
+                  "inherit"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [

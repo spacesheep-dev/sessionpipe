@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Writes conformance/control-vectors/*.json: signed control commands, valid and
 // broken, with the verdict every verifier must reach (CONTROL.md §5). Signatures are
-// random, so the files are generated once and committed; `npm run vectors` rewrites
-// them (SESSIONPIPE_WRITE_VECTORS=1), and control-vectors.test.ts checks them on
-// every run. Test keys only: made fresh here, only their public halves are written.
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+// random, so the files are generated once and committed; `npm run vectors`
+// (SESSIONPIPE_WRITE_VECTORS=1) writes the ones that aren't there yet and keeps every
+// file already written, so a new vector never churns the others' signatures;
+// SESSIONPIPE_WRITE_VECTORS=all rewrites them all. control-vectors.test.ts checks them
+// on every run. Test keys only: made fresh here, only their public halves are written.
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
@@ -16,6 +18,7 @@ import {
   FILE_SIZE_MAX,
   FILES_MAX,
   fromB64url,
+  MODEL_MAX,
   RECEIVER_MAX_AGE_MS,
   RS256,
   type SignedCommand,
@@ -27,7 +30,11 @@ import { commandStr, DayKey, MACHINE, nonce, Passkey, signed } from "./helpers/a
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dir = path.join(root, "conformance/control-vectors");
-const WRITE = process.env.SESSIONPIPE_WRITE_VECTORS === "1";
+const WRITE = process.env.SESSIONPIPE_WRITE_VECTORS === "1" || process.env.SESSIONPIPE_WRITE_VECTORS === "all";
+const REWRITE = process.env.SESSIONPIPE_WRITE_VECTORS === "all";
+/** Numbers another open change holds, skipped here so the two never collide: none now
+ *  (90, `start-acp-harness`, landed with ACP control). */
+const RESERVED = new Set<number>();
 
 const RP = "receiver.example";
 const T = 1_790_800_000_000; // the command's iat in every vector unless it says otherwise
@@ -622,14 +629,126 @@ describe.runIf(WRITE)("write control vectors", () => {
       "start",
     );
 
-    mkdirSync(dir, { recursive: true });
-    for (const f of readdirSync(dir)) if (f.endsWith(".json")) rmSync(path.join(dir, f));
-    let n = 0;
-    for (const v of [...out.slice(0, split), ...enroll, ...out.slice(split)])
-      writeFileSync(
-        path.join(dir, `${String(++n).padStart(2, "0")}-${v.name}.json`),
-        `${JSON.stringify(v, null, 2)}\n`,
+    // --- a start's options and the closed field set (CONTROL.md §3.1), after the files ---
+    const files = out.length;
+    const NEW_CODEX = "codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
+    ok(
+      "valid-start-with-permission",
+      "A new session at the safe level.",
+      await signed(pk, day, start(undefined, { permission: "safe" })),
+      "grant",
+      "start",
+    );
+    ok(
+      "valid-start-with-model",
+      "A new session on a model the harness names (Claude Code's alias `sonnet`).",
+      await signed(pk, day, start(undefined, { model: "sonnet" })),
+      "grant",
+      "start",
+    );
+    ok(
+      "valid-start-with-everything",
+      "A new Codex session read-only, on a model, with a file.",
+      await signed(pk, day, start([png], { session: NEW_CODEX, permission: "read", model: "gpt-5.6-sol" })),
+      "grant",
+      "start",
+    );
+    {
+      const head = "us.anthropic/claude-opus-4-1@20250805:v1[1m]-";
+      ok(
+        "valid-model-at-limit",
+        `A model id of exactly ${MODEL_MAX} characters, using . / : @ [ ] and -.`,
+        await signed(pk, day, start(undefined, { model: head + "x".repeat(MODEL_MAX - head.length) })),
+        "grant",
+        "start",
       );
-    console.log(`wrote ${n} control vectors to ${path.relative(root, dir)}`);
+    }
+    const optionShape = async (name: string, description: string, cmd: string) =>
+      refuse(name, description, await signed(pk, day, cmd), "bad_fields");
+    await optionShape(
+      "permission-unknown",
+      "A level the spec doesn't define (`full`).",
+      start(undefined, { permission: "full" }),
+    );
+    await optionShape(
+      "permission-harness-name",
+      "A harness's own mode name (`bypassPermissions`) instead of a level: there is no level above auto.",
+      start(undefined, { permission: "bypassPermissions" }),
+    );
+    await optionShape("permission-not-string", "A permission of null.", start(undefined, { permission: null }));
+    await optionShape("permission-on-prompt", "Only a start carries a permission.", commandStr({ permission: "safe" }));
+    await optionShape(
+      "permission-on-cancel",
+      "Only a start carries a permission.",
+      commandStr({ kind: "cancel", text: undefined, permission: "read" }),
+    );
+    await optionShape(
+      "model-on-permission-answer",
+      "Only a start carries a model.",
+      commandStr({ kind: "permission.answer", text: undefined, for: "perm-1", decision: "deny", model: "sonnet" }),
+    );
+    await optionShape("model-empty", "An empty model.", start(undefined, { model: "" }));
+    await optionShape(
+      "model-leading-dash",
+      "A model that would read as a flag (`--dangerously-skip-permissions`).",
+      start(undefined, { model: "--dangerously-skip-permissions" }),
+    );
+    await optionShape(
+      "model-too-long",
+      `A model id of ${MODEL_MAX + 1} characters.`,
+      start(undefined, { model: "m".repeat(MODEL_MAX + 1) }),
+    );
+    await optionShape(
+      "model-bad-char",
+      "A model id with a space and a semicolon (`sonnet; rm -rf ~`).",
+      start(undefined, { model: "sonnet; rm -rf ~" }),
+    );
+    {
+      const safe = start(undefined, { permission: "safe" });
+      const s = await signed(pk, day, safe);
+      refuse(
+        "tampered-permission",
+        "Signed at safe, carried at auto: the receiver changed the level after the device signed.",
+        { ...s, cmd: safe.replace('"permission":"safe"', '"permission":"auto"') },
+        "bad_csig",
+      );
+    }
+    await optionShape(
+      "start-unknown-field",
+      'A field no kind has (`"sandbox":"off"`): the field set is closed, so a field a machine doesn\'t know is refused, never ignored.',
+      start(undefined, { sandbox: "off" }),
+    );
+    ok(
+      "valid-start-tilde-cwd",
+      "A new session in `~/spacesheep`: the machine reads `~` under its own user's home, as events write a session's folder, so no receiver needs to know it.",
+      await signed(pk, day, start(undefined, { cwd: "~/spacesheep" })),
+      "grant",
+      "start",
+    );
+    await shape(
+      "start-tilde-user-cwd",
+      "A new session in `~root/spacesheep`: only `~` alone or `~/…` is read under the machine's home, never another user's.",
+      { kind: "start", cwd: "~root/spacesheep" },
+      "bad_fields",
+    );
+
+    mkdirSync(dir, { recursive: true });
+    const names = new Set<string>();
+    let n = 0;
+    let wrote = 0;
+    const all = [...out.slice(0, split), ...enroll, ...out.slice(split, files), ...out.slice(files)];
+    for (const v of all) {
+      do n++;
+      while (RESERVED.has(n));
+      const name = `${String(n).padStart(2, "0")}-${v.name}.json`;
+      names.add(name);
+      if (!REWRITE && existsSync(path.join(dir, name))) continue;
+      writeFileSync(path.join(dir, name), `${JSON.stringify(v, null, 2)}\n`);
+      wrote++;
+    }
+    // A vector that no longer exists goes; another change's reserved number stays.
+    for (const f of readdirSync(dir))
+      if (f.endsWith(".json") && !names.has(f) && !RESERVED.has(Number.parseInt(f, 10))) rmSync(path.join(dir, f));
+    console.log(`wrote ${wrote} of ${all.length} control vectors to ${path.relative(root, dir)}`);
   }, 60_000);
 });

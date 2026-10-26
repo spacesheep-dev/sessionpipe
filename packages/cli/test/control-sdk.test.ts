@@ -107,7 +107,7 @@ describe("loadSdk", () => {
     const host = await loadSdk({ claudeBin: null, log: (s) => log.push(s) });
     expect(host).not.toBeNull();
     expect(log).toEqual(["Agent SDK found (@anthropic-ai/claude-agent-sdk): new sessions start in place"]);
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "safe" });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe" });
     expect(await s.send("hi")).toEqual({ reply: "reply: hi" });
     const o = seen.options[0]!;
     expect(o).toMatchObject({ sessionId: "sid", cwd: tmp, permissionMode: "dontAsk" });
@@ -122,7 +122,7 @@ describe("loadSdk", () => {
     const env = { SESSIONPIPE_AGENT_SDK: sdkFile, HOME: tmp };
     const host = await loadSdk({ claudeBin: "/opt/claude", env, log: (s) => log.push(s) });
     expect(log[0]).toContain(sdkFile);
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "auto", allowedTools: ["mcp__spacesheep"] });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "auto", allowedTools: ["mcp__spacesheep"] });
     expect(await s.send("go")).toEqual({ reply: "reply: go" });
     expect(seen.options[0]).toMatchObject({
       permissionMode: "auto",
@@ -131,19 +131,27 @@ describe("loadSdk", () => {
       env: { HOME: tmp, SESSIONPIPE_CONTROL_JOB: "1" },
     });
     // An empty tool list is no list at all.
-    host!.start({ session: "s2", cwd: tmp, mode: "safe", allowedTools: [] }).close();
+    host!.start({ session: "s2", cwd: tmp, permission: "safe", allowedTools: [] }).close();
     expect(seen.options[1]).not.toHaveProperty("allowedTools");
+    expect(seen.options[1]).not.toHaveProperty("model");
+    // Each level as its permissionMode, and the model when one was asked for; never bypass.
+    host!.start({ session: "s3", cwd: tmp, permission: "read", model: "opus[1m]" }).close();
+    host!.start({ session: "s4", cwd: tmp, permission: "edits" }).close();
+    expect(seen.options[2]).toMatchObject({ permissionMode: "plan", model: "opus[1m]" });
+    expect(seen.options[3]).toMatchObject({ permissionMode: "acceptEdits" });
+    expect(seen.options[1]).toMatchObject({ permissionMode: "dontAsk" });
+    expect(JSON.stringify(seen.options)).not.toContain("bypass");
     // Inherit: no permission mode at all, so the SDK starts in the settings' defaultMode.
-    host!.start({ session: "s3", cwd: tmp, mode: "inherit" }).close();
-    expect(seen.options[2]).toMatchObject({ sessionId: "s3", cwd: tmp });
-    expect(seen.options[2]).not.toHaveProperty("permissionMode");
-    expect(seen.options[2]).not.toHaveProperty("allowDangerouslySkipPermissions");
+    host!.start({ session: "s5", cwd: tmp, permission: "inherit" }).close();
+    expect(seen.options[4]).toMatchObject({ sessionId: "s5", cwd: tmp });
+    expect(seen.options[4]).not.toHaveProperty("permissionMode");
+    expect(seen.options[4]).not.toHaveProperty("allowDangerouslySkipPermissions");
     s.close();
   });
 
   it("replies, errors and silence: each result answers the message that waited for it", async () => {
     const host = await loadSdk({ claudeBin: null, env: { SESSIONPIPE_AGENT_SDK: sdkFile }, log: () => {} });
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "safe" });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe" });
     const t0 = s.lastUsed;
     expect(s.busy).toBe(false);
     const a = s.send("one");
@@ -165,21 +173,21 @@ describe("loadSdk", () => {
 
   it("a stream that dies fails every message still waiting, in the SDK's words", async () => {
     const host = await loadSdk({ claudeBin: null, env: { SESSIONPIPE_AGENT_SDK: sdkFile }, log: () => {} });
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "safe" });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe" });
     const first = s.send("crash");
     const second = s.send("never read");
     expect(await first).toEqual({ reply: "", error: "stream died" });
     expect(await second).toEqual({ reply: "", error: "stream died" });
     s.close();
     // A rejection that isn't an Error is still a reason.
-    const t = host!.start({ session: "sid2", cwd: tmp, mode: "safe" });
+    const t = host!.start({ session: "sid2", cwd: tmp, permission: "safe" });
     expect(await t.send("crash-raw")).toEqual({ reply: "", error: "raw" });
     t.close();
   });
 
   it("close is final and never throws, even when the SDK's own close does", async () => {
     const host = await loadSdk({ claudeBin: null, env: { SESSIONPIPE_AGENT_SDK: sdkFile }, log: () => {} });
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "safe", allowedTools: ["mcp__x"] });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe", allowedTools: ["mcp__x"] });
     seen.options[0]!.throwOnClose = true;
     expect(() => s.close()).not.toThrow();
     expect(seen.calls).toEqual(["close"]);
@@ -188,7 +196,7 @@ describe("loadSdk", () => {
   it("a result nobody asked for is let go; the next message still gets its own", async () => {
     const host = await loadSdk({ claudeBin: null, env: { SESSIONPIPE_AGENT_SDK: sdkFile }, log: () => {} });
     // The stand-in reads this tool name as its cue to answer before being asked.
-    const s = host!.start({ session: "sid", cwd: tmp, mode: "safe", allowedTools: ["stray"] });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe", allowedTools: ["stray"] });
     await new Promise((r) => setTimeout(r, 20));
     expect(await s.send("after")).toEqual({ reply: "reply: after" });
     s.close();

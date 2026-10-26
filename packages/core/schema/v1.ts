@@ -246,6 +246,20 @@ export const MachineId = z.string().regex(/^m_[A-Za-z0-9_-]{16,40}$/, "m_ + 16�
 export const SessionRef = z.string().regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/, "<harness>:<session id>");
 export const ControlKind = z.enum(["prompt", "permission.answer", "cancel", "start", "key.add"]);
 export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+/** How much a started session may do without anyone approving it (CONTROL.md §3.1),
+ *  narrowest first. Closed: nothing is wider than `auto`. */
+export const StartPermission = z.enum(["read", "safe", "edits", "auto"]);
+/** What a start ran with, or gets by default: a level, or `inherit` (no permission flag,
+ *  the harness's own default) on a machine the person put in inherit mode. Never a
+ *  command's `permission`. */
+export const RunLevel = z.enum(["read", "safe", "edits", "auto", "inherit"]);
+/** A model id as the harness names it, passed as one argument: never a leading dash. */
+export const ModelId = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/, "a model id");
+const HarnessName = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 
 /** A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
  *  (`GET {control}/files/{sha256}`); the signed hash is what the machine checks.
@@ -290,7 +304,8 @@ export const ControlCommand = z.object({
   decision: z.enum(["allow", "deny"]).optional(),
   /** Shown to the model beside a decision. */
   note: z.string().max(2000).optional(),
-  /** start: the absolute folder the new session runs in. */
+  /** start: the folder the new session runs in: absolute, or `~` / `~/…` under the
+   *  home of the user the machine's daemon runs as, as events write it. */
   cwd: z.string().max(1024).optional(),
   /** key.add (session `sessionpipe:keys`): the new device's passkey, which the machine
    *  trusts once a key it already trusts signed this command. */
@@ -306,6 +321,11 @@ export const ControlCommand = z.object({
   /** start only: 1–10 files, together at most 50 MiB, downloaded and checked by hash
    *  before the session starts. */
   files: z.array(ControlFile).min(1).max(10).optional(),
+  /** start only: the level the new session runs at, at most the machine's mode. Send
+   *  it only to a machine whose hello advertises it for the harness (`start`). */
+  permission: StartPermission.optional(),
+  /** start only: the model the harness runs. As `permission`: only when advertised. */
+  model: ModelId.optional(),
   /** At least 16 random bytes, base64url. */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/),
   /** Epoch ms, the signing device's clock. */
@@ -379,7 +399,8 @@ export const ControlAck = z.object({
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
         /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`);
-         *  failed: `file` when a start's attachment couldn't be fetched, checked or written. */
+         *  failed: `file` when a start's attachment couldn't be fetched, checked or written,
+         *  `model` when the harness wouldn't run the start's model. */
         code: z
           .string()
           .regex(/^[a-z_]{1,40}$/)
@@ -389,6 +410,9 @@ export const ControlAck = z.object({
         reply: z.string().max(20_000).optional(),
         /** progress only: rises with every progress ack for this id; a receiver keeps the highest. */
         seq: z.int().min(0).optional(),
+        /** taken, delivered of a start: the options it ran with (`model` only when one was
+         *  asked for). A receiver shows this, never what was asked. */
+        applied: z.strictObject({ permission: RunLevel.optional(), model: ModelId.optional() }).optional(),
       }),
     )
     .min(1),
@@ -480,6 +504,26 @@ export const ControlHello = z.object({
   accounts: z.array(HarnessAccount).max(20).optional(),
   /** As in control-pair.json. */
   files: z.boolean().optional(),
+  /** Per harness in `harnesses`: the options a start may carry (CONTROL.md §2). No
+   *  entry: neither `permission` nor `model`. */
+  start: z
+    .record(
+      HarnessName,
+      z.object({
+        /** The levels it starts at here, already capped by `mode`. */
+        permissions: z.array(StartPermission).min(1).max(4).meta({ uniqueItems: true }),
+        /** What a start that names none gets: one of `permissions`, or `inherit` on an
+         *  inherit machine. */
+        permission: RunLevel,
+        /** Model ids the harness offers here: a suggestion, not a promise. */
+        models: z.array(ModelId).max(50).optional(),
+        /** Any well-formed model is passed to the harness (which may still reject it). */
+        any_model: z.boolean().optional(),
+      }),
+    )
+    .refine((o) => Object.keys(o).length <= 50, "at most 50 harnesses")
+    .meta({ maxProperties: 50 })
+    .optional(),
 });
 
 export const WellKnown = z.object({
