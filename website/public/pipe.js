@@ -13,7 +13,8 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
   const harnesses = all(".left li");
   const receivers = all(".right li");
   const stages = all(".core li");
-  for (const li of [...harnesses, ...stages, ...receivers]) {
+  // the ends' rows tick as an event leaves or lands; a stage only brightens its name
+  for (const li of [...harnesses, ...receivers]) {
     const tick = document.createElement("i");
     tick.className = "tick";
     li.append(tick);
@@ -29,69 +30,80 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
   const wide = { in: twins(".wire.in"), out: twins(".wire.out"), dot: fig.querySelector(".wire.out .dot") };
   const tall = { in: twins(".vwire.in"), out: twins(".vwire.out"), dot: fig.querySelector(".vwire.out .dot") };
 
-  const out = "cubic-bezier(0.22, 1, 0.36, 1)";
-  const along = (path, delay, ms, back) => {
-    const dash = 16;
+  const ease = getComputedStyle(fig).getPropertyValue("--ease").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
+  const into = "cubic-bezier(0.4, 0, 1, 1)";
+  // a dash runs the wire's length; on the fan-out it stays hidden on the stretch the five wires
+  // share and fades in as it splits off
+  const along = (path, delay, ms, back, easing, fan) => {
+    const dash = narrow.matches ? 16 : 12;
     const len = path.getTotalLength();
     const [from, to] = back ? [-len, dash] : [dash, -len];
     path.classList.toggle("back", back);
     path.style.strokeDasharray = `${dash} ${len + dash}`;
+    // (offsets are of the dash's way along, so they hold whatever the easing)
+    const show = fan
+      ? [
+          { opacity: 0, offset: 0.24 },
+          { opacity: 1, offset: 0.36 },
+        ]
+      : [{ opacity: 1, offset: 0.05 }];
     path.animate(
       [
         { strokeDashoffset: from, opacity: 0 },
-        { opacity: 1, offset: 0.05 },
+        ...show,
         { opacity: 1, offset: 0.95 },
         { strokeDashoffset: to, opacity: 0 },
       ],
-      { duration: ms, delay, easing: "cubic-bezier(0.45, 0, 0.3, 1)" },
+      { duration: ms, delay, easing },
     );
   };
   const tick = (li, delay) =>
     li.lastChild.animate(
       [
-        { transform: "scaleX(0)", opacity: 1, easing: out },
+        { transform: "scaleX(0)", opacity: 1, easing: ease },
         { transform: "scaleX(1)", opacity: 1, offset: 0.4 },
         { transform: "scaleX(1)", opacity: 0 },
       ],
-      { duration: 760, delay },
+      { duration: 600, delay },
     );
-  const stage = (li, delay) => {
-    tick(li, delay);
+  const stage = (li, delay) =>
     li.firstChild.animate(
-      [{ opacity: 0.66 }, { opacity: 1, offset: 0.2 }, { opacity: 1, offset: 0.45 }, { opacity: 0.66 }],
+      [{ opacity: 0.66 }, { opacity: 1, offset: 0.16 }, { opacity: 1, offset: 0.4 }, { opacity: 0.66 }],
       {
-        duration: 900,
+        duration: 500,
         delay,
+        fill: "none",
       },
     );
-  };
 
-  // an event: harness row → its wire → adapt … outbox → the dot → every receiver
+  // an event: harness row → its wire → adapt … outbox → the dot → every receiver, in about 1.2 s;
+  // it speeds into the core and slows into the receivers
   const send = (h) => {
-    const w = narrow.matches ? tall : wide;
-    const t = narrow.matches ? [380, 460] : [520, 540];
+    const n = narrow.matches;
+    const w = n ? tall : wide;
+    const t = n ? [300, 320] : [360, 380];
     tick(harnesses[h], 0);
-    along(w.in[narrow.matches ? h % 3 : h], 160, t[0], false);
-    const core = 160 + t[0] - 60;
-    for (const [k, li] of stages.entries()) stage(li, core + k * 110);
-    const dot = core + 4 * 110 + 220;
-    w.dot.animate([{ transform: "scale(1)" }, { transform: "scale(1.2)", offset: 0.35 }, { transform: "scale(1)" }], {
-      duration: 480,
+    along(w.in[n ? 1 : h], 80, t[0], false, into);
+    const core = 80 + t[0];
+    for (const [k, li] of stages.entries()) stage(li, core + k * 70);
+    const dot = core + 4 * 70 + 80;
+    w.dot.animate([{ transform: "scale(1)" }, { transform: "scale(1.12)", offset: 0.3 }, { transform: "scale(1)" }], {
+      duration: 320,
       delay: dot,
-      easing: out,
+      easing: ease,
     });
-    for (const path of w.out) along(path, dot + 80, t[1], false);
-    for (const [k, li] of receivers.entries()) tick(li, dot + 80 + t[1] - 100 + (narrow.matches ? k * 60 : 0));
+    for (const path of w.out) along(path, dot + 20, t[1], false, ease, true);
+    for (const [k, li] of receivers.entries()) tick(li, dot + 20 + t[1] - 60 + (n ? k * 60 : 0));
   };
   // control: receiver row → the dot → the core → the harness's wire → the harness row
   const answer = (r, h) => {
-    const w = narrow.matches ? tall : wide;
-    const t = narrow.matches ? [460, 380] : [540, 520];
+    const n = narrow.matches;
+    const w = n ? tall : wide;
     tick(receivers[r], 0);
-    along(w.out[narrow.matches ? 1 : r], 120, t[0], true);
-    const back = 120 + t[0] + 320;
-    along(w.in[narrow.matches ? 1 : h], back, t[1], true);
-    tick(harnesses[h], back + t[1] - 80);
+    along(w.out[n ? 1 : r], 120, 400, true, into);
+    const back = 120 + 400 + 160;
+    along(w.in[n ? 1 : h], back, 360, true, ease);
+    tick(harnesses[h], back + 360 - 80);
   };
 
   // a fixed round that reads as a live machine: Claude Code busiest, Antigravity least; the
@@ -107,8 +119,9 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
     if (b === undefined) send(a);
     else answer(a, b);
     step++;
+    // one event at a time: the next leaves only after this one has landed
     const coming = round[step % round.length];
-    schedule(coming.length > 1 ? 2100 : b !== undefined ? 1500 : 1250 + ((step * 7) % 5) * 120);
+    schedule(b !== undefined ? 2600 : coming.length > 1 ? 2400 : 2200 + ((step * 7) % 5) * 120);
   };
   const schedule = (ms) => {
     due = performance.now() + ms;
@@ -138,10 +151,14 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
     }
     run(seen && !document.hidden);
   };
-  new IntersectionObserver(([entry]) => {
-    seen = entry.isIntersecting;
-    update();
-  }).observe(fig);
+  // start once a good part of the figure is in view, not when its edge peeks in
+  new IntersectionObserver(
+    ([entry]) => {
+      seen = entry.intersectionRatio >= 0.35;
+      update();
+    },
+    { threshold: 0.35 },
+  ).observe(fig);
   document.addEventListener("visibilitychange", update);
   still.addEventListener("change", update);
 }
