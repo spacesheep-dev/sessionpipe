@@ -15,6 +15,18 @@ const out = path.join(root, "website/dist");
 const SITE = "https://sessionpipe.org";
 const read = (p) => readFileSync(path.join(root, p), "utf8");
 const version = JSON.parse(read("packages/core/package.json")).version;
+// The sessionpipe-gui release the home page offers, with each file's size in bytes as the
+// release lists it: the one place to bump. The page prints decimal MB, as Finder does.
+const guiVersion = "0.3.0";
+const gui = {
+  version: guiVersion,
+  files: {
+    dmg: [`sessionpipe_${guiVersion}_universal.dmg`, 7315955],
+    deb: [`sessionpipe_${guiVersion}_amd64.deb`, 4045142],
+    appimage: [`sessionpipe_${guiVersion}_amd64.AppImage`, 82668024],
+    tgz: [`sessionpipe-gui-${guiVersion}.tgz`],
+  },
+};
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -549,48 +561,44 @@ const FAQ = [
   let home = read("website/src/pages/home.html");
   home = home.replace("{{fullkb}}", kb(full)).replace("{{version}}", version);
   {
-    // The GUI, in real screenshots from its own docs/screenshots/shoot.mjs (demo data), one
-    // pair per scheme: the board on a desktop beside the same machine on a phone. The pair
-    // that doesn't match the reader's scheme is display:none, so it is neither fetched nor read.
+    // sessionpipe-gui's release: {{gui:dmg}} is a file's URL, {{gui:dmg-size}} its size.
+    const releases = "https://github.com/spacesheep-dev/sessionpipe-gui/releases";
+    const values = { version: gui.version, releases };
+    for (const [key, [file, bytes]] of Object.entries(gui.files)) {
+      values[key] = `${releases}/download/v${gui.version}/${file}`;
+      if (bytes) values[`${key}-size`] = `${(bytes / 1e6).toFixed(1)}&nbsp;MB`;
+    }
+    // the npm command's URL, breakable after each slash and never inside a name
+    values["tgz-wbr"] = values.tgz.replace(/(?<=[^/])\/(?=[^/])/g, "/<wbr>");
+    home = home.replace(/\{\{gui:([a-z-]+)\}\}/g, (_, k) => {
+      if (!(k in values)) throw new Error(`home.html: no sessionpipe-gui value "${k}"`);
+      return values[k];
+    });
+    // Real screenshots, demo data, the same scene in each scheme: the board on a desktop and
+    // on a phone, sharing a bottom edge. <picture> fetches only the reader's scheme, and the
+    // slot stays empty without the files, so the page never shows an older GUI than it offers.
     const has = (f) => existsSync(path.join(root, "website/public/gui", f));
-    const shot = (kind, scheme, alt, caption, [w1, w2], [width, height]) =>
-      has(`${kind}-${scheme}-${w1}.webp`)
-        ? `<figure class="${kind} ${scheme}"><img src="/gui/${kind}-${scheme}-${w1}.webp" srcset="/gui/${kind}-${scheme}-${w1}.webp ${w1}w, /gui/${kind}-${scheme}-${w2}.webp ${w2}w" sizes="${kind === "board" ? "(max-width: 720px) 100vw, 760px" : "(max-width: 720px) 40vw, 280px"}" alt="${alt}" width="${width}" height="${height}" loading="lazy" decoding="async"><figcaption>${caption}</figcaption></figure>`
+    const set = (name, widths) => widths.map((w) => `/gui/${name}-${w}.webp ${w}w`).join(", ");
+    const shot = (kind, widths, [width, height], sizes, alt, caption) =>
+      has(`${kind}-light-${widths[0]}.webp`) && has(`${kind}-dark-${widths[0]}.webp`)
+        ? `<figure class="${kind}"><picture><source media="(prefers-color-scheme: dark)" srcset="${set(`${kind}-dark`, widths)}" sizes="${sizes}"><img src="/gui/${kind}-light-${widths[0]}.webp" srcset="${set(`${kind}-light`, widths)}" sizes="${sizes}" alt="${alt}" width="${width}" height="${height}" loading="lazy" decoding="async"></picture><figcaption>${caption}</figcaption></figure>`
         : "";
-    const desk = [1200, 2000];
-    const phone = [600, 900];
     const shots = [
       shot(
         "board",
-        "light",
-        "The sessionpipe GUI's board on a Mac: sessions from every machine grouped by state, the one that needs you first.",
-        "Board · macOS · 0.3.0, demo data",
-        desk,
+        [960, 1440],
         [1440, 900],
-      ),
-      shot(
-        "board",
-        "dark",
-        "The sessionpipe GUI's search over the board: “webhook” finds live sessions and this machine's transcripts.",
-        "Search, offline · macOS · 0.3.0, demo data",
-        desk,
-        [1440, 900],
+        "(max-width: 720px) calc(100vw - 32px), 800px",
+        "The sessionpipe-gui board, demo data: sessions from two machines grouped by state, the one that needs you first.",
+        `Board · macOS · ${gui.version}, demo data`,
       ),
       shot(
         "phone",
-        "light",
-        "The same session on a phone: Claude Code asks to run a deploy, with Allow and Deny.",
-        "Prompt · phone",
-        phone,
-        [390, 664],
-      ),
-      shot(
-        "phone",
-        "dark",
-        "The board on a phone, the session that needs you first.",
+        [390, 585],
+        [585, 996],
+        "(max-width: 720px) 60vw, 300px",
+        "The same board on a phone.",
         "Board · phone",
-        phone,
-        [390, 664],
       ),
     ].join("");
     home = home.replace("{{gui-shots}}", shots ? `<div class="gui-shots">${shots}</div>` : "");

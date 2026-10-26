@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// The site's one script: copy buttons. Each copies the Markdown file its data-copy names, or
-// the command its data-text holds. Without it the buttons stay hidden and the link or the
-// command beside each one does the same job.
+// The site's one script: copy buttons, and the GUI's download for this system. Each button
+// copies the Markdown file its data-copy names, or the command its data-text holds. Without
+// it the buttons stay hidden and the link or the command beside each one does the same job.
 for (const button of document.querySelectorAll("button[data-copy], button[data-text]")) {
   const label = button.textContent;
   button.hidden = false;
@@ -30,4 +30,35 @@ for (const button of document.querySelectorAll("button[data-copy], button[data-t
       button.textContent = label;
     }, 2000);
   });
+}
+
+// The GUI's download (home page only): the file for this system first, the others beside it.
+// Read from the browser's own platform string, kept here and sent nowhere. Without the script,
+// or on a system it doesn't know, the page stays as written: macOS first, then Linux.
+const dl = document.querySelector("[data-dl]");
+if (dl) {
+  const platform = `${navigator.userAgentData?.platform ?? navigator.platform ?? ""} ${navigator.userAgent}`;
+  // iPadOS reports a Mac; a Mac with a touch screen is one.
+  const os =
+    /android|iphone|ipad|ipod/i.test(platform) || (/mac/i.test(platform) && navigator.maxTouchPoints > 1)
+      ? "phone"
+      : /mac/i.test(platform)
+        ? "mac"
+        : /linux|x11|cros/i.test(platform)
+          ? "linux"
+          : /win/i.test(platform)
+            ? "other"
+            : "mac";
+  const primary = { mac: "mac", linux: "linux", other: "node" }[os];
+  for (const note of dl.querySelectorAll("[data-for]")) note.hidden = note.dataset.for !== os;
+  for (const item of dl.querySelectorAll("[data-os]")) {
+    const on = item.dataset.os === primary;
+    if (item.dataset.os === "node") item.hidden = !on;
+    const button = item.querySelector(".btn");
+    button.classList.toggle("primary", on);
+    button.classList.toggle("quiet", !on);
+  }
+  // first in the row is first in the tab order too
+  const first = dl.querySelector(`[data-os="${primary}"]`);
+  if (first) dl.querySelector("[data-os]").before(first);
 }

@@ -1452,13 +1452,24 @@ details > p {
   opacity: 0.72;
   white-space: normal;
 }
-.home .dl p {
+.home .dl > .dl-note,
+.home .dl > [data-os="node"] {
+  grid-column: 1 / -1;
+}
+.home .dl > .dl-note {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--fg);
+  max-width: 46ch;
+}
+.home .dl div p {
   margin: 10px 0 0;
   padding-left: 18px;
   font: 400 12px / 1.6 var(--mono);
   color: var(--fg2);
 }
-.home .dl p a,
+.home .dl div p a,
 .home .dl-meta a {
   color: var(--fg);
 }
@@ -1466,12 +1477,22 @@ details > p {
   margin: 16px 0 0;
   padding-left: 18px;
   font-size: 13px;
+  line-height: 1.6;
   color: var(--fg2);
 }
 .home .gui-run {
   margin: 24px 0 0;
   padding: 20px 0 0;
   border-top: 1px solid var(--line);
+}
+.home .gui-run .cmd {
+  align-items: flex-start;
+}
+.home .gui-run .cmd .p {
+  padding: 6px 0;
+}
+.home .gui-run .cmd button.copy {
+  align-self: center;
 }
 .home .gui-run p:not(.cmd) {
   margin: 0 0 12px;
@@ -1506,18 +1527,6 @@ details > p {
   margin: 12px 0 0;
   font: 400 12px / 1.4 var(--mono);
   color: var(--fg2);
-}
-/* one pair per scheme; the other is display:none, so the browser never fetches it */
-.home .gui-shots .dark {
-  display: none;
-}
-@media (prefers-color-scheme: dark) {
-  .home .gui-shots .dark {
-    display: block;
-  }
-  .home .gui-shots .light {
-    display: none;
-  }
 }
 .home .rows {
   margin: 0;

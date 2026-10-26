@@ -11,7 +11,10 @@ Geist and Geist Mono (SIL OFL 1.1, `public/fonts/LICENSE-geist.txt`), Latin subs
 Latin Extended loaded only when a page uses it, and fallback faces sized to Geist so the
 swap moves no line. `src/og/og.html` is the source of `og.png`.
 
-**The GUI's picture.** The home page shows the sessionpipe GUI's board when
-`public/gui/board.webp` exists (1440 × 900; `board-dark.webp` beside it is used in dark
-mode), and leaves the slot out when it doesn't, so the page never shows an older GUI than
-the one shipping.
+**sessionpipe-gui.** The release the home page offers (its version, file names and sizes)
+is `gui` at the top of `build.mjs`; `home.html` reads it through `{{gui:…}}`, so a new
+release is one edit there. `public/copy.js` puts the visitor's system first (macOS without
+JS). The screenshots are `public/gui/{board,phone}-{light,dark}-<width>.webp`: real
+screenshots of demo data, the same scene in each scheme, at 960/1440 (board) and 390/585
+(phone) wide. Without them the section lays out without pictures, so the page never shows
+an older GUI than the one it offers.

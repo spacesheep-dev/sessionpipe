@@ -84,14 +84,16 @@
 <p class="fine">The desktop app shows all of it; sending from the app comes later. For now you answer a prompt or send the next message from a browser, a phone's included, signed with your passkey.</p>
 </div>
 <div class="gui-get">
-<div class="dl">
-<div><a class="btn primary" href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_universal.dmg"><span>Download for macOS</span><small>universal · .dmg</small></a><p>Apple silicon and Intel<br>Signed and notarized, macOS 11+</p></div>
-<div><a class="btn quiet" href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.deb"><span>Download for Linux</span><small>x86-64 · .deb · 3.8 MB</small></a><p>Debian, Ubuntu and derivatives<br>Any distro: <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.3.0/sessionpipe_0.3.0_amd64.AppImage">AppImage</a>, 78.8 MB</p></div>
+<div class="dl" data-dl>
+<p class="dl-note" data-for="phone" hidden>On a phone, the GUI is a page your computer serves. Install it there, then open it here over Wi-Fi or Tailscale.</p>
+<div data-os="node" hidden><a class="btn quiet" href="#gui-npm"><span>Install with Node</span><small>npm · any system with Node 20</small></a><p>No desktop app for this system yet.</p></div>
+<div data-os="mac"><a class="btn primary" href="{{gui:dmg}}"><span>Download for macOS</span><small>universal · .dmg · {{gui:dmg-size}}</small></a><p>Apple silicon and Intel<br>Signed and notarized, macOS 11+</p></div>
+<div data-os="linux"><a class="btn quiet" href="{{gui:deb}}"><span>Download for Linux</span><small>x86-64 · .deb · {{gui:deb-size}}</small></a><p>Debian, Ubuntu and derivatives<br>Any distro: <a href="{{gui:appimage}}">AppImage</a>, {{gui:appimage-size}}</p></div>
 </div>
-<p class="dl-meta">Version 0.3.0. It updates itself. <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a></p>
-<div class="gui-run">
-<p>The app opens the GUI's receiver on this machine. Start it once; any browser on your network, a phone included, can open it too.</p>
-<p class="cmd"><span class="p" aria-hidden="true">$</span><code>npx github:<wbr>spacesheep-dev/<wbr>sessionpipe-gui</code><button type="button" class="copy" data-text="npx github:spacesheep-dev/sessionpipe-gui" hidden>Copy</button></p>
+<p class="dl-meta">Version {{gui:version}}. It updates itself. <a href="{{gui:releases}}">All releases</a><br>The app needs Node 20 or later; on first run it starts the GUI's receiver on this machine.</p>
+<div class="gui-run" id="gui-npm">
+<p>Or from npm, on any system with Node 20. <code>sessionpipe-gui</code> then serves the board on <code>localhost:7373</code>, with a QR code for your phone.</p>
+<p class="cmd"><span class="p" aria-hidden="true">$</span><code>npm i -g {{gui:tgz-wbr}}</code><button type="button" class="copy" data-text="npm i -g {{gui:tgz}}" hidden>Copy</button></p>
 </div>
 </div>
 </div>
