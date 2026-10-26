@@ -109,6 +109,21 @@ rollout written in the last 90 seconds) is acked `unsupported` rather than resum
 Before a Codex run the daemon checks `codex login status` (or `CODEX_API_KEY`) and says
 `codex login --device-auth` if it isn't signed in.
 
+Any other agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
+is reached the same way: Gemini CLI, OpenCode, goose, Copilot CLI, Cursor, Droid, Devin,
+Kilo, Qwen Code, Cline and the rest of the ACP registry ([the list, with each one's
+launch line](../../spec/ADAPTERS.md#agents-driven-through-acp-control-only)). The daemon
+runs the agent's own CLI (`gemini --acp`, `opencode acp`, …) when it is installed, on
+PATH or where `SESSIONPIPE_ACP_<HARNESS>` points (`SESSIONPIPE_ACP_GEMINI_CLI`), and
+never downloads one. It is the agent's client: a start opens a session in your folder,
+the reply streams back as the agent writes it, and the process stays up so the next
+message lands in it with no cold start (`api` mode); `cancel` works there too. An agent
+idle for ten minutes is closed, and a later message reopens the session where the agent
+supports `session/load`. Safe mode answers every permission the agent asks with a
+refusal, listed in the reply; auto mode allows. An agent that never asks (OpenCode, by
+its own settings) runs its tools as it would at your terminal. Signing in is yours to do
+at the terminal: an agent that wants it says so in the reply.
+
 ## Updates
 
 The control daemon keeps its own copy current. About a minute after it starts, and then

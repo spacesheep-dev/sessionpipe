@@ -5,19 +5,22 @@
 // allows — to a parked waiter, at the session's next Stop, to a session it holds
 // through the Agent SDK, or by a headless resume or fork — then acks how. Claude Code,
 // Codex (`codex exec`) and Antigravity (`agy`) sessions can be resumed and started
-// headlessly; the Agent SDK, waiters, Stop blocks and forks are Claude Code's.
+// headlessly, and so can any agent that speaks ACP (held like an SDK session, `api`
+// mode); the Agent SDK, waiters, Stop blocks and forks are Claude Code's.
 //
 // A receiver can queue a message; it can never make this process run one.
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import {
+  acpControl,
   antigravityControl,
   claudeAccounts,
   claudeControl,
   codexControl,
   deniedNote,
   type HarnessAccount,
+  HELLO_HARNESSES_MAX,
   JOB_TIMEOUT_MS,
   jobEnv,
   type Login,
@@ -129,7 +132,8 @@ export interface Carried {
   expires_at: string;
 }
 
-/** A session the Agent SDK holds for the daemon (sdk.ts; a fake in tests). */
+/** A session the daemon holds: through the Agent SDK (sdk.ts; a fake in tests), or an
+ *  ACP agent it runs (core's acp-control.ts), which says so in `mode`. */
 export interface SdkSession {
   /** Deliver one message; resolves with the agent's reply when the turn ends. */
   send(text: string): Promise<{ reply: string; error?: string }>;
@@ -137,6 +141,10 @@ export interface SdkSession {
   close(): void;
   readonly busy: boolean;
   readonly lastUsed: number;
+  /** How a message through it is acked; `sdk` when unsaid. */
+  readonly mode?: DeliveryMode;
+  /** Gone for good (the process left): drop it, a later message reopens the session. */
+  readonly closed?: boolean;
 }
 export interface SdkHost {
   start(o: {
@@ -160,6 +168,9 @@ export interface DaemonDeps {
   agy?: () => string | null;
   /** Is Codex signed in as this process sees it? Asked before a run. */
   codexLogin?: (bin: string) => Promise<Login>;
+  /** An ACP agent's CLI on this machine, by harness name (core's findAcpAgent; null:
+   *  not installed). Absent: this daemon drives none of them. */
+  acp?: (harness: string) => { bin: string; args: string[] } | null;
   /** The harnesses every hello advertises (core's drivableHarnesses); by default, the
    *  ones the finders above find. */
   harnesses?: () => string[];
@@ -345,7 +356,7 @@ export class ControlDaemon {
     this.helloTimer.unref();
     void this.helloAll();
     void this.flushAcks();
-    const idle = setInterval(() => this.closeIdleSdk(), 60_000);
+    const idle = setInterval(() => this.closeIdleSdk(), Math.min(60_000, this.deps.sdkIdleMs ?? 60_000));
     idle.unref();
     if (this.sockId) {
       this.ownTimer = setInterval(() => void this.checkSocket(), 10_000);
@@ -851,8 +862,16 @@ export class ControlDaemon {
   private async helloAll(): Promise<void> {
     void this.refreshSessionTools();
     const waiting = [...this.live].filter(([, l]) => l.waiter).map(([k]) => k);
-    const modes: DeliveryMode[] = ["waiter", "turn", "resume", "fork", ...(this.deps.sdk ? (["sdk"] as const) : [])];
     const harnesses = this.harnesses();
+    const modes: DeliveryMode[] = [
+      "waiter",
+      "turn",
+      "resume",
+      "fork",
+      ...(this.deps.sdk ? (["sdk"] as const) : []),
+      // Every ACP agent's turn is acked `api` (§6).
+      ...(harnesses.some((h) => acpControl.acpAgent(h)) ? (["api"] as const) : []),
+    ];
     const accounts = this.accounts();
     for (const r of this.cfg.receivers) {
       const body = {
@@ -1034,7 +1053,8 @@ export class ControlDaemon {
    *  the hooks' cwd, never the command. */
   private place(session: string): { refused: string; why: string } | Placed {
     const ref = parseSessionRef(session)!;
-    if (ref.harness === "codex" || ref.harness === "antigravity") return this.placeDriven(session, ref);
+    if (ref.harness === "codex" || ref.harness === "antigravity" || acpControl.acpAgent(ref.harness))
+      return this.placeDriven(session, ref);
     if (ref.harness === "claude-code") {
       const target = this.state.copies[ref.id] ?? ref.id;
       const t = findTranscript(target, this.deps.claudeDirs()) ?? findTranscript(ref.id, this.deps.claudeDirs());
@@ -1051,9 +1071,9 @@ export class ControlDaemon {
     return { folder: ok, transcript: null };
   }
 
-  /** A Codex or Antigravity session: one the daemon started is its alias (the harness's
-   *  id and the start's folder); one the hooks reported is Codex's rollout (its
-   *  `session_meta` cwd) or, for Antigravity, the folder its hooks gave. */
+  /** A Codex, Antigravity or ACP-driven session: one the daemon started is its alias
+   *  (the harness's id and the start's folder); one the hooks reported is Codex's
+   *  rollout (its `session_meta` cwd) or, for the others, the folder its hooks gave. */
   private placeDriven(
     session: string,
     ref: { harness: string; id: string },
@@ -1071,7 +1091,7 @@ export class ControlDaemon {
     if (!cwd)
       return {
         refused: "no_session",
-        why: `no folder known for ${ref.harness === "codex" ? "Codex" : "Antigravity"} session ${shortId(ref.harness, ref.id)}`,
+        why: `no folder known for ${this.label(ref.harness)} session ${shortId(ref.harness, ref.id)}`,
       };
     const ok = this.allowed(cwd);
     if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
@@ -1087,6 +1107,12 @@ export class ControlDaemon {
     } catch {
       return undefined;
     }
+  }
+
+  /** A driven harness, as the person knows it. */
+  private label(harness: string): string {
+    const agent = acpControl.acpAgent(harness);
+    return agent ? agent.label : harness === "codex" ? "Codex" : "Antigravity";
   }
 
   private aliasOf(harness: string, id: string): Alias | null {
@@ -1153,14 +1179,17 @@ export class ControlDaemon {
     }
   }
 
-  /** The harnesses this machine can run a message in, for hello. */
+  /** The harnesses this machine can run a message in, for hello: at most
+   *  HELLO_HARNESSES_MAX, the three with their own drivers first. */
   private harnesses(): string[] {
-    if (this.deps.harnesses) return this.deps.harnesses();
+    if (this.deps.harnesses) return this.deps.harnesses().slice(0, HELLO_HARNESSES_MAX);
+    const acp = this.deps.acp;
     return [
       ...(this.deps.claude() ? ["claude-code"] : []),
       ...(this.deps.codex?.() ? ["codex"] : []),
       ...(this.deps.agy?.() ? ["antigravity"] : []),
-    ];
+      ...(acp ? acpControl.ACP_HARNESSES.filter((h) => acp(h)) : []),
+    ].slice(0, HELLO_HARNESSES_MAX);
   }
 
   private allowed(dir: string): string | null {
@@ -1215,7 +1244,7 @@ export class ControlDaemon {
         detail: "no cancel path for a session the daemon doesn't hold",
       });
     await held.interrupt();
-    this.finish(r, id, { outcome: "delivered", mode: "sdk" }, sent);
+    this.finish(r, id, { outcome: "delivered", mode: held.mode ?? "sdk" }, sent);
   }
 
   private view(session: string, place: Placed) {
@@ -1231,7 +1260,7 @@ export class ControlDaemon {
         recentlyWritten(place.file, this.lastEnd.get(ref.id), this.deps.now());
       return {
         harness: ref.harness,
-        sdk: false,
+        sdk: this.sdkSessions.has(ref.id),
         waiter: !!l?.waiter && !l.waiter.destroyed,
         midTurn: !!l?.midTurn,
         live,
@@ -1300,13 +1329,13 @@ export class ControlDaemon {
       case "sdk": {
         const s = this.sdkSessions.get(ref.id)!;
         this.finish(r, id, { outcome: "taken" });
-        const out = await s.send(frame(text, r.url));
+        const out = await this.sendHeld(ref.id, s, frame(text, r.url));
         return this.finish(
           r,
           id,
           out.error
             ? { outcome: "failed", detail: out.error }
-            : { outcome: "delivered", mode: "sdk", reply: out.reply },
+            : { outcome: "delivered", mode: s.mode ?? "sdk", reply: out.reply },
           sent,
         );
       }
@@ -1317,6 +1346,17 @@ export class ControlDaemon {
       case "api":
         return this.finish(r, id, { outcome: "unsupported", detail: "no input API wired for this harness" });
     }
+  }
+
+  /** One message through a held session; one whose process left is let go of, so the
+   *  next message reopens the session instead of finding it closed. */
+  private async sendHeld(id: string, s: SdkSession, text: string): Promise<{ reply: string; error?: string }> {
+    const out = await s.send(text);
+    if (s.closed) {
+      s.close();
+      this.sdkSessions.delete(id);
+    }
+    return out;
   }
 
   /** A turn message whose Stop never took it: route again, now that it isn't mid-turn. */
@@ -1467,7 +1507,9 @@ export class ControlDaemon {
     mode: "resume" | "fork",
     sent: number,
   ): Promise<void> {
-    if (parseSessionRef(cmd.session)?.harness !== "claude-code") return this.resumeDriven(r, id, cmd, place, sent);
+    const harness = parseSessionRef(cmd.session)?.harness;
+    if (acpControl.acpAgent(harness as string)) return this.resumeAcp(r, id, cmd, place, sent);
+    if (harness !== "claude-code") return this.resumeDriven(r, id, cmd, place, sent);
     const claude = this.deps.claude();
     if (!claude)
       return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
@@ -1708,6 +1750,7 @@ export class ControlDaemon {
         code: "folder",
         detail: "that folder isn't one this machine allows",
       });
+    if (acpControl.acpAgent(ref.harness)) return this.startAcp(r, id, cmd, ref, cwd, sent);
     if (ref.harness !== "claude-code") return this.startDriven(r, id, cmd, ref, cwd, sent);
     if (findTranscript(ref.id, this.deps.claudeDirs()) || this.sdkSessions.has(ref.id))
       return this.finish(r, id, {
@@ -1801,6 +1844,111 @@ export class ControlDaemon {
       `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
     );
     await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null);
+  }
+
+  /** A new session of an ACP agent (CONTROL.md §6): the agent's CLI as a child the
+   *  daemon keeps, the start's id as the session's name the moment the agent names its
+   *  own (aliases.ts), and the first turn through it. Acked `delivered` in `api` mode;
+   *  later messages go through the same process while it is held. */
+  private async startAcp(
+    r: PairedReceiver,
+    id: string,
+    cmd: ControlCommand,
+    ref: { harness: string; id: string },
+    cwd: string,
+    sent: number,
+  ): Promise<void> {
+    const label = this.label(ref.harness);
+    if (this.aliasOf(ref.harness, ref.id) || this.live.get(cmd.session)?.cwd || this.sdkSessions.has(ref.id))
+      return this.finish(r, id, {
+        outcome: "refused",
+        code: "bad_session",
+        detail: "that new session's id is already taken",
+      });
+    const found = this.deps.acp?.(ref.harness) ?? null;
+    if (!found) return this.finish(r, id, { outcome: "failed", detail: `${label} isn't installed on this machine` });
+    this.finish(r, id, { outcome: "taken" });
+    const text = await this.attached(r, id, cmd, ref, cwd);
+    if (text === null) return;
+    this.deps.log(
+      `${id.slice(-8)}: ${found.bin} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
+    );
+    const stream = this.answerStream(r, id);
+    const out = await this.slot(async () => {
+      const opened = await this.openAcp(id, found, cwd, label, stream);
+      if ("failed" in opened) return { reply: "", error: opened.failed };
+      /* v8 ignore next -- unsupported only comes of a session/load, which a start never asks for */
+      if ("unsupported" in opened) return { reply: "", error: opened.unsupported };
+      this.sdkSessions.set(ref.id, opened.held);
+      this.setAlias(ref.harness, ref.id, opened.held.session, cwd);
+      return this.sendHeld(ref.id, opened.held, frameStart(text, r.url));
+    });
+    stream.close();
+    this.finish(
+      r,
+      id,
+      out.error ? { outcome: "failed", detail: out.error } : { outcome: "delivered", mode: "api", reply: out.reply },
+      sent,
+    );
+  }
+
+  /** The next message for an ACP-driven session no process holds: the agent run again
+   *  and the session reopened in it (`session/load`), then held like a new one. Acked
+   *  `resume`, as any cold start. An agent that can't reopen one is `unsupported`. */
+  private async resumeAcp(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number) {
+    const ref = parseSessionRef(cmd.session)!;
+    const label = this.label(ref.harness);
+    const found = this.deps.acp?.(ref.harness) ?? null;
+    if (!found) return this.finish(r, id, { outcome: "failed", detail: `${label} isn't installed on this machine` });
+    this.finish(r, id, { outcome: "taken" });
+    await this.serial(ref.id, async () => {
+      /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
+      const target = this.aliasOf(ref.harness, ref.id)?.id ?? place.target ?? ref.id;
+      this.deps.log(
+        `${id.slice(-8)}: ${found.bin} reopens ${target.slice(0, 8)} (${this.cfg.mode}) in ${place.folder}`,
+      );
+      const stream = this.answerStream(r, id);
+      const out = await this.owning(ref.id, () =>
+        this.slot(async () => {
+          const opened = await this.openAcp(id, found, place.folder, label, stream, target);
+          if ("unsupported" in opened) return { reply: "", unsupported: opened.unsupported };
+          if ("failed" in opened) return { reply: "", error: opened.failed };
+          this.sdkSessions.set(ref.id, opened.held);
+          return this.sendHeld(ref.id, opened.held, frame(cmd.text as string, r.url));
+        }),
+      );
+      stream.close();
+      if ("unsupported" in out) return this.finish(r, id, { outcome: "unsupported", detail: out.unsupported });
+      this.finish(
+        r,
+        id,
+        out.error
+          ? { outcome: "failed", detail: out.error }
+          : { outcome: "delivered", mode: "resume", reply: out.reply },
+        sent,
+      );
+    });
+  }
+
+  private openAcp(
+    id: string,
+    found: { bin: string; args: string[] },
+    cwd: string,
+    label: string,
+    stream: AnswerStream,
+    load?: string,
+  ): Promise<acpControl.AcpStart> {
+    return acpControl.startAcp({
+      ...found,
+      cwd,
+      mode: this.cfg.mode,
+      label,
+      env: this.deps.env ?? process.env,
+      ...(load ? { load } : {}),
+      onText: (t) => stream.set(t),
+      log: (l) => this.deps.log(`${id.slice(-8)}: ${l}`),
+      now: this.deps.now,
+    });
   }
 
   /** A start's text, with its files (CONTROL.md §6) fetched, checked and written under

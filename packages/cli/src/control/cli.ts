@@ -4,6 +4,7 @@ import { existsSync, realpathSync, statSync, unwatchFile, watchFile } from "node
 import os from "node:os";
 import path from "node:path";
 import {
+  acpControl,
   antigravityControl,
   claudeControl,
   claudeDirs,
@@ -300,6 +301,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     codex: () => codexControl.findCodex(),
     agy: () => antigravityControl.findAgy(),
     codexLogin: (bin) => codexControl.codexLogin(bin),
+    acp: (harness) => acpControl.findAcpAgent(harness),
     harnesses: () => drivableHarnesses(),
     run: runClaude,
     sdk,

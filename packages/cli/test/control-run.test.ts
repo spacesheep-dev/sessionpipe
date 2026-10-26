@@ -105,6 +105,7 @@ vi.mock("@sessionpipe/core", async (original) => {
       codexLogin: async (bin: string) => ({ loggedIn: bin === "/codex" }),
     },
     antigravityControl: { ...real.antigravityControl, findAgy: () => null },
+    acpControl: { ...real.acpControl, findAcpAgent: () => null },
     drivableHarnesses: () => [],
   };
 });
@@ -212,6 +213,7 @@ describe("control run", () => {
     expect(deps.harnesses?.()).toEqual([]);
     expect(deps.codex?.()).toBeNull();
     expect(deps.agy?.()).toBeNull();
+    expect(deps.acp?.("goose")).toBeNull();
     expect(deps.claudeDirs()).toContain(path.join(os.homedir(), ".claude"));
     expect(await deps.codexLogin?.("/codex")).toEqual({ loggedIn: true });
     expect(deps.updateStatus?.()).toEqual({ latest: "9.9.9" });

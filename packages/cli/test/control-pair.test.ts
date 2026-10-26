@@ -192,6 +192,25 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(readControl(env)?.receivers[0]?.keys.map((k) => k.id)).toEqual([passkey.key.id]);
   });
 
+  it("lists at most 20 harnesses, and `api` among the modes when an ACP agent is one of them", async () => {
+    const many = ["claude-code", "codex", ...Array.from({ length: 25 }, (_, i) => `agent-${i}`)];
+    rx.posts = [started()];
+    rx.gets = [await paired()];
+    await pair(opts({ harnesses: ["claude-code", "goose"] }));
+    expect(rx.seen[1]?.body).toMatchObject({
+      harnesses: ["claude-code", "goose"],
+      modes: expect.arrayContaining(["api"]),
+    });
+    rx.seen.length = 0;
+    rx.posts = [started()];
+    rx.gets = [await paired()];
+    await pair(opts({ harnesses: many }));
+    expect(rx.seen[1]?.body).toMatchObject({
+      harnesses: many.slice(0, 20),
+      modes: ["waiter", "turn", "resume", "fork"],
+    });
+  });
+
   it("a receiver that answers 200 to the start is fine; one that refuses says why, or doesn't", async () => {
     rx.posts = [{ status: 403, body: { reason: "quota" } }];
     await expect(pair(opts())).rejects.toThrow("the receiver refused to start pairing (HTTP 403: quota)");

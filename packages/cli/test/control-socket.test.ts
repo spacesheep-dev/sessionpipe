@@ -447,10 +447,10 @@ describe.runIf(unix)("messages the daemon can't take in", () => {
       },
     });
     await dm.start();
-    const q = await rx.send({ kind: "start", session: "gemini-cli:abc", cwd: project, text: "hi" });
+    const q = await rx.send({ kind: "start", session: "kiro:abc", cwd: project, text: "hi" });
     expect(await rx.waitAck(q.id)).toMatchObject({
       outcome: "unsupported",
-      detail: "can't start a gemini-cli session",
+      detail: "can't start a kiro session",
     });
     for (let i = 0; i < 100 && !rx.hellos.length; i++) await settle(20);
     expect(rx.hellos[0]).toMatchObject({ harnesses: ["claude-code"] });

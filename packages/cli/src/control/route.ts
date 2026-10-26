@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The routing rule (spec/CONTROL.md §6): the first delivery mode that fits, top to
 // bottom. Pure, so every branch is a unit test.
+import { acpControl } from "@sessionpipe/core";
 import type { ControlKind } from "@sessionpipe/core/control";
 
 export type DeliveryMode = "sdk" | "waiter" | "turn" | "api" | "resume" | "fork";
@@ -26,8 +27,8 @@ export interface SessionView {
 export type Route = { mode: DeliveryMode } | { unsupported: string } | { refused: "no_session" };
 
 /** The harnesses the daemon can run a turn of by itself: resume an idle session, start a
- *  new one (`claude -p`, `codex exec`, `agy -p`). */
-export const HEADLESS = new Set(["claude-code", "codex", "antigravity"]);
+ *  new one (`claude -p`, `codex exec`, `agy -p`, or any ACP agent as its client). */
+export const HEADLESS = new Set(["claude-code", "codex", "antigravity", ...acpControl.ACP_HARNESSES]);
 
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
  *  session gets a fork, never a resume. */

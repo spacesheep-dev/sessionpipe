@@ -192,7 +192,7 @@ describe("routing (CONTROL.md §6)", () => {
     expect(routePrompt({ ...base, live: true })).toEqual({ mode: "fork" });
     expect(routePrompt({ ...base, live: true, canFork: false })).toHaveProperty("unsupported");
     expect(routePrompt({ ...base, known: false })).toEqual({ refused: "no_session" });
-    expect(routePrompt({ ...base, harness: "gemini-cli" })).toHaveProperty("unsupported");
+    expect(routePrompt({ ...base, harness: "kiro" })).toHaveProperty("unsupported");
     expect(routePrompt({ ...base, harness: "codex", midTurn: true })).toEqual({ mode: "turn" });
     // Codex and Antigravity: resumed headlessly when idle, never copied when open.
     for (const harness of ["codex", "antigravity"]) {

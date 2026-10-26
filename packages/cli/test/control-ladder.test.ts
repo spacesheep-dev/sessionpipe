@@ -29,7 +29,7 @@ import { FakeReceiver } from "./helpers/receiver.js";
 const SID = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
 const SESSION = `claude-code:${SID}`;
 const NEW = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8c";
-const GEMINI = "gemini-cli:g-1";
+const KIRO = "kiro:g-1";
 const unix = process.platform !== "win32";
 const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
 
@@ -207,30 +207,30 @@ afterEach(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe.runIf(unix)("a harness with no headless path (Gemini CLI)", () => {
+describe.runIf(unix)("a harness with no headless path (Kiro)", () => {
   it("is placed by its hooks' cwd: in place at its next Stop when mid-turn, else unsupported", {
     timeout: 30_000,
   }, async () => {
     await startDaemon();
     // Nothing known about it yet.
-    const none = await rx.send({ session: GEMINI, text: "hi" });
+    const none = await rx.send({ session: KIRO, text: "hi" });
     expect(await rx.waitAck(none.id)).toMatchObject({ outcome: "refused", code: "no_session" });
     // A folder off the list, a path that isn't absolute, a file rather than a folder, a folder that is gone.
     for (const cwd of [tmp, "relative/dir", fakeClaude, path.join(tmp, "gone")]) {
-      await ask(sock, { op: "event", session: GEMINI, event: "SessionStart", cwd }, 500);
-      const q = await rx.send({ session: GEMINI, text: "hi" });
+      await ask(sock, { op: "event", session: KIRO, event: "SessionStart", cwd }, 500);
+      const q = await rx.send({ session: KIRO, text: "hi" });
       expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "folder" });
     }
-    await ask(sock, { op: "event", session: GEMINI, event: "SessionStart", cwd: project }, 500);
-    const idle = await rx.send({ session: GEMINI, text: "hi" });
+    await ask(sock, { op: "event", session: KIRO, event: "SessionStart", cwd: project }, 500);
+    const idle = await rx.send({ session: KIRO, text: "hi" });
     expect(await rx.waitAck(idle.id)).toMatchObject({
       outcome: "unsupported",
-      detail: "no idle delivery for gemini-cli yet",
+      detail: "no idle delivery for kiro yet",
     });
-    await ask(sock, { op: "event", session: GEMINI, event: "UserPromptSubmit", cwd: project }, 500);
-    const q = await rx.send({ session: GEMINI, text: "while you're at it" });
+    await ask(sock, { op: "event", session: KIRO, event: "UserPromptSubmit", cwd: project }, 500);
+    const q = await rx.send({ session: KIRO, text: "while you're at it" });
     for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await settle(20);
-    const r = await ask(sock, { op: "stop", session: GEMINI, active: false }, 500);
+    const r = await ask(sock, { op: "stop", session: KIRO, active: false }, 500);
     expect(r).toMatchObject({ op: "block" });
     // No transcript to read an answer from: delivered, without one.
     const ack = await rx.waitAck(q.id);
@@ -240,8 +240,8 @@ describe.runIf(unix)("a harness with no headless path (Gemini CLI)", () => {
 
   it("a folder allowed with a trailing slash that doesn't exist is matched as written", async () => {
     await startDaemon({ cfg: { folders: [`${path.join(tmp, "gone")}/`, project] } });
-    await ask(sock, { op: "event", session: GEMINI, event: "UserPromptSubmit", cwd: project }, 500);
-    const q = await rx.send({ session: GEMINI, text: "hi" });
+    await ask(sock, { op: "event", session: KIRO, event: "UserPromptSubmit", cwd: project }, 500);
+    const q = await rx.send({ session: KIRO, text: "hi" });
     for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await settle(20);
     expect(rx.acks.find((a) => a.id === q.id)?.outcome).toBe("taken");
   });

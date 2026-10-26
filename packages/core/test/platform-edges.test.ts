@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { ACP_AGENTS } from "../src/adapters/acp-control.js";
 import { agPath } from "../src/adapters/antigravity.js";
 import { findAgy } from "../src/adapters/antigravity-control.js";
 import { _resetClaudeCaches, claudeFacts, claudePid } from "../src/adapters/claude-code.js";
@@ -100,7 +101,8 @@ describe("finding a harness CLI", () => {
     });
   });
   it("drivableHarnesses: a machine with none of the CLIs drives nothing", () => {
-    fake.statFails = (p) => /(?:^|[\\/])(?:claude|codex|agy)(?:\.exe|\.cmd)?$/.test(p);
+    const names = ["claude", "codex", "agy", ...ACP_AGENTS.map((a) => a.bin)].join("|");
+    fake.statFails = (p) => new RegExp(`(?:^|[\\\\/])(?:${names})(?:\\.exe|\\.cmd)?$`).test(p);
     expect(drivableHarnesses({ PATH: path.join(tmp, "win") })).toEqual([]);
   });
 });
