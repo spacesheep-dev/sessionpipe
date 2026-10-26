@@ -307,8 +307,9 @@ time,
   max-width: var(--max);
   margin: 0 auto;
   padding: 0 var(--gutter);
-  min-height: 60px;
+  min-height: 76px;
 }
+/* the lockup at 24 px: the mark reads as a mark, the wordmark as a name */
 .brand {
   display: inline-flex;
   padding: 8px 0;
@@ -316,21 +317,21 @@ time,
 }
 .brand img {
   display: block;
-  width: 131px;
-  height: 18px;
+  width: 175px;
+  height: 24px;
 }
 .top nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 .top nav a {
   color: var(--fg2);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 8px 12px;
+  border-radius: 9px;
   transition:
     color 0.12s,
     background-color 0.12s;
@@ -341,6 +342,13 @@ time,
 }
 .top nav a[aria-current] {
   color: var(--fg);
+  background: var(--well);
+}
+/* GitHub closes the row as a quiet pill */
+.top nav a[href^="https://github.com/"] {
+  margin-left: 8px;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 main {
   max-width: var(--max);
@@ -1649,6 +1657,17 @@ details > p {
 }
 /* --- narrow screens ------------------------------------------------------------------------ */
 @media (max-width: 960px) {
+  /* the lockup and seven links share one row down to the phone layout */
+  .top nav {
+    gap: 0;
+  }
+  .top nav a {
+    padding: 8px 8px;
+    font-size: 14px;
+  }
+  .top nav a[href^="https://github.com/"] {
+    margin-left: 4px;
+  }
   .home .pipe {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -1887,5 +1906,16 @@ details > p {
   }
   .top nav a {
     padding: 6px 8px;
+    font-size: 14px;
+  }
+  .top nav a[href^="https://github.com/"] {
+    margin-left: 2px;
+  }
+  .top .in {
+    min-height: 64px;
+  }
+  .brand img {
+    width: 146px;
+    height: 20px;
   }
 }
