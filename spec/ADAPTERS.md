@@ -120,6 +120,7 @@ each with `transcript_path: null` and an empty `expect`.
 | Ids in stdin | `session_id`, `cwd`, `transcript_path`, `timestamp`, `hook_event_name`, `tool_name`, `tool_input`, `tool_response`, `prompt`, `prompt_response`, `notification_type`, `message`, `details`, `trigger`, `source`, `reason`. |
 | Transcript (tier 2) | `transcript_path` (`~/.gemini/tmp/<hash>/chats/session-*.jsonl`): records of `type: user \| gemini`. |
 | Quirks | Gemini CLI's own telemetry defaults `logPrompts` **on**; the installer says so once. |
+| Control | Through ACP: `gemini --acp` (*Agents driven through ACP*, below). A session the daemon started this way fires these same hooks, under Gemini CLI's own `session_id`; the daemon keeps the start's id as its name (CONTROL.md §6 `start`). |
 
 Fixtures: *(recording pending: Gemini CLI is not signed in on the recording
 machine.)*
@@ -152,7 +153,7 @@ machine; the next conversation fills them.)*
 | Transcript (tier 2) | One SQLite database for every session: `~/.local/share/devin/cli/sessions.db` (`$XDG_DATA_HOME/devin/cli/sessions.db`; `%APPDATA%\devin\cli\sessions.db` on Windows), read **read-only**. There is no per-session file, so the adapter addresses a session as `<database>#<session id>`. `message_nodes` is a forest that keeps abandoned branches (27 nodes for a two-turn session): the transcript is the one chain ending at `sessions.main_chain_id`, walked up through `parent_node_id` (a recursive CTE), never every node. `chat_message` is JSON: `role: "user"` with `metadata.is_user_input` true is the person, `role: "assistant"` with non-empty `content` is the reply; `role: "system"` (Cognition's own prompt, the subagent profiles, the skills manifest, the generated `system_info`) and `role: "tool"` are skipped at every tier. `node_id` is the cursor, and it bounds the read: the walk stops there, so a Stop does not re-read the chain's root (a 17 kB system prompt and four more system blocks) every time, and where a chain is longer than the reader's 4000-node cap the **newest** nodes are the ones kept. A turn is timed by the message's own `chat_message.metadata.created_at`; `message_nodes.created_at` is the time the row batch was last **saved** — one value for the whole chain, rewritten on every save, and not monotonic along it — so it is only the fallback for a message with no time of its own. On a machine with neither `node:sqlite` nor the `sqlite3` binary there is no way into the database at all: Devin then reports **tier 0–1 only** — no model, no folder from the store, no title, no times, no tier-2 turns, and an empty `backfill`. |
 | Facts | Title: the earliest non-shell `prompt_history.content` (`first-ask`, 80 chars) — `sessions.title` is the titler's own output and holds a backticked command, or a raw `functions.Shell:0{…}` mid-turn. Model: `sessions.model` (the slug, e.g. `swe-2-medium`). `cwd`: `sessions.working_directory`. Times: `sessions.created_at` / `last_activity_at`, which are unix **seconds**. Version: the `_versions/current` symlink under the data directory. Account: `devin.org_id` from the user config — the only account id Devin keeps in a plain local file (`devin auth status` would name the user, but that is a subprocess, and `credentials.toml` is never read). |
 | Quirks | Every `devin -p` starts a **new** session with a new slug; `-c` / `-r <id>` reuse the id and fire `SessionStart` again with `source: "resume"`. `Stop` is **not** guaranteed — a turn whose tool was rejected went `UserPromptSubmit` → `PreToolUse` → `PermissionRequest` → `SessionEnd` with no `Stop`; `SessionEnd` fired on every run, and `session.ended` is therefore not "the session is over for good". `PermissionRequest` fires **after** `PreToolUse` for the same `tool_use_id`. Devin also imports `~/.claude/settings.json` hooks (`read_config_from.claude`, on by default), so a Claude Code entry there can be run by Devin: the `claude-code` adapter drops a payload with no `transcript_path` and a non-UUID session id for exactly that reason. |
-| Control | None yet. Devin has `-p`, `-c` and `-r <id>`, so a headless driver is possible, but it is not in `HEADLESS` and a `permission.answer` for a `devin` session is refused (the hook never prints). |
+| Control | Through ACP: `devin acp` (*Agents driven through ACP*, below); a session the daemon started this way fires these same hooks under Devin's own session id, and the daemon keeps the start's id as its name. A `permission.answer` for a `devin` session is still refused (the hook never prints). |
 
 Fixtures recorded 2026-10-08 on Devin CLI 3000.11.3 (seven `devin --model swe-2-medium -p`
 runs with a recording hook): `SessionStart` (`startup` and `resume`), `UserPromptSubmit`,
@@ -178,3 +179,72 @@ payload: `PostCompaction` *(recording pending)* — the runs were far too short 
 ## OpenCode (`opencode`) — M7
 
 No shell hook: a plugin file `~/.config/opencode/plugins/sessionpipe.ts` POSTs bus events to the local worker over a Unix socket / named pipe. `session.created` → `session.started` · `message.updated` (user) → `turn.started` · `tool.execute.before/after` · `permission.asked` → `attention` · `session.idle` → `turn.ended` · `session.deleted` → `session.ended`. Ids: `sessionID`, `directory`. Immediate `prompt` and `cancel` exist through the server API (M6). *(recording pending)*
+
+## Agents driven through ACP (control only)
+
+The [Agent Client Protocol](https://agentclientprotocol.com) (ACP) is one JSON-RPC
+conversation over an agent's stdin and stdout, the same for every agent that speaks
+it. For control (CONTROL.md §6: `start`, then `prompt` and `cancel` in `api` mode) one
+client in the daemon drives all of them; nothing here is a hook adapter, and an agent
+in this table reports no events unless it also has a row above. The daemon runs only
+an agent that is already installed on the machine: its CLI on `PATH`, or the file
+`SESSIONPIPE_ACP_<HARNESS>` names (the harness name upper-cased, `-` as `_`:
+`SESSIONPIPE_ACP_GEMINI_CLI`); it never downloads one. The launch line per agent is the
+one the [ACP registry](https://github.com/agentclientprotocol/registry) publishes and
+checks nightly, as of its 2026-10-22 state (the registry id in the second column); a
+harness that has a row above keeps its name here. Claude Code, Codex and Antigravity
+have their own drivers (above) and their ACP wrappers (`claude-acp`, `codex-acp`,
+`antigravity-acp`) are not run.
+
+| `harness.name` | Registry id | Product | Launch |
+|----------------|-------------|---------|--------|
+| `gemini-cli` | `gemini` | Gemini CLI (Google) | `gemini --acp` |
+| `devin` | `devin` | Devin CLI (Cognition) | `devin acp` |
+| `opencode` | `opencode` | OpenCode | `opencode acp` |
+| `cursor` | `cursor` | Cursor | `cursor-agent acp` |
+| `copilot-cli` | `github-copilot-cli` | GitHub Copilot CLI | `copilot --acp` |
+| `droid` | `factory-droid` | Droid (Factory) | `droid exec --output-format acp-daemon` |
+| `goose` | `goose` | goose (Block) | `goose acp` |
+| `kilo` | `kilo` | Kilo | `kilo acp` |
+| `qwen-code` | `qwen-code` | Qwen Code | `qwen --acp --experimental-skills` |
+| `cline` | `cline` | Cline | `cline --acp` |
+| `auggie` | `auggie` | Auggie (Augment) | `auggie --acp` |
+| `kimi` | `kimi` | Kimi CLI (Moonshot) | `kimi acp` |
+| `amp` | `amp-acp` | Amp (Sourcegraph) | `amp-acp` |
+| `mistral-vibe` | `mistral-vibe` | Mistral Vibe | `vibe-acp` |
+| `bob` | `bob` | Bob (IBM) | `bob acp` |
+| `grok-build` | `grok-build` | Grok Build (xAI) | `grok agent stdio` |
+| `qoder` | `qoder` | Qoder CLI | `qodercli --acp` |
+| `minimax-code` | `minimax-code` | MiniMax Code | `mcode acp` |
+| `codebuddy-code` | `codebuddy-code` | Codebuddy Code (Tencent) | `codebuddy --acp` |
+| `nova` | `nova` | Nova (Compass) | `nova acp` |
+| `dimcode` | `dimcode` | DimCode | `dim acp` |
+| `dirac` | `dirac` | Dirac | `dirac --acp` |
+| `harn` | `harn` | Harn | `harn serve acp` |
+| `vtcode` | `vtcode` | VT Code | `vtcode acp` |
+| `stakpak` | `stakpak` | Stakpak | `stakpak acp` |
+| `crow-cli` | `crow-cli` | crow-cli | `crow-cli acp` |
+| `corust-agent` | `corust-agent` | Corust Agent | `corust-agent-acp` |
+| `cortex-code` | `cortex-code` | Cortex Code (Snowflake) | `cortex acp serve` |
+| `kimchi` | `kimchi` | Kimchi | `kimchi --mode acp` |
+
+What the daemon says and reads, in the protocol's own names:
+
+- `initialize` with `protocolVersion: 1`, `clientCapabilities: {fs: {readTextFile: false,
+  writeTextFile: false}, terminal: false}` and `clientInfo` naming sessionpipe. An agent
+  that answers with `authMethods` and then refuses `session/new` with an *authentication
+  required* error is acked `failed` with the agent's words: signing in is done at the
+  machine's terminal, never by the daemon.
+- `session/new` with `cwd` (the start's folder) and `mcpServers: []`; `session/load`
+  with the same and the agent's `sessionId` to reopen one.
+- `session/prompt` with one `text` block; its response's `stopReason` ends the turn.
+- `session/update`: `agent_message_chunk` whose `content` is `text` is the reply;
+  `tool_call` and `tool_call_update` name what ran (for the reply's list of refusals);
+  every other kind is ignored.
+- `session/request_permission`: answered from the machine's mode (CONTROL.md §6).
+- `session/cancel` (a notification) for `cancel`.
+
+A session an ACP agent runs is placed by the folder its start ran in, which the daemon
+records with the agent's session id (`aliases.json`), or by the folder the harness's
+own hooks reported where it has a row above.
+

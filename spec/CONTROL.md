@@ -236,8 +236,8 @@ used:
 | `sdk` | The daemon started the session itself (Agent SDK streaming input) and still holds it | Claude Code | 0 turns |
 | `waiter` | The session runs `sessionpipe wait` in the background (§8) | Claude Code | 0 turns, no network |
 | `turn` | The session is mid-turn: the message lands at its next Stop | Claude Code, Codex, Gemini CLI (AfterAgent), Cursor, Copilot CLI, Droid, Kiro | 0 turns |
-| `api` | The harness has an input API | OpenCode, Codex app-server | 0 turns |
-| `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`) | cold start |
+| `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
+| `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`), an ACP agent that can reopen a session (`session/load`) | cold start |
 | `fork` | Live and idle, with no waiter | Claude Code (`--fork-session`) | cold start |
 
 Nothing fits: acked `unsupported`. **Never two writers on one transcript**: a session a
@@ -279,16 +279,49 @@ attention it did not receive a verified `permission.answer` for.
 ### `cancel`
 
 Stops the current turn where an API exists (the Agent SDK's interrupt in `sdk` mode;
-OpenCode `/session/:id/abort`; Codex app-server interrupt); everywhere else acked
+ACP `session/cancel` for a session the daemon holds in `api` mode; OpenCode
+`/session/:id/abort`; Codex app-server interrupt); everywhere else acked
 `unsupported`. **Never a signal to a pid.**
 
 ### `start`
 
 A new session of the command's harness, in `cwd`, for any harness the machine can drive
 headlessly (it lists them in its hello's `harnesses`; any other is acked
-`unsupported`). Claude Code: with the command's session id, through the Agent SDK when
+`unsupported`). The pairing request and the hello list at most **20**: Claude Code,
+Codex and Antigravity first, then the ACP agents below in the registry's order, so a
+machine with more agents installed than that advertises the first 20 and still starts
+any of the rest a command names. Their `modes` include `api` whenever one of the
+listed harnesses is an ACP agent. Claude Code: with the command's session id, through the Agent SDK when
 the daemon has it, else `claude -p --session-id`. Codex: `codex exec`. Antigravity:
 `agy -p`. Acked `delivered` with mode `sdk` or `resume`, and the reply.
+
+**Any other agent, through ACP.** An agent that speaks the
+[Agent Client Protocol](https://agentclientprotocol.com) (ADAPTERS.md, *Agents driven
+through ACP*, names each one and its command) is driven the same way for every one of
+them: the daemon runs the agent's own CLI as a child process in `cwd`, with JSON-RPC
+over its stdin and stdout, and is its client: `initialize` (protocol version 1, no
+file-system or terminal capability, so the agent uses its own tools), `session/new` in
+`cwd`, then `session/prompt` with the framed text. The agent's `agent_message_chunk`
+updates are the reply as it grows (`progress` acks) and the `session/prompt` response
+ends the turn; `end_turn` and `max_tokens` are a delivered turn, `refusal` and
+`cancelled` say so in the reply, anything else is `failed`. Acked `delivered` with mode
+`api`. The agent names its own session (`session/new` → `sessionId`), so the start's id
+is its name everywhere, as above. **The daemon keeps the agent running** after the
+turn: a later `prompt` to that session goes to the same process (`api`, 0 turns), and a
+`cancel` is its `session/cancel`. An agent idle for ten minutes is closed; a `prompt` to a
+session no process holds reopens it with `session/load` when the agent said it could
+(`agentCapabilities.loadSession`) and is acked `unsupported` when it can't, naming the
+agent. The agent's `session/request_permission` is answered by the machine's mode and
+never by a receiver: `safe` picks a `reject_once` option, else `reject_always`, else
+answers `cancelled`, and the reply lists what was refused; `auto` picks `allow_once`,
+else `allow_always`, and answers `cancelled` when neither is offered. The mode governs
+what the daemon answers, not what the agent asks: an agent that runs a tool without
+asking (OpenCode 2.1 wrote a file in `safe` mode with no `session/request_permission`)
+is bound only by its own settings, as it would be at its own terminal.
+Every other request an agent makes of its client (`fs/*`, `terminal/*`,
+`elicitation/create`) is answered *method not found*, since the daemon advertised none
+of them. The daemon only ever runs an agent that is already installed on the machine
+(found on `PATH`, or where `SESSIONPIPE_ACP_<HARNESS>` points): it never fetches one.
 
 Some harnesses name their own sessions: neither `codex exec` nor `agy` can be told which
 id a new session gets. A machine whose harness names its own sessions **keeps the

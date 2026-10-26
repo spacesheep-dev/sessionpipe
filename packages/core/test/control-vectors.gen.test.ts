@@ -614,6 +614,13 @@ describe.runIf(WRITE)("write control vectors", () => {
       "Two files whose names differ only in case.",
       start([png, { ...pdf, name: "Screenshot.PNG" }]),
     );
+    ok(
+      "start-acp-harness",
+      "A new session of an agent driven through ACP (goose): the harness name is the row in ADAPTERS.md, and whether this machine can start it is the daemon's to say (its hello's `harnesses`), never the verifier's.",
+      await signed(pk, day, commandStr({ kind: "start", session: "goose:0199a", cwd: "/tmp" })),
+      "grant",
+      "start",
+    );
 
     mkdirSync(dir, { recursive: true });
     for (const f of readdirSync(dir)) if (f.endsWith(".json")) rmSync(path.join(dir, f));

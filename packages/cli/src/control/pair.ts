@@ -9,7 +9,14 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { claudeAccounts, claudeDirs, drivableHarnesses, type HarnessAccount } from "@sessionpipe/core";
+import {
+  acpControl,
+  claudeAccounts,
+  claudeDirs,
+  drivableHarnesses,
+  type HarnessAccount,
+  HELLO_HARNESSES_MAX,
+} from "@sessionpipe/core";
 import { type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
 import {
   type ControlConfig,
@@ -107,11 +114,13 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
       accounts = [];
     }
   const auth = { authorization: `Bearer ${o.token ?? pollKey}`, "content-type": "application/json" };
+  const harnesses = (o.harnesses ?? drivableHarnesses(o.env ?? process.env)).slice(0, HELLO_HARNESSES_MAX);
   const hello = {
     ...(pollKey ? { poll_key: pollKey } : {}),
     name: cfg.name,
-    harnesses: o.harnesses ?? drivableHarnesses(o.env ?? process.env),
-    modes: ["waiter", "turn", "resume", "fork"],
+    harnesses,
+    // Every ACP agent's turn is acked `api` (CONTROL.md §6).
+    modes: ["waiter", "turn", "resume", "fork", ...(harnesses.some((h) => acpControl.acpAgent(h)) ? ["api"] : [])],
     version: VERSION,
     folders: cfg.folders,
     mode: cfg.mode,

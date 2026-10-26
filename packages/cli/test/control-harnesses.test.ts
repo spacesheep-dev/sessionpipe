@@ -199,7 +199,8 @@ describe("which kinds go where", () => {
     expect(kindPath("start", "codex")).toBe("start");
     expect(kindPath("start", "antigravity")).toBe("start");
     expect(kindPath("start", "claude-code")).toBe("start");
-    expect(kindPath("start", "gemini-cli")).toHaveProperty("unsupported");
+    expect(kindPath("start", "gemini-cli")).toBe("start"); // through ACP
+    expect(kindPath("start", "kiro")).toHaveProperty("unsupported");
   });
   it("a permission answer goes to the hook, except where the hook never prints", () => {
     expect(kindPath("permission.answer", "claude-code")).toBe("permission");
