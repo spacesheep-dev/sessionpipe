@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// The site's one script: copy buttons, and the GUI's download for this system. Each button
-// copies the Markdown file its data-copy names, or the command its data-text holds. Without
-// it the buttons stay hidden and the link or the command beside each one does the same job.
+// The site's one script: copy buttons, the GUI's download for this system, and the docs'
+// contents marking the section being read. Each button copies the Markdown file its
+// data-copy names, or the command its data-text holds. Without it the buttons stay hidden
+// and the link or the command beside each one does the same job.
 for (const button of document.querySelectorAll("button[data-copy], button[data-text]")) {
   const label = button.textContent;
   button.hidden = false;
@@ -61,4 +62,32 @@ if (dl) {
   // first in the row is first in the tab order too
   const first = dl.querySelector(`[data-os="${primary}"]`);
   if (first) dl.querySelector("[data-os]").before(first);
+}
+
+// The docs' contents: mark the section being read, so the list says where you are.
+const toc = document.querySelector(".docs .toc");
+if (toc && "IntersectionObserver" in window) {
+  const links = new Map([...toc.querySelectorAll("a[href^='#']")].map((a) => [a.hash.slice(1), a]));
+  const seen = new Set();
+  const mark = () => {
+    const first = [...links.keys()].find((id) => seen.has(id));
+    for (const [id, a] of links) {
+      if (id === first) a.setAttribute("aria-current", "location");
+      else a.removeAttribute("aria-current");
+    }
+  };
+  const io = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) seen.add(e.target.id);
+        else seen.delete(e.target.id);
+      }
+      if (seen.size) mark();
+    },
+    { rootMargin: "-80px 0px -60% 0px" },
+  );
+  for (const id of links.keys()) {
+    const h = document.getElementById(id);
+    if (h) io.observe(h);
+  }
 }

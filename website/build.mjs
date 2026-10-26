@@ -40,6 +40,7 @@ const nav = [
   ["/docs/", "Docs"],
   ["/protocol/", "Protocol"],
   ["/receivers/", "Receivers"],
+  ["/#gui", "GUI"],
   ["/changelog/", "Changelog"],
   ["https://github.com/spacesheep-dev/sessionpipe", "GitHub"],
 ];
@@ -97,7 +98,7 @@ function page({ title, description, body: html, pathname, edit, license, jsonld 
   const navHtml = nav
     .map(
       ([href, label]) =>
-        `<a href="${href}"${href === pathname || (href !== "/" && pathname.startsWith(href)) ? ' aria-current="page"' : ""}>${label}</a>`,
+        `<a href="${href}"${href === pathname || (href !== "/" && pathname.startsWith(href)) || (href === "/docs/" && pathname === "/get-started/") ? ' aria-current="page"' : ""}>${label}</a>`,
     )
     .join("");
   return `<!doctype html>
@@ -174,7 +175,9 @@ function mdPage({ pathname, file, title, description, map, dirPrefix = "", licen
 }
 
 // h2/h3 get ids (an explicit {#id}, else GitHub's slug, so links written against the
-// repository's Markdown land), and the page gets a table of contents from them.
+// repository's Markdown land), and the page gets a table of contents from them: a column
+// beside the text on a wide screen, and on a narrow one a single folded line under the h1,
+// so the page still starts with its title.
 function anchored(html) {
   const toc = [];
   const out = html.replace(/<h([23])>(.*?)<\/h\1>/g, (_, level, inner) => {
@@ -192,8 +195,13 @@ function anchored(html) {
     toc.push({ level: Number(level), id, text: plain });
     return `<h${level} id="${id}"><a href="#${id}">${text}</a></h${level}>`;
   });
-  const tocHtml = `<nav class="toc" aria-label="On this page"><p>On this page</p><ul>${toc.map((h) => `<li class="l${h.level}"><a href="#${h.id}">${h.text}</a></li>`).join("")}</ul></nav>`;
-  return { html: out, toc: tocHtml };
+  const item = (h) => `<li class="l${h.level}"><a href="#${h.id}">${h.text}</a></li>`;
+  const tocHtml = `<nav class="toc" aria-label="On this page"><p>On this page</p><ul>${toc.map(item).join("")}</ul></nav>`;
+  const fold = `<details class="toc-m"><summary>On this page</summary><nav aria-label="On this page"><ul>${toc
+    .filter((h) => h.level === 2)
+    .map(item)
+    .join("")}</ul></nav></details>`;
+  return { html: toc.length ? out.replace("</h1>", `</h1>${fold}`) : out, toc: tocHtml };
 }
 
 // --- protocol, from spec/ ---------------------------------------------------------
