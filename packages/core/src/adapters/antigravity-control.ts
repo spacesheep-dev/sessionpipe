@@ -8,6 +8,7 @@
 // the daemon keeps that too. Shapes measured on agy 1.2.16, 2026-10-04.
 import os from "node:os";
 import path from "node:path";
+import type { RunLevel, StartPermission } from "../control/verify.js";
 import { deniedNote, findBinary, jobEnv, type Mode, type Reading, type RunResult, runFailure } from "./headless.js";
 
 const LABEL = "Antigravity";
@@ -22,17 +23,28 @@ export function findAgy(env: NodeJS.ProcessEnv = process.env, home = os.homedir(
   });
 }
 
-/** Permission flags for the machine's mode. Safe: none — agy denies every tool call
- *  nobody is there to approve, and says which. Auto: `--mode accept-edits`. Inherit:
- *  none either, so agy runs as it would by itself. Never
- *  `--dangerously-skip-permissions`: no path here writes it. */
-export function agyModeFlags(mode: Mode): string[] {
-  return mode === "auto" ? ["--mode", "accept-edits"] : [];
+/** Permission flags for a level. Safe: none — agy denies every tool call nobody is
+ *  there to approve, and says which. Edits: `--mode accept-edits`, its widest, which is
+ *  also what an auto machine's mode means for it. Inherit: none either, so agy runs as
+ *  it would by itself. agy has no read-only mode known, so `read` is never offered and
+ *  throws rather than run at safe. Never `--dangerously-skip-permissions`: no path here
+ *  writes it. */
+export function agyModeFlags(level: RunLevel): string[] {
+  if (level === "read") throw new Error("Antigravity has no read-only mode");
+  return level === "safe" || level === "inherit" ? [] : ["--mode", "accept-edits"];
 }
+
+/** The levels a start may ask agy for on a machine in `mode`: safe, and edits on an
+ *  auto machine. */
+export const offeredLevels = (mode: Mode): StartPermission[] => (mode === "auto" ? ["safe", "edits"] : ["safe"]);
+
+/** What a start that names no level gets, said as what it is: edits on an auto machine,
+ *  no flag on an inherit one. */
+export const defaultLevel = (mode: Mode): RunLevel => (mode === "auto" ? "edits" : mode);
 
 /** One headless turn in the folder it is spawned in. A message that starts with a dash
  *  would read as a flag after `-p`; a leading space keeps it the prompt. */
-export function agyArgs(o: { mode: Mode; prompt: string; resume?: string }): string[] {
+export function agyArgs(o: { permission: RunLevel; prompt: string; resume?: string }): string[] {
   const prompt = o.prompt.startsWith("-") ? ` ${o.prompt}` : o.prompt;
   return [
     ...(o.resume ? ["--conversation", o.resume] : []),
@@ -40,7 +52,7 @@ export function agyArgs(o: { mode: Mode; prompt: string; resume?: string }): str
     prompt,
     "--output-format",
     "stream-json",
-    ...agyModeFlags(o.mode),
+    ...agyModeFlags(o.permission),
   ];
 }
 

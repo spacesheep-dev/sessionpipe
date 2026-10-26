@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Config, DEFAULT_CONFIG, machineName, readConfig, writeConfig } from "../src/config.js";
 import { makeEvent } from "../src/events.js";
-import { configFile, homeDir, safeId, stateDir, tilde } from "../src/paths.js";
+import { configFile, homeDir, safeId, stateDir, tilde, untilde } from "../src/paths.js";
 import { isUlid, ulid } from "../src/ulid.js";
 
 const dirs: string[] = [];
@@ -156,6 +156,14 @@ describe("paths", () => {
     expect(tilde("/Users/m2/x", "/Users/m")).toBe("/Users/m2/x");
     expect(tilde("/etc", "/Users/m")).toBe("/etc");
     expect(tilde(path.join(homeDir(), "code"))).toBe(`~${path.sep}code`);
+  });
+  it("untilde: ~ and ~/… (or ~\\…) under the home, the way back from tilde; ~user and the rest as they are", () => {
+    expect(untilde("~", "/Users/m")).toBe("/Users/m");
+    expect(untilde("~/x/y", "/Users/m")).toBe(path.join("/Users/m", "x/y"));
+    expect(untilde("~\\x", "/Users/m")).toBe(path.join("/Users/m", "x"));
+    expect(untilde("~m2/x", "/Users/m")).toBe("~m2/x");
+    expect(untilde("/etc", "/Users/m")).toBe("/etc");
+    expect(untilde(tilde(path.join(homeDir(), "code")))).toBe(path.join(homeDir(), "code"));
   });
   it("safeId keeps [A-Za-z0-9_.-], replaces the rest, cuts at 160", () => {
     expect(safeId("s/1:a b")).toBe("s_1_a_b");

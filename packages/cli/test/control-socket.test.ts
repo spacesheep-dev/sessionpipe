@@ -261,7 +261,7 @@ describe.runIf(unix)("what is in hand", () => {
     priv.startsRunning = 0;
     priv.sdkSessions.set(
       SID,
-      (dm as unknown as { deps: DaemonDeps }).deps.sdk!.start({ session: SID, cwd: project, mode: "safe" }),
+      (dm as unknown as { deps: DaemonDeps }).deps.sdk!.start({ session: SID, cwd: project, permission: "safe" }),
     );
     expect(dm.busy()).toBe("an Agent SDK session mid-turn");
     priv.sdkSessions.clear();

@@ -31,6 +31,14 @@ export function tilde(p: string, home: string = homeDir()): string {
   return p.startsWith(home + path.sep) || p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
 }
 
+/** The other way: `~`, `~/…` (or `~\…`) under the home directory, as a control `start`'s
+ *  `cwd` may name a folder an event reported (CONTROL.md §3.1). Anything else, `~user`
+ *  included, is returned as it is. */
+export function untilde(p: string, home: string = homeDir()): string {
+  if (p === "~") return home;
+  return /^~[\\/]/.test(p) ? path.join(home, p.slice(2)) : p;
+}
+
 /** A file-name-safe id. */
 export const safeId = (s: string): string =>
   String(s)

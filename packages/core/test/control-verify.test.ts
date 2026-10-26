@@ -11,12 +11,17 @@ import {
   fromB64url,
   KEY_STORE_SESSION,
   keyUsable,
+  levelRank,
+  MODEL_MAX,
+  MODEL_RE,
+  narrower,
   originAllowed,
   parseCommand,
   parseGrant,
   parseSessionRef,
   RS256,
   type SignedCommand,
+  START_PERMISSIONS,
   sameBytes,
   sha256,
   verifyAssertion,
@@ -167,10 +172,16 @@ describe("parseCommand", () => {
   it("start: text and an absolute folder, nothing else", () => {
     expect(code({ kind: "start", cwd: "/x" })).toBe("ok");
     expect(code({ kind: "start", cwd: "C:\\x" })).toBe("ok");
+    // Under the machine's home, as events write a folder: never another user's.
+    for (const cwd of ["~", "~/x", "~\\x"]) expect(code({ kind: "start", cwd }), cwd).toBe("ok");
+    for (const cwd of ["~root/x", "~x", "x/~"])
+      expect(code({ kind: "start", cwd }), cwd).toMatch(/^bad_fields: .*under ~/);
     expect(code({ kind: "start", text: undefined, cwd: "/x" })).toMatch(/^bad_fields: a new session needs text/);
     expect(code({ kind: "start", cwd: "rel" })).toMatch(/^bad_fields: .*absolute folder/);
     expect(code({ kind: "start" })).toMatch(/^bad_fields: .*absolute folder/);
-    expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe("bad_fields: a start carries text, cwd and files");
+    expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe(
+      "bad_fields: a start carries text, cwd, files, a permission and a model",
+    );
   });
   it("permission.answer: for and decision, no text", () => {
     expect(code({ kind: "permission.answer", text: undefined, for: "a", decision: "deny" })).toBe("ok");
@@ -206,6 +217,85 @@ describe("parseCommand", () => {
     expect(code({ kind: "key.add", text: undefined, key })).toMatch(/^bad_session: a key.add names/);
     expect(code({ key })).toBe("bad_fields: only a key.add carries a key");
     expect(code({ name: "x" })).toBe("bad_fields: only a key.add carries a key");
+  });
+
+  const START = { kind: "start", session: "codex:0199a", cwd: "/w" };
+  it("start options: a permission of the four levels, a model as one safe argument", () => {
+    for (const permission of START_PERMISSIONS) expect(code({ ...START, permission })).toBe("ok");
+    for (const permission of ["full", "bypassPermissions", "default", "", null, 3, ["auto"]])
+      expect(code({ ...START, permission })).toBe("bad_fields: a permission is one of read, safe, edits, auto");
+    for (const model of ["sonnet", "gpt-5.6-sol", "claude-opus-4-1@20250805", "opus[1m]", "us.anthropic/x:1", "a"])
+      expect(code({ ...START, model })).toBe("ok");
+    expect(code({ ...START, model: "m".repeat(MODEL_MAX) })).toBe("ok");
+    for (const model of [
+      "",
+      "-m",
+      "--dangerously-skip-permissions",
+      "a b",
+      "a;b",
+      "a\nb",
+      "m".repeat(MODEL_MAX + 1),
+      7,
+    ])
+      expect(code({ ...START, model })).toMatch(/^bad_fields: a model is 1 to 100 /);
+    expect(MODEL_RE.test(".hidden")).toBe(false);
+  });
+
+  it("levels rank narrowest first, and nothing ranks above auto", () => {
+    expect(START_PERMISSIONS.map(levelRank)).toEqual([0, 1, 2, 3]);
+    expect(levelRank("bypassPermissions")).toBe(-1);
+    expect(narrower("auto", "safe")).toBe("safe");
+    expect(narrower("read", "auto")).toBe("read");
+    expect(narrower("edits", "edits")).toBe("edits");
+  });
+
+  // Each kind's own fields, beside the common ones (CONTROL.md §3.1). Adding a field to
+  // a kind later is one entry here, and every other kind is checked to refuse it.
+  const KINDS: Record<string, { base: Record<string, unknown>; own: Record<string, unknown> }> = {
+    prompt: { base: {}, own: { text: "hi" } },
+    "permission.answer": {
+      base: { text: undefined, for: "a", decision: "deny" },
+      own: { for: "a", decision: "allow" },
+    },
+    cancel: { base: { text: undefined }, own: {} },
+    start: {
+      base: START,
+      own: {
+        text: "hi",
+        cwd: "/w",
+        files: [{ name: "a.png", type: "image/png", size: 1, sha256: "A".repeat(43) }],
+        permission: "read",
+        model: "sonnet",
+      },
+    },
+    "key.add": {
+      base: { session: KEY_STORE_SESSION, text: undefined, key: { id: "a".repeat(20), alg: -7, spki: "b".repeat(50) } },
+      own: { name: "iPhone" },
+    },
+  };
+  const OPTIONAL_ELSEWHERE = { files: [], permission: "safe", model: "sonnet", key: {}, name: "x", cwd: "/w" };
+  it("each kind carries its own fields, the common ones and nothing else", () => {
+    for (const [kind, { base, own }] of Object.entries(KINDS)) {
+      expect(code({ kind, ...base, ...own, note: "why" }), kind).toBe("ok");
+      // Any field the spec doesn't list, on every kind.
+      for (const stray of ["sandbox", "permissions", "Model", "__proto__", "x".repeat(60)])
+        expect(code({ kind, ...base, [stray]: "off" }), `${kind} ${stray}`).toMatch(
+          /^bad_fields: (the command carries a field its kind doesn't have: |a |only )/,
+        );
+      // Another kind's field.
+      for (const [f, v] of Object.entries(OPTIONAL_ELSEWHERE))
+        if (!(f in own) && !(f in base)) expect(code({ kind, ...base, [f]: v }), `${kind} ${f}`).toMatch(/^bad_fields/);
+    }
+    expect(code({ ...START, sandbox: "off" })).toBe(
+      "bad_fields: the command carries a field its kind doesn't have: sandbox",
+    );
+    expect(code({ ...START, ["y".repeat(60)]: 1 })).toBe(
+      `bad_fields: the command carries a field its kind doesn't have: ${"y".repeat(40)}`,
+    );
+    expect(code({ permission: "safe" })).toBe("bad_fields: only a start carries a model or a permission");
+    expect(code({ kind: "cancel", text: undefined, model: "sonnet" })).toBe(
+      "bad_fields: only a start carries a model or a permission",
+    );
   });
 });
 

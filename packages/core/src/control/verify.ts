@@ -40,6 +40,25 @@ export const FILES_TOTAL_MAX = 52_428_800;
 export const FILE_NAME_MAX = 200;
 /** and a media type of at most this many. */
 export const FILE_TYPE_MAX = 100;
+/** A start's `model` (CONTROL.md §3.1): at most this many characters, */
+export const MODEL_MAX = 100;
+/** in this alphabet, never starting with a dash, so it can never read as a flag. */
+export const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/;
+/** The levels a start may ask for (CONTROL.md §3.1), narrowest first. Closed: no level
+ *  is wider than `auto`, and none turns a harness's approval off. */
+export const START_PERMISSIONS = ["read", "safe", "edits", "auto"] as const;
+export type StartPermission = (typeof START_PERMISSIONS)[number];
+/** What a run is started with: a level, or `inherit` (CONTROL.md §2) — no permission
+ *  flag at all, so the harness starts in its own default on the machine. Only a machine
+ *  the person put in inherit mode runs that way; a command never names it. */
+export type RunLevel = StartPermission | "inherit";
+
+/** Where a level sits, narrowest (0) to widest; -1 for anything that isn't one. */
+export const levelRank = (l: unknown): number => START_PERMISSIONS.indexOf(l as StartPermission);
+/** The narrower of two levels: what a later run of a session gets, its recorded level
+ *  against what the machine's mode allows now. */
+export const narrower = (a: StartPermission, b: StartPermission): StartPermission =>
+  levelRank(a) <= levelRank(b) ? a : b;
 
 export const COMMAND_TYPE = "sessionpipe.control";
 export const GRANT_TYPE = "sessionpipe.grant";
@@ -113,6 +132,10 @@ export interface ControlCommand {
   name?: string;
   /** start only: files to download, verify and write into the new session's folder. */
   files?: ControlFile[];
+  /** start only: the level the new session runs at (never above the machine's mode). */
+  permission?: StartPermission;
+  /** start only: the model the harness runs, as the harness names it. */
+  model?: string;
   nonce: string;
   iat: number;
 }
@@ -171,6 +194,18 @@ const MEDIA_TYPE_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/
 const BAD_NAME_CHAR_RE = /[/\\\x00-\x1f\x7f]/;
 const UP = 0x01;
 const UV = 0x04;
+
+/** The fields each kind carries besides the common ones (CONTROL.md §3.1). The set is
+ *  closed: a field it doesn't list is `bad_fields`, so a field added later fails closed
+ *  on a machine that predates it instead of being ignored. */
+const COMMON_FIELDS: readonly string[] = ["v", "t", "machine", "kind", "session", "nonce", "iat", "note"];
+const FIELDS: Record<ControlKind, readonly string[]> = {
+  prompt: ["text"],
+  "permission.answer": ["for", "decision"],
+  cancel: [],
+  start: ["text", "cwd", "files", "permission", "model"],
+  "key.add": ["key", "name"],
+};
 
 // --- encodings ------------------------------------------------------------------
 
@@ -417,13 +452,18 @@ export function parseCommand(str: unknown): Parsed {
       break;
     case "start":
       if (!text()) return bad("bad_fields", `a new session needs text, at most ${TEXT_MAX} characters`);
-      if (typeof c.cwd !== "string" || !isAbsolute(c.cwd) || c.cwd.length > 1024)
-        return bad("bad_fields", "a new session needs an absolute folder");
-      if (has("for") || has("decision")) return bad("bad_fields", "a start carries text, cwd and files");
+      if (typeof c.cwd !== "string" || !(isAbsolute(c.cwd) || HOME_RELATIVE_RE.test(c.cwd)) || c.cwd.length > 1024)
+        return bad("bad_fields", "a new session needs an absolute folder, or one under ~");
+      if (has("for") || has("decision"))
+        return bad("bad_fields", "a start carries text, cwd, files, a permission and a model");
       if (has("files")) {
         const why = filesProblem(c.files);
         if (why) return bad("bad_fields", why);
       }
+      if (has("permission") && levelRank(c.permission) < 0)
+        return bad("bad_fields", `a permission is one of ${START_PERMISSIONS.join(", ")}`);
+      if (has("model") && (typeof c.model !== "string" || c.model.length > MODEL_MAX || !MODEL_RE.test(c.model)))
+        return bad("bad_fields", `a model is 1 to ${MODEL_MAX} letters, digits and ._:/@[]-, not starting with a dash`);
       break;
     case "permission.answer":
       if (typeof c.for !== "string" || !c.for || c.for.length > 128) return bad("bad_fields", "which attention?");
@@ -458,6 +498,12 @@ export function parseCommand(str: unknown): Parsed {
   }
   if (c.kind !== "key.add" && (has("key") || has("name"))) return bad("bad_fields", "only a key.add carries a key");
   if (c.kind !== "start" && has("files")) return bad("bad_fields", "only a start carries files");
+  if (c.kind !== "start" && (has("permission") || has("model")))
+    return bad("bad_fields", "only a start carries a model or a permission");
+  const allowed = FIELDS[c.kind as ControlKind];
+  for (const k of Object.keys(c))
+    if (!COMMON_FIELDS.includes(k) && !allowed.includes(k))
+      return bad("bad_fields", `the command carries a field its kind doesn't have: ${k.slice(0, 40)}`);
   if (has("note") && (typeof c.note !== "string" || c.note.length > NOTE_MAX))
     return bad("bad_fields", `a note is text, at most ${NOTE_MAX} characters`);
   return { ok: true, cmd: c as unknown as ControlCommand };
@@ -497,6 +543,9 @@ function fileNameProblem(name: unknown): string | null {
   if (n.startsWith(".")) return "a file name can't start with a dot";
   return null;
 }
+
+/** A `start`'s `cwd` under the machine's home: `~` alone, or `~/…` (`~\…`). Never `~user`. */
+export const HOME_RELATIVE_RE = /^~(?:[\\/]|$)/;
 
 function isAbsolute(p: string): boolean {
   return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);

@@ -5,13 +5,15 @@
 // the moment a run reveals the harness's own id, the daemon records it here:
 //
 //   state/control/aliases.json   {"codex:<command's id>": {"id": "<harness's id>",
-//                                  "cwd": "<folder>", "at": "<iso>"}, …}   (0600)
+//                                  "cwd": "<folder>", "at": "<iso>",
+//                                  "permission": "<level>", "model": "<id>"}, …}   (0600)
 //
 // and everything the machine reports uses the command's id: the daemon's acks, a later
 // prompt (resumed under the harness's id), and the hook events, which the worker renames
 // before it builds them (run.ts). Small, so it is read whole wherever it is needed.
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { type StartOptions, startOptionsOf } from "./store.js";
 
 export interface Alias {
   /** The harness's own session id. */
@@ -19,6 +21,10 @@ export interface Alias {
   /** The folder the session runs in (the start's). */
   cwd: string;
   at: string;
+  /** What the start ran with (CONTROL.md §6, Options); absent for an alias recorded
+   *  before 0.10.0, whose later runs keep the machine's mode. */
+  permission?: StartOptions["permission"];
+  model?: string;
 }
 export type Aliases = Record<string, Alias>;
 
@@ -32,7 +38,7 @@ export function readAliases(file: string): Aliases {
     for (const [k, v] of Object.entries(j as Record<string, unknown>)) {
       const a = v as Partial<Alias> | null;
       if (a && typeof a.id === "string" && a.id && typeof a.cwd === "string")
-        out[k] = { id: a.id, cwd: a.cwd, at: typeof a.at === "string" ? a.at : "" };
+        out[k] = { id: a.id, cwd: a.cwd, at: typeof a.at === "string" ? a.at : "", ...startOptionsOf(a) };
     }
     return out;
   } catch {

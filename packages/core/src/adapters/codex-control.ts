@@ -7,8 +7,10 @@
 // the command that started it (CONTROL.md §6 `start`). Shapes measured on codex-cli
 // 0.160.0, 2026-10-04.
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MODEL_RE, type RunLevel, type StartPermission } from "../control/verify.js";
 import {
   findBinary,
   jobEnv,
@@ -39,18 +41,21 @@ export function findCodex(
   });
 }
 
-/** Sandbox flags for the machine's mode. Safe: workspace-write, and nothing escalates
- *  unattended (exec never asks). Auto: approval requests go through Codex's own
- *  automatic review. Inherit: none, so `sandbox_mode` and `approval_policy` come from the
- *  person's own config.toml, a new session's and a resume's alike. Never
- *  `--dangerously-bypass-approvals-and-sandbox` or `--dangerously-bypass-hook-trust`: no
- *  path here writes them. */
-export function codexModeFlags(mode: Mode, resume = false): string[] {
-  if (mode === "inherit") return [];
+/** Sandbox flags for a level (a machine's mode is one: safe, auto, inherit). Read: the
+ *  read-only sandbox. Safe: workspace-write, and nothing escalates unattended (exec never
+ *  asks); that sandbox already edits inside the folder, so `edits` is never offered and
+ *  means the same. Auto: approval requests go through Codex's own automatic review.
+ *  Inherit: none, so `sandbox_mode` and `approval_policy` come from the person's own
+ *  config.toml, a new session's and a resume's alike. Never
+ *  `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust` or
+ *  `danger-full-access`: no path here writes them. */
+export function codexModeFlags(level: RunLevel, resume = false): string[] {
+  if (level === "inherit") return [];
+  const sandbox = level === "read" ? "read-only" : "workspace-write";
   // `codex exec resume` takes neither `-s` nor `--approve-for-me` (0.160: "unexpected
   // argument"), so a resume says the same thing as config overrides, which it does take.
   if (resume)
-    return mode === "auto"
+    return level === "auto"
       ? [
           "-c",
           'sandbox_mode="workspace-write"',
@@ -59,16 +64,59 @@ export function codexModeFlags(mode: Mode, resume = false): string[] {
           "-c",
           'approvals_reviewer="auto_review"',
         ]
-      : ["-c", 'sandbox_mode="workspace-write"'];
-  return mode === "auto" ? ["--approve-for-me"] : ["-s", "workspace-write"];
+      : ["-c", `sandbox_mode="${sandbox}"`];
+  return level === "auto" ? ["--approve-for-me"] : ["-s", sandbox];
 }
 
+/** The levels a start may ask Codex for on a machine in `mode`: read and safe, and auto
+ *  on an auto machine. */
+export const offeredLevels = (mode: Mode): StartPermission[] =>
+  mode === "auto" ? ["read", "safe", "auto"] : ["read", "safe"];
+
+/** What a start that names no level gets: what the machine's mode means for Codex. */
+export const defaultLevel = (mode: Mode): RunLevel => mode;
+
 /** One headless turn. A new session runs in `cwd` (`-C`); a resume names the thread.
- *  The prompt goes after `--`, so a message that starts with a dash is never a flag. */
-export function codexArgs(o: { mode: Mode; prompt: string; cwd?: string; resume?: string }): string[] {
+ *  The model is its own argument after `-m`. The prompt goes after `--`, so a message
+ *  that starts with a dash is never a flag. */
+export function codexArgs(o: {
+  permission: RunLevel;
+  prompt: string;
+  cwd?: string;
+  resume?: string;
+  model?: string;
+}): string[] {
   const common = ["--json", "--skip-git-repo-check"];
-  if (o.resume) return ["exec", "resume", ...common, ...codexModeFlags(o.mode, true), "--", o.resume, o.prompt];
-  return ["exec", ...common, ...(o.cwd ? ["-C", o.cwd] : []), ...codexModeFlags(o.mode), "--", o.prompt];
+  const model = o.model ? ["-m", o.model] : [];
+  if (o.resume)
+    return ["exec", "resume", ...common, ...codexModeFlags(o.permission, true), ...model, "--", o.resume, o.prompt];
+  return [
+    "exec",
+    ...common,
+    ...(o.cwd ? ["-C", o.cwd] : []),
+    ...codexModeFlags(o.permission),
+    ...model,
+    "--",
+    o.prompt,
+  ];
+}
+
+/** The models a hello offers for Codex (CONTROL.md §2 `start`): the slugs Codex's own
+ *  picker lists, from `$CODEX_HOME/models_cache.json` (visibility `list`; hidden ones,
+ *  such as its review model, left out), at most 50. Empty when there is no cache. */
+export function codexModels(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string[] {
+  try {
+    const file = path.join(env.CODEX_HOME || path.join(home, ".codex"), "models_cache.json");
+    const j = JSON.parse(readFileSync(file, "utf8")) as { models?: unknown };
+    if (!Array.isArray(j.models)) return [];
+    const out: string[] = [];
+    for (const m of j.models as { slug?: unknown; visibility?: unknown }[])
+      if (m && m.visibility === "list" && typeof m.slug === "string" && MODEL_RE.test(m.slug) && m.slug.length <= 100)
+        if (!out.includes(m.slug)) out.push(m.slug);
+    return out.slice(0, 50);
+  } catch {
+    return [];
+  }
 }
 
 /** The env a headless turn runs with. */

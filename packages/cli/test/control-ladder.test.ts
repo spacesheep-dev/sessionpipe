@@ -357,9 +357,15 @@ describe.runIf(unix)("headless runs", () => {
   it("auto mode on a Claude Code without an auto permission mode is refused, for a resume and a start", async () => {
     await startDaemon({ cfg: { mode: "auto" } });
     const q = await rx.send({ session: SESSION, text: "resume" });
-    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "mode" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "permission" });
     const s = await rx.send({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "start" });
-    expect(await rx.waitAck(s.id)).toMatchObject({ outcome: "refused", code: "mode" });
+    expect(await rx.waitAck(s.id)).toMatchObject({
+      outcome: "refused",
+      code: "permission",
+      detail: "this machine is in auto mode, but its Claude Code has no auto permission mode",
+    });
+    // Final at once: nothing was taken, nothing ran.
+    expect(rx.acks.filter((a) => a.id === s.id).map((a) => a.outcome)).toEqual(["refused"]);
   });
 
   it("inherit mode: a resume and a start pass no permission flag, so Claude Code picks its own default", async () => {
@@ -377,7 +383,7 @@ describe.runIf(unix)("headless runs", () => {
     expect(calls[0]).toEqual(expect.arrayContaining(["-p", "--resume", SID]));
     expect(calls[1]).toEqual(expect.arrayContaining(["-p", "--session-id", NEW]));
     for (const c of calls) expect(c.join(" ")).not.toMatch(/--permission-mode|--permission-prompts|dangerously/);
-    expect(log.some((l) => l.includes(`claude -p --resume ${SID} in `))).toBe(true);
+    expect(log.some((l) => l.includes(`claude -p (inherit) --resume ${SID} in `))).toBe(true);
   });
 
   it("no Claude Code on this machine: a resume and a start fail in words", async () => {
@@ -523,7 +529,7 @@ describe.runIf(unix)("the answer read from a live session", () => {
 
   it("a fork whose copy has no transcript yet: delivered to the waiter, without a reply", async () => {
     const COPY = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
-    writeState(path.join(tmp, "state", "control", "state.json"), { copies: { [SID]: COPY } });
+    writeState(path.join(tmp, "state", "control", "state.json"), { started: {}, copies: { [SID]: COPY } });
     await startDaemon();
     const got = waitForMessage(SESSION, { env });
     await settle(100);

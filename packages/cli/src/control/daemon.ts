@@ -30,8 +30,17 @@ import {
   redactSecrets,
   safeId,
   shortId,
+  untilde,
 } from "@sessionpipe/core";
-import { type ControlCommand, parseSessionRef, verifyCommand } from "@sessionpipe/core/control";
+import {
+  type ControlCommand,
+  levelRank,
+  narrower,
+  parseSessionRef,
+  type RunLevel,
+  type StartPermission,
+  verifyCommand,
+} from "@sessionpipe/core/control";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import { ask, type LocalReply, type LocalRequest } from "./local.js";
@@ -46,18 +55,20 @@ import {
   NonceStore,
   type PairedReceiver,
   readState,
+  type StartOptions,
+  startOptionsOf,
   writeControl,
   writeState,
 } from "./store.js";
 import { AnswerStream } from "./stream.js";
 
 const {
+  claudeArgs,
   claudeEnv,
   findTranscript,
   isUuid,
   liveProcess,
   loginHint,
-  modeFlags,
   parseResult,
   recentlyWritten,
   sessionFolder,
@@ -82,11 +93,37 @@ interface Driver {
   label: string;
   cmd: string;
   bin: () => string | null;
-  args: (o: { mode: ControlMode; prompt: string; cwd: string; resume?: string }) => string[];
+  args: (o: { permission: RunLevel; prompt: string; cwd: string; resume?: string; model?: string }) => string[];
+  /** The levels a start may ask for here, and the one it gets by default (CONTROL.md §2). */
+  levels: (mode: ControlMode) => StartPermission[];
+  defaultLevel: (mode: ControlMode) => RunLevel;
+  /** Model ids to suggest, when the harness takes a model at all. */
+  models?: () => string[];
   reading: () => Reading & { warnings?: string[] };
   login?: (bin: string) => Promise<Login>;
   loginHint?: string;
 }
+
+/** One harness's entry in the hello's `start` (CONTROL.md §2). */
+export interface StartEntry {
+  permissions: StartPermission[];
+  /** What a start that names none gets: a level, or `inherit` on an inherit machine. */
+  permission: RunLevel;
+  models?: string[];
+  any_model?: boolean;
+}
+
+/** The modes the Agent SDK takes for every level: a start through it is not limited by
+ *  what `claude --help` lists (sdk.ts maps each level to its `permissionMode`). */
+const SDK_CAPS: Caps = {
+  hasMode: true,
+  modes: ["plan", "dontAsk", "acceptEdits", "auto"],
+  promptsNone: false,
+  fork: true,
+};
+
+/** A failure the harness puts down to the model it was asked to run. */
+const MODEL_FAILURE_RE = /\bmodel\b/i;
 
 /** A start, read from the command before it is verified: only ever used to order a
  *  prompt behind it, never to run anything. */
@@ -151,7 +188,10 @@ export interface SdkHost {
   start(o: {
     session: string;
     cwd: string;
-    mode: ControlMode;
+    /** The level the session runs at (CONTROL.md §3.1), as its `permissionMode`; none in inherit. */
+    permission: RunLevel;
+    /** The model, when the start asked for one. */
+    model?: string;
     configDir?: string;
     allowedTools?: string[];
   }): SdkSession;
@@ -178,6 +218,8 @@ export interface DaemonDeps {
   /** The harness accounts every hello names; by default, those signed in across
    *  `claudeDirs`, read again for each hello. */
   accounts?: () => HarnessAccount[];
+  /** The models a hello suggests for Codex; by default, its own models cache. */
+  codexModels?: () => string[];
   run: (bin: string, args: string[], o: RunOptions) => Promise<RunResult>;
   sdk?: SdkHost | null;
   /** How long to follow a live session's turn for an in-place answer (tests shorten it). */
@@ -265,6 +307,8 @@ export interface Status {
   nonces: number;
   acks_pending: number;
   delivered: Record<string, number>;
+  /** What a start may carry per harness, as the last hello said (CONTROL.md §2). */
+  start: Record<string, StartEntry>;
   /** Null when the daemon could restart now (nothing in hand); otherwise what it holds. */
   busy: string | null;
   update?: unknown;
@@ -497,6 +541,7 @@ export class ControlDaemon {
       nonces: this.nonces.size,
       acks_pending: this.acks.all().length,
       delivered: { ...this.delivered },
+      start: this.startOptions(),
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
     };
@@ -874,6 +919,7 @@ export class ControlDaemon {
       ...(harnesses.some((h) => acpControl.acpAgent(h)) ? (["api"] as const) : []),
     ];
     const accounts = this.accounts();
+    const start = this.startOptions(harnesses);
     for (const r of this.cfg.receivers) {
       const body = {
         name: this.cfg.name,
@@ -887,6 +933,7 @@ export class ControlDaemon {
         ...(accounts.length ? { accounts } : {}),
         // This daemon takes `files` on a start (an older one would start without them).
         files: true,
+        start,
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
       const st = this.polling.get(r.control + r.machine);
@@ -1122,10 +1169,10 @@ export class ControlDaemon {
 
   /** The harness revealed its own id for a session the command named: from now on that
    *  is where the command's id leads (aliases.ts). Written before anything else reads it. */
-  private setAlias(harness: string, id: string, real: string, cwd: string): void {
+  private setAlias(harness: string, id: string, real: string, cwd: string, o: StartOptions | null): void {
     this.aliases = {
       ...this.aliases,
-      [`${harness}:${id}`]: { id: real, cwd, at: new Date(this.deps.now()).toISOString() },
+      [`${harness}:${id}`]: { id: real, cwd, at: new Date(this.deps.now()).toISOString(), ...o },
     };
     try {
       writeAliases(aliasFile(this.dir), this.aliases);
@@ -1151,8 +1198,10 @@ export class ControlDaemon {
         label: "Codex",
         cmd: "codex",
         bin: () => this.deps.codex?.() ?? null,
-        args: ({ mode, prompt, cwd, resume }) =>
-          resume ? codexControl.codexArgs({ mode, prompt, resume }) : codexControl.codexArgs({ mode, prompt, cwd }),
+        args: ({ cwd, resume, ...o }) => codexControl.codexArgs(resume ? { ...o, resume } : { ...o, cwd }),
+        levels: codexControl.offeredLevels,
+        defaultLevel: codexControl.defaultLevel,
+        models: () => this.deps.codexModels?.() ?? codexControl.codexModels(this.deps.env ?? process.env),
         reading: () => codexControl.reading(),
         ...(this.deps.codexLogin ? { login: this.deps.codexLogin } : {}),
         loginHint: codexControl.LOGIN_HINT,
@@ -1163,8 +1212,10 @@ export class ControlDaemon {
         label: "Antigravity",
         cmd: "agy",
         bin: () => this.deps.agy?.() ?? null,
-        args: ({ mode, prompt, resume }) =>
-          resume ? antigravityControl.agyArgs({ mode, prompt, resume }) : antigravityControl.agyArgs({ mode, prompt }),
+        args: ({ permission, prompt, resume }) =>
+          antigravityControl.agyArgs(resume ? { permission, prompt, resume } : { permission, prompt }),
+        levels: antigravityControl.offeredLevels,
+        defaultLevel: antigravityControl.defaultLevel,
         reading: () => antigravityControl.reading(),
       };
     /* v8 ignore next -- see above */
@@ -1193,7 +1244,131 @@ export class ControlDaemon {
     ].slice(0, HELLO_HARNESSES_MAX);
   }
 
-  private allowed(dir: string): string | null {
+  /** The caps a new Claude Code session is started with: the Agent SDK's when the
+   *  daemon has it, else what this machine's `claude --help` lists. */
+  private startCaps(): Caps | null {
+    return this.deps.sdk ? SDK_CAPS : (this.deps.claude()?.caps ?? null);
+  }
+
+  /** What a start may carry for one harness here (CONTROL.md §2 `start`), capped by the
+   *  machine's mode; null when it takes neither option, or when a start without one
+   *  would be refused (an auto machine whose Claude Code has no auto mode). */
+  private startEntry(harness: string): StartEntry | null {
+    const mode = this.cfg.mode;
+    if (harness === "claude-code") {
+      const caps = this.startCaps();
+      if (!caps) return null;
+      const permissions = claudeControl.offeredLevels(mode, caps);
+      const permission = claudeControl.defaultLevel(mode);
+      return permission === "inherit" || permissions.includes(permission)
+        ? { permissions, permission, any_model: true }
+        : null;
+    }
+    if (harness !== "codex" && harness !== "antigravity") return null;
+    const drv = this.driver(harness)!;
+    const models = drv.models?.() ?? null;
+    return {
+      permissions: drv.levels(mode),
+      permission: drv.defaultLevel(mode),
+      ...(models ? { any_model: true, ...(models.length ? { models } : {}) } : {}),
+    };
+  }
+
+  /** The hello's `start`: an entry for each harness it lists that takes options. */
+  private startOptions(harnesses = this.harnesses()): Record<string, StartEntry> {
+    const out: Record<string, StartEntry> = {};
+    for (const h of harnesses) {
+      const e = this.startEntry(h);
+      if (e) out[h] = e;
+    }
+    return out;
+  }
+
+  /** The options a start runs with, or the refusal (CONTROL.md §5 step 8): a level the
+   *  machine offers for that harness, never above its mode, and a model only where the
+   *  harness takes one. Never another level or model than the one asked for. */
+  private startChoice(
+    harness: string,
+    cmd: ControlCommand,
+  ): { options: StartOptions } | { code: "permission" | "model"; detail: string } {
+    const mode = this.cfg.mode;
+    const claude = harness === "claude-code";
+    // An ACP agent takes neither option here: it runs as the machine's mode says (§6).
+    if (acpControl.acpAgent(harness)) {
+      if (cmd.permission !== undefined || cmd.model !== undefined)
+        return {
+          code: cmd.permission !== undefined ? "permission" : "model",
+          detail: `${this.label(harness)} takes no permission level or model choice on this machine`,
+        };
+      return { options: { permission: mode } };
+    }
+    const level: RunLevel =
+      cmd.permission ?? (claude ? claudeControl.defaultLevel(mode) : this.driver(harness)!.defaultLevel(mode));
+    const ask = { permission: level, ...(cmd.model !== undefined ? { model: cmd.model } : {}) };
+    // No Claude Code here at all: the start fails on that, in words, a step later.
+    if (claude && !this.startCaps()) return { options: ask };
+    const entry = this.startEntry(harness);
+    // `inherit` is never asked for, only a default: the person chose it at the machine.
+    if (level !== "inherit" && !entry?.permissions.includes(level)) {
+      if (levelRank(level) > levelRank(claudeControl.ceilingLevel(mode)))
+        return {
+          code: "permission",
+          detail:
+            mode === "inherit"
+              ? `this machine runs in inherit mode, where a message may only name read or safe; ${level} needs \`sessionpipe control mode auto\` at the machine`
+              : `this machine runs in ${mode} mode; ${level} needs \`sessionpipe control mode auto\` at the machine`,
+        };
+      return { code: "permission", detail: this.levelMissing(harness, level) };
+    }
+    // Every harness that takes a model here takes any well-formed one (`any_model`); the
+    // models it lists are suggestions, so no list here is closed.
+    if (cmd.model !== undefined && !entry?.any_model)
+      return {
+        code: "model",
+        detail: `${claude ? /* v8 ignore next -- Claude Code always takes a model */ "Claude Code" : this.driver(harness)!.label} takes no model choice on this machine`,
+      };
+    return { options: ask };
+  }
+
+  /** Why a harness has no such level here, though the machine's mode would allow it. */
+  private levelMissing(harness: string, level: StartPermission): string {
+    if (harness === "codex") return "Codex has no edits level: its safe level, the workspace sandbox, already edits";
+    if (harness === "antigravity")
+      return level === "read" ? "Antigravity has no read-only mode" : "Antigravity's widest level is edits";
+    // startChoice() returned before this for a Claude Code with no caps at all.
+    const mf = claudeControl.modeFlags(level, this.startCaps()!);
+    /* v8 ignore next -- only a level its caps lack is ever missing */
+    return "error" in mf ? mf.error : `this machine's Claude Code can't start at ${level}`;
+  }
+
+  /** The options a later run of a session gets: the narrower of what its start recorded
+   *  and what the machine's mode means now, with the recorded model. A session with no
+   *  record (the hooks reported it, or it predates 0.10.0) runs at the machine's mode. */
+  private laterOptions(harness: string, recorded: StartOptions | null | undefined): StartOptions {
+    const mode = this.cfg.mode;
+    const now = harness === "claude-code" ? claudeControl.defaultLevel(mode) : this.driver(harness)!.defaultLevel(mode);
+    const model = recorded?.model ? { model: recorded.model } : {};
+    // No level of its own (none recorded, or the start inherited): the machine's mode now.
+    if (!recorded || recorded.permission === "inherit") return { permission: now, ...model };
+    // A level of its own, on an inherit machine now: at most what a start there may name.
+    const cap = now === "inherit" ? claudeControl.ceilingLevel(mode) : now;
+    return { permission: narrower(recorded.permission, cap), ...model };
+  }
+
+  /** What the acks carry as `applied`: the model only when one was asked for. */
+  private applied(o: StartOptions): StartOptions {
+    return { permission: o.permission, ...(o.model ? { model: o.model } : {}) };
+  }
+
+  /** A failed run that asked for a model, put down to the model: acked with code `model`. */
+  private failedRun(why: string, o: StartOptions): Omit<Ack, "receiver" | "id" | "at"> {
+    return { outcome: "failed", ...(o.model && MODEL_FAILURE_RE.test(why) ? { code: "model" } : {}), detail: why };
+  }
+
+  /** The real folder a command or a session names, when it is one this machine allows:
+   *  absolute, or under this user's home as `~/…` (a start's `cwd` may say either). */
+  private allowed(folder: string): string | null {
+    const dir = untilde(folder);
     if (!path.isAbsolute(dir)) return null;
     let r: string;
     try {
@@ -1433,16 +1608,20 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
       // Read again: the start this waited for may have named the session meanwhile.
+      const alias = this.aliasOf(ref.harness, ref.id);
       /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
-      const target = this.aliasOf(ref.harness, ref.id)?.id ?? place.target ?? ref.id;
+      const target = alias?.id ?? place.target ?? ref.id;
+      const recorded = alias ? startOptionsOf(alias) : null;
+      const o = this.laterOptions(ref.harness, recorded);
       const args = drv.args({
-        mode: this.cfg.mode,
+        permission: o.permission,
         prompt: frame(cmd.text as string, r.url),
         cwd: place.folder,
         resume: target,
+        ...(o.model ? { model: o.model } : {}),
       });
-      this.deps.log(`${id.slice(-8)}: ${drv.cmd} resume ${target.slice(0, 8)} (${this.cfg.mode}) in ${place.folder}`);
-      await this.drive(r, id, ref, drv, ready.bin, args, place.folder, sent, target);
+      this.deps.log(`${id.slice(-8)}: ${drv.cmd} resume ${target.slice(0, 8)} (${o.permission}) in ${place.folder}`);
+      await this.drive(r, id, ref, drv, ready.bin, args, place.folder, sent, target, o, recorded);
     });
   }
 
@@ -1460,6 +1639,9 @@ export class ControlDaemon {
     cwd: string,
     sent: number,
     asked: string | null,
+    o: StartOptions,
+    /** What the session's alias records (a start records `o`): kept when it is renamed. */
+    record: StartOptions | null,
   ): Promise<void> {
     const stream = this.answerStream(r, id);
     const reading = drv.reading();
@@ -1468,7 +1650,7 @@ export class ControlDaemon {
       const s = reading.session;
       if (!s || s === named) return;
       named = s;
-      if (s !== asked) this.setAlias(ref.harness, ref.id, s, cwd);
+      if (s !== asked) this.setAlias(ref.harness, ref.id, s, cwd, record);
     };
     const onLine = (l: string) => {
       if (reading.feed(l)) stream.set(reading.text);
@@ -1492,12 +1674,22 @@ export class ControlDaemon {
     if (reading.warnings?.length)
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} warned: ${reading.warnings.join(" · ").slice(0, 400)}`);
     const out = reading.outcome(res);
-    if ("failed" in out) return this.finish(r, id, { outcome: "failed", detail: out.failed });
+    if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
     const moved =
       asked && named && named !== asked
         ? `\n\n(${drv.label} didn't find that session on this machine, so this ran in a new one; later messages continue there.)`
         : "";
-    this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply + moved }, sent);
+    this.finish(
+      r,
+      id,
+      {
+        outcome: "delivered",
+        mode: "resume",
+        reply: out.reply + moved,
+        ...(asked ? {} : { applied: this.applied(o) }),
+      },
+      sent,
+    );
   }
 
   private async headless(
@@ -1514,25 +1706,30 @@ export class ControlDaemon {
     const claude = this.deps.claude();
     if (!claude)
       return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
-    const mf = modeFlags(this.cfg.mode, claude.caps);
-    if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "mode", detail: mf.error });
+    const ref = parseSessionRef(cmd.session)!;
+    // The session's own record (its start's level, narrowed to the machine's mode now).
+    const o = this.laterOptions("claude-code", this.state.started[ref.id]);
+    const mf = claudeControl.modeFlags(o.permission, claude.caps);
+    if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
     const signedOut = await this.loginProblem(place.transcript?.configDir);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
-    const ref = parseSessionRef(cmd.session)!;
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
       const target = this.state.copies[ref.id] ?? ref.id;
-      const resume = mode === "fork" ? ["--resume", target, "--fork-session"] : ["--resume", target];
-      const allow = this.allowedFor(r);
-      const args = [
-        "-p",
-        ...this.outputArgs(claude.caps),
-        ...mf.args,
-        ...(allow.length ? [`--allowedTools=${allow.join(",")}`] : []),
-        ...resume,
-        frame(cmd.text as string, r.url),
-      ];
-      this.deps.log(`${id.slice(-8)}: claude -p ${[...mf.args, ...resume].join(" ")} in ${place.folder}`);
+      const built = claudeArgs({
+        caps: claude.caps,
+        level: o.permission,
+        prompt: frame(cmd.text as string, r.url),
+        resume: target,
+        fork: mode === "fork",
+        allowedTools: this.allowedFor(r),
+        ...(o.model ? { model: o.model } : {}),
+      });
+      /* v8 ignore next -- the same caps and level passed modeFlags above */
+      const args = "args" in built ? built.args : [];
+      this.deps.log(
+        `${id.slice(-8)}: claude -p (${o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
+      );
       const stream = this.answerStream(r, id);
       const res = await this.owning(target, () =>
         this.slot(() =>
@@ -1547,7 +1744,7 @@ export class ControlDaemon {
       stream.close();
       this.lastEnd.set(target, this.deps.now());
       const out = this.outcome(res);
-      if ("failed" in out) return this.finish(r, id, { outcome: "failed", detail: out.failed });
+      if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
       if (mode === "fork" && ran !== target) {
         this.state.copies[ref.id] = ran;
@@ -1676,13 +1873,6 @@ export class ControlDaemon {
     });
   }
 
-  /** How a headless run prints: streamed where this Claude Code can, else one JSON at the end. */
-  private outputArgs(caps: { stream?: boolean }): string[] {
-    return caps.stream
-      ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
-      : ["--output-format", "json"];
-  }
-
   /** Mark a session as held by one of the daemon's runs while `fn` runs. */
   private async owning<T>(session: string, fn: () => Promise<T>): Promise<T> {
     this.ownRuns.set(session, (this.ownRuns.get(session) ?? 0) + 1);
@@ -1751,66 +1941,91 @@ export class ControlDaemon {
         code: "folder",
         detail: "that folder isn't one this machine allows",
       });
+    // The level and model, checked before anything is taken (CONTROL.md §5 step 8).
+    const choice = this.startChoice(ref.harness, cmd);
+    if ("code" in choice) {
+      this.deps.log(`refused ${id.slice(-8)}: ${choice.code} — ${choice.detail}`);
+      return this.finish(r, id, { outcome: "refused", code: choice.code, detail: choice.detail });
+    }
+    const o = choice.options;
     if (acpControl.acpAgent(ref.harness)) return this.startAcp(r, id, cmd, ref, cwd, sent);
-    if (ref.harness !== "claude-code") return this.startDriven(r, id, cmd, ref, cwd, sent);
+    if (ref.harness !== "claude-code") return this.startDriven(r, id, cmd, ref, cwd, sent, o);
     if (findTranscript(ref.id, this.deps.claudeDirs()) || this.sdkSessions.has(ref.id))
       return this.finish(r, id, {
         outcome: "refused",
         code: "bad_session",
         detail: "that new session's id is already taken",
       });
+    const claude = this.deps.sdk ? null : this.deps.claude();
+    if (!this.deps.sdk && !claude)
+      return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
     const signedOut = await this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
-    this.finish(r, id, { outcome: "taken" });
+    this.recordStart(ref.id, o);
+    this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
     const text = await this.attached(r, id, cmd, ref, cwd);
     if (text === null) return;
     if (this.deps.sdk) {
       const sdk = this.deps.sdk;
       const out = await this.slot(async () => {
-        const s = sdk.start({ session: ref.id, cwd, mode: this.cfg.mode, allowedTools: this.allowedFor(r) });
+        const s = sdk.start({
+          session: ref.id,
+          cwd,
+          permission: o.permission,
+          ...(o.model ? { model: o.model } : {}),
+          allowedTools: this.allowedFor(r),
+        });
         this.sdkSessions.set(ref.id, s);
         return s.send(frameStart(text, r.url));
       });
       return this.finish(
         r,
         id,
-        out.error ? { outcome: "failed", detail: out.error } : { outcome: "delivered", mode: "sdk", reply: out.reply },
+        out.error
+          ? this.failedRun(out.error, o)
+          : { outcome: "delivered", mode: "sdk", reply: out.reply, applied: this.applied(o) },
         sent,
       );
     }
-    const claude = this.deps.claude();
-    if (!claude)
-      return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
-    const mf = modeFlags(this.cfg.mode, claude.caps);
-    if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "mode", detail: mf.error });
+    const c = claude!;
+    const built = claudeArgs({
+      caps: c.caps,
+      level: o.permission,
+      prompt: frameStart(text, r.url),
+      session: ref.id,
+      allowedTools: this.allowedFor(r),
+      ...(o.model ? { model: o.model } : {}),
+    });
+    /* v8 ignore next -- startChoice() offered this level from these same caps */
+    const args = "args" in built ? built.args : [];
     const stream = this.answerStream(r, id);
     const res = await this.slot(() =>
-      this.deps.run(
-        claude.bin,
-        [
-          "-p",
-          ...this.outputArgs(claude.caps),
-          ...mf.args,
-          ...(this.allowedFor(r).length ? [`--allowedTools=${this.allowedFor(r).join(",")}`] : []),
-          "--session-id",
-          ref.id,
-          frameStart(text, r.url),
-        ],
-        {
-          cwd,
-          env: claudeEnv(undefined, this.deps.env),
-          timeoutMs: JOB_TIMEOUT_MS,
-          ...(claude.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
-        },
-      ),
+      this.deps.run(c.bin, args, {
+        cwd,
+        env: claudeEnv(undefined, this.deps.env),
+        timeoutMs: JOB_TIMEOUT_MS,
+        ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
+      }),
     );
     stream.close();
     // The transcript this run just wrote is ours: the next message must not read it as a
     // live session (a fork instead of a resume).
     this.lastEnd.set(ref.id, this.deps.now());
     const out = this.outcome(res);
-    if ("failed" in out) return this.finish(r, id, { outcome: "failed", detail: out.failed });
-    this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply }, sent);
+    if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
+    this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply, applied: this.applied(o) }, sent);
+  }
+
+  /** A Claude Code session the daemon starts: what it runs with, for its later runs. */
+  private recordStart(session: string, o: StartOptions): void {
+    this.state.started[session] = o;
+    try {
+      writeState(path.join(this.dir, "state.json"), this.state);
+    } catch (e) {
+      this.deps.log(
+        `couldn't record what ${session.slice(0, 8)} runs with: ${String(/* v8 ignore next -- writeState throws fs Errors */ (e as Error)?.message || e)}`,
+      );
+    }
   }
 
   /** A new Codex or Antigravity session: the harness picks its id, and the start's id
@@ -1822,6 +2037,7 @@ export class ControlDaemon {
     ref: { harness: string; id: string },
     cwd: string,
     sent: number,
+    o: StartOptions,
   ): Promise<void> {
     const drv = this.driver(ref.harness)!;
     const env = this.deps.env ?? process.env;
@@ -1837,14 +2053,19 @@ export class ControlDaemon {
       });
     const ready = await this.drivenProblem(drv);
     if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
-    this.finish(r, id, { outcome: "taken" });
+    this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
     const text = await this.attached(r, id, cmd, ref, cwd);
     if (text === null) return;
-    const args = drv.args({ mode: this.cfg.mode, prompt: frameStart(text, r.url), cwd });
+    const args = drv.args({
+      permission: o.permission,
+      prompt: frameStart(text, r.url),
+      cwd,
+      ...(o.model ? { model: o.model } : {}),
+    });
     this.deps.log(
-      `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
+      `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${o.permission}) in ${cwd}`,
     );
-    await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null);
+    await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o);
   }
 
   /** A new session of an ACP agent (CONTROL.md §6): the agent's CLI as a child the
@@ -1881,7 +2102,7 @@ export class ControlDaemon {
       /* v8 ignore next -- unsupported only comes of a session/load, which a start never asks for */
       if ("unsupported" in opened) return { reply: "", error: opened.unsupported };
       this.sdkSessions.set(ref.id, opened.held);
-      this.setAlias(ref.harness, ref.id, opened.held.session, cwd);
+      this.setAlias(ref.harness, ref.id, opened.held.session, cwd, null);
       return this.sendHeld(ref.id, opened.held, frameStart(text, r.url));
     });
     stream.close();
