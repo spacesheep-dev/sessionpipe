@@ -197,10 +197,12 @@ function anchored(html) {
     const text = m ? inner.slice(0, m.index) : inner;
     // The heading as plain text for the contents list: tags and entities out, and any `<`,
     // `>`, `&` or `"` left over dropped too, so nothing that could be markup reaches the list.
-    const plain = text
-      .replace(/<[^>]*>?/g, "")
-      .replace(/&[a-z]+;|&#\d+;/g, "")
-      .replace(/[<>&"]/g, "");
+    let plain = text;
+    for (let prev = ""; prev !== plain; ) {
+      prev = plain;
+      plain = plain.replace(/<[^<>]*>/g, "");
+    }
+    plain = plain.replace(/&[a-z]+;|&#\d+;/g, "").replace(/[<>&"]/g, "");
     let id =
       m?.[1] ??
       plain
