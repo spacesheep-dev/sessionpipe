@@ -4,7 +4,7 @@
 export function usageTable(harnesses: readonly string[]): Record<string, string> {
   return {
     connect:
-      "connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
+      "connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--no-service]",
     install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]`,
     sink: "sink add|list|remove|test (use --help after a subcommand for its options)",
     "sink add": "sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--secret S] [--pii] [--name N]",
@@ -24,8 +24,8 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "update on": "update on",
     control: "control pair|mode|status|keys|off|run (use --help after a subcommand for its options)",
     "control pair":
-      "control pair <receiver> [--folder DIR]… [--mode safe|auto] [--tier 0-3] [--token T] [--name N] [--no-service]",
-    "control mode": "control mode auto|safe",
+      "control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]",
+    "control mode": "control mode auto|safe|inherit",
     "control status": "control status",
     "control keys": "control keys [remove <id>]",
     "control keys remove": "control keys remove <id>",

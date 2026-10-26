@@ -10,6 +10,13 @@
 // zero turns while idle; but ~300 MB resident per held session, so the daemon
 // closes one that has been idle for ten minutes and a later message resumes it.
 import type { SdkHost, SdkSession } from "./daemon.js";
+import type { ControlMode } from "./store.js";
+
+/** The SDK's permission mode for each machine mode, as modeFlags gives the CLI's
+ *  (claude-code-control.ts). Inherit gives none: the SDK then starts the session in its
+ *  settings' permissions.defaultMode, as `claude -p` does (0.3.310, measured with
+ *  bypassPermissions there, which needed no allowDangerouslySkipPermissions). */
+const PERMISSION_MODE = { safe: "dontAsk", auto: "auto" } as const;
 
 type SdkQuery = AsyncIterable<{ type: string; subtype?: string; result?: unknown; is_error?: boolean }> & {
   interrupt(): Promise<void>;
@@ -41,7 +48,7 @@ export async function loadSdk(o: {
     }: {
       session: string;
       cwd: string;
-      mode: "safe" | "auto";
+      mode: ControlMode;
       configDir?: string;
       allowedTools?: string[];
     }): SdkSession {
@@ -61,7 +68,7 @@ export async function loadSdk(o: {
         options: {
           sessionId: session,
           cwd,
-          permissionMode: mode === "auto" ? "auto" : "dontAsk",
+          ...(mode === "inherit" ? {} : { permissionMode: PERMISSION_MODE[mode] }),
           ...(allowedTools?.length ? { allowedTools } : {}),
           ...(o.claudeBin ? { pathToClaudeCodeExecutable: o.claudeBin } : {}),
           env: { ...(o.env ?? process.env), SESSIONPIPE_CONTROL_JOB: "1" },

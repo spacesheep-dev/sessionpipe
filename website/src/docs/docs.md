@@ -103,7 +103,7 @@ local outbox.
 {{usage control pair}}
 
 Pairs this machine with a receiver for signed messages and installs the daemon. Asks once, at
-this terminal, whether sessions you message run in safe or auto mode.
+this terminal, whether sessions you message run in safe, auto or inherit mode.
 
 {{usage control mode}}
 

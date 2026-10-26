@@ -20,6 +20,7 @@ import {
 import { type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
 import {
   type ControlConfig,
+  type ControlMode,
   controlState,
   dropControlSecret,
   type PairedReceiver,
@@ -37,7 +38,7 @@ export interface PairOptions {
    *  is the whole setup (CONTROL.md §2). */
   token: string | null;
   folders: string[];
-  mode: "safe" | "auto";
+  mode: ControlMode;
   name: string;
   out: (s: string) => void;
   fetch?: typeof fetch;

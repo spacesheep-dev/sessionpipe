@@ -425,8 +425,9 @@ export const ControlPairStart = z.object({
   /** The folders the machine lets sessions run in, for the receiver's "new session"
    *  picker. Informational: the machine checks its own list again. */
   folders: z.array(z.string().max(1024)).max(50).optional(),
-  /** safe: nothing that needs approval runs unattended; auto: the harness's auto mode. */
-  mode: z.enum(["safe", "auto"]).optional(),
+  /** safe: nothing that needs approval runs unattended; auto: the harness's auto mode;
+   *  inherit: no permission flag, each harness's own default there. Chosen at the machine. */
+  mode: z.enum(["safe", "auto", "inherit"]).optional(),
   /** The harness accounts signed in here, so the receiver's board can name each
    *  `session.account_id` (CONTROL.md §2). */
   accounts: z.array(HarnessAccount).max(20).optional(),
@@ -474,7 +475,7 @@ export const ControlHello = z.object({
   waiting: z.array(SessionRef).max(500).optional(),
   /** As in control-pair.json: informational, re-checked on the machine. */
   folders: z.array(z.string().max(1024)).max(50).optional(),
-  mode: z.enum(["safe", "auto"]).optional(),
+  mode: z.enum(["safe", "auto", "inherit"]).optional(),
   /** As in control-pair.json: read again for every hello, so a new sign-in is named. */
   accounts: z.array(HarnessAccount).max(20).optional(),
   /** As in control-pair.json. */

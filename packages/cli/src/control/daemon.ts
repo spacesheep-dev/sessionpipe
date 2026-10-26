@@ -41,6 +41,7 @@ import {
   type Ack,
   AckOutbox,
   type ControlConfig,
+  type ControlMode,
   type DaemonState,
   NonceStore,
   type PairedReceiver,
@@ -81,7 +82,7 @@ interface Driver {
   label: string;
   cmd: string;
   bin: () => string | null;
-  args: (o: { mode: "safe" | "auto"; prompt: string; cwd: string; resume?: string }) => string[];
+  args: (o: { mode: ControlMode; prompt: string; cwd: string; resume?: string }) => string[];
   reading: () => Reading & { warnings?: string[] };
   login?: (bin: string) => Promise<Login>;
   loginHint?: string;
@@ -150,7 +151,7 @@ export interface SdkHost {
   start(o: {
     session: string;
     cwd: string;
-    mode: "safe" | "auto";
+    mode: ControlMode;
     configDir?: string;
     allowedTools?: string[];
   }): SdkSession;

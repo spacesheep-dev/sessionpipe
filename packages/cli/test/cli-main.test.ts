@@ -809,6 +809,14 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       expect.any(Function),
       realDist,
     );
+    // Inherit is taken as named, like the other two.
+    const inherit = await run("connect", rx.url, "--mode", "inherit", "--folder", path.join(home, "a"));
+    expect(inherit.text).not.toContain("Safe mode:");
+    expect(controlMain).toHaveBeenLastCalledWith(
+      expect.arrayContaining(["--mode", "inherit"]),
+      expect.any(Function),
+      realDist,
+    );
   });
 
   it("over ssh on a Mac, a signed-out account says why the login can't be read; elsewhere not", async () => {

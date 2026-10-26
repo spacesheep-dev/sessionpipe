@@ -15,6 +15,7 @@ import {
   NonceStore,
   type PairedReceiver,
   pairedCount,
+  parseMode,
   readControl,
   readState,
   writeControl,
@@ -45,6 +46,24 @@ afterEach(() => {
 });
 
 describe("control.json", () => {
+  it("the mode is safe, auto or inherit by name; anything else reads as safe", () => {
+    mkdirSync(path.dirname(file()), { recursive: true });
+    for (const [mode, read] of [
+      ["inherit", "inherit"],
+      ["auto", "auto"],
+      ["safe", "safe"],
+      ["bypass", "safe"],
+      ["bypassPermissions", "safe"],
+      [undefined, "safe"],
+    ] as const) {
+      writeFileSync(file(), JSON.stringify({ mode, receivers: [] }));
+      expect(readControl(env)?.mode).toBe(read);
+    }
+    expect(parseMode("inherit")).toBe("inherit");
+    expect(parseMode("INHERIT")).toBeNull();
+    expect(parseMode(1)).toBeNull();
+  });
+
   it("a file without receivers is no config; a bare one gets a name, folders and safe mode", () => {
     mkdirSync(path.dirname(file()), { recursive: true });
     writeFileSync(file(), "{}");

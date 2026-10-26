@@ -44,7 +44,7 @@ import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from
 import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
-import { moveControlSecrets, pairedCount, readControl, writeControl } from "./control/store.js";
+import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
@@ -181,7 +181,7 @@ function help(): void {
   out(`sessionpipe ${VERSION} — an open protocol for what your coding agents are doing
 
 Usage:
-  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]…
+  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]…
                                   (everything, in one go: hooks, a sink, signed messages, keys)
   sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N]
   sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin | --all] [--keep-state]
@@ -318,7 +318,7 @@ async function connect(): Promise<void> {
   const raw = args[1];
   if (!raw || raw.startsWith("-"))
     return out(
-      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto] [--folder DIR]… [--no-service]",
+      "usage: sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--no-service]",
     );
   const cfg = setupConfig();
   if (viaNpx(distDir)) return rerunGlobally(args, out, { allowDowngrade: has("--allow-downgrade") });
@@ -373,8 +373,7 @@ async function connect(): Promise<void> {
       out(
         "  ! No folder for sessions you message yet (this ran from your home folder, and no recent session ran anywhere else). Run `sessionpipe control pair` again from a project folder, or with --folder.",
       );
-    const mode =
-      flag("--mode") === "auto" || flag("--mode") === "safe" ? (flag("--mode") as string) : (control?.mode ?? "safe");
+    const mode = parseMode(flag("--mode")) ?? control?.mode ?? "safe";
     await controlMain(
       [
         "control",
