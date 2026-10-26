@@ -39,6 +39,9 @@ schemas/ are code and stay under Apache-2.0.
 The website (website/public/fonts/) ships Geist and Geist Mono, Copyright 2024 The
 Geist Project Authors, under the SIL Open Font License 1.1 (LICENSE-geist.txt).
 
+The website's download buttons draw the Apple and Linux (Tux) glyphs from Simple Icons
+(simpleicons.org), released under CC0 1.0. The marks themselves belong to their owners.
+
 Third-party names (Claude Code, Codex, Gemini, Antigravity, Cursor, GitHub Copilot,
 Droid, Kiro, OpenCode and others) are trademarks of their respective owners. See
 TRADEMARKS.md.

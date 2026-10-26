@@ -1448,17 +1448,32 @@ details > p {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-/* a two-line button: what it does in Geist, what you get in mono under it */
+/* a two-line button: the platform's mark, then what it does in Geist and what you get in
+   mono under it. The mark is the text colour, so it follows the button and the scheme. */
 .home .dl .btn {
   display: flex;
   width: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
   min-height: 64px;
   padding: 12px 18px;
   border-radius: 12px;
   line-height: 1.2;
+}
+.home .dl .dl-ico {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+.home .dl .dl-txt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
 }
 .home .dl .btn small {
   font: 400 12px / 1.3 var(--mono);
@@ -1479,7 +1494,8 @@ details > p {
 }
 .home .dl div p {
   margin: 10px 0 0;
-  padding-left: 18px;
+  /* under the button's words, past its mark: padding 18 + mark 22 + gap 14 */
+  padding-left: 54px;
   font: 400 12px / 1.6 var(--mono);
   color: var(--fg2);
 }
