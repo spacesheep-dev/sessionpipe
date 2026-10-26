@@ -30,26 +30,47 @@ import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService } from "./pair.js";
 import { loadSdk } from "./sdk.js";
-import { controlFile, controlState, readControl, writeControl } from "./store.js";
+import { type ControlMode, controlFile, controlState, parseMode, readControl, writeControl } from "./store.js";
 import { waitForMessage, waitSession } from "./wait.js";
 
-export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto] [--tier 0-3] [--token T] [--name N] [--no-service]
-  sessionpipe control mode auto|safe                (how sessions run when you message them)
+export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]
+  sessionpipe control mode auto|safe|inherit        (how sessions run when you message them)
   sessionpipe control folders [add|remove DIR…]     (where sessions you message may run)
   sessionpipe control status | keys [remove <id>] | off [<receiver>] | run
   sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)`;
 
-const MODE_TEXT = `  auto  Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's
-        own safety check stops what looks dangerous. Pick this to get work done from your phone.
-        (Codex runs with --approve-for-me, Antigravity with --mode accept-edits.)
-  safe  Only what each folder's Claude Code settings already allow: with no allow rules, a
-        session can't even read a file. Pick this if this machine holds things no agent
-        should touch unattended. (Codex runs in its workspace-write sandbox and never
-        escalates; Antigravity is denied every tool call that would need approval.)`;
+const MODE_TEXT = `  auto    Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's
+          own safety check stops what looks dangerous. Pick this to get work done from your phone.
+          (Codex runs with --approve-for-me, Antigravity with --mode accept-edits.) Where Claude
+          Code's settings turn auto mode off (permissions.disableAutoMode), Claude Code runs these
+          sessions in its default mode instead, which refuses whatever needs approval; inherit
+          runs them as your own sessions run.
+  safe    Only what each folder's Claude Code settings already allow: with no allow rules, a
+          session can't even read a file. Pick this if this machine holds things no agent
+          should touch unattended. (Codex runs in its workspace-write sandbox and never
+          escalates; Antigravity is denied every tool call that would need approval.)
+  inherit As your own sessions here run: no permission flag, so each harness starts in its own
+          default on this machine. Claude Code takes permissions.defaultMode from its settings,
+          whatever you set there, bypassPermissions included. Pick this if sessions you message
+          should run the way you run them. (Codex follows the approval_policy and sandbox_mode in
+          its config.toml; Antigravity gets no flag, as in safe.)`;
 
-/** Ask the person at this machine, once: auto or safe. Not a terminal (an agent ran the
- *  pair command): safe, and say how to change it. */
-async function askMode(out: (s?: string) => void): Promise<"safe" | "auto"> {
+/** What each mode means, in a few words: after pairing, and after `control mode` changes it. */
+const MODE_IS: Record<ControlMode, string> = {
+  safe: "nothing that needs approval runs unattended",
+  auto: "Claude Code's auto mode",
+  inherit: "each harness's own default mode on this machine",
+};
+const MODE_NOW: Record<ControlMode, string> = {
+  safe: "only what each folder's settings already allow",
+  auto: "Claude Code's auto mode decides what's safe",
+  inherit: "as your own sessions here run: each harness's own default",
+};
+
+/** Ask the person at this machine, once: auto, safe or inherit. Inherit only by its whole
+ *  name, never by a stray letter: it runs whatever the settings say, bypass included. Not
+ *  a terminal (an agent ran the pair command): safe, and say how to change it. */
+async function askMode(out: (s?: string) => void): Promise<ControlMode> {
   if (!process.stdin.isTTY) {
     out("  Mode: safe for now. Run `sessionpipe control mode auto` to let sessions you message work unattended.");
     return "safe";
@@ -61,9 +82,10 @@ async function askMode(out: (s?: string) => void): Promise<"safe" | "auto"> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     for (;;) {
-      const a = (await rl.question("  auto or safe? [auto] ")).trim().toLowerCase();
+      const a = (await rl.question("  auto, safe or inherit? [auto] ")).trim().toLowerCase();
       if (a === "" || a === "a" || a === "auto") return "auto";
       if (a === "s" || a === "safe") return "safe";
+      if (a === "inherit") return "inherit";
     }
   } finally {
     rl.close();
@@ -150,12 +172,8 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       }
       // How sessions run when a message arrives is the person's call, asked once here at
       // the machine — never a default they find out about when a session can't read a file.
-      const mode: "safe" | "auto" =
-        flag("--mode") === "auto" || flag("--mode") === "safe"
-          ? (flag("--mode") as "safe" | "auto")
-          : existing?.mode && existing.receivers.length
-            ? existing.mode
-            : await askMode(out);
+      const mode =
+        parseMode(flag("--mode")) ?? (existing?.mode && existing.receivers.length ? existing.mode : await askMode(out));
       const tier = argv.includes("--tier") ? (Math.max(0, Math.min(3, Number(flag("--tier")) || 0)) as Tier) : 0;
       await pair({
         url,
@@ -180,9 +198,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       });
       const c = readControl()!;
       out(`  Folders sessions may run in: ${c.folders.join(", ")}`);
-      out(
-        `  Mode: ${c.mode} (${c.mode === "safe" ? "nothing that needs approval runs unattended" : "Claude Code's auto mode"})`,
-      );
+      out(`  Mode: ${c.mode} (${MODE_IS[c.mode]})`);
       let cli = path.join(distDir, "cli.js");
       try {
         cli = realpathSync(cli);
@@ -193,19 +209,19 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       return;
     }
     case "mode": {
-      const want = argv[2];
-      if (want !== "auto" && want !== "safe") {
+      const want = parseMode(argv[2]);
+      if (!want) {
         const c = readControl();
-        return out(`  mode: ${c?.mode ?? "not set up"}\n  usage: sessionpipe control mode auto|safe\n${MODE_TEXT}`);
+        return out(
+          `  mode: ${c?.mode ?? "not set up"}\n  usage: sessionpipe control mode auto|safe|inherit\n${MODE_TEXT}`,
+        );
       }
       const c = readControl();
       if (!c) return out("  control isn't set up on this machine: run `sessionpipe control pair <receiver>` first");
       c.mode = want;
       writeControl(c);
       // The running daemon reads control.json again within seconds; the next run uses it.
-      return out(
-        `  ✓ Sessions you message now run in ${want} mode${want === "auto" ? " (Claude Code's auto mode decides what's safe)" : " (only what each folder's settings already allow)"}.`,
-      );
+      return out(`  ✓ Sessions you message now run in ${want} mode (${MODE_NOW[want]}).`);
     }
     case "folders": {
       // The folders are the machine's own list, so they change here, at its keyboard, as

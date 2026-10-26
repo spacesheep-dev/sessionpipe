@@ -43,8 +43,8 @@ to a privacy tier per sink. A receiver is the server at a sink's URL.
 4. Never paste a sink token or control key into a file, a commit or a chat. `sessionpipe
    secrets` says where each one is kept.
 5. Messages to sessions ("control") are signed on the person's device and checked on the
-   machine. Pairing (`sessionpipe control pair`) and choosing safe or auto mode are the
-   person's to do at their own terminal.
+   machine. Pairing (`sessionpipe control pair`) and choosing safe, auto or inherit mode are
+   the person's to do at their own terminal.
 
 ## Commands
 

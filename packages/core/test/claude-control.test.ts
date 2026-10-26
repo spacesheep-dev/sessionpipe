@@ -96,19 +96,33 @@ describe("capabilities and mode flags", () => {
     });
     expect(parseCaps("")).toEqual({ hasMode: false, modes: [], promptsNone: false, fork: false, stream: false });
     expect(parseCaps('  --permission-prompts <m>  (choices: "stdio")\n').promptsNone).toBe(false);
+    // Claude Code 2.1.310 wraps the choices over three lines, and has `manual` for `default`.
+    const v310 = `  --permission-mode <mode>              Permission mode to use for the session
+                                        (choices: "acceptEdits", "auto",
+                                        "bypassPermissions", "manual",
+                                        "dontAsk", "plan")
+`;
+    expect(parseCaps(v310).modes).toEqual(["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
   });
-  it("safe never asks or bypasses; auto needs the harness's own auto mode", () => {
+  it("safe never asks or bypasses; auto needs the harness's own auto mode; inherit passes nothing", () => {
     const caps = parseCaps(HELP);
     expect(modeFlags("safe", caps)).toEqual({ args: ["--permission-mode", "dontAsk"] });
     expect(modeFlags("auto", caps)).toEqual({ args: ["--permission-mode", "auto"] });
+    // Inherit: no flag at all, so Claude Code starts in its settings' defaultMode.
+    expect(modeFlags("inherit", caps)).toEqual({ args: [] });
     const old = { hasMode: true, modes: ["default", "plan"], promptsNone: true, fork: false };
     expect(modeFlags("auto", old)).toEqual({ error: expect.stringContaining("no auto permission mode") });
+    // A Claude Code too old for --permission-mode, or for one mode in particular, still
+    // runs an inherit turn: there is nothing for it to refuse.
+    expect(modeFlags("inherit", old)).toEqual({ args: [] });
+    expect(modeFlags("inherit", { hasMode: false, modes: [], promptsNone: false, fork: false })).toEqual({ args: [] });
     expect(modeFlags("safe", old)).toEqual({ args: ["--permission-mode", "default", "--permission-prompts", "none"] });
     expect(modeFlags("safe", { hasMode: true, modes: ["manual"], promptsNone: false, fork: false })).toEqual({
       args: ["--permission-mode", "manual"],
     });
     expect(modeFlags("safe", { hasMode: false, modes: [], promptsNone: false, fork: false })).toEqual({ args: [] });
-    for (const m of ["safe", "auto"] as const) expect(JSON.stringify(modeFlags(m, caps))).not.toContain("bypass");
+    for (const m of ["safe", "auto", "inherit"] as const)
+      expect(JSON.stringify(modeFlags(m, caps))).not.toContain("bypass");
   });
   it.runIf(process.platform !== "win32")(
     "detectCaps runs --help, and reads what a failing claude still printed",

@@ -64,7 +64,8 @@
       "type": "string",
       "enum": [
         "safe",
-        "auto"
+        "auto",
+        "inherit"
       ]
     },
     "accounts": {

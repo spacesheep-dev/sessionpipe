@@ -139,7 +139,7 @@ describe("control pair", () => {
     );
   });
 
-  it("asks once at a terminal: enter or `a` is auto, `s` is safe, anything else is asked again", async () => {
+  it("asks once at a terminal: enter or `a` is auto, `s` is safe, only the whole word is inherit, anything else is asked again", async () => {
     Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
     writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [] });
     for (const [answers, mode] of [
@@ -148,14 +148,26 @@ describe("control pair", () => {
       [["a"], "auto"],
       [["AUTO "], "auto"],
       [["safe"], "safe"],
+      [["i", "bypass", " Inherit "], "inherit"],
     ] as const) {
       rl.answers.push(...answers);
       await run("pair", RX, "--no-service");
       expect(pair).toHaveBeenLastCalledWith(expect.objectContaining({ mode }));
       expect(rl.answers).toEqual([]);
     }
-    expect(rl.closed).toBe(5);
+    expect(rl.closed).toBe(6);
     expect(said()).toContain("how may it run?");
+    expect(said()).toContain("inherit As your own sessions here run: no permission flag");
+  });
+
+  it("--mode inherit pairs in inherit mode and says what that means", async () => {
+    vi.mocked(pair).mockImplementationOnce(async () => {
+      writeControl({ name: "Box", folders: [project], mode: "inherit", receivers: [receiver] });
+      return readControl()!;
+    });
+    await run("pair", RX, "--mode", "inherit", "--no-service");
+    expect(pair).toHaveBeenCalledWith(expect.objectContaining({ mode: "inherit" }));
+    expect(said()).toContain("Mode: inherit (each harness's own default mode on this machine)");
   });
 
   it("the key the receiver hands over becomes a sink, at --tier, unless one with a key is configured", async () => {
@@ -204,7 +216,7 @@ describe("control mode, keys, off, status, help", () => {
   it("mode: shows the current one (or that control isn't set up), then changes it", async () => {
     await run("mode");
     expect(said()).toContain("mode: not set up");
-    expect(said()).toContain("usage: sessionpipe control mode auto|safe");
+    expect(said()).toContain("usage: sessionpipe control mode auto|safe|inherit");
     out = [];
     await run("mode", "auto");
     expect(said()).toContain("control isn't set up on this machine");
@@ -217,8 +229,14 @@ describe("control mode, keys, off, status, help", () => {
     await run("mode", "safe");
     expect(said()).toContain("now run in safe mode (only what each folder's settings already allow)");
     out = [];
-    await run("mode", "loud");
-    expect(said()).toContain("mode: safe");
+    await run("mode", "inherit");
+    expect(said()).toContain("now run in inherit mode (as your own sessions here run: each harness's own default)");
+    expect(readControl()?.mode).toBe("inherit");
+    out = [];
+    // No mode is named after a harness's own bypass.
+    await run("mode", "bypass");
+    expect(said()).toContain("mode: inherit");
+    expect(readControl()?.mode).toBe("inherit");
   });
 
   it("keys: lists each receiver's keys with their algorithm, removes one by id, says when there is none", async () => {

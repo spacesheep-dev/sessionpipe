@@ -23,7 +23,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { kindPath } from "../src/control/route.js";
-import type { ControlConfig } from "../src/control/store.js";
+import type { ControlConfig, ControlMode } from "../src/control/store.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c"; // the thread a new `codex exec` picks
@@ -118,7 +118,7 @@ const runs = (): {
     : [];
 const started = () => runs().filter((r) => r.argv);
 
-function cfg(mode: "safe" | "auto" = "safe"): ControlConfig {
+function cfg(mode: ControlMode = "safe"): ControlConfig {
   return {
     name: "testbox",
     folders: [project],
@@ -137,7 +137,7 @@ function cfg(mode: "safe" | "auto" = "safe"): ControlConfig {
   };
 }
 
-async function startDaemon(o: { mode?: "safe" | "auto"; extra?: Partial<DaemonDeps> } = {}) {
+async function startDaemon(o: { mode?: ControlMode; extra?: Partial<DaemonDeps> } = {}) {
   d = new ControlDaemon(cfg(o.mode), path.join(tmp, "state", "control"), sock, {
     now: Date.now,
     fetch,
@@ -294,6 +294,15 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     const argv = started()[0]?.argv ?? [];
     expect(argv).toContain("--approve-for-me");
     expect(argv.join(" ")).not.toMatch(/dangerously|workspace-write/);
+  });
+
+  it("inherit mode: no sandbox or approval flag, so config.toml decides", { timeout: 20_000 }, async () => {
+    await startDaemon({ mode: "inherit" });
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    await rx.waitAck(q.id);
+    const argv = started()[0]?.argv ?? [];
+    expect(argv).toContain("exec");
+    expect(argv.join(" ")).not.toMatch(/approve-for-me|workspace-write|sandbox|approval|dangerously/);
   });
 
   it("a session the hooks reported: its folder from the rollout, resumed under its own id", {
@@ -492,6 +501,15 @@ describe.runIf(unix)("Antigravity (agy)", () => {
     const argv = started()[0]?.argv ?? [];
     expect(argv.slice(-2)).toEqual(["--mode", "accept-edits"]);
     expect(argv.join(" ")).not.toMatch(/dangerously/);
+  });
+
+  it("inherit mode: no permission flag, as in safe", { timeout: 20_000 }, async () => {
+    await startDaemon({ mode: "inherit" });
+    const q = await rx.send({ kind: "start", session: `antigravity:${RECV}`, cwd: project, text: "go" });
+    await rx.waitAck(q.id);
+    const argv = started()[0]?.argv ?? [];
+    expect(argv.slice(-2)).toEqual(["--output-format", "stream-json"]);
+    expect(argv.join(" ")).not.toMatch(/--mode|dangerously/);
   });
 
   it("a conversation the hooks reported: its folder from the hooks, and from the worker's facts after a restart", {

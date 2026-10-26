@@ -101,9 +101,12 @@ export function parseCaps(help: string): Caps {
 }
 
 /** Permission flags for the machine's mode. Safe: `dontAsk` (nothing that needs
- *  approval runs). Auto: Claude Code's own auto mode, or a refusal. Never
- *  bypassPermissions — no path here writes it. */
+ *  approval runs). Auto: Claude Code's own auto mode, or a refusal. Inherit: none, so
+ *  the turn starts in the mode Claude Code picks by itself here, its settings'
+ *  `permissions.defaultMode` (a resume too: Claude Code never restores a session's
+ *  earlier mode). Never bypassPermissions — no path here writes it. */
 export function modeFlags(mode: Mode, caps: Caps): { args: string[] } | { error: string } {
+  if (mode === "inherit") return { args: [] };
   if (mode === "auto") {
     if (!caps.modes.includes("auto"))
       return { error: "this machine is in auto mode, but its Claude Code has no auto permission mode" };
