@@ -78,7 +78,10 @@ SHOULD NOT send it a `start` with `files`.
 They MAY also carry `accounts`: the harness accounts signed in on the machine, each
 `{harness, id, email}`, where `id` is what events carry as `session.account_id` and
 `email` is the address the account signs in with, so the receiver's board can name an
-account rather than show its id. The email travels only here, to a receiver the
+account rather than show its id. An account with no email MAY carry `name` instead:
+a Claude Code home that runs on another API (no claude.ai login; its settings set
+`ANTHROPIC_BASE_URL`) is named by that endpoint's host, `{harness, id: "api-…",
+name: "api.z.ai"}`. The email and the name travel only here, to a receiver the
 person paired with, and never on an event (events reach every sink, a team board
 included). The daemon reads the accounts again for every hello, so a new sign-in is
 named without pairing again. A receiver MUST NOT treat them as anything but a label:

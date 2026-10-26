@@ -210,7 +210,7 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     if (!existing) cfg.receivers.push(rec);
     writeControl(cfg, o.env);
     o.out(`  ✓ Paired with ${rec.url} as ${machine} · ${rec.keys.length} key(s) trusted on this machine`);
-    const named = accounts.flatMap((a) => (a.email ? [a.email] : []));
+    const named = accounts.flatMap((a) => (a.email ? [a.email] : a.name ? [a.name] : []));
     if (named.length)
       o.out(`  Its session board names your Claude Code account${named.length > 1 ? "s" : ""}: ${named.join(", ")}`);
     // Whose passkey this machine now trusts: with open pairing, whoever approved the link.

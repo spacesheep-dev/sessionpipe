@@ -401,6 +401,9 @@ export const HarnessAccount = z.object({
   harness: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
   id: z.string().min(1).max(128),
   email: z.string().max(254).optional(),
+  /** What to call an account that has no email: a Claude Code home that runs on
+   *  another API is named by its endpoint's host (`api.z.ai`). */
+  name: z.string().min(1).max(200).optional(),
 });
 
 /** `POST {control}/pair`, sent with the person's sink token from their own terminal —

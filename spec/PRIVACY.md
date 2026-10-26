@@ -73,15 +73,17 @@ Vectors: `conformance/redaction/pii.json`.
 
 Tiers and rulesets govern events. The control lane is not a sink: it talks only to a
 receiver the person paired with by approving it with their passkey, and its pairing
-request and hellos may name the machine's harness accounts with their emails
-(`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) so that receiver's board can label
-`session.account_id`. No event carries an email for that.
+request and hellos may name the machine's harness accounts with their emails, or an
+API endpoint's host for a home with no login (`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)),
+so that receiver's board can label `session.account_id`. No event carries an email or
+a host for that.
 
 ## 3. What a sender never reads
 
 An adapter uses a harness's documented hooks API and reads files the person's own
 harness wrote on the person's own machine (its transcript, its session registry, its
-config's account id). It never reads a credential file, never calls a vendor API, and
+config's account id, or the API endpoint its settings name — that one value, never the
+token beside it). It never reads a credential file, never calls a vendor API, and
 never sends a token of the harness's anywhere. [ADAPTERS.md](ADAPTERS.md) states this
 per harness with the documentation URL.
 

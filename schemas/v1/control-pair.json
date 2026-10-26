@@ -75,6 +75,11 @@
           "email": {
             "type": "string",
             "maxLength": 254
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           }
         },
         "required": [

@@ -614,4 +614,20 @@ describe.runIf(unix)("hello", () => {
     for (let i = 0; i < 100 && !rx.hellos.length; i++) await new Promise((r) => setTimeout(r, 20));
     expect(rx.hellos[0]).not.toHaveProperty("accounts");
   });
+  it("names a home that runs on another API by its endpoint's host, never its token", async () => {
+    const dir = path.join(tmp, "claude-config");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "settings.json"),
+      JSON.stringify({
+        env: { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic", ANTHROPIC_AUTH_TOKEN: "zai-secret-token" },
+      }),
+    );
+    await startDaemon();
+    for (let i = 0; i < 100 && !rx.hellos.length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(rx.hellos[0]?.accounts).toEqual([
+      { harness: "claude-code", id: expect.stringMatching(/^api-[0-9a-f]{16}$/), name: "api.z.ai" },
+    ]);
+    expect(JSON.stringify(rx.hellos[0])).not.toContain("zai-secret-token");
+  });
 });

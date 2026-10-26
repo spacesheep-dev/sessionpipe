@@ -3,7 +3,8 @@
 // Config: settings.json in EVERY config dir (~/.claude, $CLAUDE_CONFIG_DIR, ~/.claude-*):
 // one per account; hooks written to one never fire for the others. Reads only the
 // hook's stdin, the transcript it names, the per-pid session registry and the config
-// dir's .claude.json account (its id; its email only for control's pair and hello).
+// dir's .claude.json account (its id; its email only for control's pair and hello) —
+// or, with no login there, the API its settings.json names (that one key, no token).
 // Ported from spacesheep-cli lib/sessions.js.
 
 import { execFileSync } from "node:child_process";
@@ -480,8 +481,9 @@ function parentOf(): (pid: number) => number {
 }
 const EMAIL_RE = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
 /** Who a config dir is signed in as, from its .claude.json (the default dir keeps it
- *  at ~/.claude.json): the account id, and the email it signs in with. */
-function claudeLogin(dir: string, home = homeDir()): { id: string; email?: string } | null {
+ *  at ~/.claude.json): the account id, and the email it signs in with. A dir with no
+ *  claude.ai login that runs on another API is that API's account (apiAccount). */
+function claudeLogin(dir: string, home = homeDir()): { id: string; email?: string; name?: string } | null {
   const files = [path.join(dir, ".claude.json")];
   if (path.resolve(dir) === path.join(home, ".claude")) files.unshift(path.join(home, ".claude.json"));
   for (const f of files) {
@@ -495,12 +497,40 @@ function claudeLogin(dir: string, home = homeDir()): { id: string; email?: strin
       }
     } catch {}
   }
-  return null;
+  return apiAccount(dir);
+}
+/** Anthropic's own API: a key for it is an Anthropic account no local file names. */
+const ANTHROPIC_HOST = /(^|\.)anthropic\.com$/i;
+/** A config dir whose settings send Claude Code to another API (`env.ANTHROPIC_BASE_URL`:
+ *  Kimi on a Modal endpoint, GLM on Z.ai) has no claude.ai login, so its account is the
+ *  endpoint: `api-` and 16 hex of the SHA-256 of its origin for events (the same on every
+ *  machine that uses it), and its host as the name control's pair and hello give it.
+ *  Only that one key is read; the tokens and headers beside it never are. */
+function apiAccount(dir: string): { id: string; name: string } | null {
+  let base: unknown;
+  try {
+    base = (JSON.parse(readFileSync(settingsIn(dir), "utf8")) as { env?: { ANTHROPIC_BASE_URL?: unknown } }).env
+      ?.ANTHROPIC_BASE_URL;
+  } catch {
+    return null;
+  }
+  if (typeof base !== "string") return null;
+  let u: URL;
+  try {
+    u = new URL(base.trim());
+  } catch {
+    return null;
+  }
+  if ((u.protocol !== "https:" && u.protocol !== "http:") || !u.hostname || ANTHROPIC_HOST.test(u.hostname))
+    return null;
+  // The origin alone: a path or a user:password@ can carry a key.
+  const origin = `${u.protocol}//${u.host}`;
+  return { id: `api-${createHash("sha256").update(origin).digest("hex").slice(0, 16)}`, name: u.host };
 }
 const accountCache = new Map<string, string | null>();
 /** The account id for `session.account_id`: never the email. Events go to every sink,
- *  a team board included; the email reaches only a receiver the person paired with,
- *  in control's pair and hello (claudeAccounts). */
+ *  a team board included; the email (or an API's host) reaches only a receiver the
+ *  person paired with, in control's pair and hello (claudeAccounts). */
 function claudeAccount(dir: string): string | null {
   const hit = accountCache.get(dir);
   if (hit !== undefined) return hit;
