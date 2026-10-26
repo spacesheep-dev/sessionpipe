@@ -64,6 +64,7 @@ const SESSION_ALLOW = [
   "account_id",
   "attended",
   "parent_id",
+  "launched_by",
 ];
 const MAX_SIDE = 20_000;
 const MAX_IO = 64 * 1024;

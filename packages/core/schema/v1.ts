@@ -105,6 +105,13 @@ export const Session = z.object({
   /** Whether a person attends the session, in the harness's own word. Absent = unknown, never false. */
   attended: z.boolean().optional(),
   parent_id: SessionId.nullable().optional(),
+  /** `<harness>:<id>` of the session that started this one on purpose (a script running
+   *  `claude -p` for it), from the launcher's environment. Absent for a subagent, whose
+   *  launcher is its parent, and when nothing says. */
+  launched_by: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+    .optional(),
 });
 
 export const Privacy = z.object({

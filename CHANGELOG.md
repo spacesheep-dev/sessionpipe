@@ -51,6 +51,12 @@ and released in lockstep. This file records protocol-level changes.
   (a background shell command running, 2.1.305); `stop.json` now pins `background: 1` (an
   Explore subagent still running) and `stop-2.json` `background: 0`. Additive: a receiver
   that doesn't know the field keeps it and carries on.
+- Protocol: `session.launched_by` (PROTOCOL.md §3): the session that started this one, as
+  `<harness>:<id>`, read from `SESSIONPIPE_LAUNCHED_BY` in the hook's environment. A script
+  that runs `claude -p` for a session sets it, and a receiver can group the run under its
+  launcher without reading it as a subagent, which `parent_id` would say (#65). A subagent
+  keeps its `parent_id` and gets no `launched_by`; a launcher that starts a further session
+  resets the variable, so it names the nearest launcher only.
 - Control: `start` is no longer Claude Code's alone (CONTROL.md §6; asked for by the
   maintainer on 2026-10-04, so the spec change ships with its code). A `start` names a
   session of any harness the machine can drive headlessly — the reference daemon drives

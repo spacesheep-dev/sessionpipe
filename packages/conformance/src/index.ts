@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /** @sessionpipe/conformance — runs the fixtures against an adapter (here) or a receiver URL (M3). */
 import { readFileSync } from "node:fs";
-import { adapterByName } from "@sessionpipe/core";
+import { adapterByName, readHook } from "@sessionpipe/core";
 
 export interface FixtureResult {
   file: string;
@@ -46,7 +46,7 @@ export async function runAdapterFixtures(
       results.push({ file, ok: false, why: `no adapter ${fx.harness}` });
       continue;
     }
-    const r = adapter.fromHook({
+    const r = readHook(adapter, {
       argv: fx.input.argv,
       stdin: fx.input.stdin,
       env: fx.input.env ?? {},

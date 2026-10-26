@@ -201,12 +201,20 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
           email: "x@y.z",
           attended: false,
           parent_id: null,
+          launched_by: "codex:l",
         } as Event["session"],
       }),
       3,
       false,
     )!;
-    expect(out.session).toEqual({ id: "s", seq: 1, machine: "m", attended: false, parent_id: null });
+    expect(out.session).toEqual({
+      id: "s",
+      seq: 1,
+      machine: "m",
+      attended: false,
+      parent_id: null,
+      launched_by: "codex:l",
+    });
   });
   it("is idempotent without pii", () => {
     for (const type of Object.keys(SPEC))

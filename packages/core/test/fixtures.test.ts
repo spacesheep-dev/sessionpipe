@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adapterByName } from "../src/adapters/index.js";
+import { readHook } from "../src/launched-by.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dir = path.join(root, "conformance/harness");
@@ -34,7 +35,7 @@ describe("adapter fixtures", () => {
     it(path.relative(root, f), () => {
       const adapter = adapterByName(fx.harness);
       expect(adapter, `adapter ${fx.harness}`).toBeDefined();
-      const r = adapter!.fromHook({
+      const r = readHook(adapter!, {
         argv: fx.input.argv,
         stdin: fx.input.stdin,
         env: fx.input.env ?? {},
@@ -56,4 +57,24 @@ describe("adapter fixtures", () => {
       }
     });
   }
+});
+
+describe("the launcher comes with every harness's reading (PROTOCOL.md §3)", () => {
+  it("each recorded hook, run with SESSIONPIPE_LAUNCHED_BY set, reports launched_by", () => {
+    let checked = 0;
+    for (const f of files) {
+      const fx = JSON.parse(readFileSync(f, "utf8"));
+      if (!fx.expect.length) continue;
+      const launcher = `${fx.harness}:launcher-${checked}`;
+      const r = readHook(adapterByName(fx.harness)!, {
+        argv: fx.input.argv,
+        stdin: fx.input.stdin,
+        env: { ...fx.input.env, SESSIONPIPE_LAUNCHED_BY: launcher },
+        cwd: fx.input.cwd ?? "/",
+      });
+      expect(r?.session.launched_by, path.relative(root, f)).toBe(launcher);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
 });

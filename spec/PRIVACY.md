@@ -10,7 +10,7 @@ a sink gets a tier, the tier is an allowlist, and two rulesets scrub what remain
 
 | Tier | Name | Carries |
 |-----:|------|---------|
-| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`), timing, machine, cwd, repo, branch, model, title, url, account_id, attended. Enough for "working / needs you / done" and a link to open the session. `turn.started` carries `submitted_by` and `injected`: who started the turn, and whether its prompt was the harness's own block — never any of the prompt's words, but `injected` is one bit read off the prompt's first characters, where the prompt's bare length (`prompt_chars`) is tier 1. `submitted_by` is a bare word (PROTOCOL.md §4) because tier 0 is not scrubbed by `secrets@1`. |
+| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`), timing, machine, cwd, repo, branch, model, title, url, account_id, attended, launched_by. Enough for "working / needs you / done" and a link to open the session. `turn.started` carries `submitted_by` and `injected`: who started the turn, and whether its prompt was the harness's own block — never any of the prompt's words, but `injected` is one bit read off the prompt's first characters, where the prompt's bare length (`prompt_chars`) is tier 1. `submitted_by` is a bare word (PROTOCOL.md §4) because tier 0 is not scrubbed by `secrets@1`. |
 | 1 | actions | + tool names, `call_id`, durations, ok/error text, `files.changed` paths, attention `tool` and `message` (redacted, ≤ 200 chars), `prompt_chars`, subagents, compactions. Enough for an activity feed. |
 | 2 | conversation | + `turn.transcript`: the person's prompts and the assistant's text, redacted, ≤ 20 000 chars a side, and `turn.progress`, the same for a turn still running. Enough for memory, search, recaps. |
 | 3 | full | + tool `input` and `output` (≤ 64 KB each), thinking where the harness exposes it, the native lane's raw lines. Full replay; meant for a receiver you own. |
@@ -105,6 +105,9 @@ are the controller of what it stores.
   string as though it might contain one. Never log event bodies.
 - **The native lane carries unredacted data.** Do not enable it on a receiver other
   people send to.
+- **`launched_by` can name a session you never saw.** The launcher and the session it
+  started may report to different sinks. The id is opaque: it says the two are related
+  and nothing else.
 
 ## 5. What sessionpipe itself never does
 
