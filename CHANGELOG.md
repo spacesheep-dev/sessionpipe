@@ -5,6 +5,79 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.10.0)
+
+What a 0.10.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
+some machines still run 0.9.0 (a hello says which). Everything is additive on protocol 1
+except the first item, which tightens what a machine accepts, on purpose.
+
+- **The command field set is closed** (CONTROL.md §3.1). Each kind carries the fields its
+  table row names, plus `v`, `t`, `machine`, `kind`, `session`, `nonce`, `iat` and
+  `note`. Any other field inside the signed `cmd` is refused `bad_fields`, by the
+  verifier and on the machine; 0.9.0 ignored it. A receiver keeps its own data (a
+  `match`, an `origin`) beside `cmd`, never inside it, so a field a machine doesn't know
+  fails closed.
+- **`mode: "inherit"`** (CONTROL.md §2) in a pairing request and a hello. The machine
+  passes no permission flag, so each harness runs as the person's own sessions there do:
+  Claude Code in its settings' `permissions.defaultMode`, `bypassPermissions` included,
+  and Codex as its `config.toml` says. A start that names no level runs that way. A
+  receiver shows the machine as `inherit`, on its pairing page and wherever it shows a
+  mode, and never as `safe` or `auto`; an unknown mode is unknown, not safe.
+  **The gate:** a 0.10.0 machine pairs in `inherit`, or switches to it, only with
+  receivers whose well-known file says `control.inherit: true` (HTTP.md §1). Elsewhere
+  the person is told "`<receiver>` doesn't know inherit mode yet; it would show this
+  machine as safe while the sessions you message run with no permission flag", and the
+  machine keeps its mode. A receiver sets the flag once it shows the mode truthfully and
+  accepts `mode: "inherit"` in `/pair` and `/hello` (conformance `delivery/23`).
+- **The refusal code `mode` is now `permission`** (CONTROL.md §5), beside a new
+  `refused` `model`, and `failed` `model` when the harness rejects a start's model. A
+  0.9.0 machine still says `mode`, so a receiver maps both; `detail` always has the
+  words.
+- **New hello fields** (CONTROL.md §2). `start`: per harness, the `permissions` a start
+  may name there (among `read`, `safe`, `edits`, `auto`, already capped by the mode; on
+  an `inherit` machine at most `safe`), the default `permission` (which may be
+  `inherit`), and `models` / `any_model`. `prompt_files: true`: the machine takes `files`
+  on a `prompt`. `files: true` is as in 0.9.0. There is **no `home`**: no hello names the
+  machine's home folder, which would tell every receiver the OS user name. Instead a
+  start's `cwd` may be `~` or `~/…`, the way events write a session's folder, and the
+  machine reads it under its own home. `harnesses` lists at most 20 (Claude Code, Codex
+  and Antigravity first), and `modes` include `api` whenever an ACP agent is listed.
+- **Acks carry `applied`** (CONTROL.md §6, §10): a start's `taken` and `delivered` say
+  what it runs with, `{"permission": …, "model"?: …}`, where `permission` may be
+  `inherit`. A receiver shows `applied`, never what was asked; a delivered start with no
+  `applied` reached a machine that ignored the options.
+- **New event fields** (PROTOCOL.md; all optional, tier 0): `session.attended`,
+  `turn.ended.background`, `turn.started.submitted_by` and `injected`,
+  `session.launched_by`, and `session.account_id` `api-<16 hex>` for a Claude Code home
+  on another API, named in the pair and hello `accounts[]` by `name` (the host) with no
+  `email`. A receiver that doesn't know them keeps them as extra keys.
+- **ACP harnesses** (CONTROL.md §6, ADAPTERS.md "Agents driven through ACP"): a hello's
+  `harnesses` may name any agent from the ACP registry that is installed (`gemini-cli`,
+  `opencode`, `goose`, `cursor`, `copilot-cli`, `droid`, `qwen-code` and more); their
+  turns are acked in delivery mode `api`, and an ack's `session` may be
+  `<acp-harness>:<id>`. They take no start options. A receiver shows a harness it has no
+  label for by its raw name.
+
+Adopting 0.10.0 while machines still run 0.9.0:
+
+- Send `permission` or `model` on a start only when the last hello's `start[harness]`
+  lists that level in `permissions`, or has `any_model` or `models`. A 0.9.0 machine
+  ignores both in silence and runs at its own mode.
+- Send `files` on a `prompt` only to a machine whose hello says `prompt_files: true`; a
+  0.9.0 machine refuses the prompt `bad_fields`.
+- Send a `~` folder as a start's `cwd` only to a machine whose hello carries `start`;
+  give any other an absolute one (from `folders`).
+- Never sign `inherit` as a command's `permission`: it only ever comes from the machine.
+- Read an absent `attended`, `background`, `submitted_by`, `injected` or `launched_by`
+  as unknown: never `false`, `0` or "a person". Keep a `submitted_by` you don't know.
+- Gate per machine on its latest hello, cloud boxes included: one asleep on an old
+  snapshot may still poll on 0.9.0.
+- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.10.0's
+  `sessionpipe-core/control` and its vectors (`69` is now `files-on-permission-answer`;
+  `90`–`110` are new).
+
+### Protocol changes
+
 - `turn.started` can say who started the turn (PROTOCOL.md §4; PRIVACY.md §1;
   ADAPTERS.md). Two new OPTIONAL tier-0 fields: `submitted_by`, the harness's **own** word
   for who submitted the prompt, forwarded verbatim and never mapped onto a vocabulary of

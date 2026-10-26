@@ -1,0 +1,15 @@
+---
+"sessionpipe-core": minor
+"sessionpipe": minor
+---
+
+**For receivers.** What a 0.10.0 machine sends and accepts, and how to adopt it while some machines still run 0.9.0 (CHANGELOG.md, "For receivers (0.10.0)", has the detail).
+
+- **Closed command field set.** Each command kind carries only its own fields; any other field inside the signed `cmd` is refused `bad_fields`, by the verifier and on the machine (0.9.0 ignored it). Keep your own data beside `cmd`, never in it.
+- **`mode: "inherit"`** in pairing requests and hellos: no permission flag, so a start that names no level runs as the person's own sessions there do, permission checks off included where their settings say so. Show it as `inherit`, never as safe or auto. A 0.10.0 machine pairs in inherit, or switches to it, only with a receiver whose well-known file says `control.inherit: true`; it tells everyone else's person "… doesn't know inherit mode yet; it would show this machine as safe". Set the flag once you show the mode truthfully and accept it in `/pair` and `/hello` (conformance `delivery/23`).
+- **Refusal code `mode` is now `permission`**, plus `refused` `model` and `failed` `model`. Map both codes; a 0.9.0 machine still says `mode`.
+- **Hello:** `start` (per harness: `permissions` among `read`, `safe`, `edits`, `auto`, capped by the mode; the default `permission`, which may be `inherit`; `models`, `any_model`), `prompt_files: true`, and no `home`: a start's `cwd` may be `~` or `~/…` instead. `harnesses` lists at most 20, and `modes` include `api` when an ACP agent is listed.
+- **Acks:** a start's `taken` and `delivered` carry `applied` (`permission` may be `inherit`). Show `applied`, never what was asked.
+- **Events:** `session.attended`, `turn.ended.background`, `turn.started.submitted_by` and `injected`, `session.launched_by`, and `account_id` `api-<16 hex>` for a Claude Code home on another API, named in `accounts[]` by `name` with no `email`. All optional, tier 0.
+- **ACP agents** (gemini-cli, opencode, goose, cursor, copilot-cli, droid and more) appear in `harnesses` and in ack `session` refs, acked in mode `api`; they take no start options.
+- **While machines run 0.9.0:** send `permission` or `model` only where the last hello's `start` advertises them (0.9.0 ignores them silently); `files` on a `prompt` only with `prompt_files: true` (0.9.0 refuses them); a `~` folder only to a machine whose hello has `start`; never `inherit` as a command's level; read an absent `attended`, `background`, `submitted_by`, `injected` or `launched_by` as unknown, never as false, 0 or a person.
