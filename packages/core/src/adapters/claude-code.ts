@@ -275,6 +275,11 @@ export const claudeCode: Adapter = {
     if (event === "UserPromptSubmit" && typeof s.prompt === "string") hints.prompt = s.prompt;
     const host = input.env.CLAUDE_CODE_HOST_SESSION_ID;
     if (host && DESKTOP_ID.test(host)) hints.desktop_id = host;
+    // Whether a person attends the session, in Claude Code's own word ("1" or "0" in a hook's
+    // environment); a turn the control daemon runs on the person's signed message is theirs.
+    // facts() turns it into session.attended once it knows whether the session has a link.
+    const attended = input.env.CLAUDE_CODE_SESSION_ATTENDED;
+    if (attended === "1" || attended === "0") hints.attended = attended === "1" || !!input.env.SESSIONPIPE_CONTROL_JOB;
     // The registry file is found while the process tree stands (the detached
     // worker's parent is gone by the time it runs). Heartbeat-class events skip it.
     if (event !== "PreToolUse" && event !== "PostToolUse") hints.claude_pid = claudePid(input.env);
@@ -299,6 +304,11 @@ export const claudeCode: Adapter = {
     const cwd = out.cwd ?? session.cwd;
     Object.assign(out, gitFacts(cwd), out.branch ? { branch: out.branch } : {});
     if (!out.url && typeof hints.desktop_id === "string") out.url = `claude://code/continue/${hints.desktop_id}`;
+    // A Remote Control session says "0" though a person drives it from claude.ai: it runs as a
+    // headless child of `claude remote-control`. Its link is what tells it from a `claude -p`;
+    // CLAUDE_CODE_ENVIRONMENT_KIND cannot, since a `claude -p` started inside a Remote Control
+    // session inherits "bridge", while the registry entry it writes has no bridge id of its own.
+    if (typeof hints.attended === "boolean") out.attended = hints.attended || !!out.url;
     return out;
   },
 

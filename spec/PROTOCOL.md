@@ -42,7 +42,7 @@ generated from the reference implementation's types.
     "model": "claude-fable-5-1",
     "title": "Open-source session hooks", "title_source": "harness",
     "url": "https://claude.ai/code/session_01…", "account_id": "a1b2…",
-    "parent_id": null
+    "attended": true, "parent_id": null
   },
   "privacy": { "rulesets": ["secrets@1"], "pii": false },
   "data": { "tool": "Bash", "call_id": "toolu_01…", "ms": 1830, "ok": true }
@@ -81,6 +81,7 @@ blanks an earlier full value.
 | `title`, `title_source` | The session's name and where it came from: `custom` (the person named it), `harness` (the tool's own titler), `first-ask` (the first prompt, cut). A receiver SHOULD never replace a better source with a worse one. |
 | `url` | A link that opens the session (a Remote Control link, a web remote). |
 | `account_id` | An opaque id for the harness account, never an email. A receiver the person paired with for control learns the email that goes with it from the pairing request and the daemon's hellos (`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)). |
+| `attended` | Whether a person attends the session, as the harness says: `true` when one is at it or drives it from one of its own clients (a terminal, a remote-control link, a desktop app), `false` for a run nobody watches, such as a headless run a script started. Absent when the harness does not say, and a receiver MUST read absent as unknown, never as `false`. A later event may change it (a headless session resumed in a terminal). |
 | `parent_id` | For a subagent's own events: the parent session's id. `null` or absent otherwise. |
 
 **Short id.** Where a session is named to a person (a log line, a notification, a
@@ -165,7 +166,7 @@ What each tier carries. The full rules, the rulesets and guidance are in
 | What | 0 | 1 | 2 | 3 |
 |------|:-:|:-:|:-:|:-:|
 | Session id, state events, timing | ✓ | ✓ | ✓ | ✓ |
-| Machine, cwd, repo, branch, model, title, url, account_id | ✓ | ✓ | ✓ | ✓ |
+| Machine, cwd, repo, branch, model, title, url, account_id, attended | ✓ | ✓ | ✓ | ✓ |
 | Attention kind | ✓ | ✓ | ✓ | ✓ |
 | Tool names, durations, ok/error | — | ✓ | ✓ | ✓ |
 | File paths touched | — | ✓ | ✓ | ✓ |

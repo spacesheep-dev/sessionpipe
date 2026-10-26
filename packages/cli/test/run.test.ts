@@ -242,6 +242,47 @@ describe("runJob", () => {
     expect(r.events[0]?.session.account_id).toBe("org-from-the-job");
     expect(r.events[0]?.session.cwd).toBe(tmp);
   });
+  it("session.attended comes from the job's environment, never the worker's", async () => {
+    const run = (id: string, env: Record<string, string>) =>
+      runJob(
+        {
+          harness: "claude-code",
+          event: "SessionStart",
+          argv: ["claude-code", "SessionStart"],
+          stdin: JSON.stringify({ session_id: id, cwd: tmp, source: "startup" }),
+          cwd: tmp,
+          env,
+          at: Date.now(),
+        },
+        { state: path.join(tmp, "attended") },
+      );
+    // The worker was spawned by a desktop session's hook during a control turn, and sweeps the
+    // job of a `claude -p` nobody watches.
+    const keys = ["CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_HOST_SESSION_ID", "SESSIONPIPE_CONTROL_JOB"];
+    const saved = keys.map((k) => process.env[k]);
+    Object.assign(process.env, {
+      CLAUDE_CODE_SESSION_ATTENDED: "1",
+      CLAUDE_CODE_HOST_SESSION_ID: "local_the-worker",
+      SESSIONPIPE_CONTROL_JOB: "1",
+    });
+    try {
+      const probe = await run("11111111-1111-4111-8111-111111111111", { CLAUDE_CODE_SESSION_ATTENDED: "0" });
+      expect(probe.events[0]?.session.attended).toBe(false);
+      expect(probe.events[0]?.session.url).toBeUndefined();
+      const desktop = await run("22222222-2222-4222-8222-222222222222", {
+        CLAUDE_CODE_SESSION_ATTENDED: "0",
+        CLAUDE_CODE_HOST_SESSION_ID: "local_the-job",
+      });
+      expect(desktop.events[0]?.session).toMatchObject({ attended: true, url: "claude://code/continue/local_the-job" });
+      const unsaid = await run("33333333-3333-4333-8333-333333333333", {});
+      expect(unsaid.events[0]?.session).not.toHaveProperty("attended");
+    } finally {
+      keys.forEach((k, i) => {
+        if (saved[i] === undefined) delete process.env[k];
+        else process.env[k] = saved[i];
+      });
+    }
+  });
 });
 
 describe("sessions the control daemon named (control/aliases.ts)", () => {

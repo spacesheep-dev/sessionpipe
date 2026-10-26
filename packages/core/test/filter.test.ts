@@ -193,11 +193,20 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
   });
   it("only the session fields the spec names survive", () => {
     const out = filterEvent(
-      base({ session: { id: "s", seq: 1, machine: "m", email: "x@y.z", parent_id: null } as Event["session"] }),
+      base({
+        session: {
+          id: "s",
+          seq: 1,
+          machine: "m",
+          email: "x@y.z",
+          attended: false,
+          parent_id: null,
+        } as Event["session"],
+      }),
       3,
       false,
     )!;
-    expect(out.session).toEqual({ id: "s", seq: 1, machine: "m", parent_id: null });
+    expect(out.session).toEqual({ id: "s", seq: 1, machine: "m", attended: false, parent_id: null });
   });
   it("is idempotent without pii", () => {
     for (const type of Object.keys(SPEC))
@@ -234,6 +243,13 @@ describe("filterEvent: pii@1 runs only when opted in", () => {
     expect(e.privacy).toEqual({ rulesets: ["pii@1"], pii: true });
     const bare = filterEvent(base({ type: "session.started", session: { id: "s", seq: 0 }, data: {} }), 0, true)!;
     expect(bare.session).toEqual({ id: "s", seq: 0 });
+    // Who attends a session is tier 0, and pii@1 leaves it alone.
+    const att = filterEvent(
+      base({ type: "session.started", session: { id: "s", seq: 0, attended: false }, data: {} }),
+      0,
+      true,
+    )!;
+    expect(att.session).toEqual({ id: "s", seq: 0, attended: false });
   });
 });
 

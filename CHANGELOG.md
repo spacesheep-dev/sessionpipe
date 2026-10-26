@@ -20,6 +20,16 @@ and released in lockstep. This file records protocol-level changes.
   `UserPromptSubmit.source`, which no build in the field sends yet; fixture
   `conformance/harness/claude-code/user-prompt-submit-injected.json`. Additive: a receiver
   that does not know the fields keeps them as extra keys on `data`.
+- `session.attended`: whether a person attends the session (PROTOCOL.md §3, §5; PRIVACY.md
+  §1; ADAPTERS.md). A new OPTIONAL tier-0 boolean in the session block, in the harness's own
+  word: `true` when a person is at the session or drives it from one of the harness's own
+  clients, `false` for a run nobody watches. A receiver MUST read an absent field as unknown,
+  never as `false`. Claude Code fills it from `CLAUDE_CODE_SESSION_ATTENDED`, counting a
+  control turn and a session with a link (its Remote Control bridge or the desktop app) as
+  attended, because every headless run says `0`, a Remote Control session included. The hook
+  carries `CLAUDE_CODE_SESSION_ATTENDED` and `SESSIONPIPE_CONTROL_JOB` into the job, and the
+  worker reads those and `CLAUDE_CODE_HOST_SESSION_ID` from the job alone, never from its own
+  environment. Additive: a receiver that does not know the field ignores it.
 - Control: a `start` may carry `files` (CONTROL.md §3.1, §6; HTTP.md §1, §3; still
   Draft). Up to 10 files, 25 MiB each and 50 MiB together, each named in the signed
   command by its SHA-256 (base64url), so a receiver cannot swap one. The receiver

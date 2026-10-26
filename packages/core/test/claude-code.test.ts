@@ -110,6 +110,19 @@ describe("claude-code fromHook", () => {
     expect(hook("SubagentStart", { agent_id: "a1" })?.session.parent_id).toBeUndefined();
     expect(hook("Stop", { cwd: 1 }, {}, "/argv")?.session.cwd).toBe("/argv");
   });
+  it("hints.attended: Claude Code's own word, and a control turn is the person's", () => {
+    const att = (env: Record<string, string>) =>
+      hook("SessionStart", { source: "startup" }, { HOME: home, ...env })?.hints?.attended;
+    expect(att({ CLAUDE_CODE_SESSION_ATTENDED: "1" })).toBe(true);
+    expect(att({ CLAUDE_CODE_SESSION_ATTENDED: "0" })).toBe(false);
+    expect(att({ CLAUDE_CODE_SESSION_ATTENDED: "0", SESSIONPIPE_CONTROL_JOB: "1" })).toBe(true);
+    // What a `claude -p` an agent starts inside a Remote Control session inherits (measured, 2.1.310).
+    expect(att({ CLAUDE_CODE_SESSION_ATTENDED: "0", CLAUDE_CODE_ENVIRONMENT_KIND: "bridge" })).toBe(false);
+    // No word from the harness, or one it never uses: unknown, never false.
+    expect(att({})).toBeUndefined();
+    expect(att({ CLAUDE_CODE_SESSION_ATTENDED: "yes" })).toBeUndefined();
+    expect(hook("Stop", {}, { CLAUDE_CODE_SESSION_ATTENDED: "0", HOME: home })?.session).toEqual({ id: SID, cwd: "/" });
+  });
   it("PostToolUseFailure: the error text from a string, an {error} or a {message}, nothing from the rest", () => {
     const fail = (error: unknown, tool_response?: unknown) =>
       hook("PostToolUseFailure", { tool_name: "Bash", tool_use_id: "toolu_1", duration_ms: 12.6, error, tool_response })
@@ -448,6 +461,20 @@ describe("claude-code facts", () => {
       title_source: "first-ask",
     });
     expect(claudeFacts(file, SID, {}, memState()).title).toBe("ask");
+  });
+  it("session.attended: Claude Code's word, or a link a person opens the session by", () => {
+    const attended = (hints: Record<string, unknown>, file?: string) =>
+      claudeCode.facts({ id: SID, cwd: "/" }, file, hints, memState()).attended;
+    expect(attended({})).toBeUndefined(); // the harness said nothing
+    expect(attended({ attended: true })).toBe(true);
+    expect(attended({ attended: false })).toBe(false);
+    // A Remote Control session says "0" (measured, 2.1.307), and its registry entry names its bridge.
+    registry(781, { sessionId: "filed-under-another", bridgeSessionId: "session_01AttendedHere" });
+    const file = transcript([user("ask"), assistant("ok")]);
+    expect(attended({ attended: false, claude_pid: 781 }, file)).toBe(true);
+    expect(attended({ attended: false, claude_pid: 782 }, file)).toBe(false);
+    // The desktop app's link counts the same.
+    expect(attended({ attended: false, desktop_id: "local_abc-123" })).toBe(true);
   });
   it("the bridge link from a bridge-session record (cse_ or session_), the head before the tail", () => {
     expect(
