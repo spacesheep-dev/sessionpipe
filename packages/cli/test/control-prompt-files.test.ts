@@ -92,7 +92,7 @@ beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), "sp-prompt-files-"));
   project = path.join(tmp, "project");
   configDir = path.join(tmp, "claude-config");
-  sock = path.join(tmp, "control.sock");
+  sock = process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock");
   env = { ...process.env, SESSIONPIPE_STATE: path.join(tmp, "state"), SESSIONPIPE_SOCKET: sock };
   mkdirSync(project, { recursive: true });
   mkdirSync(path.join(configDir, "sessions"), { recursive: true });
