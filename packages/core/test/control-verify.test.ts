@@ -82,7 +82,7 @@ describe("verifyCommand", () => {
     expect(parseSessionRef(":x")).toBeNull();
   });
 
-  it("checks a start's files: lengths after NFC, names unique across case and form, only on a start", () => {
+  it("checks a start's files: lengths after NFC, names unique across case and form, only on a start or a prompt", () => {
     const f = { name: "a.png", type: "image/png", size: 10, sha256: "A".repeat(43) };
     expect(filesProblem([f])).toBeNull();
     // 201 code units as sent, 200 characters after NFC: allowed.
@@ -101,7 +101,7 @@ describe("verifyCommand", () => {
     expect(filesProblem([{ ...f, type: "image/png; charset=x" }])).toMatch(/media type/);
     expect(filesProblem([{ ...f, sha256: 5 }])).toMatch(/sha256/);
     expect(filesProblem([null])).toMatch(/object/);
-    // Only a start carries files: every other kind is refused for them alone.
+    // Only a start or a prompt carries files: every other kind is refused for them alone.
     const key = { id: "A".repeat(16), alg: -7, spki: "A".repeat(40) };
     for (const fields of [
       { kind: "permission.answer", text: undefined, for: "perm-1", decision: "deny" },
@@ -111,11 +111,16 @@ describe("verifyCommand", () => {
       expect(parseCommand(commandStr({ ...fields, files: [f] }))).toMatchObject({
         ok: false,
         code: "bad_fields",
-        why: "only a start carries files",
+        why: "only a start or a prompt carries files",
       });
     const st = (files: unknown) => parseCommand(commandStr({ kind: "start", cwd: "/tmp", files }));
     expect(st([f]).ok).toBe(true);
     expect(st(null)).toMatchObject({ ok: false, code: "bad_fields" });
+    // A prompt's files follow the same rules.
+    const pr = (files: unknown) => parseCommand(commandStr({ files }));
+    expect(pr([f]).ok).toBe(true);
+    expect(pr([])).toMatchObject({ ok: false, code: "bad_fields", why: "files is a list of 1 to 10 files" });
+    expect(pr([f, { ...f, name: "A.PNG" }])).toMatchObject({ ok: false, why: "two files have the same name" });
   });
 
   it("decodes base64url strictly", () => {
@@ -252,7 +257,10 @@ describe("parseCommand", () => {
   // Each kind's own fields, beside the common ones (CONTROL.md §3.1). Adding a field to
   // a kind later is one entry here, and every other kind is checked to refuse it.
   const KINDS: Record<string, { base: Record<string, unknown>; own: Record<string, unknown> }> = {
-    prompt: { base: {}, own: { text: "hi" } },
+    prompt: {
+      base: {},
+      own: { text: "hi", files: [{ name: "a.png", type: "image/png", size: 1, sha256: "A".repeat(43) }] },
+    },
     "permission.answer": {
       base: { text: undefined, for: "a", decision: "deny" },
       own: { for: "a", decision: "allow" },

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Attachments on a `start` (spec/CONTROL.md §3.1, §6): the signed command names each
-// file by its SHA-256; the bytes wait on the receiver. The daemon fetches each one
-// with the machine's token, stops reading past the signed size, checks length and
-// hash, and only then writes it — under <cwd>/.sessionpipe/files/<session>/, never
-// through a symlink, never over an existing path, mode 0600. Any problem: nothing is
-// kept and the session doesn't start. The same for every harness the daemon starts:
+// Attachments on a `start` or a `prompt` (spec/CONTROL.md §3.1, §6): the signed command
+// names each file by its SHA-256; the bytes wait on the receiver. The daemon fetches
+// each one with the machine's token, stops reading past the signed size, checks length
+// and hash, and only then writes it — under <cwd>/.sessionpipe/files/<session>/ for a
+// start, <session>/<nonce>/ for a prompt — never through a symlink, never over an
+// existing path, mode 0600. Any problem: nothing is kept, and the session doesn't start
+// or the message isn't delivered. The same for every harness and every delivery mode:
 // the files are in `cwd` before the run, and nothing about them is the harness's.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -98,22 +99,29 @@ function realDir(p: string, why: string): void {
 }
 
 /**
- * Write the checked files to <cwd>/.sessionpipe/files/<session>/ and answer their
- * paths relative to cwd. `cwd` is already resolved (realpath) and allowed.
- * On any problem everything written here is removed and FileProblem thrown.
+ * Write the checked files to <cwd>/.sessionpipe/files/<session>/ (a start's, which must
+ * be new) or <session>/<message>/ (a prompt's: the session's folder may be there, the
+ * message's must be new), and answer their paths relative to cwd. `cwd` is already
+ * resolved (realpath) and allowed. On any problem everything written here is removed
+ * and FileProblem thrown.
  */
-export function writeFiles(cwd: string, session: string, files: Fetched[]): string[] {
+export function writeFiles(cwd: string, session: string, files: Fetched[], message?: string): string[] {
   const top = path.join(cwd, ".sessionpipe");
   const parent = path.join(top, "files");
-  const dir = path.join(parent, session);
+  const sub = message ? `${session}/${message}` : session;
+  const dir = path.join(parent, session, ...(message ? [message] : []));
   let made = false;
   try {
+    // Names the protocol allows in an id that are no folder of their own.
+    for (const part of [session, message])
+      if (part === "." || part === "..") throw new FileProblem(`no folder ${part}`);
     realDir(top, ".sessionpipe");
     // The folder ignores itself, so a repository never picks it up.
     const ignore = path.join(top, ".gitignore");
     if (!existsSync(ignore)) writeFileSync(ignore, "*\n", { flag: "wx", mode: 0o600 });
     realDir(parent, ".sessionpipe/files");
-    if (existsSync(dir)) throw new FileProblem(`.sessionpipe/files/${session} already exists`);
+    if (message) realDir(path.join(parent, session), `.sessionpipe/files/${session}`);
+    if (existsSync(dir)) throw new FileProblem(`.sessionpipe/files/${sub} already exists`);
     mkdirSync(dir, { mode: 0o700 });
     made = true;
     // Every parent between cwd and here is a real directory right now.
@@ -122,7 +130,7 @@ export function writeFiles(cwd: string, session: string, files: Fetched[]): stri
     for (const f of files) {
       // wx: exclusive create, which also refuses to open through a symlink.
       writeFileSync(path.join(dir, f.name), f.bytes, { flag: "wx", mode: 0o600 });
-      rel.push(`.sessionpipe/files/${session}/${f.name}`);
+      rel.push(`.sessionpipe/files/${sub}/${f.name}`);
     }
     return rel;
   } catch (e) {

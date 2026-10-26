@@ -584,7 +584,11 @@ describe.runIf(WRITE)("write control vectors", () => {
     );
     const fileShape = async (name: string, description: string, cmd: string) =>
       refuse(name, description, await signed(pk, day, cmd), "bad_fields");
-    await fileShape("files-on-prompt", "Only a start may carry files.", commandStr({ files: [png] }));
+    await fileShape(
+      "files-on-permission-answer",
+      "Only a start or a prompt may carry files.",
+      commandStr({ kind: "permission.answer", text: undefined, for: "perm-1", decision: "deny", files: [png] }),
+    );
     await fileShape("files-empty", "An empty list of files.", start([]));
     await fileShape("files-not-a-list", "files as an object.", start(png));
     await fileShape(
@@ -730,6 +734,20 @@ describe.runIf(WRITE)("write control vectors", () => {
       "A new session in `~root/spacesheep`: only `~` alone or `~/…` is read under the machine's home, never another user's.",
       { kind: "start", cwd: "~root/spacesheep" },
       "bad_fields",
+    );
+
+    // --- files on a prompt (CONTROL.md §6 `prompt`) ---
+    ok(
+      "valid-prompt-with-files",
+      "A message for a running session with a screenshot attached (to a machine whose hello says prompt_files).",
+      await signed(pk, day, commandStr({ files: [png] })),
+      "grant",
+      "prompt",
+    );
+    await optionShape(
+      "files-on-cancel",
+      "Only a start or a prompt carries files.",
+      commandStr({ kind: "cancel", text: undefined, files: [png] }),
     );
 
     mkdirSync(dir, { recursive: true });

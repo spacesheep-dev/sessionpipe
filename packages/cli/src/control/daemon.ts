@@ -933,6 +933,8 @@ export class ControlDaemon {
         ...(accounts.length ? { accounts } : {}),
         // This daemon takes `files` on a start (an older one would start without them).
         files: true,
+        // …and on a prompt (CONTROL.md §6 `prompt`): an older daemon refuses those.
+        prompt_files: true,
         start,
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
@@ -1089,6 +1091,13 @@ export class ControlDaemon {
         // Read again: the message before this one may have moved the session (a fork).
         const now = this.place(cmd.session);
         if ("refused" in now) return this.finish(r, m.id, { outcome: "refused", code: now.refused, detail: now.why });
+        // A prompt's files are on disk, and listed in its text, before any mode hands it over.
+        if (cmd.files) {
+          this.finish(r, m.id, { outcome: "taken" });
+          const text = await this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce);
+          if (text === null) return;
+          return this.prompt(r, m.id, { ...cmd, text }, now, sent);
+        }
         return this.prompt(r, m.id, cmd, now, sent);
       });
     } catch (e) {
@@ -2173,16 +2182,19 @@ export class ControlDaemon {
     });
   }
 
-  /** A start's text, with its files (CONTROL.md §6) fetched, checked and written under
-   *  `cwd` first — every check in §5 passed and the nonce is recorded by now, so the
-   *  `taken` ack is out and the download may take its time. Null when a file failed:
-   *  the command is acked `failed` with code `file`, nothing is kept, no session starts. */
+  /** A start's or a prompt's text, with its files (CONTROL.md §6) fetched, checked and
+   *  written under `cwd` first (a prompt's in a folder of its own, named by its signed
+   *  nonce) — every check in §5 passed and the nonce is recorded by now, so the `taken`
+   *  ack is out and the download may take its time. Null when a file failed: the command
+   *  is acked `failed` with code `file`, nothing is kept, no session starts and no
+   *  message is delivered. */
   private async attached(
     r: PairedReceiver,
     id: string,
     cmd: ControlCommand,
     ref: { id: string },
     cwd: string,
+    message?: string,
   ): Promise<string | null> {
     const text = cmd.text as string;
     if (!cmd.files) return text;
@@ -2193,8 +2205,10 @@ export class ControlDaemon {
         fetch: this.deps.fetch,
         timeoutMs: this.deps.fileTimeoutMs,
       });
-      const rel = writeFiles(cwd, ref.id, got);
-      this.deps.log(`${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}`);
+      const rel = writeFiles(cwd, ref.id, got, message);
+      this.deps.log(
+        `${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}${message ? `/${message}` : ""}`,
+      );
       return withFiles(text, got, rel);
     } catch (e) {
       // fetchFiles and writeFiles throw nothing but a FileProblem, and its message is the detail.
