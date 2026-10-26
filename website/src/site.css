@@ -1113,9 +1113,10 @@ details > p {
     opacity var(--out) var(--ease),
     visibility 0s linear var(--out);
 }
-/* an event the tier doesn't carry at all: its row stays, dimmed as one unit, and says so */
-.home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) > :is(i, b, u),
-.home .term:has(input[value="1"]:checked) .tail [data-min="2"] > :is(i, b, u) {
+/* an event the tier doesn't carry at all: its row stays, dimmed to the time's grey as one
+   unit, and says so. The time is that grey already; dimming it too would fail contrast. */
+.home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) > :is(b, u),
+.home .term:has(input[value="1"]:checked) .tail [data-min="2"] > :is(b, u) {
   opacity: 0.52;
 }
 .home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) .x,
