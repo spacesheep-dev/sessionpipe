@@ -27,6 +27,16 @@
   --sans: Geist, "Geist Fallback Apple", "Geist Fallback Segoe", "Geist Fallback Arial", system-ui, sans-serif;
   --mono: "Geist Mono", "Geist Mono Fallback Menlo", "Geist Mono Fallback Consolas", ui-monospace, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* The type scale: one display size, one title, one running head, then text. Every heading
+     on the site is one of these; mono labels are always 13px (12px only inside the tail). */
+  --fs-display: clamp(40px, 5.8vw, 72px);
+  --fs-title: clamp(28px, 3.3vw, 40px);
+  --fs-head: 22px;
+  --fs-h3: 17px;
+  --fs-lead: clamp(17px, 1.55vw, 19px);
+  --fs-small: 14px;
+  --fs-label: 13px;
+  --underline: color-mix(in srgb, currentColor 28%, transparent);
   --max: 1120px;
   --gutter: 32px;
   color-scheme: light dark;
@@ -219,14 +229,17 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-ui);
   outline-offset: 2px;
-  border-radius: 4px;
+}
+a:focus-visible {
+  border-radius: 3px;
 }
 a {
   color: var(--fg);
   text-decoration: underline;
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--underline);
   text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: auto;
   transition: text-decoration-color 0.12s;
 }
 a:hover {
@@ -455,29 +468,36 @@ button.copy:hover {
 }
 
 /* --- prose: every page rendered from Markdown --------------------------------------- */
+/* 16.5px Geist at 680px is about 75 characters a line; tables and code may run wider. */
 .prose {
-  max-width: 720px;
+  max-width: 680px;
   padding-top: 40px;
   font-size: 16.5px;
   line-height: 1.65;
 }
 .prose h1 {
-  font-size: clamp(32px, 5vw, 40px);
-  line-height: 1.1;
-  letter-spacing: -0.025em;
-  margin: 0 0 20px;
+  font-size: var(--fs-title);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  margin: 0 0 24px;
 }
 .prose h2 {
   font-size: 24px;
   line-height: 1.25;
-  letter-spacing: -0.015em;
-  margin: 2.2em 0 0.6em;
+  letter-spacing: -0.018em;
+  margin: 2.4em 0 0.6em;
 }
 .prose h3 {
-  font-size: 18px;
+  font-size: var(--fs-h3);
   line-height: 1.35;
   letter-spacing: -0.005em;
-  margin: 1.8em 0 0.5em;
+  margin: 2em 0 0.5em;
+}
+.prose h3 code,
+.prose h2 code {
+  font-size: 0.9em;
+  background: none;
+  padding: 0;
 }
 .prose h4 {
   font-size: 16px;
@@ -504,12 +524,12 @@ button.copy:hover {
   margin: 2.5em 0;
 }
 .prose blockquote {
-  margin: 0 0 1.6em;
-  padding: 14px 18px;
-  background: var(--well);
-  border-radius: 12px;
+  margin: 0 0 2em;
+  padding: 2px 0 2px 18px;
+  border-left: 2px solid var(--line-strong);
   color: var(--fg2);
   font-size: 15px;
+  line-height: 1.6;
 }
 .prose blockquote > :last-child {
   margin-bottom: 0;
@@ -520,17 +540,22 @@ button.copy:hover {
 .prose pre {
   background: var(--well);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 14px 18px;
   overflow-x: auto;
-  font-size: 13.5px;
-  line-height: 1.6;
-  margin: 0 0 1.2em;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 0 1.4em;
+  tab-size: 2;
 }
+/* inline code: mono a step smaller, on a tint just off the ground, padded so a comma after
+   it doesn't look detached */
 .prose code {
   font-size: 0.86em;
-  background: var(--well);
-  padding: 2px 5px;
-  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  padding: 0.12em 0.32em;
+  border-radius: 4px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .prose :not(pre) > code,
 .entries :not(pre) > code {
@@ -547,7 +572,7 @@ button.copy:hover {
   max-width: 100%;
   border-collapse: collapse;
   font-size: 14.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   margin: 0 0 1.4em;
   font-variant-numeric: tabular-nums;
 }
@@ -559,11 +584,19 @@ button.copy:hover {
   border-bottom: 1px solid var(--line);
 }
 .prose th {
-  font-weight: 500;
-  font-size: 13px;
+  font: 400 var(--fs-label) / 1.4 var(--mono);
   color: var(--fg2);
   border-bottom-color: var(--line-strong);
   white-space: nowrap;
+}
+.prose td:first-child {
+  white-space: nowrap;
+}
+/* in a table the column already says "literal": mono, no chip */
+.prose td code {
+  background: none;
+  padding: 0;
+  color: var(--fg);
 }
 .prose img,
 .prose svg {
@@ -648,8 +681,8 @@ details > p {
 /* --- docs: a table of contents beside the page ---------------------------------------- */
 .docs {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
-  gap: 56px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 64px;
 }
 .docs .toc {
   position: sticky;
@@ -663,7 +696,7 @@ details > p {
 }
 .docs .toc p {
   margin: 0 0 10px;
-  font: 400 12px / 1.4 var(--mono);
+  font: 400 var(--fs-label) / 1.4 var(--mono);
   color: var(--fg2);
 }
 .docs .toc ul {
@@ -697,7 +730,23 @@ details > p {
 }
 .docs .prose h2 {
   border-top: 1px solid var(--line);
-  padding-top: 1.2em;
+  padding-top: 1.1em;
+}
+.docs .prose h1 + h2,
+.docs .prose blockquote + h2 {
+  border-top: 0;
+  padding-top: 0;
+}
+.docs.spec .prose {
+  padding-top: 32px;
+}
+.docs.spec .toc {
+  padding-top: 40px;
+}
+.docs .prose h2 a:hover,
+.docs .prose h3 a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--underline);
 }
 .docs .prose pre.usage {
   white-space: pre-wrap;
@@ -847,66 +896,81 @@ details > p {
 }
 
 /* --- home --------------------------------------------------------------------------------- */
-/* hero: what it is in one line, the command, then the stream itself on an ink plate */
+/* hero: the headline across the page, then what to type beside what you get, the stream
+   itself on an ink plate, so the stream is above the fold at 1280 × 800 */
 .home .hero {
-  padding: clamp(56px, 9vw, 120px) 0 0;
+  padding: clamp(40px, 6vw, 80px) 0 0;
 }
 .home .eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 24px;
-  font: 400 13px / 1.4 var(--mono);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  margin: 0 0 20px;
+  font: 400 var(--fs-label) / 1.4 var(--mono);
   color: var(--fg2);
 }
 .home .eyebrow a {
   color: var(--fg2);
+  text-decoration-color: transparent;
+}
+.home .eyebrow a:hover {
+  color: var(--fg);
+  text-decoration-color: var(--underline);
 }
 .home .hero h1 {
-  font-size: clamp(40px, 7.2vw, 72px);
+  font-size: var(--fs-display);
   line-height: 1;
-  letter-spacing: -0.04em;
-  max-width: 15ch;
-  margin: 0 0 24px;
+  letter-spacing: -0.042em;
+  max-width: 20ch;
+  margin: 0 0 clamp(32px, 4vw, 48px);
+  /* optical: pull the A's left side bearing back onto the column edge */
+  text-indent: -0.03em;
 }
-/* The headline's two orange phrases: what it is (open protocol) and what it watches (doing). */
+/* One orange word: "doing", the event. The same orange marks the attention.needed line in
+   the stream right under it, and nothing else in the hero. */
 .home .hero h1 .hl {
   font-style: normal;
   color: var(--accent-ui);
 }
+.home .hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 32px 48px;
+  align-items: start;
+}
 .home .lead {
-  font-size: clamp(17px, 2vw, 20px);
+  font-size: var(--fs-lead);
   line-height: 1.5;
   color: var(--fg2);
-  max-width: 50ch;
-  margin: 0 0 36px;
+  max-width: 46ch;
+  margin: -0.3em 0 28px;
 }
 .home .start {
   display: grid;
-  grid-template-columns: minmax(0, 400px) auto;
-  align-items: center;
-  gap: 12px 24px;
+  gap: 12px;
   margin: 0 0 16px;
 }
 .home .start .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin: 0;
 }
 .home .agent {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-small);
   color: var(--fg2);
 }
 .home .agent button.copy {
   padding: 4px 6px;
   margin: 0 -6px;
   min-height: 0;
-  font-size: 14px;
+  font-size: var(--fs-small);
   color: var(--fg);
   text-decoration: underline;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
+  text-decoration-color: var(--underline);
+  text-underline-offset: 0.22em;
 }
 .home .agent .agent-link {
   display: none;
@@ -915,72 +979,74 @@ details > p {
   display: inline;
 }
 
-/* the stream: sessionpipe tail on the ink plate */
+/* the stream: sessionpipe tail on the ink plate. Each event is a grid row (time, harness,
+   type, detail), so a narrow screen drops the time and the detail wraps inside its own
+   column instead of running off the plate. */
 .home .term {
-  margin: clamp(48px, 7vw, 80px) 0 0;
+  margin: 0;
   background: var(--plate);
   color: var(--plate-fg);
-  border-radius: 28px;
-  padding: 24px 32px 32px;
+  border-radius: 20px;
+  padding: 18px 24px 22px;
   box-shadow: inset 0 0 0 1px var(--plate-line);
 }
 .home .term figcaption {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 0 20px;
-  font: 400 13px / 1.4 var(--mono);
+  margin: 0 0 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--plate-line);
+  font: 400 12px / 1.4 var(--mono);
   color: var(--plate-fg3);
 }
-.home .term pre {
-  margin: 0;
-  font: 400 13px / 2 var(--mono);
-  overflow-x: auto;
-  scrollbar-width: none;
+.home .tail {
+  font: 400 12.5px / 1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
   color: var(--plate-fg2);
 }
-.home .term pre::-webkit-scrollbar {
-  display: none;
-}
-.home .term pre > span {
-  display: inline-block;
+.home .tail p {
+  display: grid;
+  grid-template-columns: 8ch 11ch 16ch minmax(0, 1fr);
+  column-gap: 2ch;
+  margin: 0;
+  padding: 4px 0;
   animation: tail-line 0.4s var(--ease) both;
-  animation-delay: calc(0.2s + var(--i) * 0.36s);
+  animation-delay: calc(0.2s + var(--i) * 0.32s);
 }
-.home .term i {
+.home .tail i {
   font-style: normal;
   color: var(--plate-fg3);
 }
-.home .term b {
+.home .tail b {
   font-weight: 400;
   color: var(--plate-fg);
 }
-.home .term u {
+.home .tail u {
   text-decoration: none;
   color: var(--plate-fg);
 }
-.home .term strong {
+.home .tail .hot u,
+.home .tail strong {
   font-weight: 500;
   color: var(--accent);
 }
-.home .term .dot {
+.home .tail .dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
   border-radius: 50%;
   background: var(--accent);
-  vertical-align: 0.05em;
+  vertical-align: 0.08em;
 }
-.home .term .cursor {
-  display: inline-block;
-  width: 0.55em;
-  height: 1.15em;
-  vertical-align: -0.22em;
+.home .tail .cursor {
+  grid-column: 1;
+  display: block;
+  width: 0.6em;
+  height: 1.25em;
   background: var(--plate-fg2);
-  animation:
-    tail-line 0.4s var(--ease) both calc(0.2s + var(--i) * 0.36s),
-    blink 1.1s steps(1) infinite calc(0.2s + var(--i) * 0.36s);
+  animation: blink 1.1s steps(1) infinite calc(0.2s + var(--i) * 0.32s);
 }
 @keyframes tail-line {
   from {
@@ -994,8 +1060,8 @@ details > p {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .home .term pre > span,
-  .home .term .cursor {
+  .home .tail p,
+  .home .tail .cursor {
     animation: none;
   }
   .btn,
@@ -1011,17 +1077,17 @@ details > p {
 }
 .home .sh {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 14px;
-  margin: 0 0 32px;
+  margin: 0 0 36px;
 }
 .home .sh .n {
-  font: 400 14px / 1 var(--mono);
+  font: 400 var(--fs-label) / 1 var(--mono);
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
 }
 .home .sh h2 {
-  font-size: 22px;
+  font-size: var(--fs-head);
   line-height: 1.25;
   letter-spacing: -0.01em;
   margin: 0;
@@ -1031,6 +1097,7 @@ details > p {
   content: "";
   flex: 1;
   height: 1px;
+  align-self: center;
   background: var(--line);
   order: 3;
 }
@@ -1041,9 +1108,9 @@ details > p {
   white-space: nowrap;
 }
 .home .statement {
-  font-size: clamp(22px, 3vw, 32px);
-  line-height: 1.3;
-  letter-spacing: -0.02em;
+  font-size: var(--fs-title);
+  line-height: 1.15;
+  letter-spacing: -0.028em;
   font-weight: 500;
   max-width: 30ch;
   margin: 0 0 48px;
@@ -1059,9 +1126,11 @@ details > p {
 }
 .home code {
   font-size: 0.86em;
-  background: var(--well);
-  padding: 2px 5px;
-  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  padding: 0.12em 0.32em;
+  border-radius: 4px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .home pre code,
 .home .cmd code {
@@ -1212,7 +1281,7 @@ details > p {
   gap: 10px;
 }
 .home .flow h3 span {
-  font: 400 12px / 1 var(--mono);
+  font: 400 var(--fs-label) / 1 var(--mono);
   color: var(--fg2);
 }
 .home .json {
@@ -1221,7 +1290,7 @@ details > p {
   padding: 16px 18px;
   background: var(--well);
   border-radius: 16px;
-  font: 400 11.5px / 1.65 var(--mono);
+  font: 400 12px / 1.7 var(--mono);
   overflow-x: auto;
   color: var(--fg2);
 }
@@ -1327,72 +1396,120 @@ details > p {
   color: var(--fg);
 }
 
-/* §05 receivers: the GUI first, then the rest as rows */
-.home .featured {
+/* §02 the GUI: the headline and what it is on the left, the downloads on the right, then the
+   real screenshots, a desktop and a phone sharing one baseline. No device chrome, no shadow:
+   a hairline and the app's own corner radius, like a window on the desk. */
+.home .gui {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-  grid-template-areas: "intro shot" "act shot";
-  align-content: center;
-  gap: 0 56px;
-  padding: 0 0 56px;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 32px 48px;
+  align-items: start;
 }
-.home .featured .intro {
-  grid-area: intro;
-  align-self: end;
+.home .gui h3 {
+  font-size: var(--fs-title);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  max-width: 13ch;
+  margin: 0 0 20px;
 }
-.home .featured .act {
-  grid-area: act;
+.home .gui-intro p {
+  margin: 0;
+  color: var(--fg2);
+  max-width: 46ch;
 }
-.home .featured .shot {
-  grid-area: shot;
-  align-self: center;
+.home .gui-get {
+  justify-self: end;
+  width: min(100%, 520px);
 }
-.home .featured.noshot {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: "intro act";
+.home .dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+/* a two-line button: what it does in Geist, what you get in mono under it */
+.home .dl .btn {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 64px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  line-height: 1.2;
+}
+.home .dl .btn small {
+  font: 400 12px / 1.3 var(--mono);
+  letter-spacing: 0;
+  opacity: 0.72;
+  white-space: normal;
+}
+.home .dl p {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font: 400 12px / 1.6 var(--mono);
+  color: var(--fg2);
+}
+.home .dl p a,
+.home .dl-meta a {
+  color: var(--fg);
+}
+.home .dl-meta {
+  margin: 16px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--fg2);
+}
+.home .gui-run {
+  margin: 24px 0 0;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--line);
+}
+.home .gui-run p:not(.cmd) {
+  margin: 0 0 12px;
+  font-size: var(--fs-small);
+  color: var(--fg2);
+}
+.home .gui-shots {
+  display: grid;
+  grid-template-columns: minmax(0, 1440fr) minmax(0, 528fr);
+  gap: 24px;
   align-items: end;
+  margin: 56px 0 0;
 }
-.home .featured.noshot .intro p {
-  margin-bottom: 0;
-}
-.home .featured h3 {
-  font-size: clamp(26px, 3.2vw, 34px);
-  line-height: 1.1;
-  letter-spacing: -0.025em;
-  margin: 0 0 14px;
-}
-.home .featured .kicker {
-  font: 400 13px / 1.4 var(--mono);
-  color: var(--fg2);
-  margin: 0 0 14px;
-}
-.home .featured .intro p {
-  color: var(--fg2);
-  margin: 0 0 24px;
-  max-width: 50ch;
-}
-.home .featured .intro p.kicker {
-  margin: 0 0 14px;
-}
-.home .featured .actions {
+.home .gui-shots figure {
   margin: 0;
+  min-width: 0;
 }
-.home .featured .cmd {
-  margin-bottom: 12px;
-}
-.home .featured .shot {
-  margin: 0;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow:
-    0 0 0 1px var(--line),
-    0 24px 60px -24px rgb(20 20 20 / 0.28);
-  background: var(--surface);
-}
-.home .featured .shot img {
+.home .gui-shots img {
   display: block;
   width: 100%;
   height: auto;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.home .gui-shots .board img {
+  border-radius: 10px;
+}
+.home .gui-shots .phone img {
+  border-radius: 22px;
+}
+.home .gui-shots figcaption {
+  margin: 12px 0 0;
+  font: 400 12px / 1.4 var(--mono);
+  color: var(--fg2);
+}
+/* one pair per scheme; the other is display:none, so the browser never fetches it */
+.home .gui-shots .dark {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .home .gui-shots .dark {
+    display: block;
+  }
+  .home .gui-shots .light {
+    display: none;
+  }
 }
 .home .rows {
   margin: 0;
@@ -1661,14 +1778,26 @@ details > p {
   .home .pipe .next {
     margin-top: 12px;
   }
-  .home .featured,
-  .home .featured.noshot {
+  .home .hero-grid,
+  .home .gui {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "intro" "act" "shot";
-    gap: 24px;
   }
-  .home .featured .intro p {
-    margin-bottom: 0;
+  .home .hero h1 {
+    max-width: 15ch;
+  }
+  .home .lead {
+    max-width: 52ch;
+  }
+  .home .start {
+    grid-template-columns: minmax(0, 400px) auto;
+    align-items: center;
+    gap: 12px 24px;
+  }
+  .home .gui-get {
+    justify-self: start;
+  }
+  .docs.spec .toc {
+    display: none;
   }
   .home .spec,
   .home .conf,
@@ -1733,19 +1862,37 @@ details > p {
     flex: 1;
   }
   .home .term {
-    border-radius: 20px;
-    padding: 18px 18px 22px;
+    border-radius: 18px;
+    padding: 14px 16px 18px;
     margin-left: calc(-1 * var(--gutter) + 8px);
     margin-right: calc(-1 * var(--gutter) + 8px);
   }
   .home .term figcaption span + span {
     display: none;
   }
-  .home .term pre {
+  .home .tail {
     font-size: 11.5px;
   }
-  .home .term i {
+  .home .tail p {
+    grid-template-columns: 11ch 16ch minmax(0, 1fr);
+    column-gap: 1.5ch;
+  }
+  .home .tail i {
     display: none;
+  }
+  .home .dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .home .gui-shots {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    margin-top: 40px;
+  }
+  .home .gui-shots .phone {
+    width: 64%;
+  }
+  .home .gui-shots .phone img {
+    border-radius: 14px;
   }
   .home .sh {
     flex-wrap: wrap;

@@ -161,6 +161,29 @@ function mdPage({ pathname, file, title, description, map, dirPrefix = "", licen
   );
 }
 
+// h2/h3 get ids (an explicit {#id}, else GitHub's slug, so links written against the
+// repository's Markdown land), and the page gets a table of contents from them.
+function anchored(html) {
+  const toc = [];
+  const out = html.replace(/<h([23])>(.*?)<\/h\1>/g, (_, level, inner) => {
+    const m = /\s*\{#([a-z0-9-]+)\}$/.exec(inner);
+    const text = m ? inner.slice(0, m.index) : inner;
+    const plain = text.replace(/<[^>]+>/g, "").replace(/&[a-z]+;|&#\d+;/g, "");
+    let id =
+      m?.[1] ??
+      plain
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N} _-]/gu, "")
+        .trim()
+        .replace(/ /g, "-");
+    while (toc.some((h) => h.id === id)) id += "-";
+    toc.push({ level: Number(level), id, text: plain });
+    return `<h${level} id="${id}"><a href="#${id}">${text}</a></h${level}>`;
+  });
+  const tocHtml = `<nav class="toc" aria-label="On this page"><p>On this page</p><ul>${toc.map((h) => `<li class="l${h.level}"><a href="#${h.id}">${h.text}</a></li>`).join("")}</ul></nav>`;
+  return { html: out, toc: tocHtml };
+}
+
 // --- protocol, from spec/ ---------------------------------------------------------
 const specs = [
   [
@@ -215,7 +238,8 @@ const specNav = (current) =>
 for (const [pathname, file, title, description] of specs) {
   const md = rewriteLinks(read(file), specPath, "");
   twin(pathname, md);
-  const body = `${specNav(pathname)}<article class="prose">${marked.parse(md)}</article>`;
+  const { html, toc } = anchored(marked.parse(md));
+  const body = `${specNav(pathname)}<div class="docs spec">${toc}<article class="prose">${html}</article></div>`;
   const jsonld = {
     "@context": "https://schema.org",
     "@type": "TechArticle",
@@ -428,29 +452,14 @@ const publicCommands = Object.keys(usage).filter(
   // A command the CLI has and this page doesn't is a build error, not a gap someone notices.
   const missing = publicCommands.filter((k) => !used.has(k));
   if (missing.length) throw new Error(`${src}: document ${missing.map((k) => `"${k}"`).join(", ")}`);
-  const toc = [];
-  const html = marked.parse(md).replace(/<h([23])>(.*?)<\/h\1>/g, (_, level, inner) => {
-    const m = /\s*\{#([a-z0-9-]+)\}$/.exec(inner);
-    const text = m ? inner.slice(0, m.index) : inner;
-    let id =
-      m?.[1] ??
-      text
-        .replace(/<[^>]+>/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "");
-    while (toc.some((h) => h.id === id)) id += "-";
-    toc.push({ level: Number(level), id, text: text.replace(/<[^>]+>/g, "") });
-    return `<h${level} id="${id}"><a href="#${id}">${text}</a></h${level}>`;
-  });
-  const tocHtml = toc.map((h) => `<li class="l${h.level}"><a href="#${h.id}">${h.text}</a></li>`).join("");
+  const { html, toc } = anchored(marked.parse(md));
   write(
     "/docs/",
     page({
       title: "Docs · sessionpipe",
       description:
         "Every sessionpipe command, the control daemon, self-updates, status JSON and the conformance suite.",
-      body: `<div class="docs"><nav class="toc" aria-label="On this page"><p>On this page</p><ul>${tocHtml}</ul></nav><article class="prose">${html}</article></div>`,
+      body: `<div class="docs">${toc}<article class="prose">${html}</article></div>`,
       pathname: "/docs/",
       edit: `https://github.com/spacesheep-dev/sessionpipe/edit/main/${src}`,
     }),
@@ -540,16 +549,51 @@ const FAQ = [
   let home = read("website/src/pages/home.html");
   home = home.replace("{{fullkb}}", kb(full)).replace("{{version}}", version);
   {
-    // The GUI's board, when website/public/gui/ has it (1440 × 900, light and optionally
-    // dark): a slot, so the page never shows a picture of an older GUI than the one shipping.
+    // The GUI, in real screenshots from its own docs/screenshots/shoot.mjs (demo data), one
+    // pair per scheme: the board on a desktop beside the same machine on a phone. The pair
+    // that doesn't match the reader's scheme is display:none, so it is neither fetched nor read.
     const has = (f) => existsSync(path.join(root, "website/public/gui", f));
-    const alt =
-      "The sessionpipe GUI's board: sessions from every machine grouped by state, the one that needs you first.";
-    const img = `<img src="/gui/board.webp" alt="${alt}" width="1440" height="900" loading="lazy" decoding="async">`;
-    const shot = has("board.webp")
-      ? `<figure class="shot">${has("board-dark.webp") ? `<picture><source srcset="/gui/board-dark.webp" media="(prefers-color-scheme: dark)">${img}</picture>` : img}</figure>`
-      : "";
-    home = home.replace("{{gui-shot}}", shot).replace("{{gui-class}}", shot ? "" : " noshot");
+    const shot = (kind, scheme, alt, caption, [w1, w2], [width, height]) =>
+      has(`${kind}-${scheme}-${w1}.webp`)
+        ? `<figure class="${kind} ${scheme}"><img src="/gui/${kind}-${scheme}-${w1}.webp" srcset="/gui/${kind}-${scheme}-${w1}.webp ${w1}w, /gui/${kind}-${scheme}-${w2}.webp ${w2}w" sizes="${kind === "board" ? "(max-width: 720px) 100vw, 760px" : "(max-width: 720px) 40vw, 280px"}" alt="${alt}" width="${width}" height="${height}" loading="lazy" decoding="async"><figcaption>${caption}</figcaption></figure>`
+        : "";
+    const desk = [1200, 2000];
+    const phone = [600, 900];
+    const shots = [
+      shot(
+        "board",
+        "light",
+        "The sessionpipe GUI's board on a Mac: sessions from every machine grouped by state, the one that needs you first.",
+        "Board · macOS · 0.3.0, demo data",
+        desk,
+        [1440, 900],
+      ),
+      shot(
+        "board",
+        "dark",
+        "The sessionpipe GUI's search over the board: “webhook” finds live sessions and this machine's transcripts.",
+        "Search, offline · macOS · 0.3.0, demo data",
+        desk,
+        [1440, 900],
+      ),
+      shot(
+        "phone",
+        "light",
+        "The same session on a phone: Claude Code asks to run a deploy, with Allow and Deny.",
+        "Prompt · phone",
+        phone,
+        [390, 664],
+      ),
+      shot(
+        "phone",
+        "dark",
+        "The board on a phone, the session that needs you first.",
+        "Board · phone",
+        phone,
+        [390, 664],
+      ),
+    ].join("");
+    home = home.replace("{{gui-shots}}", shots ? `<div class="gui-shots">${shots}</div>` : "");
   }
   home = home.replace(/\{\{diagram:([a-z-]+)\}\}/g, (_, n) => diagram(n));
   {
