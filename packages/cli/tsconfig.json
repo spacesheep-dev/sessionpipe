@@ -6,7 +6,9 @@
     "paths": {
       "@sessionpipe/core": ["../core/dist/src/index.d.ts"],
       "@sessionpipe/core/schema": ["../core/dist/schema/v1.d.ts"],
-      "@sessionpipe/core/control": ["../core/dist/src/control/index.d.ts"]
+      "@sessionpipe/core/control": ["../core/dist/src/control/index.d.ts"],
+      "@sessionpipe/core/service": ["../core/dist/src/service/index.d.ts"],
+      "@sessionpipe/core/version": ["../core/dist/src/version.d.ts"]
     }
   },
   "include": ["src"]

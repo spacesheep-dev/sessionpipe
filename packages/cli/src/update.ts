@@ -13,40 +13,10 @@ import { viaNpx } from "./runtime.js";
 
 export const REGISTRY_LATEST = "https://registry.npmjs.org/sessionpipe/latest";
 
-const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+// How versions order lives in core, beside the restart they lead to.
+import { parseVersion } from "@sessionpipe/core/version";
 
-interface Parsed {
-  n: [number, number, number];
-  pre: string | null;
-}
-function parse(v: string): Parsed | null {
-  const m = VERSION_RE.exec(String(v).trim());
-  if (!m) return null;
-  return { n: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ?? null };
-}
-
-/** Order two versions: <0, 0, >0, or null if either isn't one. A release sorts above
- *  its own prereleases; prereleases compare by their tag. */
-export function compareVersions(a: string, b: string): number | null {
-  const x = parse(a);
-  const y = parse(b);
-  if (!x || !y) return null;
-  for (let i = 0; i < 3; i++) if (x.n[i] !== y.n[i]) return (x.n[i] as number) - (y.n[i] as number);
-  if (x.pre === y.pre) return 0;
-  if (x.pre === null) return 1;
-  if (y.pre === null) return -1;
-  return x.pre.localeCompare(y.pre, "en", { numeric: true });
-}
-
-/** `a` is a release newer than `b`. A prerelease is never offered as an update: the
- *  `latest` dist-tag is a release, and anything else is someone's experiment.
- *  Setup opts into prereleases when checking whether an installed build is newer. */
-export function isNewer(a: string, b: string, includePrereleases = false): boolean {
-  const x = parse(a);
-  if (!x || (!includePrereleases && x.pre !== null)) return false;
-  const c = compareVersions(a, b);
-  return c !== null && c > 0;
-}
+export { compareVersions, isNewer } from "@sessionpipe/core/version";
 
 /** The registry's `latest` for sessionpipe: one GET, nothing sent but the request. */
 export async function latestVersion(f: typeof fetch = fetch, timeoutMs = 8000): Promise<string> {
@@ -56,7 +26,7 @@ export async function latestVersion(f: typeof fetch = fetch, timeoutMs = 8000): 
   });
   if (!r.ok) throw new Error(`the npm registry answered HTTP ${r.status}`);
   const j = (await r.json()) as { version?: unknown };
-  if (typeof j.version !== "string" || !parse(j.version)) throw new Error("the npm registry named no version");
+  if (typeof j.version !== "string" || !parseVersion(j.version)) throw new Error("the npm registry named no version");
   return j.version;
 }
 
@@ -184,7 +154,7 @@ export async function installedVersion(o: {
     timeoutMs: 30_000,
   });
   const v = r.stdout.trim();
-  return r.code === 0 && parse(v) ? v : null;
+  return r.code === 0 && parseVersion(v) ? v : null;
 }
 
 /** `npm install -g sessionpipe@<version>` into the prefix the running copy came from,

@@ -97,6 +97,8 @@ describe.runIf(process.platform !== "win32")("setup preserves installed code and
       alias: {
         "@sessionpipe/core": path.join(root, "packages/core/src/index.ts"),
         "@sessionpipe/core/control": path.join(root, "packages/core/src/control/index.ts"),
+        "@sessionpipe/core/service": path.join(root, "packages/core/src/service/index.ts"),
+        "@sessionpipe/core/version": path.join(root, "packages/core/src/version.ts"),
       },
       define: { __SESSIONPIPE_VERSION__: JSON.stringify(offered) },
     });

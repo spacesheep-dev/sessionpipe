@@ -97,7 +97,7 @@ describe.skipIf(process.platform === "win32")("POSIX control service paths", () 
             mkdirSync(dist, { recursive: true });
             writeFileSync(path.join(dist, "cli.js"), "global CLI fixture");
             const files = serviceFiles({ node: "", cli: "", logDir: home, home });
-            const file = targetPlatform === "darwin" ? files.plist.file : files.unit.file;
+            const file = targetPlatform === "darwin" ? files.plist.path : files.unit.path;
             if (npx) {
               vi.mocked(execFileSync).mockReturnValue(node.prefix);
               await controlMain(
@@ -139,7 +139,7 @@ describe.skipIf(process.platform === "win32")("POSIX control service paths", () 
                 expect.anything(),
               );
             } else {
-              expect(body).toContain(`ExecStart="${node.stable}" "${path.join(dist, "cli.js")}" control run`);
+              expect(body).toContain(`ExecStart="${node.stable}" "${path.join(dist, "cli.js")}" "control" "run"`);
               expect(execFileSync).toHaveBeenCalledWith("systemctl", ["--user", "daemon-reload"], expect.anything());
             }
             expect(body).not.toMatch(/_npx|\/Cellar\//);

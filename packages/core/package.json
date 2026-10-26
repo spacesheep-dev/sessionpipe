@@ -43,6 +43,14 @@
     "./control": {
       "types": "./dist/src/control/index.d.ts",
       "import": "./dist/control.js"
+    },
+    "./service": {
+      "types": "./dist/src/service/index.d.ts",
+      "import": "./dist/service.js"
+    },
+    "./version": {
+      "types": "./dist/src/version.d.ts",
+      "import": "./dist/version.js"
     }
   },
   "types": "./dist/src/index.d.ts",
