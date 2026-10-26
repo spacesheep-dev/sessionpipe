@@ -1377,6 +1377,33 @@ details > p {
 /* the GUI: the headline on the left; what it is and the two downloads on the right; then the
    board, the full width of the page. No device chrome, no shadow: a hairline and the app's own
    corner radius, like a window on the desk. */
+/* The GUI's band: the page's one orange block, edge to edge (a shadow the width of the
+   viewport, clipped to the band's height, so nothing scrolls sideways). Ink on #FF5A1F is
+   6.4:1 in both schemes, so the band keeps its own colours whatever the page's are. */
+.home .band {
+  --fg: #141414;
+  --fg2: rgb(20 20 20 / 0.74);
+  --btn: #141414;
+  --on-btn: #f5f5f3;
+  --line-strong: rgb(20 20 20 / 0.5);
+  --well: rgb(20 20 20 / 0.08);
+  margin-top: clamp(96px, 12.5vw, 160px);
+  padding: clamp(64px, 8vw, 104px) 0;
+  color: var(--fg);
+  background: var(--accent);
+  box-shadow: 0 0 0 100vmax var(--accent);
+  clip-path: inset(0 -100vmax);
+}
+.home .band :focus-visible {
+  outline-color: #141414;
+}
+.home .band a:not(.btn) {
+  color: var(--fg);
+  text-decoration-color: rgb(20 20 20 / 0.45);
+}
+.home .band .gui-shots img {
+  box-shadow: 0 0 0 1px rgb(20 20 20 / 0.35);
+}
 .home .gui {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
