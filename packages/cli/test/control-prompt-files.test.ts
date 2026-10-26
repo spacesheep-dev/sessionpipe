@@ -135,7 +135,7 @@ describe.runIf(unix)("files on a prompt", { timeout: 30_000 }, () => {
     expect(readFileSync(path.join(project, ".sessionpipe", ".gitignore"), "utf8")).toBe("*\n");
     expect(runs[0]?.at(-1)).toMatch(
       new RegExp(
-        `^Message via [^\n]+\n\nwhat about this\\?\n\nAttached files \\(saved in this folder\\):\n- ${rel.replace(/\./g, "\\.")} \\(image/png, 3 KB\\)$`,
+        `^Message via [^\n]+\n\nwhat about this\\?\n\nAttached files \\(saved in this folder\\):\n- ${rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(image/png, 3 KB\\)$`,
       ),
     );
     // A second message to the same session gets a folder of its own beside the first.

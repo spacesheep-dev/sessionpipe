@@ -446,7 +446,8 @@ describe("a start's folder under ~", { timeout: 30_000 }, () => {
       await startDaemon();
       const q = await rx.send({ kind: "start", session: `claude-code:${NEW}`, cwd: "~/project", text: "go" });
       expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
-      expect(runs[0]?.cwd).toBe(realpathSync(project));
+      // Both in their long form: Windows hands out 8.3 names (RUNNER~1) for the same folder.
+      expect(realpathSync.native(runs[0]?.cwd ?? "")).toBe(realpathSync.native(project));
       // The home folder itself isn't one this machine allows.
       const h = await rx.send({ kind: "start", session: `claude-code:${RECV}`, cwd: "~", text: "go" });
       expect(await rx.waitAck(h.id)).toMatchObject({ outcome: "refused", code: "folder" });
