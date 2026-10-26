@@ -458,12 +458,12 @@ describe("the service that keeps the daemon running", () => {
 
   it("writes a launchd plist and a systemd unit that restart the daemon and log to the state dir, escaped", () => {
     const f = serviceFiles({ node: "/opt/a&b/node", cli: '/x/"cli".js', logDir: "/log", home: "/h" });
-    expect(f.plist.file).toBe(path.join("/h", "Library", "LaunchAgents", "org.sessionpipe.control.plist"));
-    expect(f.plist.body).toContain('<string>/opt/a&amp;b/node</string><string>/x/"cli".js</string>');
-    expect(f.plist.body).toContain(`<key>StandardOutPath</key><string>${path.join("/log", "daemon.log")}</string>`);
-    expect(f.unit.file).toBe(path.join("/h", ".config", "systemd", "user", "sessionpipe-control.service"));
-    expect(f.unit.body).toContain('ExecStart="/opt/a&b/node" "/x/\\"cli\\".js" control run');
-    expect(serviceFiles({ node: "n", cli: "c", logDir: "l" }).plist.file.startsWith(home)).toBe(true);
+    expect(f.plist.path).toBe(path.join("/h", "Library", "LaunchAgents", "org.sessionpipe.control.plist"));
+    expect(f.plist.text).toContain('<string>/opt/a&amp;b/node</string><string>/x/"cli".js</string>');
+    expect(f.plist.text).toContain(`<key>StandardOutPath</key><string>${path.join("/log", "daemon.log")}</string>`);
+    expect(f.unit.path).toBe(path.join("/h", ".config", "systemd", "user", "sessionpipe-control.service"));
+    expect(f.unit.text).toContain('ExecStart="/opt/a&b/node" "/x/\\"cli\\".js" "control" "run"');
+    expect(serviceFiles({ node: "n", cli: "c", logDir: "l" }).plist.path.startsWith(home)).toBe(true);
   });
 
   it("darwin: bootstraps into the gui domain, or the user domain when nobody is at the screen", () => {
@@ -493,7 +493,7 @@ describe("the service that keeps the daemon running", () => {
     const unit = path.join(home, ".config", "systemd", "user", "sessionpipe-control.service");
     exec.mockImplementation((_c, args) => (args[0] === "show-user" ? "Linger=no\n" : ""));
     let r = installService({ node: "/n", cli: "/c.js", env, exec, platform: "linux" });
-    expect(readFileSync(unit, "utf8")).toContain('ExecStart="/n" "/c.js" control run');
+    expect(readFileSync(unit, "utf8")).toContain('ExecStart="/n" "/c.js" "control" "run"');
     expect(r).toContain(
       "systemd user unit sessionpipe-control.service; it stops when you log out: run `sudo loginctl enable-linger",
     );
@@ -549,28 +549,28 @@ describe("the service that keeps the daemon running", () => {
       expect(execFileSync).not.toHaveBeenCalled();
     }
     on("darwin");
-    mkdirSync(path.dirname(f.plist.file), { recursive: true });
-    writeFileSync(f.plist.file, "plist");
+    mkdirSync(path.dirname(f.plist.path), { recursive: true });
+    writeFileSync(f.plist.path, "plist");
     vi.mocked(execFileSync).mockImplementationOnce(() => {
       throw new Error("not loaded");
     });
     uninstallService(env);
-    expect(existsSync(f.plist.file)).toBe(false);
+    expect(existsSync(f.plist.path)).toBe(false);
     expect(vi.mocked(execFileSync).mock.calls.map((c) => c[1])).toEqual([
       ["bootout", `gui/${process.getuid?.() ?? ""}/org.sessionpipe.control`],
       ["bootout", `user/${process.getuid?.() ?? ""}/org.sessionpipe.control`],
     ]);
     vi.mocked(execFileSync).mockClear();
     process.getuid = undefined as never;
-    writeFileSync(f.plist.file, "plist");
+    writeFileSync(f.plist.path, "plist");
     uninstallService(env);
     expect(vi.mocked(execFileSync).mock.calls[0]?.[1]).toEqual(["bootout", "gui//org.sessionpipe.control"]);
     vi.mocked(execFileSync).mockClear();
     on("linux");
-    mkdirSync(path.dirname(f.unit.file), { recursive: true });
-    writeFileSync(f.unit.file, "unit");
+    mkdirSync(path.dirname(f.unit.path), { recursive: true });
+    writeFileSync(f.unit.path, "unit");
     uninstallService(env);
-    expect(existsSync(f.unit.file)).toBe(false);
+    expect(existsSync(f.unit.path)).toBe(false);
     expect(vi.mocked(execFileSync).mock.calls.map((c) => c[1])).toEqual([
       ["--user", "disable", "--now", "sessionpipe-control.service"],
       ["--user", "daemon-reload"],

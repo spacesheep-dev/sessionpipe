@@ -6,7 +6,9 @@
     "paths": {
       "@sessionpipe/core": ["./packages/core/src/index.ts"],
       "@sessionpipe/core/schema": ["./packages/core/schema/v1.ts"],
-      "@sessionpipe/core/control": ["./packages/core/src/control/index.ts"]
+      "@sessionpipe/core/control": ["./packages/core/src/control/index.ts"],
+      "@sessionpipe/core/service": ["./packages/core/src/service/index.ts"],
+      "@sessionpipe/core/version": ["./packages/core/src/version.ts"]
     }
   },
   "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],

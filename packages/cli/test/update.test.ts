@@ -581,11 +581,11 @@ describe("who restarts the daemon", () => {
   });
   it("the service files sessionpipe writes restart on the update's exit code", () => {
     const f = serviceFiles({ node: "/n", cli: "/c.js", logDir: "/l", home: "/h" });
-    expect(f.plist.body).toContain("<key>SuccessfulExit</key><false/>");
-    expect(f.plist.body).toContain("<key>SESSIONPIPE_SERVICE</key><string>launchd</string>");
-    expect(f.unit.body).toContain("Restart=on-failure");
-    expect(f.unit.body).toContain(`RestartForceExitStatus=${UPDATE_EXIT}`);
-    expect(f.unit.body).toContain("Environment=SESSIONPIPE_SERVICE=systemd");
+    expect(f.plist.text).toContain("<key>SuccessfulExit</key><false/>");
+    expect(f.plist.text).toContain("<key>SESSIONPIPE_SERVICE</key><string>launchd</string>");
+    expect(f.unit.text).toContain("Restart=on-failure");
+    expect(f.unit.text).toContain(`RestartForceExitStatus=${UPDATE_EXIT}`);
+    expect(f.unit.text).toContain("Environment=SESSIONPIPE_SERVICE=systemd");
   });
 });
 

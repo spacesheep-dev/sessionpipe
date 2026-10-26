@@ -4,10 +4,8 @@
 // proof over sha256("sessionpipe.pair:<machine>:<code>"); the key is trusted only once
 // the proof verifies here. Also the service files (launchd / systemd) that keep the
 // daemon running, and `control off`.
-import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import {
   acpControl,
@@ -18,6 +16,8 @@ import {
   HELLO_HARNESSES_MAX,
 } from "@sessionpipe/core";
 import { type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
+import type { Exec } from "@sessionpipe/core/service";
+import * as core from "@sessionpipe/core/service";
 import {
   type ControlConfig,
   type ControlMode,
@@ -292,78 +292,29 @@ export function removeKey(id: string, env?: NodeJS.ProcessEnv): number {
 }
 
 // --- the service -------------------------------------------------------------------
+// The launchd agent and the systemd user unit are core's (sessionpipe-core/service);
+// this is the daemon's: its label, its command line, and what to tell the person.
 
 const LABEL = "org.sessionpipe.control";
 const UNIT = "sessionpipe-control.service";
+const DESCRIPTION = "sessionpipe control daemon (signed messages to your coding sessions)";
 
-/** Both files restart the daemon when it exits non-zero; an update exits UPDATE_EXIT
- *  (75, autoupdate.ts) to come back on the new code. SESSIONPIPE_SERVICE tells the
- *  daemon which manager that is (files from before it are recognized without it). */
+export { type Exec, ensureLinger } from "@sessionpipe/core/service";
+
+/** The daemon's service: `<node> <cli> control run`, logging to the state dir. Both files
+ *  restart it when it exits non-zero; an update exits UPDATE_EXIT (75) to come back on
+ *  the new code. SESSIONPIPE_SERVICE tells the daemon which manager that is. */
+const spec = (o: { node: string; cli: string; logDir: string; home?: string }) => ({
+  label: LABEL,
+  unit: UNIT,
+  description: DESCRIPTION,
+  argv: [o.node, o.cli, "control", "run"],
+  logPath: path.join(o.logDir, "daemon.log"),
+  ...(o.home ? { home: o.home } : {}),
+});
+
 export function serviceFiles(o: { node: string; cli: string; logDir: string; home?: string }) {
-  const home = o.home ?? os.homedir();
-  const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${LABEL}</string>
-  <key>ProgramArguments</key>
-  <array><string>${xml(o.node)}</string><string>${xml(o.cli)}</string><string>control</string><string>run</string></array>
-  <key>EnvironmentVariables</key><dict><key>SESSIONPIPE_SERVICE</key><string>launchd</string></dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>ProcessType</key><string>Background</string>
-  <key>StandardOutPath</key><string>${xml(path.join(o.logDir, "daemon.log"))}</string>
-  <key>StandardErrorPath</key><string>${xml(path.join(o.logDir, "daemon.log"))}</string>
-</dict>
-</plist>
-`;
-  const q = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
-  const unit = `[Unit]
-Description=sessionpipe control daemon (signed messages to your coding sessions)
-After=network-online.target
-
-[Service]
-ExecStart=${q(o.node)} ${q(o.cli)} control run
-Environment=SESSIONPIPE_SERVICE=systemd
-Restart=on-failure
-RestartForceExitStatus=75
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-`;
-  return {
-    plist: { file: path.join(home, "Library", "LaunchAgents", `${LABEL}.plist`), body: plist },
-    unit: { file: path.join(home, ".config", "systemd", "user", UNIT), body: unit },
-  };
-}
-
-export type Exec = (cmd: string, args: string[]) => string;
-const execQuiet: Exec = (cmd, args) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000 });
-
-/** A systemd user service stops when its person's last login ends — closing the ssh
- *  session to a lab workstation or a cloud machine stopped the daemon with it — unless
- *  the user lingers. `loginctl enable-linger` for yourself needs no root on systemd's
- *  default policy; where it does, say the one command that does it. */
-export function ensureLinger(user: string, exec: Exec = execQuiet): { on: boolean; note: string } {
-  const lingering = () => {
-    try {
-      return /^Linger=yes/m.test(exec("loginctl", ["show-user", user, "--property=Linger"]));
-    } catch {
-      return false;
-    }
-  };
-  if (lingering()) return { on: true, note: "it keeps running after you log out (linger was already on)" };
-  try {
-    exec("loginctl", ["enable-linger", user]);
-  } catch {}
-  if (lingering()) return { on: true, note: "it keeps running after you log out (turned linger on)" };
-  return {
-    on: false,
-    note: `it stops when you log out: run \`sudo loginctl enable-linger ${user}\` once to keep it running`,
-  };
+  return core.serviceFiles(spec(o));
 }
 
 /** Write and start the service for this platform. Returns what it did, in words. */
@@ -376,57 +327,22 @@ export function installService(o: {
 }): string {
   const logDir = controlState(o.env);
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
-  const f = serviceFiles({ node: o.node, cli: o.cli, logDir });
-  const run = o.exec ?? execQuiet;
-  const platform = o.platform ?? process.platform;
-  if (platform === "darwin") {
-    mkdirSync(path.dirname(f.plist.file), { recursive: true });
-    writeFileSync(f.plist.file, f.plist.body);
-    const uid = String(process.getuid?.() ?? "");
-    for (const d of ["gui", "user"])
-      try {
-        run("launchctl", ["bootout", `${d}/${uid}/${LABEL}`]);
-      } catch {}
-    try {
-      run("launchctl", ["bootstrap", `gui/${uid}`, f.plist.file]);
-      return `launchd agent ${LABEL} (log: ${path.join(logDir, "daemon.log")})`;
-    } catch {}
-    // No one logged in at the screen (an ssh session to a Mac mini): the gui domain
-    // doesn't exist. The user domain runs it now; after a restart it starts again at
-    // the next login at the screen.
-    run("launchctl", ["bootstrap", `user/${uid}`, f.plist.file]);
-    return `launchd agent ${LABEL} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${path.join(logDir, "daemon.log")})`;
-  }
-  if (platform === "linux") {
-    mkdirSync(path.dirname(f.unit.file), { recursive: true });
-    writeFileSync(f.unit.file, f.unit.body);
-    try {
-      run("systemctl", ["--user", "daemon-reload"]);
-      run("systemctl", ["--user", "enable", "--now", UNIT]);
-    } catch {
-      return `wrote ${f.unit.file}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
-    }
-    const linger = ensureLinger(os.userInfo().username, run);
-    return `systemd user unit ${UNIT}; ${linger.note} (journalctl --user -u ${UNIT})`;
-  }
+  const log = path.join(logDir, "daemon.log");
+  const r = core.installService({
+    ...spec({ node: o.node, cli: o.cli, logDir }),
+    ...(o.exec ? { exec: o.exec } : {}),
+    ...(o.platform ? { platform: o.platform } : {}),
+  });
+  if (r.manager === "launchd")
+    return r.domain === "gui"
+      ? `launchd agent ${LABEL} (log: ${log})`
+      : `launchd agent ${LABEL} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${log})`;
+  if (r.manager === "systemd") return `systemd user unit ${UNIT}; ${r.linger?.note} (journalctl --user -u ${UNIT})`;
+  if (r.unreachable)
+    return `wrote ${r.unreachable}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
   return "no service manager for this platform yet; run `sessionpipe control run` yourself";
 }
 
-export function uninstallService(env?: NodeJS.ProcessEnv): void {
-  const f = serviceFiles({ node: "", cli: "", logDir: controlState(env) });
-  const run = (cmd: string, args: string[]) => {
-    try {
-      execFileSync(cmd, args, { stdio: "ignore", timeout: 15_000 });
-    } catch {}
-  };
-  if (process.platform === "darwin" && existsSync(f.plist.file)) {
-    run("launchctl", ["bootout", `gui/${process.getuid?.() ?? ""}/${LABEL}`]);
-    run("launchctl", ["bootout", `user/${process.getuid?.() ?? ""}/${LABEL}`]);
-    unlinkSync(f.plist.file);
-  }
-  if (process.platform === "linux" && existsSync(f.unit.file)) {
-    run("systemctl", ["--user", "disable", "--now", UNIT]);
-    unlinkSync(f.unit.file);
-    run("systemctl", ["--user", "daemon-reload"]);
-  }
+export function uninstallService(_env?: NodeJS.ProcessEnv): void {
+  core.uninstallService({ label: LABEL, unit: UNIT });
 }

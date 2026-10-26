@@ -11,6 +11,8 @@ export default defineConfig({
     alias: {
       "@sessionpipe/core/schema": path.resolve(import.meta.dirname, "packages/core/schema/v1.ts"),
       "@sessionpipe/core/control": path.resolve(import.meta.dirname, "packages/core/src/control/index.ts"),
+      "@sessionpipe/core/service": path.resolve(import.meta.dirname, "packages/core/src/service/index.ts"),
+      "@sessionpipe/core/version": path.resolve(import.meta.dirname, "packages/core/src/version.ts"),
       "@sessionpipe/core": path.resolve(import.meta.dirname, "packages/core/src/index.ts"),
     },
   },
