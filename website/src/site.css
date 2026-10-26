@@ -1005,40 +1005,57 @@ details > p {
   display: inline;
 }
 
-/* the stream: sessionpipe tail on the ink plate. Each event is a grid row (time, harness,
-   type, detail), so a narrow screen drops the time and the detail wraps inside its own
-   column instead of running off the plate. */
+/* the stream, as a sink receives it. One stream of events on the ink plate (time, harness,
+   type, detail) and the tier the sink was given: what a tier doesn't carry fades out and
+   keeps its place, so the figure never changes size. The checked radio is the state, read
+   with :has(), so the control works without a script; tier.js only walks the tiers once. */
 .home .term {
+  /* what arrives fades in row after row, top to bottom; what goes leaves at once */
+  --in: 0.3s;
+  --out: 0.16s;
+  --step: 18ms;
+  /* the control's track and selected segment: the plate is dark in both themes */
+  --seg: rgb(255 255 255 / 0.06);
+  --seg-on: rgb(255 255 255 / 0.12);
   margin: 0;
   background: var(--plate);
   color: var(--plate-fg);
   border-radius: 20px;
-  padding: 18px 24px 22px;
+  padding: 12px 24px 16px;
   box-shadow: inset 0 0 0 1px var(--plate-line);
 }
 .home .term figcaption {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 0 12px;
+  /* the control's height, reserved so the rows below never move */
+  min-height: 43px;
+  margin: 0 0 10px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--plate-line);
-  font: 400 12px / 1.4 var(--mono);
-  color: var(--plate-fg3);
-}
-.home .tail {
-  font: 400 12.5px / 1.5 var(--mono);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  line-height: 1.4;
   color: var(--plate-fg2);
 }
+
+/* the rows: one line each, a fixed height, nothing reflows when a tier changes */
+.home .tail {
+  font: 400 12.5px / 20px var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--plate-fg);
+}
 .home .tail p {
+  --d: calc(var(--i) * var(--step));
+  position: relative;
   display: grid;
   grid-template-columns: 8ch 11ch 16ch minmax(0, 1fr);
   column-gap: 2ch;
   margin: 0;
-  padding: 4px 0;
-  animation: tail-line 0.4s var(--ease) both;
-  animation-delay: calc(0.2s + var(--i) * 0.32s);
+  padding: 2px 0;
+  animation: tail-line 0.42s var(--ease) both;
+  animation-delay: calc(0.15s + var(--i) * 70ms);
 }
 .home .tail i {
   font-style: normal;
@@ -1046,33 +1063,181 @@ details > p {
 }
 .home .tail b {
   font-weight: 400;
-  color: var(--plate-fg);
 }
 .home .tail u {
   text-decoration: none;
-  color: var(--plate-fg);
 }
-.home .tail .hot u,
-.home .tail strong {
-  font-weight: 500;
-  color: var(--accent);
+.home .tail i,
+.home .tail b,
+.home .tail u {
+  transition: opacity var(--in) var(--ease) var(--d);
 }
-.home .tail .dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 5px;
+.home .tail .d {
+  display: grid;
+  min-width: 0;
+}
+.home .tail .v,
+.home .tail .x {
+  grid-area: 1 / 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home .tail .v {
+  color: var(--plate-fg2);
+}
+.home .tail .r,
+.home .tail .x {
+  color: var(--plate-fg3);
+}
+/* shown: fade in after the rows above it; hidden: fade out, then leave the text flow for
+   selection and the accessibility tree */
+.home .tail .v,
+.home .tail [data-t],
+.home .term .carries [data-n] {
+  transition:
+    opacity var(--in) var(--ease) var(--d, 0s),
+    visibility 0s linear var(--d, 0s);
+}
+.home .tail .x,
+.home .term:has(input[value="0"]:checked) .tail [data-t],
+.home .term:has(input[value="1"]:checked) .tail :is([data-t="2"], [data-t="3"]),
+.home .term:has(input[value="2"]:checked) .tail [data-t="3"],
+.home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) .v,
+.home .term:has(input[value="1"]:checked) .tail [data-min="2"] .v,
+.home .term .carries [data-n] {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--out) var(--ease),
+    visibility 0s linear var(--out);
+}
+/* an event the tier doesn't carry at all: its row stays, dimmed as one unit, and says so */
+.home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) > :is(i, b, u),
+.home .term:has(input[value="1"]:checked) .tail [data-min="2"] > :is(i, b, u) {
+  opacity: 0.52;
+}
+.home .term:has(input[value="0"]:checked) .tail :is([data-min="1"], [data-min="2"]) .x,
+.home .term:has(input[value="1"]:checked) .tail [data-min="2"] .x {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--in) var(--ease) var(--d),
+    visibility 0s linear var(--d);
+}
+/* the one orange moment: the event that needs you, marked in the gutter like an unread mail */
+.home .tail .hot::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  vertical-align: 0.08em;
+  animation: tail-dot 0.5s var(--ease) both;
+  animation-delay: calc(0.35s + var(--i) * 70ms);
 }
-.home .tail .cursor {
-  grid-column: 1;
+.home .term .carries {
+  display: grid;
+  margin: 10px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--plate-line);
+  font-size: var(--fs-label);
+  line-height: 20px;
+  color: var(--plate-fg2);
+}
+.home .term .carries [data-n] {
+  grid-area: 1 / 1;
+}
+.home .term:has(input[value="0"]:checked) .carries [data-n="0"],
+.home .term:has(input[value="1"]:checked) .carries [data-n="1"],
+.home .term:has(input[value="2"]:checked) .carries [data-n="2"],
+.home .term:has(input[value="3"]:checked) .carries [data-n="3"] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--in) var(--ease) calc(var(--step) * 4),
+    visibility 0s linear calc(var(--step) * 4);
+}
+
+/* the tier: a segmented control made of radios, so arrows, Tab and Space work as they do
+   in any radio group. Only the selected segment's ground changes; nothing slides. */
+.home .tiers {
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--seg);
+}
+.home .tiers label {
+  position: relative;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+.home .tiers input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.home .tiers .seg {
+  --num: var(--plate-fg3);
+  position: relative;
+  isolation: isolate;
   display: block;
-  width: 0.6em;
-  height: 1.25em;
-  background: var(--plate-fg2);
-  animation: blink 1.1s steps(1) infinite calc(0.2s + var(--i) * 0.32s);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--plate-fg2);
+  transition: color var(--in) var(--ease);
+}
+.home .tiers .seg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--seg-on);
+  opacity: 0;
+  transition: opacity var(--in) var(--ease);
+}
+.home .tiers b {
+  font: 400 12px / 1 var(--mono);
+  margin-right: 5px;
+  color: var(--num);
+}
+.home .tiers em {
+  font-style: normal;
+}
+.home .tiers label:hover > .seg,
+.home .tiers input:checked + .seg {
+  --num: var(--plate-fg);
+  color: var(--plate-fg);
+}
+.home .tiers input:checked + .seg::before {
+  opacity: 1;
+}
+.home .tiers input:focus-visible + .seg {
+  outline: 2px solid var(--accent-ui);
+  outline-offset: 0;
+}
+
+/* the hero's two columns below 1200px leave the plate too narrow for the time */
+@media (min-width: 961px) and (max-width: 1199px) {
+  .home .tail p {
+    grid-template-columns: 11ch 16ch minmax(0, 1fr);
+  }
+  .home .tail i {
+    display: none;
+  }
 }
 @keyframes tail-line {
   from {
@@ -1080,14 +1245,20 @@ details > p {
     transform: translateY(4px);
   }
 }
-@keyframes blink {
-  50% {
+@keyframes tail-dot {
+  from {
     opacity: 0;
+    transform: scale(0.4);
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .home .term {
+    --in: 0s;
+    --out: 0s;
+    --step: 0s;
+  }
   .home .tail p,
-  .home .tail .cursor {
+  .home .tail .hot::before {
     animation: none;
   }
   .btn,
@@ -1867,24 +2038,49 @@ details > p {
   .home .start .actions .btn {
     flex: 1;
   }
+  /* the phone: the control takes the caption's whole row, and each event takes two lines
+     (harness and type, then the detail under them) so nothing is cut */
   .home .term {
     border-radius: 18px;
-    padding: 14px 16px 18px;
+    padding: 10px 16px 14px;
     margin-left: calc(-1 * var(--gutter) + 8px);
     margin-right: calc(-1 * var(--gutter) + 8px);
   }
-  .home .term figcaption span + span {
+  .home .term .lbl {
+    display: none;
+  }
+  .home .tiers {
+    flex: 1;
+  }
+  .home .tiers .seg {
+    padding: 7px 6px;
+  }
+  /* the Grep pair says nothing Codex's Bash pair doesn't, and the phone needs the height */
+  .home .tail [data-wide] {
     display: none;
   }
   .home .tail {
     font-size: 11.5px;
+    line-height: 16px;
   }
   .home .tail p {
-    grid-template-columns: 11ch 16ch minmax(0, 1fr);
+    grid-template-columns: 11ch minmax(0, 1fr);
     column-gap: 1.5ch;
+    padding: 3px 0;
   }
   .home .tail i {
     display: none;
+  }
+  .home .tail .d {
+    grid-column: 1 / -1;
+  }
+  .home .tail .hot::before {
+    left: -11px;
+    top: 8px;
+  }
+  .home .term .carries {
+    min-height: calc(2 * 18px + 13px);
+    line-height: 18px;
   }
   .home .dl {
     grid-template-columns: minmax(0, 1fr);
@@ -2002,5 +2198,24 @@ details > p {
   .brand img {
     width: 146px;
     height: 20px;
+  }
+}
+
+/* the smallest phones: the tiers by number, with the caption back beside them */
+@media (max-width: 360px) {
+  .home .term .lbl {
+    display: inline;
+  }
+  .home .tiers {
+    flex: none;
+  }
+  .home .tiers .seg {
+    padding: 7px 9px;
+  }
+  .home .tiers b {
+    margin: 0;
+  }
+  .home .tiers em {
+    display: none;
   }
 }

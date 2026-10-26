@@ -11,23 +11,26 @@
 </div>
 <p class="agent">Setting it up with an agent? <button type="button" class="copy" data-copy="/agent.md" hidden>Copy its context</button><a class="agent-link" href="/agent.md">Give it /agent.md</a></p>
 </div>
-<figure class="term" aria-label="sessionpipe tail at tier 1: a Claude Code session and a Codex session in one stream; the Claude Code session ends up waiting for a permission.">
-<figcaption><span>sessionpipe tail --tier 1</span><span>local outbox · no server</span></figcaption>
+<figure class="term" aria-label="What a sink receives at each privacy tier, from one stream of a Claude Code session and a Codex session that ends with Claude Code waiting for permission to run git push. Tier 0 keeps state and timing, tier 1 adds tool names and the attention message, tier 2 adds the prompts with secrets redacted, tier 3 adds tool input and output.">
+<figcaption><span class="lbl">What a sink receives</span><span class="tiers" role="radiogroup" aria-label="Privacy tier"><label><input type="radio" name="tier" value="0"><span class="seg"><b>0</b><em>presence</em></span></label><label><input type="radio" name="tier" value="1" checked><span class="seg"><b>1</b><em>actions</em></span></label><label><input type="radio" name="tier" value="2"><span class="seg"><b>2</b><em>conversation</em></span></label><label><input type="radio" name="tier" value="3"><span class="seg"><b>3</b><em>full</em></span></label></span></figcaption>
 <div class="tail" aria-hidden="true">
-<p style="--i:0"><i>00:41:02</i><b>claude-code</b><u>session.started</u><span>~/spacesheep main</span></p>
-<p style="--i:1"><i>00:41:09</i><b>claude-code</b><u>turn.started</u><span>prompt_chars=61</span></p>
-<p style="--i:2"><i>00:41:10</i><b>codex</b><u>tool.started</u><span>Bash</span></p>
-<p style="--i:3"><i>00:41:11</i><b>claude-code</b><u>tool.started</u><span>Read</span></p>
-<p style="--i:4"><i>00:41:11</i><b>claude-code</b><u>tool.ended</u><span>Read ok 38ms</span></p>
-<p style="--i:5"><i>00:41:12</i><b>codex</b><u>tool.ended</u><span>Bash ok 1204ms</span></p>
-<p style="--i:6"><i>00:41:14</i><b>claude-code</b><u>tool.started</u><span>Bash</span></p>
-<p style="--i:7"><i>00:41:16</i><b>codex</b><u>turn.ended</u><span>stop</span></p>
-<p class="hot" style="--i:8"><i>00:41:31</i><b>claude-code</b><u>attention.needed</u><span><strong><span class="dot"></span>permission</strong> Bash "git push…"</span></p>
-<p style="--i:9"><span class="cursor"></span></p>
+<p style="--i:0"><i>00:41:02</i><b>claude-code</b><u>session.started</u><span class="d"><span class="v">~/spacesheep main</span></span></p>
+<p style="--i:1"><i>00:41:09</i><b>claude-code</b><u>turn.started</u><span class="d"><span class="v"><span data-t="1">prompt_chars=58</span></span></span></p>
+<p data-min="2" style="--i:2"><i>00:41:09</i><b>claude-code</b><u>turn.progress</u><span class="d"><span class="v">"push it, GH_TOKEN=<span class="r">[redacted]</span>"</span><span class="x">not sent</span></span></p>
+<p data-min="1" style="--i:3"><i>00:41:10</i><b>codex</b><u>tool.started</u><span class="d"><span class="v">Bash<span data-t="3"> "npm test"</span></span><span class="x">not sent</span></span></p>
+<p data-min="1" data-wide style="--i:4"><i>00:41:11</i><b>claude-code</b><u>tool.started</u><span class="d"><span class="v">Grep<span data-t="3"> "advanceCursor"</span></span><span class="x">not sent</span></span></p>
+<p data-min="1" data-wide style="--i:5"><i>00:41:11</i><b>claude-code</b><u>tool.ended</u><span class="d"><span class="v">Grep ok 38ms<span data-t="3"> numFiles=3</span></span><span class="x">not sent</span></span></p>
+<p data-min="1" style="--i:6"><i>00:41:12</i><b>codex</b><u>tool.ended</u><span class="d"><span class="v">Bash ok 1204ms<span data-t="3"> "14 passed"</span></span><span class="x">not sent</span></span></p>
+<p style="--i:7"><i>00:41:13</i><b>codex</b><u>turn.ended</u><span class="d"><span class="v">stop</span></span></p>
+<p data-min="1" style="--i:8"><i>00:41:14</i><b>claude-code</b><u>tool.started</u><span class="d"><span class="v">Bash<span data-t="3"> "git push"</span></span><span class="x">not sent</span></span></p>
+<p class="hot" style="--i:9"><i>00:41:15</i><b>claude-code</b><u>attention.needed</u><span class="d"><span class="v">permission<span data-t="1"> Bash git push</span></span></span></p>
 </div>
+<p class="carries"><span data-n="0">Tier 0 carries state and timing: working, needs you, done. No words.</span><span data-n="1">Tier 1 adds tool names, durations, prompt length and the attention message.</span><span data-n="2">Tier 2 adds prompts and replies, secrets redacted on your machine.</span><span data-n="3">Tier 3 adds tool input and output, for a receiver you own.</span></p>
+<p class="visually-hidden" aria-live="polite"></p>
 </figure>
 </div>
 </section>
+<script src="/tier.js" defer></script>
 
 <section class="sec" id="how" aria-labelledby="how-h">
 <h2 class="sh" id="how-h">How it works</h2>
