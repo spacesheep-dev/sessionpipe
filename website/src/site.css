@@ -1197,7 +1197,6 @@ details > p {
   text-align: center;
   white-space: nowrap;
   color: var(--plate-fg2);
-  transition: color var(--in) var(--ease);
 }
 .home .tiers .seg::before {
   content: "";
