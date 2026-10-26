@@ -28,7 +28,7 @@ import { installedVersion, installVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
 import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
-import { installService, off, pair, removeKey, uninstallService } from "./pair.js";
+import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { loadSdk } from "./sdk.js";
 import { type ControlMode, controlFile, controlState, parseMode, readControl, writeControl } from "./store.js";
 import { waitForMessage, waitSession } from "./wait.js";
@@ -218,6 +218,16 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       }
       const c = readControl();
       if (!c) return out("  control isn't set up on this machine: run `sessionpipe control pair <receiver>` first");
+      // A receiver that doesn't know inherit would show this machine as safe (CONTROL.md §2).
+      if (want === "inherit" && c.mode !== "inherit") {
+        const no = await withoutInherit(c.receivers.map((r) => r.url));
+        if (no.length) {
+          for (const why of no) out(`  ✗ ${why}.`);
+          out(`  Mode stays ${c.mode}. Inherit works once every receiver this machine is paired with knows it.`);
+          process.exitCode = 1;
+          return;
+        }
+      }
       c.mode = want;
       writeControl(c);
       // The running daemon reads control.json again within seconds; the next run uses it.

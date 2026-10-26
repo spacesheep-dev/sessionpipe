@@ -19,6 +19,7 @@ import {
   removeKey,
   serviceFiles,
   uninstallService,
+  withoutInherit,
 } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
 
@@ -75,6 +76,16 @@ class Scripted {
     return new Response(next.body === undefined ? null : JSON.stringify(next.body), { status: next.status });
   };
 }
+
+/** A well-known file whose receiver shows inherit mode as that (CONTROL.md §2). */
+const knowsInherit: Answer = {
+  status: 200,
+  body: {
+    capabilities: ["events", "control"],
+    endpoints: { events: "/api/sessionpipe/v1/events", control: "/api/sessionpipe/v1/control" },
+    control: { signing: { rp_id: RP }, open_pairing: false, inherit: true },
+  },
+};
 
 let tmp: string;
 let env: NodeJS.ProcessEnv;
@@ -151,6 +162,7 @@ describe("discovery", () => {
       control: "https://api.rx.test/control",
       rpId: RP,
       open: false,
+      inherit: false,
       events: null,
     });
   });
@@ -209,6 +221,35 @@ describe("pairing (CONTROL.md §2)", () => {
       harnesses: many.slice(0, 20),
       modes: ["waiter", "turn", "resume", "fork"],
     });
+  });
+
+  it("pairs in inherit mode only with a receiver that says it knows inherit (CONTROL.md §2)", async () => {
+    await expect(pair(opts({ mode: "inherit" }))).rejects.toThrow(
+      `${URL_} doesn't know inherit mode yet; it would show this machine as safe while the sessions you message run with no permission flag. Pair with --mode safe or --mode auto`,
+    );
+    // Nothing was sent: no pairing request reached it.
+    expect(rx.seen.map((s) => s.method)).toEqual(["GET"]);
+    rx.wellKnown = knowsInherit;
+    rx.seen.length = 0;
+    rx.posts = [started()];
+    rx.gets = [await paired()];
+    await pair(opts({ mode: "inherit" }));
+    expect(rx.seen[1]?.body).toMatchObject({ mode: "inherit" });
+    expect(readControl(env)?.mode).toBe("inherit");
+  });
+
+  it("withoutInherit names each receiver that doesn't know inherit, or can't be read", async () => {
+    expect(await withoutInherit([URL_], rx.fetch)).toEqual([
+      `${URL_} doesn't know inherit mode yet; it would show this machine as safe while the sessions you message run with no permission flag`,
+    ]);
+    rx.wellKnown = knowsInherit;
+    expect(await withoutInherit([URL_], rx.fetch)).toEqual([]);
+    const down = (async () => {
+      throw new Error("fetch failed");
+    }) as unknown as typeof fetch;
+    expect(await withoutInherit(["https://gone.test"], down)).toEqual([
+      "couldn't check that https://gone.test knows inherit mode (fetch failed)",
+    ]);
   });
 
   it("a receiver that answers 200 to the start is fine; one that refuses says why, or doesn't", async () => {

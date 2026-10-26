@@ -68,14 +68,14 @@ async function json(r: Response): Promise<Record<string, unknown>> {
 export async function discover(
   url: string,
   f: typeof fetch,
-): Promise<{ control: string; rpId: string; open: boolean; events: string | null }> {
+): Promise<{ control: string; rpId: string; open: boolean; inherit: boolean; events: string | null }> {
   const base = url.replace(/\/$/, "");
   const r = await f(`${base}/.well-known/sessionpipe`);
   if (!r.ok) throw new Error(`${base} has no sessionpipe well-known file (HTTP ${r.status})`);
   const wk = (await r.json()) as {
     capabilities?: string[];
     endpoints?: { control?: string; events?: string };
-    control?: { signing?: { rp_id?: string }; open_pairing?: boolean };
+    control?: { signing?: { rp_id?: string }; open_pairing?: boolean; inherit?: boolean };
   };
   if (!wk.capabilities?.includes("control") || !wk.endpoints?.control || !wk.control?.signing?.rp_id)
     throw new Error(`${base} doesn't serve control yet (its well-known file lists no control.signing)`);
@@ -84,15 +84,39 @@ export async function discover(
     control: abs(wk.endpoints.control),
     rpId: wk.control.signing.rp_id,
     open: wk.control.open_pairing === true,
+    inherit: wk.control.inherit === true,
     events: wk.endpoints.events ? abs(wk.endpoints.events) : null,
   };
+}
+
+/** Why a machine won't run in inherit mode with this receiver (CONTROL.md §2): a
+ *  receiver that doesn't know the mode would show the machine as safe. */
+export const inheritRefused = (url: string) =>
+  `${url} doesn't know inherit mode yet; it would show this machine as safe while the sessions you message run with no permission flag`;
+
+/** The paired receivers that don't say they show inherit mode (`control.inherit` in
+ *  their well-known file), with why. A receiver that can't be read counts as one. */
+export async function withoutInherit(urls: string[], f: typeof fetch = fetch): Promise<string[]> {
+  const out: string[] = [];
+  for (const url of urls) {
+    try {
+      if (!(await discover(url, f)).inherit) out.push(inheritRefused(url));
+    } catch (e) {
+      out.push(`couldn't check that ${url} knows inherit mode (${(e as Error).message})`);
+    }
+  }
+  return out;
 }
 
 /** Pair (or add a key to) this machine with one receiver. Returns the saved config. */
 export async function pair(o: PairOptions): Promise<ControlConfig> {
   const f = o.fetch ?? fetch;
   const sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const { control, rpId, open } = await discover(o.url, f);
+  const { control, rpId, open, inherit } = await discover(o.url, f);
+  if (o.mode === "inherit" && !inherit)
+    throw new Error(
+      `${inheritRefused(o.url)}. Pair with --mode safe or --mode auto (\`sessionpipe control mode safe\` first, if this machine is in inherit already).`,
+    );
   if (!o.token && !open)
     throw new Error(
       `${o.url} needs a key to pair: add it as a sink first (\`sessionpipe sink add ${o.url} --token …\`) or pass --token.`,

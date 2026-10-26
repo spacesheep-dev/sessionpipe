@@ -77,6 +77,14 @@ picker for a new session, and `files: true` when the machine takes attachments o
 and no command changes it. In `inherit` a turn may run with permission checks off, if
 that is what the harness's own settings say, so a machine MUST NOT run in `inherit`
 unless the person chose it there.
+A receiver that predates `inherit` reads it as an unknown mode and is likely to show
+the machine as `safe`, so the person would approve, and later send to, a machine
+described as safer than it runs. A receiver that shows `inherit` as what it is says
+so with `control.inherit: true` in its well-known file ([HTTP.md](HTTP.md) §1). A
+daemon MUST NOT pair in `inherit` mode with a receiver whose well-known file does not
+say `control.inherit: true`, and MUST NOT switch to `inherit` while it is paired with
+one; it says why at the terminal and keeps the mode it had. A receiver that sets
+`control.inherit` MUST accept `mode: "inherit"` in a pairing request and a hello.
 A machine that does not say `files: true` may predate attachments and start the
 session without them, so a receiver SHOULD NOT send it a `start` with `files`.
 
@@ -454,6 +462,8 @@ send → delivered time.
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
   until acked; a start the machine refuses `start_limit`, final at once.
+- `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
+  whose `mode` is `inherit` (§2).
 
 ## 12. Status
 

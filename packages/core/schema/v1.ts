@@ -512,6 +512,9 @@ export const WellKnown = z.object({
       /** Informational: the receiver accepts `files` on a start and serves
        *  `GET {control}/files/{sha256}`. */
       files: z.boolean().optional(),
+      /** The receiver shows a machine in `inherit` mode as that, never as safe or auto.
+       *  A daemon pairs in, or switches to, `inherit` only with receivers that say so. */
+      inherit: z.boolean().optional(),
     })
     .optional(),
 });
