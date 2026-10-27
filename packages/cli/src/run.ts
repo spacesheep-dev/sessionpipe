@@ -458,7 +458,13 @@ export async function runJob(
             {
               type: "turn.transcript",
               harnessEvent: job.event,
-              data: { turn: turnNo++, user: t.user, assistant: t.assistant, at: new Date(t.at).toISOString() },
+              data: {
+                turn: turnNo++,
+                user: t.user,
+                assistant: t.assistant,
+                at: new Date(t.at).toISOString(),
+                ...(t.injected ? { injected: true as const } : {}),
+              },
             },
             {
               harness: { name: job.harness, ...(version ? { version } : {}) },

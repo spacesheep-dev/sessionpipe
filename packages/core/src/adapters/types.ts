@@ -37,6 +37,10 @@ export interface Turn {
   assistant: string;
   at: number;
   endLine: number;
+  /** The ask reached the session from somewhere other than its own keyboard — another
+   *  local session handed it over, which is how a control daemon reaches a session in
+   *  place (spec/CONTROL.md §6.3). The words are the person's; the arrival was not. */
+  injected?: true;
 }
 
 export interface TranscriptRead {

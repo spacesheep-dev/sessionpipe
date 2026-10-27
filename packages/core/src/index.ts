@@ -9,7 +9,15 @@ export { Cursors, Outbox, type OutboxRef, processAlive, takeLock, takeNamedLock 
 export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.js";
 export * from "./privacy/index.js";
 export { gitFacts, stripCredentials } from "./readers/git.js";
-export { isInjected, pairTurns, readAntigravity, readClaude, readCodex, readGemini } from "./readers/transcripts.js";
+export {
+  isInjected,
+  pairTurns,
+  peerAsk,
+  readAntigravity,
+  readClaude,
+  readCodex,
+  readGemini,
+} from "./readers/transcripts.js";
 export { shortId } from "./short-id.js";
 export * from "./sinks/index.js";
 export type * from "./types.js";
