@@ -64,8 +64,8 @@ export interface ControlConfig {
   receivers: PairedReceiver[];
   /** Caps this machine keeps whatever a receiver sends (defaults in daemon.ts,
    *  LIMITS): new sessions running at once and per hour, headless Claude Code runs
-   *  at once. */
-  limits?: { start_concurrent?: number; start_per_hour?: number; headless?: number };
+   *  at once, copies of sessions made in a day. */
+  limits?: { start_concurrent?: number; start_per_hour?: number; headless?: number; copies_per_day?: number };
 }
 
 export const controlFile = (env: NodeJS.ProcessEnv = process.env) =>
@@ -228,6 +228,10 @@ export interface Ack {
   reply?: string;
   /** A start's taken and delivered: what it ran with (CONTROL.md §6, Options). */
   applied?: StartOptions;
+  /** This answer came from a COPY of the session the command named, not from it: the
+   *  person's words went somewhere other than the conversation they were looking at,
+   *  and they are owed that fact (CONTROL.md §6 `fork`). */
+  copy_of?: string;
 }
 
 /** What a session the daemon started runs with: its level and, when one was asked for,
@@ -280,9 +284,28 @@ export class AckOutbox {
  *  daemon acts on; this is only the shape a stored value has to keep). */
 const MODE_SHAPE = /^[A-Za-z]{1,40}$/;
 
+/** A copy the daemon made because it could not reach the original (CONTROL.md §6
+ *  `fork`), and what the person is owed about it: which session it is, when it was made
+ *  and why there is one at all. Daemons up to 0.10.0 wrote the id alone. */
+export interface Copy {
+  id: string;
+  at: string;
+  /** In the machine's own words, for the ack and the board: why a copy, not the session. */
+  reason: string;
+}
+
+/** The id alone, as 0.10.0 and earlier wrote it, reads as a copy with nothing else known. */
+const asCopy = (v: unknown): Copy | null => {
+  if (typeof v === "string" && v) return { id: v, at: "", reason: "" };
+  if (!v || typeof v !== "object") return null;
+  const c = v as { id?: unknown; at?: unknown; reason?: unknown };
+  if (typeof c.id !== "string" || !c.id) return null;
+  return { id: c.id, at: typeof c.at === "string" ? c.at : "", reason: typeof c.reason === "string" ? c.reason : "" };
+};
+
 export interface DaemonState {
-  /** Original session → the fork its messages go to. */
-  copies: Record<string, string>;
+  /** Original session → the copy its messages go to. */
+  copies: Record<string, Copy>;
   /** Claude Code sessions the daemon started → what they run with (Codex and
    *  Antigravity keep theirs in the alias entry, aliases.ts). */
   started: Record<string, StartOptions>;
@@ -293,24 +316,42 @@ export interface DaemonState {
 }
 
 export function readState(file: string): DaemonState {
+  const copies: Record<string, Copy> = {};
+  const started: Record<string, StartOptions> = {};
+  const modes: Record<string, string> = {};
   try {
-    const j = JSON.parse(readFileSync(file, "utf8")) as { copies?: unknown; started?: unknown; modes?: unknown };
-    const started: Record<string, StartOptions> = {};
+    const j = JSON.parse(readFileSync(file, "utf8")) as {
+      copies?: unknown;
+      copies_v2?: unknown;
+      started?: unknown;
+      modes?: unknown;
+    };
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
         const o = startOptionsOf(v);
         if (o) started[k] = o;
       }
-    const modes: Record<string, string> = {};
     if (j.modes && typeof j.modes === "object")
       for (const [k, v] of Object.entries(j.modes)) if (typeof v === "string" && MODE_SHAPE.test(v)) modes[k] = v;
-    return {
-      copies: j.copies && typeof j.copies === "object" ? (j.copies as Record<string, string>) : {},
-      started,
-      modes,
-    };
-  } catch {
-    return { copies: {}, started: {}, modes: {} };
-  }
+    // The richer shape when it is there, the plain id map when it isn't.
+    const from = j.copies_v2 && typeof j.copies_v2 === "object" ? j.copies_v2 : j.copies;
+    if (from && typeof from === "object")
+      for (const [k, v] of Object.entries(from as Record<string, unknown>)) {
+        const c = asCopy(v);
+        if (c) copies[k] = c;
+      }
+  } catch {}
+  return { copies, started, modes };
 }
-export const writeState = (file: string, s: DaemonState) => writePrivate(file, s);
+
+/** Both shapes of `copies`, every time. A daemon up to 0.10.0 reads `copies` as a map of
+ *  plain session ids and uses what it finds there as a `--resume` target, so writing
+ *  only the record would make every message to a session with a copy resume
+ *  `[object Object]` after a rollback — and a fleet keeps the previous build precisely
+ *  so it can roll back. */
+export const writeState = (file: string, s: DaemonState) =>
+  writePrivate(file, {
+    ...s,
+    copies: Object.fromEntries(Object.entries(s.copies).map(([k, c]) => [k, c.id])),
+    copies_v2: s.copies,
+  });

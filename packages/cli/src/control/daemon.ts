@@ -46,8 +46,9 @@ import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAl
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { ask, type LocalReply, type LocalRequest } from "./local.js";
-import { awaitAnswer, firstAsk, transcriptEnd } from "./reply.js";
+import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
 import {
+  COPY_NOTE,
   type DeliveryMode,
   frame,
   frameInbox,
@@ -85,6 +86,7 @@ const {
   parseResult,
   peerClass,
   recentlyWritten,
+  relaunchMode,
   resolveHome,
   sessionFolder,
 } = claudeControl;
@@ -377,7 +379,7 @@ export function sessionToolsFrom(v: unknown): string[] {
   ].slice(0, 8);
 }
 
-export const LIMITS = { startConcurrent: 2, startPerHour: 10, headless: 3 } as const;
+export const LIMITS = { startConcurrent: 2, startPerHour: 10, headless: 3, copiesPerDay: 10 } as const;
 
 export class ControlDaemon {
   private server: net.Server | null = null;
@@ -398,6 +400,9 @@ export class ControlDaemon {
    *  minutes, and a hold can be RELEASED later (a mode change does it), so for that long
    *  another write would mean the person's words arriving twice (CONTROL.md §6.3). */
   private readonly parked = new Map<string, { at: number; id: string }>();
+  /** Things said once in the log however many acks carry them (a mode the settings turn
+   *  off): the person reads the ack, the machine's log doesn't need it every time. */
+  private readonly warned = new Set<string>();
   private state: DaemonState;
   private running = false;
   private readonly polling = new Map<string, PollState>();
@@ -1192,7 +1197,7 @@ export class ControlDaemon {
     if (ref.harness === "codex" || ref.harness === "antigravity" || acpControl.acpAgent(ref.harness))
       return this.placeDriven(session, ref);
     if (ref.harness === "claude-code") {
-      const target = this.state.copies[ref.id] ?? ref.id;
+      const target = this.state.copies[ref.id]?.id ?? ref.id;
       const dirs = this.deps.claudeDirs();
       // The account the session belongs to, not the first one that has its transcript:
       // one id can be filed in several (CONTROL.md §6, Homes), and the home that holds
@@ -1579,7 +1584,7 @@ export class ControlDaemon {
   ): { rec: LiveRecord; declare: inbox.PeerClass } | { code: string; detail: string } | null {
     const ref = parseSessionRef(session);
     if (ref?.harness !== "claude-code" || !place.transcript) return null;
-    const target = this.state.copies[ref.id] ?? ref.id;
+    const target = this.state.copies[ref.id]?.id ?? ref.id;
     // A run of the daemon's own holding it is not a session to write into: the message
     // queues behind that run and resumes it.
     if (this.ownRuns.has(target)) return null;
@@ -1717,7 +1722,7 @@ export class ControlDaemon {
       ref.harness === "claude-code"
         ? this.deps.claude()
         : /* v8 ignore next -- every other harness returned above */ null;
-    const target = this.state.copies[ref.id] ?? ref.id;
+    const target = this.state.copies[ref.id]?.id ?? ref.id;
     const t = transcript;
     // The daemon's own run holding it is not "someone else's live process": the message
     // queues behind that run (serial per session) and resumes it.
@@ -1733,7 +1738,10 @@ export class ControlDaemon {
       inbox: !!look && "rec" in look,
       live,
       known: !!t,
-      canFork: !!claude?.caps.fork,
+      // A copy is never itself copied: a message for a session that already has one
+      // resumes that copy, and when the copy is live too the person is told rather than
+      // handed a copy of a copy (CONTROL.md §6 `fork`).
+      canFork: !!claude?.caps.fork && !this.state.copies[ref.id],
       api: false,
     };
   }
@@ -2039,19 +2047,29 @@ export class ControlDaemon {
     if (!claude)
       return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
     const ref = parseSessionRef(cmd.session)!;
+    const dir = place.transcript?.configDir;
+    const home = homeSettings(dir);
     // The session's own record (its start's level, narrowed to the machine's mode now).
-    const o = this.laterOptions("claude-code", this.state.started[ref.id]);
+    const recorded = this.state.started[ref.id];
+    const o = this.laterOptions("claude-code", recorded);
     const mf = claudeControl.modeFlags(o.permission, claude.caps);
     if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
-    const signedOut = await this.loginProblem(place.transcript?.configDir);
+    const signedOut = await this.loginProblem(dir);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
+    if (mode === "fork") {
+      const refusal = this.copyLimit();
+      if (refusal) return this.finish(r, id, { outcome: "refused", code: "copy_limit", detail: refusal });
+    }
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
-      const target = this.state.copies[ref.id] ?? ref.id;
+      const target = this.state.copies[ref.id]?.id ?? ref.id;
+      // A copy is told it is a copy: its conversation is a replay, the original is
+      // elsewhere, and nothing it does there appears in it.
+      const body = frame(cmd.text as string, r.url) + (mode === "fork" ? `\n\n${COPY_NOTE}` : "");
       const built = claudeArgs({
         caps: claude.caps,
         level: o.permission,
-        prompt: frame(cmd.text as string, r.url),
+        prompt: body,
         resume: target,
         fork: mode === "fork",
         allowedTools: this.allowedFor(r),
@@ -2059,15 +2077,35 @@ export class ControlDaemon {
       });
       /* v8 ignore next -- the same caps and level passed modeFlags above */
       const args = "args" in built ? built.args : [];
+      // A narrowing the session itself chose, said again (CONTROL.md §6 `prompt`): a
+      // session this daemon started is #138's to decide for, and on a machine that
+      // names a mode of its own there is nothing to re-assert. Elsewhere `inherit`
+      // means no flag, and on this fleet no flag is the account's default, which is
+      // wider than what the person set the session to. Beside `-p`, where modeFlags
+      // would have put one; the prompt stays last.
+      const narrow = recorded || this.cfg.mode !== "inherit" ? null : relaunchMode(this.modeOf(target), home);
+      if (narrow) args.splice(1, 0, "--permission-mode", narrow);
       this.deps.log(
-        `${id.slice(-8)}: claude -p (${o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
+        `${id.slice(-8)}: claude -p (${narrow ?? o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
       );
       const stream = this.answerStream(r, id);
+      const before = place.transcript ? transcriptEnd(place.transcript.file) : 0;
       const res = await this.owning(target, () =>
         this.slot(() =>
           this.deps.run(claude.bin, args, {
             cwd: place.folder,
-            env: claudeEnv(place.transcript?.configDir, this.deps.env),
+            env: {
+              ...claudeEnv(dir, this.deps.env),
+              // The harness's own contract for copying a session something else still
+              // holds: without it the resuming process claims the transcript's pointer,
+              // so the COPY's end becomes what the person's next window resumes — and
+              // the message re-enters their own conversation without them seeing it.
+              ...(mode === "fork"
+                ? {
+                    CLAUDE_CODE_RESUME_SOURCE_ALIVE: `${target}|${new Date(this.deps.now()).toISOString()}|${target}`,
+                  }
+                : {}),
+            },
             timeoutMs: JOB_TIMEOUT_MS,
             ...(claude.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
           }),
@@ -2079,17 +2117,64 @@ export class ControlDaemon {
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
       if (mode === "fork" && ran !== target) {
-        this.state.copies[ref.id] = ran;
+        this.state.copies[ref.id] = {
+          id: ran,
+          at: new Date(this.deps.now()).toISOString(),
+          reason: "the session was open on this computer and couldn't be reached in place",
+        };
         writeState(path.join(this.dir, "state.json"), this.state);
         this.lastEnd.set(ran, this.deps.now());
       }
       this.finish(
         r,
         id,
-        { outcome: "delivered", mode, reply: out.reply, ...(ran !== ref.id ? { session: `claude-code:${ran}` } : {}) },
+        {
+          outcome: "delivered",
+          mode,
+          reply: out.reply,
+          ...(ran !== ref.id ? { session: `claude-code:${ran}` } : {}),
+          ...(mode === "fork" && ran !== target ? { copy_of: `claude-code:${target}` } : {}),
+          ...this.ranNote(place, before, { narrow, home }),
+        },
         sent,
       );
     });
+  }
+
+  /** What the ack says about the mode a cold run turned out to have (CONTROL.md §6
+   *  `prompt`): what the new turn's own row recorded, which is what it ran in rather
+   *  than what was asked for — and, on a machine set to auto whose Claude Code has auto
+   *  turned off, that the turn ran in Manual mode and what fixes it. */
+  private ranNote(
+    place: Placed,
+    before: number,
+    o: { narrow: string | null; home: claudeControl.HomeSettings },
+  ): { detail?: string } {
+    const notes: string[] = [];
+    if (this.cfg.mode === "auto" && o.home.disableAutoMode) {
+      const say =
+        "auto mode is turned off in this machine's Claude Code settings, so the turn ran in Manual mode; `sessionpipe control mode inherit` runs it the way your own sessions here run";
+      notes.push(say);
+      if (!this.warned.has(say)) {
+        this.warned.add(say);
+        this.deps.log(say);
+      }
+    }
+    const ran = place.transcript ? ranInMode(place.transcript.file, before) : null;
+    if (ran) notes.push(`the turn ran in ${ran}${o.narrow ? ", the mode the session itself was in" : ""}`);
+    return notes.length ? { detail: notes.join("; ") } : {};
+  }
+
+  /** Why no copy may be made right now, or null. A copy replays a whole conversation, so
+   *  the machine caps them itself whatever a receiver sends. */
+  private copyLimit(): string | null {
+    const cap = this.limits().copiesPerDay;
+    const cut = this.deps.now() - 24 * 3600_000;
+    const today = Object.values(this.state.copies).filter((c) => (Date.parse(c.at) || 0) > cut).length;
+    if (today < cap) return null;
+    return cap
+      ? `this machine has already made ${today} copies of sessions today, which is its limit; a copy replays a whole conversation, so they are capped here`
+      : "this machine doesn't make copies of sessions, and that session couldn't be reached in place";
   }
 
   private outcome(res: RunResult): { failed: string } | { reply: string; session?: string } {
@@ -2153,7 +2238,7 @@ export class ControlDaemon {
   private answerFrom(session: string): { file: string; offset: number } | null {
     const ref = parseSessionRef(session);
     if (!ref || ref.harness !== "claude-code") return null;
-    const t = findTranscript(this.state.copies[ref.id] ?? ref.id, this.deps.claudeDirs());
+    const t = findTranscript(this.state.copies[ref.id]?.id ?? ref.id, this.deps.claudeDirs());
     return t ? { file: t.file, offset: transcriptEnd(t.file) } : null;
   }
 
@@ -2229,6 +2314,7 @@ export class ControlDaemon {
       startConcurrent: n(l.start_concurrent, LIMITS.startConcurrent),
       startPerHour: n(l.start_per_hour, LIMITS.startPerHour),
       headless: Math.max(1, n(l.headless, LIMITS.headless)),
+      copiesPerDay: n(l.copies_per_day, LIMITS.copiesPerDay),
     };
   }
 

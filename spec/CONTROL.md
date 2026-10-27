@@ -367,8 +367,8 @@ A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `not_a_command`, `wrong_machine`, `unknown_kind`, `bad_session`, `bad_fields`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
-(`folder`, `no_attention`, `no_session`, `ambiguous_home`, `start_limit`, `permission`,
-`model`). A daemon up to 0.9.0 sends `mode` where this document says `permission`.
+(`folder`, `no_attention`, `no_session`, `ambiguous_home`, `start_limit`, `copy_limit`,
+`permission`, `model`). A daemon up to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
 runs in a Worker, a browser and Node). A receiver SHOULD run it on arrival as an early
@@ -533,6 +533,42 @@ its `reply`, so the person reads the answer where they asked. A turn that doesn'
 within 30 minutes is acked `delivered` without one. The framed message tells the model
 its answer goes back by itself, so it never reaches for a command to send it (a real
 session invented one, 2026-10-01).
+
+**A cold mode (`resume`, `fork`) re-asserts a narrowing the session chose, and names
+nothing else.** The machine's mode is the person's own choice at that machine and the
+only thing that picks a permission flag (§2); `inherit` passes none, so the harness
+starts in its own default there. But no flag is not neutral: where an account's default
+is a mode with permission prompts off, no flag is the widest outcome there is, and a
+session the person had narrowed themselves would quietly come back wider. So for a
+session the machine did not start, on a machine that names no mode of its own, a daemon
+MAY pass the narrowing the session itself was last in, read from what the session
+reported (§6.2) and never from a flag it once asked for:
+
+| The session's own last mode | The flag on a relaunch |
+|---|---|
+| `plan`, `dontAsk` | that one |
+| `acceptEdits` | that one, where the account's own default is at least as wide; otherwise none |
+| `default`, `manual`, `auto`, `bypassPermissions`, nothing recorded | none |
+
+A daemon MUST NOT emit `auto` or `bypassPermissions` this way — the two values a setting
+can quietly turn into something else — and MUST NOT re-assert anything wider than what
+the machine itself does with no flag. A session the machine started keeps the options its
+start recorded (**Options** below), which this does not touch. Where a machine's mode
+asks for a mode the harness's own settings turn off (`auto` where auto is disabled), the
+turn still runs and the ack SHOULD say what it ran in instead and what would fix it. The
+ack's `detail` MAY name the mode the new turn's own record shows — which is what it ran
+in, rather than what was asked for.
+
+A `fork` answers from a **copy**, not from the session the command named, and the person
+is owed that fact: the ack names the copy in `session` and the original in `copy_of`, and
+the message itself SHOULD tell the copy that it is one, so it does not carry on the
+original's work. A copy is a leaf: later messages for that session resume the copy, and a
+copy is never itself copied. A machine MAY cap how many copies it makes in a day (each
+replays a whole conversation) and refuses beyond that `copy_limit`, with a reason. Where
+the harness has a contract for copying a session something else still holds — Claude
+Code's `CLAUDE_CODE_RESUME_SOURCE_ALIVE` — a daemon MUST use it, or the copy claims the
+original's transcript pointer and the delivered turn re-enters the person's own
+conversation unseen.
 
 ### `permission.answer`
 
@@ -706,7 +742,9 @@ hook waits or prints.
 ## 10. Acks
 
 `POST {control}/ack` with [`control-ack.json`](https://sessionpipe.org/schema/v1/control-ack.json):
-`{"acks":[{"id","outcome","at","mode?","session?","code?","detail?","reply?","applied?"}]}`.
+`{"acks":[{"id","outcome","at","mode?","session?","copy_of?","code?","detail?","reply?","applied?"}]}`.
+`copy_of` says the answer came from a copy of the session the command named, not from it
+(§6 `prompt`).
 
 | Outcome | Meaning |
 |---------|---------|
@@ -744,9 +782,11 @@ send → delivered time.
   `delivered` with `applied`; a hello with `start`.
 - `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
   whose `mode` is `inherit` (§2).
-- `conformance/delivery/24`–`25` — a prompt delivered in place through the session's own
-  inbox and acked `delivered` with `mode: "inbox"`; and one written into that inbox that
-  the session never took, acked `failed` with code `held` once and never retried (§6.3).
+- `conformance/delivery/24`–`26` — a prompt delivered in place through the session's own
+  inbox and acked `delivered` with `mode: "inbox"`; one written into that inbox that the
+  session never took, acked `failed` with code `held` once and never retried (§6.3); and
+  a copy's ack, naming the copy in `session` and the session the person addressed in
+  `copy_of` (§6 `prompt`).
 
 ## 12. Status
 

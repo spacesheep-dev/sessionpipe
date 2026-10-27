@@ -112,6 +112,11 @@ export function frameInbox(text: string, receiver: string, id: string): string {
   return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${inboxMark(id)}):\n\n${text}`;
 }
 
+/** Said with a message a copy of a session is answering, so the model knows the person
+ *  is not reading this conversation: a copy is not the thread they are looking at. */
+export const COPY_NOTE =
+  "You are a copy of that session, started to answer this message: the conversation above is a replay, the original session is somewhere else, and nothing you do here appears in it. Answer the message and stop; don't carry on the original's work.";
+
 /** A new session's first message: the person's words first, where they come from after.
  *  Claude Code names a session from the start of its first message, so a header in front
  *  named every started session "Message via spacesheep.dev (sessionpipe control, s…"

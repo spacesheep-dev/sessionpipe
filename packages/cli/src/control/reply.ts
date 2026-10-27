@@ -64,6 +64,36 @@ export function firstAsk(file: string, from: number, mark: string): "peer" | "ot
   return null;
 }
 
+/** The permission mode the rows written after `from` record — what the turn a relaunch
+ *  just ran ACTUALLY ran in, rather than what was asked for (spec/CONTROL.md §6
+ *  `prompt`). The last word wins; null when no row says. */
+export function ranInMode(file: string, from: number): string | null {
+  const size = transcriptEnd(file);
+  if (size <= from) return null;
+  let text: string;
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(Math.min(size - from, 4 * 1024 * 1024));
+    const n = readSync(fd, buf, 0, buf.length, from);
+    text = buf.subarray(0, n).toString("utf8");
+  } catch {
+    /* v8 ignore next 2 -- readSync throws only on a file that vanished mid-read */
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+  let mode: string | null = null;
+  for (const line of text.split("\n")) {
+    if (!line.includes('"permissionMode"')) continue;
+    try {
+      const j = JSON.parse(line) as { permissionMode?: unknown; isSidechain?: unknown };
+      if (!j.isSidechain && typeof j.permissionMode === "string" && /^[A-Za-z]{1,40}$/.test(j.permissionMode))
+        mode = j.permissionMode;
+    } catch {}
+  }
+  return mode;
+}
+
 const rowText = (c: unknown): string => {
   if (typeof c === "string") return c;
   if (!Array.isArray(c)) return "";

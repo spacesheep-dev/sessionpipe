@@ -430,6 +430,9 @@ export const ControlAck = z.object({
         mode: DeliveryMode.optional(),
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
+        /** The answer came from a COPY of the session the command named, which this
+         *  names: the person is owed the fact that their words went somewhere else. */
+        copy_of: SessionRef.optional(),
         /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`,
          *  `ambiguous_home` when one session id is filed in several of the harness's accounts);
          *  failed: `file` when a start's attachment couldn't be fetched, checked or written,

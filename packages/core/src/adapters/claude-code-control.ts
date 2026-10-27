@@ -583,6 +583,30 @@ export function homeSettings(configDir: string | undefined, home = os.homedir())
   };
 }
 
+/** The `--permission-mode` a relaunch of ONE session re-asserts, or null for no flag at
+ *  all (spec/CONTROL.md §6 `prompt`). Only a narrowing the session itself chose:
+ *
+ *  - `plan` and `dontAsk` always: both are narrower than any account's default, and the
+ *    person chose them at that keyboard;
+ *  - `acceptEdits` only where the account's own default is at least that wide, so a
+ *    re-assertion can never be wider than what the machine itself does with no flag.
+ *    Settings that can't be read mean it isn't re-asserted;
+ *  - everything else — `default`, `manual`, `auto`, `bypassPermissions`, nothing
+ *    recorded — is no flag, and the account's own default decides.
+ *
+ *  It never returns `auto` or `bypassPermissions`: the two values a setting can quietly
+ *  turn into something else, and the two this code must never write. `auto` is the
+ *  incident this came from — it asks for a mode that `disableAutoMode` turns into Manual,
+ *  so a session that recorded it gets no flag and the account's default instead.
+ *
+ *  No flag is not neutral. On a fleet whose accounts default to bypass it is the widest
+ *  outcome there is, which is why a narrowing the person chose has to be said again. */
+export function relaunchMode(recorded: string | null | undefined, home: HomeSettings): string | null {
+  if (recorded === "plan" || recorded === "dontAsk") return recorded;
+  if (recorded === "acceptEdits" && modeRank(home.defaultMode) >= modeRank("acceptEdits")) return recorded;
+  return null;
+}
+
 /** Written in the last 90 s, and not by a job of ours. */
 export function recentlyWritten(file: string, ourLastEnd?: number, now = Date.now()): boolean {
   let m: number;

@@ -220,9 +220,20 @@ describe("acks not yet accepted", () => {
 describe("forks and aliases on disk", () => {
   it("state.json: the fork map, or nothing when it is missing or not a map", () => {
     const f = path.join(tmp, "state", "control", "state.json");
+    const copy = { id: "b", at: "2026-10-26T00:00:00.000Z", reason: "no lane reached it" };
     expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
-    writeState(f, { copies: { a: "b" }, started: {}, modes: {} });
-    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: { a: "b" } });
+    writeState(f, { copies: { a: copy }, started: {}, modes: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: { a: copy } });
+    // Written in both shapes, so a daemon that only knows the id map can still roll back.
+    expect(JSON.parse(readFileSync(f, "utf8")) as { copies: unknown; copies_v2: unknown }).toMatchObject({
+      copies: { a: "b" },
+      copies_v2: { a: copy },
+    });
+    // The id alone is what daemons up to 0.10.0 wrote: a copy with nothing else known.
+    writeFileSync(f, JSON.stringify({ copies: { a: "b" } }));
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: { a: { id: "b", at: "", reason: "" } } });
+    writeFileSync(f, JSON.stringify({ copies: { a: 7, b: {}, c: { id: "" }, d: { id: "x" } } }));
+    expect(readState(f).copies).toEqual({ d: { id: "x", at: "", reason: "" } });
     writeFileSync(f, JSON.stringify({ copies: "b" }));
     expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));

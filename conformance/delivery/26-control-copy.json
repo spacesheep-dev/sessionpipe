@@ -1,0 +1,29 @@
+{
+  "name": "control-copy",
+  "spec": "CONTROL.md §6 prompt, §10 acks",
+  "capability": "control",
+  "note": "No mode reached the session itself, so the machine answered from a COPY of it. The ack names the copy in `session`, the session the person addressed in `copy_of`, and in `detail` the permission mode the turn actually ran in. The receiver's part is to say whose answer this is: the person's words went to a copy, not to the conversation they were looking at.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "prompt", "text": "are we done with the three PRs?" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    { "ack": { "outcome": "taken" }, "expect": { "status": 202 } },
+    {
+      "ack": {
+        "outcome": "delivered",
+        "mode": "fork",
+        "session": "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b",
+        "copy_of": "claude-code:{uuid}",
+        "detail": "the turn ran in acceptEdits, the mode the session itself was in",
+        "reply": "A copy of that session answered: yes, all three are merged."
+      },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}
