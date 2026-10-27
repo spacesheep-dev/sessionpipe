@@ -17,6 +17,7 @@ import {
   adapterByName,
   Cursors,
   capTail,
+  claudeControl,
   type DeliveryResult,
   type Event,
   type FactsState,
@@ -58,6 +59,14 @@ async function tellDaemon(
 ): Promise<void> {
   const sock = socketPath(state);
   if (process.platform !== "win32" && !existsSync(sock)) return;
+  // The session's own permission mode, where its payload names one (CONTROL.md §6, The
+  // session's mode): the daemon records it per session, and an in-place lane and a
+  // relaunch's narrowing both rest on it. Read from the top-level field, never matched
+  // out of the payload's text, so a tool input that quotes one cannot set it.
+  let mode: string | null = null;
+  try {
+    mode = claudeControl.hookMode(JSON.parse(job.stdin));
+  } catch {}
   await ask(
     sock,
     {
@@ -66,6 +75,7 @@ async function tellDaemon(
       event: job.event,
       ...(cwd ? { cwd } : {}),
       ...(transcript ? { transcript } : {}),
+      ...(mode ? { mode } : {}),
     },
     300,
   );

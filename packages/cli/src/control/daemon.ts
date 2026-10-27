@@ -151,6 +151,9 @@ const TURN_FALLBACK_MS = 30 * 60_000;
 const ANSWER_WAIT_MS = 30 * 60_000;
 /** How long a Stop hook may take to be answered. */
 const RECENT_ACKS_MS = 25 * 3600_000;
+/** How many sessions' recorded permission modes are kept (CONTROL.md §6, The session's
+ *  mode). One entry is a session ref and a word; the oldest go first. */
+const MODES_KEPT = 500;
 /** Events that prove a pending permission prompt was resolved some other way. */
 const CLOSES_ATTENTION = new Set([
   "PostToolUse",
@@ -643,6 +646,7 @@ export class ControlDaemon {
       case "stop": {
         const l = this.liveOf(req.session);
         l.lastEvent = this.deps.now();
+        this.recordMode(req.session, req.mode);
         const p = this.takeTurn(l);
         if (!p) {
           this.reply(s, { op: "none" });
@@ -689,8 +693,10 @@ export class ControlDaemon {
   private onEvent(e: Extract<LocalRequest, { op: "event" }>): void {
     // A worker that read the aliases a moment before a start recorded its session still
     // names the harness's own id; this daemon knows the start's.
-    const l = this.liveOf(this.named(e.session));
+    const named = this.named(e.session);
+    const l = this.liveOf(named);
     l.lastEvent = this.deps.now();
+    this.recordMode(named, e.mode);
     if (e.cwd) l.cwd = e.cwd;
     if (e.transcript) l.transcript = e.transcript;
     if (CLOSES_ATTENTION.has(e.event) && l.attentions.size) {
@@ -1167,6 +1173,30 @@ export class ControlDaemon {
     const ok = this.allowed(cwd);
     if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
     return { folder: ok, transcript: null, target, file };
+  }
+
+  /** Keep what a session's own hooks said its permission mode is (CONTROL.md §6, The
+   *  session's mode). The latest word wins, and a mode this daemon has no meaning for
+   *  is not kept at all.
+   *
+   *  The compare and the write are one step of this process's own event loop — one
+   *  daemon serves a machine, and it is the one holding the socket — so a burst of hook
+   *  events cannot interleave a read with a write; and an unchanged mode writes nothing,
+   *  which matters because a hook fires for every tool call of every session. */
+  private recordMode(session: string, mode: string | undefined): void {
+    if (!mode || !claudeControl.CLAUDE_MODES.includes(mode)) return;
+    if (this.state.modes[session] === mode) return;
+    this.state.modes[session] = mode;
+    // Oldest first: a machine that has run thousands of sessions keeps the recent ones.
+    const over = Object.keys(this.state.modes).length - MODES_KEPT;
+    for (const k of Object.keys(this.state.modes).slice(0, Math.max(0, over))) delete this.state.modes[k];
+    try {
+      writeState(path.join(this.dir, "state.json"), this.state);
+    } catch (e) {
+      this.deps.log(
+        `couldn't record ${session.slice(0, 24)}'s permission mode: ${String(/* v8 ignore next -- writeState throws fs Errors */ (e as Error)?.message || e)}`,
+      );
+    }
   }
 
   /** The folder the worker recorded for a session from its hooks (run.ts, facts). */

@@ -220,13 +220,13 @@ describe("acks not yet accepted", () => {
 describe("forks and aliases on disk", () => {
   it("state.json: the fork map, or nothing when it is missing or not a map", () => {
     const f = path.join(tmp, "state", "control", "state.json");
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
-    writeState(f, { copies: { a: "b" }, started: {} });
-    expect(readState(f)).toEqual({ started: {}, copies: { a: "b" } });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
+    writeState(f, { copies: { a: "b" }, started: {}, modes: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: { a: "b" } });
     writeFileSync(f, JSON.stringify({ copies: "b" }));
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
     // What each started session runs with: a known level, and a model only when well-formed.
     writeFileSync(
       f,

@@ -510,6 +510,38 @@ export function liveProcess(session: string, configDir: string): boolean {
   return liveRecords(session, configDir).length > 0;
 }
 
+/** Claude Code's own permission modes, narrowest first (its own order, 2.1.310).
+ *  `plan` asks for everything and writes nothing; `bypassPermissions` asks for nothing.
+ *  Used to tell one mode from another and to compare two, never to pick one. */
+export const CLAUDE_MODES = ["plan", "default", "manual", "dontAsk", "acceptEdits", "auto", "bypassPermissions"];
+export const modeRank = (m: string | null | undefined): number => (m ? CLAUDE_MODES.indexOf(m) : -1);
+
+/** The permission mode a hook payload reports for its own session, or null. Claude Code
+ *  writes `permission_mode` on every hook payload; `permissionMode` is the spelling its
+ *  transcript records use, and is read too so one reader serves both.
+ *
+ *  This is the only place a mode the person chose at the keyboard can be read from: a
+ *  session's registry row doesn't carry it, and the transcript names it only on turns
+ *  that happen to record one. hook.ts repeats the shape test, because it imports nothing
+ *  but node builtins. */
+export function hookMode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as { permission_mode?: unknown; permissionMode?: unknown };
+  const v = typeof p.permission_mode === "string" ? p.permission_mode : p.permissionMode;
+  return typeof v === "string" && CLAUDE_MODES.includes(v) ? v : null;
+}
+
+/** The permission class Claude Code's own inbox checks a sender's declared class
+ *  against (2.1.310): `bypassPermissions` is `bypass`; a mode that prompts before it
+ *  acts is `prompting`. `plan` is neither — its class there depends on a capability and
+ *  a TTY this code cannot see — and nor is `auto`, nor a mode nothing has recorded, so
+ *  those get no in-place lane at all (spec/CONTROL.md §6.4). */
+export function peerClass(mode: string | null | undefined): "bypass" | "prompting" | null {
+  if (mode === "bypassPermissions") return "bypass";
+  if (mode === "default" || mode === "manual" || mode === "dontAsk" || mode === "acceptEdits") return "prompting";
+  return null;
+}
+
 /** Written in the last 90 s, and not by a job of ours. */
 export function recentlyWritten(file: string, ourLastEnd?: number, now = Date.now()): boolean {
   let m: number;

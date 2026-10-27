@@ -276,26 +276,41 @@ export class AckOutbox {
   }
 }
 
+/** A permission mode as a hook payload spells it (core's CLAUDE_MODES is the list the
+ *  daemon acts on; this is only the shape a stored value has to keep). */
+const MODE_SHAPE = /^[A-Za-z]{1,40}$/;
+
 export interface DaemonState {
   /** Original session → the fork its messages go to. */
   copies: Record<string, string>;
   /** Claude Code sessions the daemon started → what they run with (Codex and
    *  Antigravity keep theirs in the alias entry, aliases.ts). */
   started: Record<string, StartOptions>;
+  /** Session ref → the permission mode its own hooks last reported (CONTROL.md §6, The
+   *  session's mode). The daemon's own record, in its own state: no Claude Code home is
+   *  written to. Insertion order is the age order, which is how the oldest are dropped. */
+  modes: Record<string, string>;
 }
 
 export function readState(file: string): DaemonState {
   try {
-    const j = JSON.parse(readFileSync(file, "utf8")) as { copies?: unknown; started?: unknown };
+    const j = JSON.parse(readFileSync(file, "utf8")) as { copies?: unknown; started?: unknown; modes?: unknown };
     const started: Record<string, StartOptions> = {};
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
         const o = startOptionsOf(v);
         if (o) started[k] = o;
       }
-    return { copies: j.copies && typeof j.copies === "object" ? (j.copies as Record<string, string>) : {}, started };
+    const modes: Record<string, string> = {};
+    if (j.modes && typeof j.modes === "object")
+      for (const [k, v] of Object.entries(j.modes)) if (typeof v === "string" && MODE_SHAPE.test(v)) modes[k] = v;
+    return {
+      copies: j.copies && typeof j.copies === "object" ? (j.copies as Record<string, string>) : {},
+      started,
+      modes,
+    };
   } catch {
-    return { copies: {}, started: {} };
+    return { copies: {}, started: {}, modes: {} };
   }
 }
 export const writeState = (file: string, s: DaemonState) => writePrivate(file, s);

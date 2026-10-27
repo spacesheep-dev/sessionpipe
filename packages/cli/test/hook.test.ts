@@ -312,6 +312,14 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
       expect(d.asked[1]).toEqual({ op: "stop", session: `claude-code:${SID}`, active: false });
       expect(out).toHaveLength(1);
       expect(jobs()).toHaveLength(2);
+      // The session's own permission mode rides along when the payload names one
+      // (CONTROL.md §6, The session's mode); a value of another shape is not a mode.
+      await run(["claude-code", "Stop"], claude({ permission_mode: "bypassPermissions" }));
+      expect(d.asked[2]).toMatchObject({ op: "stop", mode: "bypassPermissions" });
+      await run(["claude-code", "Stop"], claude({ permissionMode: "plan" }));
+      expect(d.asked[3]).toMatchObject({ op: "stop", mode: "plan" });
+      await run(["claude-code", "Stop"], claude({ permission_mode: "a mode with spaces" }));
+      expect(d.asked[4]).not.toHaveProperty("mode");
     } finally {
       await d.close();
     }

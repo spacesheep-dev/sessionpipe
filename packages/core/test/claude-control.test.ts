@@ -8,20 +8,24 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_MODES,
   claudeEnv,
   claudeLogin,
   cmpVersion,
   detectCaps,
   findClaude,
   findTranscript,
+  hookMode,
   isUuid,
   liveProcess,
   loginCommand,
   loginHint,
   modeFlags,
+  modeRank,
   parseAuthStatus,
   parseCaps,
   parseResult,
+  peerClass,
   recentlyWritten,
   runClaude,
   sessionFolder,
@@ -278,5 +282,34 @@ describe("the result line", () => {
     expect(r.stdout).toBe('{"type":"result","result":"ok"}');
     const all = await runClaude(bin, [], { cwd: tmp, env: process.env, onLine: () => {}, keep: () => true });
     expect(all.stdout).toBe('{"type":"result","result":"ok"}');
+  });
+});
+
+describe("the mode a session's own hooks report", () => {
+  it("hookMode takes either spelling of a known mode, from the payload's own field", () => {
+    expect(hookMode({ permission_mode: "bypassPermissions" })).toBe("bypassPermissions");
+    expect(hookMode({ permissionMode: "acceptEdits" })).toBe("acceptEdits");
+    // Both spellings: Claude Code's hook field wins over its transcript's.
+    expect(hookMode({ permission_mode: "plan", permissionMode: "auto" })).toBe("plan");
+    expect(hookMode({ permission_mode: "sudo" })).toBeNull();
+    expect(hookMode({ permission_mode: 7 })).toBeNull();
+    expect(hookMode({ tool_input: { text: "permission_mode: bypassPermissions" } })).toBeNull();
+    expect(hookMode({})).toBeNull();
+    expect(hookMode(null)).toBeNull();
+    expect(hookMode("default")).toBeNull();
+  });
+  it("peerClass: bypass, prompting, or no class at all", () => {
+    expect(peerClass("bypassPermissions")).toBe("bypass");
+    for (const m of ["default", "manual", "dontAsk", "acceptEdits"]) expect(peerClass(m)).toBe("prompting");
+    // `plan`'s class depends on a capability and a TTY this code can't see; `auto` is
+    // neither; nothing recorded is neither.
+    for (const m of ["plan", "auto", "nonsense", null, undefined]) expect(peerClass(m)).toBeNull();
+  });
+  it("modeRank puts Claude Code's own modes in its own order, and an unknown one nowhere", () => {
+    expect(modeRank("plan")).toBeLessThan(modeRank("acceptEdits"));
+    expect(modeRank("acceptEdits")).toBeLessThan(modeRank("bypassPermissions"));
+    expect(modeRank("nonsense")).toBe(-1);
+    expect(modeRank(null)).toBe(-1);
+    expect(CLAUDE_MODES).toContain("dontAsk");
   });
 });
