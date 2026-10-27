@@ -190,6 +190,10 @@ export const EventData = z.object({
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),
     at: Rfc3339,
+    /** As on turn.transcript: the ask reached the session from somewhere other than its
+     *  own keyboard. A running turn says it too, or a board would show the person's
+     *  relayed words as typed there until the turn ends. */
+    injected: z.literal(true).optional(),
   }),
   "tool.started": Loose.extend({
     tool: ToolName,

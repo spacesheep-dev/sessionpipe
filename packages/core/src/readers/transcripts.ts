@@ -63,7 +63,8 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
     })),
     line,
   };
-  if (cur && !cur.assistant && cur.user) out.open = { user: cur.user, at: cur.at };
+  if (cur && !cur.assistant && cur.user)
+    out.open = { user: cur.user, at: cur.at, ...(cur.injected ? { injected: true as const } : {}) };
   return out;
 }
 

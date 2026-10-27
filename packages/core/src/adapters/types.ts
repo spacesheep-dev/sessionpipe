@@ -48,7 +48,7 @@ export interface TranscriptRead {
   /** The line the cursor may advance to once every turn is delivered. */
   line: number;
   /** A prompt after the last turn with no reply yet (a turn that just began). */
-  open?: { user: string; at: number };
+  open?: { user: string; at: number; injected?: true };
 }
 
 export interface SessionFacts extends Partial<Session> {

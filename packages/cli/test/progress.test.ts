@@ -280,6 +280,90 @@ describe("a turn another session's message asked for", () => {
     at: clock,
   });
 
+  it("says the same about a turn that has answered but not yet been delivered", async () => {
+    const both = path.join(tmp, "peer-both.jsonl");
+    writeFileSync(
+      both,
+      [
+        {
+          type: "user",
+          isMeta: true,
+          timestamp: "2026-10-26T20:00:00.000Z",
+          origin: { kind: "peer", body: envelope("and the changelog?") },
+          message: { role: "user", content: [{ type: "text", text: "Another Claude session sent a message: …" }] },
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-10-26T20:00:05.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "Written." }] },
+        },
+      ]
+        .map((r) => `${JSON.stringify(r)}\n`)
+        .join(""),
+    );
+    // A tool event, not a Stop: the turn has its answer and has not been delivered yet,
+    // so the reading is of the last turn rather than of an open one.
+    await runJob(
+      {
+        harness: "claude-code",
+        event: "PostToolUse",
+        argv: ["claude-code", "PostToolUse"],
+        stdin: JSON.stringify({
+          session_id: "peer-3",
+          cwd: tmp,
+          hook_event_name: "PostToolUse",
+          transcript_path: both,
+          tool_name: "Bash",
+          tool_input: { command: "ls" },
+          tool_response: "ok",
+          tool_use_id: "t1",
+        }),
+        cwd: tmp,
+        env: { CLAUDE_CONFIG_DIR: tmp },
+        at: clock,
+      },
+      { state: tmp },
+    );
+    const p = sent().filter((e) => e.type === "turn.progress" && e.session?.id === "peer-3");
+    expect(p).toHaveLength(1);
+    expect(p[0].data).toMatchObject({ user: "and the changelog?", assistant: "Written.", injected: true });
+  });
+
+  it("says the same while it is still running: a board never shows relayed words as typed there", async () => {
+    const running = path.join(tmp, "peer-running.jsonl");
+    writeFileSync(
+      running,
+      `${JSON.stringify({
+        type: "user",
+        isMeta: true,
+        timestamp: "2026-10-26T20:00:00.000Z",
+        origin: { kind: "peer", body: envelope("look at the deploy") },
+        message: { role: "user", content: [{ type: "text", text: "Another Claude session sent a message: …" }] },
+      })}\n`,
+    );
+    await runJob(
+      {
+        harness: "claude-code",
+        event: "UserPromptSubmit",
+        argv: ["claude-code", "UserPromptSubmit"],
+        stdin: JSON.stringify({
+          session_id: "peer-2",
+          cwd: tmp,
+          hook_event_name: "UserPromptSubmit",
+          transcript_path: running,
+        }),
+        cwd: tmp,
+        env: { CLAUDE_CONFIG_DIR: tmp },
+        at: clock,
+      },
+      { state: tmp },
+    );
+    const p = sent().filter((e) => e.type === "turn.progress" && e.session?.id === "peer-2");
+    expect(p).toHaveLength(1);
+    expect(p[0].data).toMatchObject({ user: "look at the deploy", assistant: "", injected: true });
+    expect(filterEvent(p[0], 2, false)?.data).toMatchObject({ injected: true });
+  });
+
   it("goes out as a transcript turn that says the ask arrived from somewhere else", async () => {
     writeFileSync(
       file,

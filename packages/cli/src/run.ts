@@ -241,15 +241,18 @@ export const PROGRESS_MS = 20_000;
 export function openTurn(
   read: TranscriptRead,
   o: { base: number; prompt?: string | undefined; at: number },
-): { turn: number; user: string; assistant: string; at: number } | null {
+): { turn: number; user: string; assistant: string; at: number; injected?: true } | null {
   const last = read.turns[read.turns.length - 1];
-  const fresh = (user: string, at: number) => ({
+  const fresh = (user: string, at: number, injected?: true) => ({
     turn: o.base + read.turns.length,
     user: user.slice(0, MAX_TURN_SIDE),
     assistant: "",
     at,
+    ...(injected ? { injected: true as const } : {}),
   });
-  if (read.open) return fresh(read.open.user, read.open.at);
+  // A turn still running says the same about its ask as the finished one will: the board
+  // would otherwise show the person's relayed words as typed here until the turn ends.
+  if (read.open) return fresh(read.open.user, read.open.at, read.open.injected);
   // The prompt the hook just reported, unless the transcript already has its reply.
   // Text the person never typed (a task notification, another session's message) opens
   // no turn: the readers skip it, so that turn would never be delivered, and its
@@ -261,6 +264,7 @@ export function openTurn(
     turn: o.base + read.turns.length - 1,
     user: last.user.slice(0, MAX_TURN_SIDE),
     assistant: capTail(last.assistant, MAX_TURN_SIDE),
+    ...(last.injected ? { injected: true as const } : {}),
     at: last.at,
   };
 }
