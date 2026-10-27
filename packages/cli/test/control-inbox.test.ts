@@ -177,9 +177,30 @@ const sawMode = (mode: string, session = SESSION) =>
 
 /** The inbox has `n` lines in it. */
 async function wrote(n: number): Promise<void> {
-  for (let i = 0; i < 100 && written.length < n; i++) await settle(30);
+  for (let i = 0; i < 200 && written.length < n; i++) await settle(30);
   expect(written).toHaveLength(n);
 }
+
+/** The receiver has an ack of some kind for this message (`taken` counts). */
+async function anyAck(id: string): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 200 && !rx.acks.some((a) => a.id === id); i++) await settle(30);
+  const a = rx.acks.find((x) => x.id === id);
+  expect(a, "an ack for that message").toBeTruthy();
+  return a as Record<string, unknown>;
+}
+
+/** The key Claude Code writes beside a registry row. Off macOS the inbox asks for it,
+ *  and a line without it is dropped unread, so a row that has none has no lane there. */
+function inboxKey(dir = configDir): void {
+  mkdirSync(path.join(dir, "sessions"), { recursive: true });
+  writeFileSync(
+    path.join(dir, "sessions", `${process.pid}.${"a".repeat(64)}.key`),
+    JSON.stringify({ peerToken: "a".repeat(32) }),
+  );
+}
+
+/** How many lines a delivery writes here: off macOS the auth line goes first. */
+const LINES = process.platform === "darwin" ? 1 : 2;
 
 /** The mark the daemon writes into the framed text, as the session would see it. */
 const markOf = (id: string) => `message ${id.slice(-12)}`;
@@ -245,8 +266,7 @@ describe.runIf(unix)("a message into a live session's own inbox", () => {
     await startDaemon();
     await sawMode("bypassPermissions");
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "are we done with the three PRs?" });
-    await settle(200);
-    expect(written).toHaveLength(1);
+    await wrote(1);
     const frame = frameIn();
     expect(frame).toContain('from-mode="bypass"');
     expect(frame).toContain(`from-name="${new URL(rx.url).host} board"`);
@@ -274,12 +294,14 @@ describe.runIf(unix)("a message into a live session's own inbox", () => {
 
   it("says nothing about the platform when nobody asked it to: this computer's own", async () => {
     row();
+    // Whatever this computer is, the row is one the mode can use there: a Mac vets the
+    // sender by its uid, and everything else asks for the key beside the row.
+    inboxKey();
     await startDaemon({ realPlatform: true });
     await sawMode("bypassPermissions");
-    const q = await rx.send({ session: SESSION, kind: "prompt", text: "on this Mac" });
-    await wrote(1);
-    // A Mac vets the sender by uid, so the line goes out on its own.
-    expect(JSON.parse(written[0] as string)).toMatchObject({ type: "user" });
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "on this computer" });
+    await wrote(LINES);
+    expect(JSON.parse(written.at(-1) as string)).toMatchObject({ type: "user" });
     answered(markOf(q.id), "right you are");
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
     expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
@@ -331,7 +353,7 @@ describe.runIf(unix)("a message into a live session's own inbox", () => {
     await startDaemon();
     await sawMode("acceptEdits");
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "edits both ways" });
-    await settle(200);
+    await wrote(1);
     expect(frameIn()).toContain('from-mode="prompting"');
     answered(markOf(q.id), "done");
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "acceptEdits" }, 500);
@@ -535,9 +557,8 @@ describe.runIf(unix)("what the lane will not write into", () => {
     await sawMode("bypassPermissions");
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "mid-turn" });
-    await settle(150);
+    expect(await anyAck(q.id)).toMatchObject({ outcome: "taken" });
     expect(written).toEqual([]);
-    expect(rx.acks.find((a) => a.id === q.id)).toMatchObject({ outcome: "taken" });
   });
 
   it("a session the registry says is not idle", async () => {
@@ -629,10 +650,7 @@ describe.runIf(unix)("what the lane will not write into", () => {
 
   it("off macOS it reads the inbox's key first, and sends it with the message", async () => {
     row();
-    writeFileSync(
-      path.join(configDir, "sessions", `${process.pid}.${"a".repeat(64)}.key`),
-      JSON.stringify({ peerToken: "a".repeat(32) }),
-    );
+    inboxKey();
     await startDaemon({ extra: { platform: "linux" } });
     await sawMode("bypassPermissions");
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "from a Linux box" });
@@ -674,8 +692,7 @@ describe.runIf(unix)("what the lane will not write into", () => {
     await startDaemon();
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "mid-turn" });
-    await settle(200);
-    expect(rx.acks.find((a) => a.id === q.id)).toMatchObject({ outcome: "taken" });
+    expect(await anyAck(q.id)).toMatchObject({ outcome: "taken" });
     expect(log.some((l) => l.includes("not in place via its own inbox"))).toBe(false);
   });
 
@@ -699,6 +716,16 @@ describe.runIf(unix)("what the lane will not write into", () => {
     answered(markOf(q.id), "both bypass");
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
     expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+  });
+
+  it("a Windows machine: there is no inbox there, and nothing is read to find that out", async () => {
+    row();
+    await startDaemon({ extra: { platform: "win32" } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "from a PC" });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("no local inbox on Windows"))).toBe(true);
   });
 
   it("a refusal between the look and the first byte takes the next rung, with nothing written", async () => {

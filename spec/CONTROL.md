@@ -440,6 +440,9 @@ surface and no command line exposes it.
 
 Before writing, a daemon MUST check all of:
 
+- the machine has such an inbox at all: Claude Code publishes none on Windows, where a
+  message takes a cold mode instead. A daemon SHOULD say so before it reads anything
+  else, since nothing it could read there would change the answer;
 - exactly **one** live registry record across the harness's accounts (two is a refusal,
   not a guess) for the session this would write to — which is the **copy** where the
   session the command named has one (§6 `prompt`), since that is where its messages go;

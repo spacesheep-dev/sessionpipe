@@ -1581,6 +1581,14 @@ export class ControlDaemon {
     | null {
     const ref = parseSessionRef(session);
     if (ref?.harness !== "claude-code" || !place.transcript) return null;
+    // Claude Code publishes no local inbox on Windows, so there is nothing here to look
+    // at: said before a registry read, a settings read or a `ps`, so a Windows machine
+    // pays nothing for a mode it can never use. The writer refuses it too (inbox.ts).
+    if ((this.deps.platform ?? process.platform) === "win32")
+      return {
+        code: "platform",
+        detail: "Claude Code publishes no local inbox on Windows, so a message there is delivered by a cold run",
+      };
     const target = this.state.copies[ref.id]?.id ?? ref.id;
     // The session this lane would write to, which is the copy where there is one: the
     // hold, the watcher and the confirming row are all ITS (the copy's hooks report

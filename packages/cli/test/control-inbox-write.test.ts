@@ -2,7 +2,9 @@
 // The writer behind the `inbox` delivery mode (CONTROL.md §6.3), on its own: the
 // canonical envelope and its round-trip check, the name it carries, every gate that has
 // to pass before the first byte, and the one line it writes. The socket is a real Unix
-// socket in a temp dir.
+// socket in a temp dir, so everything that needs one runs on POSIX only — which is also
+// where the mode exists: Claude Code publishes no local inbox on Windows, and §6.3
+// refuses it there before anything is read (a Windows machine takes the cold modes).
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -24,6 +26,7 @@ import {
 
 type LiveRecord = claudeControl.LiveRecord;
 
+const unix = process.platform !== "win32";
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-inbox-w-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
@@ -136,7 +139,7 @@ describe("the envelope", () => {
   });
 });
 
-describe("what has to be true before the first byte", () => {
+describe.runIf(unix)("what has to be true before the first byte", () => {
   it("passes a live, idle, interactive session of this account whose class is the machine's", async () => {
     await listen();
     expect(vetInbox(rec(), { ...ok, configDir: dir })).toBeNull();
@@ -194,12 +197,17 @@ describe("what has to be true before the first byte", () => {
     // No home named: the record's own is not compared against one.
     expect(vetInbox(rec(), { sessionClass: "bypass", machineClass: "bypass", platform: "darwin" })).toBeNull();
   });
+});
 
-  it("procStart: the same instant spelled two ways is the same process", () => {
+describe("a process's start time, and the key beside its registry row", () => {
+  it("the same instant spelled two ways is the same process", () => {
     expect(sameStart("Mon Oct 26 19:53:13 2026", "Mon Oct 26 19:53:13 2026")).toBe(true);
     expect(sameStart("Mon Oct 26 19:53:13 2026", "2026-10-26T19:53:13")).toBe(true);
     expect(sameStart("Mon Oct 26 19:53:13 2026", "Mon Oct 26 12:53:13 2026")).toBe(false);
     expect(sameStart("Mon Oct 26 19:53:13 2026", "not a date")).toBe(false);
+  });
+
+  it("is read through `ps`, or is not known: a pid nobody owns, a blank answer, no `ps` at all", () => {
     expect(procStartOf(1)).toBeNull();
     expect(procStartOf(-3)).toBeNull();
     expect(procStartOf(process.pid, () => "  Mon Oct 26 19:53:13 2026 ")).toBe("Mon Oct 26 19:53:13 2026");
@@ -209,13 +217,18 @@ describe("what has to be true before the first byte", () => {
         throw new Error("no ps here");
       }),
     ).toBeNull();
-    // The real `ps`, in the registry's own spelling: a date, and the same one twice.
+  });
+
+  // The real `ps`, in the registry's own spelling. Only where the mode exists: Windows
+  // has no `ps` and no inbox to compare a start time against.
+  it.runIf(unix)("the real `ps` answers a date, and the same one twice", () => {
     const real = procStartOf(process.pid);
     expect(real).toBe(procStartOf(process.pid));
     expect(Number.isFinite(Date.parse(real as string))).toBe(true);
   });
 
   it("the inbox key is read from beside the registry row, and only when it is one", () => {
+    mkdirSync(path.join(dir, "sessions"), { recursive: true });
     const keyFile = path.join(dir, "sessions", `${process.pid}.${"a".repeat(64)}.key`);
     expect(peerToken(rec())).toBeNull();
     writeFileSync(keyFile, JSON.stringify({ peerToken: "0".repeat(32) }));
@@ -227,7 +240,7 @@ describe("what has to be true before the first byte", () => {
   });
 });
 
-describe("the one line it writes", () => {
+describe.runIf(unix)("the one line it writes", () => {
   it("is a user frame at the lowest priority, in the envelope, and nothing else", async () => {
     await listen();
     const out = await writeInbox(rec(), {
