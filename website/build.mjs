@@ -2,6 +2,7 @@
 // sessionpipe.org: one Node script, no framework. Renders spec/*.md and the legal
 // files with marked into one HTML template, copies schemas/v1 (the $ids), writes
 // website/dist/. No analytics, no external requests, no cookies.
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,15 @@ mkdirSync(path.join(out, "schema/v1"), { recursive: true });
 cpSync(path.join(root, "schemas/v1"), path.join(out, "schema/v1"), { recursive: true });
 
 const css = read("website/src/site.css");
+// A light or dark chosen with the header's button, applied before the first paint. It is the
+// one inline script, allowed by its hash; theme.js wires the button.
+const themeBoot = `try{const t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch{}`;
+const themeHash = createHash("sha256").update(themeBoot).digest("base64");
+const sun =
+  '<svg class="sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
+const moon =
+  '<svg class="moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 14.6A7.5 7.5 0 0 1 9.4 4.5a7.5 7.5 0 1 0 10.1 10.1z"/></svg>';
+
 const nav = [
   ["/", "Home"],
   ["/docs/", "Docs"],
@@ -118,8 +128,9 @@ function page({ title, description, body: html, pathname, edit, license, jsonld 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self' 'sha256-${themeHash}'; base-uri 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark">
+<script>${themeBoot}</script>
 <title>${title}</title>
 <meta name="description" content="${description}">
 <link rel="canonical" href="${canonical}">
@@ -145,9 +156,10 @@ ${jsonld ? `<script type="application/ld+json">${JSON.stringify(jsonld)}</script
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="in"><a class="brand" href="/" aria-label="sessionpipe home"><picture><source srcset="/brand/lockup-dark.svg" media="(prefers-color-scheme: dark)"><img src="/brand/lockup-light.svg" alt="" width="175" height="24"></picture></a><nav aria-label="Site">${navHtml}</nav></div></header>
+<header class="top"><div class="in"><a class="brand" href="/" aria-label="sessionpipe home"><img class="on-light" src="/brand/lockup-light.svg" alt="" width="175" height="24"><img class="on-dark" src="/brand/lockup-dark.svg" alt="" width="175" height="24"></a><nav aria-label="Site">${navHtml}</nav><button type="button" class="theme" aria-label="Switch to dark mode" title="Switch to dark mode" hidden>${sun}${moon}</button></div></header>
 <main id="main">${bar}${body}</main>
-<footer><div><picture><source srcset="/brand/mark-dark.svg" media="(prefers-color-scheme: dark)"><img class="mark" src="/brand/mark-light.svg" alt="" width="40" height="40"></picture></div><div><p class="links"><a href="/docs/">Docs</a><a href="/protocol/">Protocol</a><a href="/receivers/">Receivers</a><a href="/security/">Security</a><a href="/legal/">Legal &amp; privacy</a><a href="/governance/">Governance</a><a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/CONTRIBUTING.md">Contributing</a><a href="/changelog/">Changelog</a><a href="/llms.txt">For agents</a><a href="https://github.com/spacesheep-dev/sessionpipe">GitHub</a>${edit ? `<a href="${edit}">Edit this page</a>` : ""}</p><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} "sessionpipe" and its logo are marks of Michael Makarov (<a href="/legal/#trademarks">trademarks</a>).</p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></div></footer>
+<footer><div><img class="mark on-light" src="/brand/mark-light.svg" alt="" width="40" height="40"><img class="mark on-dark" src="/brand/mark-dark.svg" alt="" width="40" height="40"></div><div><p class="links"><a href="/docs/">Docs</a><a href="/protocol/">Protocol</a><a href="/receivers/">Receivers</a><a href="/security/">Security</a><a href="/legal/">Legal &amp; privacy</a><a href="/governance/">Governance</a><a href="https://github.com/spacesheep-dev/sessionpipe/blob/main/CONTRIBUTING.md">Contributing</a><a href="/changelog/">Changelog</a><a href="/llms.txt">For agents</a><a href="https://github.com/spacesheep-dev/sessionpipe">GitHub</a>${edit ? `<a href="${edit}">Edit this page</a>` : ""}</p><p>${license === "spec" ? 'This page is part of the sessionpipe protocol specification, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.' : "Code is Apache-2.0; the specification is CC BY 4.0."} "sessionpipe" and its logo are marks of Michael Makarov (<a href="/legal/#trademarks">trademarks</a>).</p><p>No cookies, no analytics, nothing loaded from anyone else. Hosted on GitHub Pages. sessionpipe ${version}.</p><p>Started by the people behind <a href="https://spacesheep.dev">spacesheep</a>, and given to the community as an open protocol: Apache-2.0 code, CC BY 4.0 spec, no CLA.</p></div></footer>
+<script src="/theme.js" defer></script>
 ${twin ? '<script src="/copy.js" defer></script>\n' : ""}</body>
 </html>
 `;
