@@ -146,9 +146,11 @@ const queuedPrompt = (a: unknown): string => {
   if (!a || typeof a !== "object") return "";
   const q = a as { type?: unknown; commandMode?: unknown; origin?: { kind?: string }; prompt?: unknown };
   if (q.type !== "queued_command" || (q.commandMode ?? "prompt") !== "prompt") return "";
-  if (q.origin?.kind && !SPOKEN.has(q.origin.kind)) return "";
+  // Older versions wrote no origin at all, which means the person at the keyboard.
+  const kind = q.origin?.kind ?? "human";
+  if (!SPOKEN.has(kind)) return "";
   const text = textParts(q.prompt, ["text"]).trim();
-  return q.origin?.kind === "peer" ? peerAsk(q.origin, text) : text;
+  return kind === "peer" ? peerAsk(q.origin, text) : text;
 };
 
 /** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},

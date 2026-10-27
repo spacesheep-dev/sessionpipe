@@ -4,12 +4,108 @@ import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { answerIn, awaitAnswer, transcriptEnd } from "../src/control/reply.js";
+import { answerIn, awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "../src/control/reply.js";
 import { kindPath, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
   rec({ type: "assistant", message: { stop_reason: stop, content }, ...extra });
+
+describe("firstAsk: which message the turn that just began is for", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-firstask-"));
+  const file = path.join(tmp, "t.jsonl");
+  const MARK = "message 01K6ABCDEF12";
+  /** The rows a delivery's turn gains, written after `from`. */
+  const after = (...lines: string[]) => {
+    writeFileSync(file, "head\n");
+    const from = transcriptEnd(file);
+    appendFileSync(file, lines.map((l) => `${l}\n`).join(""));
+    return from;
+  };
+  const peerRow = (o: Record<string, unknown> = {}, text = `… ${MARK} …`) =>
+    rec({ type: "user", isMeta: true, origin: { kind: "peer", ...o }, message: { content: [{ type: "text", text }] } });
+
+  it("is the peer row carrying this message's own mark", () => {
+    expect(firstAsk(file, after(peerRow()), MARK)).toBe("peer");
+    // The parsed body the harness records counts too, and a string content.
+    expect(firstAsk(file, after(peerRow({ body: `… ${MARK} …` }, "nothing here")), MARK)).toBe("peer");
+    expect(
+      firstAsk(file, after(rec({ type: "user", origin: { kind: "peer" }, message: { content: `… ${MARK} …` } })), MARK),
+    ).toBe("peer");
+    // A block with no text of its own is not where the mark is.
+    expect(
+      firstAsk(
+        file,
+        after(
+          rec({
+            type: "user",
+            origin: { kind: "peer" },
+            message: { content: [{ type: "image" }, { type: "text", text: `… ${MARK} …` }] },
+          }),
+        ),
+        MARK,
+      ),
+    ).toBe("peer");
+  });
+
+  it("is `other` for any turn this message did not cause", () => {
+    expect(firstAsk(file, after(rec({ type: "user", origin: { kind: "human" } })), MARK)).toBe("other");
+    // Another local process's message: a peer row without this message's mark.
+    expect(firstAsk(file, after(peerRow({}, "someone else's words")), MARK)).toBe("other");
+    expect(firstAsk(file, after(rec({ type: "user" })), MARK)).toBe("other");
+  });
+
+  it("is nothing yet while no row says: an unfinished line, no rows at all, only rows that aren't asks", () => {
+    writeFileSync(file, "head\n");
+    expect(firstAsk(file, transcriptEnd(file), MARK)).toBeNull();
+    expect(firstAsk(file, 0, MARK)).toBeNull();
+    // A line still being written has no newline yet, so there is no row to read.
+    const from = after();
+    appendFileSync(file, '{"type":"user"');
+    expect(firstAsk(file, from, MARK)).toBeNull();
+    expect(
+      firstAsk(
+        file,
+        after(
+          "",
+          "not json",
+          rec({ type: "assistant", message: { content: [] } }),
+          rec({ type: "user", isSidechain: true, origin: { kind: "peer" } }),
+          rec({ type: "user", isCompactSummary: true }),
+          rec({ type: "user", repeatsCompactSummary: true }),
+          rec({ type: "user", toolUseResult: {}, origin: { kind: "human" } }),
+          rec({ type: "user", message: { content: [{ type: "tool_result" }] } }),
+        ),
+        MARK,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("ranInMode: what the turn a relaunch ran actually ran in", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-ranin-"));
+  const file = path.join(tmp, "t.jsonl");
+  it("is the last mode a row after `from` records, and nothing from before it", () => {
+    writeFileSync(file, `${rec({ type: "user", permissionMode: "plan" })}\n`);
+    const from = transcriptEnd(file);
+    expect(ranInMode(file, from)).toBeNull();
+    appendFileSync(
+      file,
+      [
+        "not json",
+        rec({ type: "user", permissionMode: "acceptEdits" }),
+        rec({ type: "user", permissionMode: "bypassPermissions", isSidechain: true }),
+        rec({ type: "user", permissionMode: 7 }),
+        rec({ type: "user", permissionMode: "not a mode at all!" }),
+        rec({ type: "assistant", message: { content: [] } }),
+      ]
+        .map((l) => `${l}\n`)
+        .join(""),
+    );
+    expect(ranInMode(file, from)).toBe("acceptEdits");
+    expect(ranInMode(path.join(tmp, "none.jsonl"), 0)).toBeNull();
+  });
+});
 
 describe("answerIn", () => {
   it("is the turn's text once it ends; tool steps and subagents are not the answer", () => {

@@ -264,3 +264,47 @@ describe("turn.progress: a message absorbed mid-turn", () => {
     expect(readings().some((r) => String(r.user).startsWith("<task-notification>"))).toBe(false);
   });
 });
+
+describe("a turn another session's message asked for", () => {
+  const sid = "peer-1";
+  const file = path.join(tmp, "peer.jsonl");
+  const envelope = (body: string) =>
+    `<cross-session-message from-name="localhost board" from-mode="bypass">\n${body}\n</cross-session-message>`;
+  const peerJob = (event: string) => ({
+    harness: "claude-code",
+    event,
+    argv: ["claude-code", event],
+    stdin: JSON.stringify({ session_id: sid, cwd: tmp, hook_event_name: event, transcript_path: file }),
+    cwd: tmp,
+    env: { CLAUDE_CONFIG_DIR: tmp },
+    at: clock,
+  });
+
+  it("goes out as a transcript turn that says the ask arrived from somewhere else", async () => {
+    writeFileSync(
+      file,
+      [
+        {
+          type: "user",
+          isMeta: true,
+          timestamp: "2026-10-26T20:00:00.000Z",
+          origin: { kind: "peer", body: envelope("are we done with the three PRs?") },
+          message: { role: "user", content: [{ type: "text", text: "Another Claude session sent a message: …" }] },
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-10-26T20:00:05.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "Yes, all three." }] },
+        },
+      ]
+        .map((r) => `${JSON.stringify(r)}\n`)
+        .join(""),
+    );
+    await runJob(peerJob("Stop"), { state: tmp });
+    const t = sent().filter((e) => e.type === "turn.transcript" && e.session?.id === sid);
+    expect(t).toHaveLength(1);
+    expect(t[0].data).toMatchObject({ user: "are we done with the three PRs?", injected: true });
+    // And it survives the tier-2 filter, which carries only the keys the spec names.
+    expect(filterEvent(t[0], 2, false)?.data).toMatchObject({ injected: true });
+  });
+});

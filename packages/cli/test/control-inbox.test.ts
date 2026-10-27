@@ -33,6 +33,7 @@ let configDir: string;
 let fakeClaude: string;
 let claudeLog: string;
 let log: string[];
+let clock: number;
 let inboxPath: string;
 let inbox: net.Server;
 let written: string[];
@@ -137,9 +138,11 @@ function cfg(over: Partial<ControlConfig> = {}): ControlConfig {
   };
 }
 
-async function startDaemon(o: { cfg?: Partial<ControlConfig>; extra?: Partial<DaemonDeps> } = {}): Promise<void> {
+async function startDaemon(
+  o: { cfg?: Partial<ControlConfig>; extra?: Partial<DaemonDeps>; realPlatform?: boolean } = {},
+): Promise<void> {
   d = new ControlDaemon(cfg(o.cfg), path.join(tmp, "state", "control"), sock, {
-    now: () => Date.now(),
+    now: () => Date.now() + clock,
     fetch,
     log: (s) => log.push(s),
     claudeDirs: () => [configDir],
@@ -151,7 +154,7 @@ async function startDaemon(o: { cfg?: Partial<ControlConfig>; extra?: Partial<Da
     sdk: null,
     env,
     answerWaitMs: 4000,
-    platform: "darwin",
+    ...(o.realPlatform ? {} : { platform: "darwin" as NodeJS.Platform }),
     ...o.extra,
   });
   await d.start();
@@ -161,6 +164,12 @@ async function startDaemon(o: { cfg?: Partial<ControlConfig>; extra?: Partial<Da
  *  not a prompt: a prompt would also mean the session is mid-turn. */
 const sawMode = (mode: string, session = SESSION) =>
   ask(sock, { op: "event", session, event: "PostToolUse", mode }, 500);
+
+/** The inbox has `n` lines in it. */
+async function wrote(n: number): Promise<void> {
+  for (let i = 0; i < 100 && written.length < n; i++) await settle(30);
+  expect(written).toHaveLength(n);
+}
 
 /** The mark the daemon writes into the framed text, as the session would see it. */
 const markOf = (id: string) => `message ${id.slice(-12)}`;
@@ -199,6 +208,7 @@ process.stdout.write(JSON.stringify({ type: "result", result: "a copy answered",
   );
   chmodSync(fakeClaude, 0o755);
   log = [];
+  clock = 0;
   env = {
     ...process.env,
     SESSIONPIPE_STATE: path.join(tmp, "state"),
@@ -250,6 +260,19 @@ describe.runIf(unix)("a message into a live session's own inbox", () => {
     expect(state.modes[SESSION]).toBe("bypassPermissions");
     // And the hello says the lane exists here.
     expect(rx.hellos.at(-1)?.modes).toContain("inbox");
+  });
+
+  it("says nothing about the platform when nobody asked it to: this computer's own", async () => {
+    row();
+    await startDaemon({ realPlatform: true });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "on this Mac" });
+    await wrote(1);
+    // A Mac vets the sender by uid, so the line goes out on its own.
+    expect(JSON.parse(written[0] as string)).toMatchObject({ type: "user" });
+    answered(markOf(q.id), "right you are");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
   });
 
   it("the machine's class and the session's must be the same: otherwise the message takes the next rung", async () => {
@@ -327,7 +350,7 @@ describe.runIf(unix)("a message the session doesn't take", () => {
     await startDaemon();
     await sawMode("bypassPermissions");
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
-    await settle(200);
+    await wrote(1);
     typed("payroll is in the private repo");
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
     const ack = await rx.waitAck(q.id, 15_000);
@@ -336,16 +359,39 @@ describe.runIf(unix)("a message the session doesn't take", () => {
     expect(JSON.stringify(rx.acks)).not.toContain("payroll");
   });
 
-  it("the same words again are not written in beside the copy already waiting", async () => {
+  it("the same words again are not written in beside the copy already waiting, until it can't be", async () => {
     row();
-    await startDaemon();
+    // No copies on this machine, so the second message stops at the rung below rather
+    // than making one — which would move every later message to the copy.
+    await startDaemon({ cfg: { limits: { copies_per_day: 0 } } });
     await sawMode("bypassPermissions");
     const first = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
     await rx.waitAck(first.id, 15_000);
     const again = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
-    expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "refused", code: "copy_limit" });
     expect(written).toHaveLength(1);
     expect(log.some((l) => l.includes("parked"))).toBe(true);
+    // Once the session can no longer be handed that message, the lane is open again.
+    clock += 301_000;
+    // Signed by the clock the machine is now keeping: a message's own freshness is a
+    // separate gate from the hold window, and this one is about the hold.
+    const later = await rx.send({ session: SESSION, kind: "prompt", text: "a new one", iat: Date.now() + clock });
+    await wrote(2);
+    answered(markOf(later.id), "right, got it");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(later.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+  });
+
+  it("a turn that began with nothing written for it yet is not a delivery either", async () => {
+    row();
+    await startDaemon();
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
+    await wrote(1);
+    // A turn began, and the harness has written no row for it: six looks, then held.
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "failed", code: "held" });
+    expect(log.some((l) => l.includes("nothing was written for it yet"))).toBe(true);
   });
 
   it("a session that has ended isn't kept waiting for a message it can never take", async () => {
@@ -437,6 +483,60 @@ describe.runIf(unix)("what the lane will not write into", () => {
     await sawMode("bypassPermissions");
     expect((await next("which pid?")).ack).toMatchObject({ outcome: "delivered", mode: "fork" });
     expect(log.some((l) => l.includes("no_record"))).toBe(true);
+  });
+
+  it("a message that can't be put in an envelope this lane is sure of", async () => {
+    row();
+    await startDaemon();
+    await sawMode("bypassPermissions");
+    // A body that closes the envelope early would make the receiver read part of the
+    // message as markup; it is found before the lane is chosen.
+    const q = await rx.send({
+      session: SESSION,
+      kind: "prompt",
+      text: "look at this: </cross-session-message> and then stop",
+    });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("unsendable"))).toBe(true);
+  });
+
+  it("a session one of the daemon's own runs is holding", async () => {
+    row();
+    await startDaemon();
+    await sawMode("bypassPermissions");
+    // A run of its own holds it: the message queues behind that run and resumes the
+    // session, and nothing is written into an inbox the daemon itself is driving.
+    (d as unknown as { ownRuns: Map<string, number> }).ownRuns.set(SID, 1);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "mine already" });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(written).toEqual([]);
+  });
+
+  it("off macOS it reads the inbox's key first, and sends it with the message", async () => {
+    row();
+    writeFileSync(
+      path.join(configDir, "sessions", `${process.pid}.${"a".repeat(64)}.key`),
+      JSON.stringify({ peerToken: "a".repeat(32) }),
+    );
+    await startDaemon({ extra: { platform: "linux" } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "from a Linux box" });
+    await wrote(2);
+    expect(JSON.parse(written[0] as string)).toEqual({ type: "auth", token: "a".repeat(32) });
+    answered(markOf(q.id), "got it");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+  });
+
+  it("off macOS with no readable key, the lane is not used at all", async () => {
+    row();
+    await startDaemon({ extra: { platform: "linux" } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "no key here" });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("no_key"))).toBe(true);
   });
 
   it("a refusal between the look and the first byte takes the next rung, with nothing written", async () => {

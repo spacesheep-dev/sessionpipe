@@ -1580,7 +1580,7 @@ export class ControlDaemon {
   private inboxLook(
     session: string,
     place: Placed,
-    o: { iat?: number; body?: string } = {},
+    o: { iat: number; body: string },
   ): { rec: LiveRecord; declare: inbox.PeerClass } | { code: string; detail: string } | null {
     const ref = parseSessionRef(session);
     if (ref?.harness !== "claude-code" || !place.transcript) return null;
@@ -1594,7 +1594,7 @@ export class ControlDaemon {
         code: "parked",
         detail: `a message sent ${Math.round((this.deps.now() - held.at) / 1000)} s ago is still waiting in that session, so this one is not written in beside it`,
       };
-    if (o.iat !== undefined && this.deps.now() - o.iat > INBOX_FRESH_MS)
+    if (this.deps.now() - o.iat > INBOX_FRESH_MS)
       return {
         code: "stale",
         detail: `a message written into a live session must arrive within ${INBOX_FRESH_MS / 1000} s of being signed, and this one was signed ${Math.round((this.deps.now() - o.iat) / 1000)} s ago`,
@@ -1611,12 +1611,10 @@ export class ControlDaemon {
     const r = rec as LiveRecord;
     // The envelope is built and read back before the lane is chosen, so a body it can't
     // carry costs the message a rung rather than its delivery.
-    if (
-      o.body !== undefined &&
-      !inbox.envelope({ fromMode: this.machineClass(place.transcript.configDir), body: o.body })
-    )
+    const declare = this.machineClass(place.transcript.configDir);
+    if (!inbox.envelope({ fromMode: declare, body: o.body }))
       return { code: "unsendable", detail: "that message can't be put in an envelope this lane can be sure of" };
-    return { rec: r, declare: this.machineClass(place.transcript.configDir) };
+    return { rec: r, declare };
   }
 
   /** A write into this session's inbox that it has not taken, inside the receiving
@@ -1843,7 +1841,8 @@ export class ControlDaemon {
             {
               outcome: "failed",
               code: "held",
-              detail: `written into the live session on this computer; it didn't begin a turn for it, so it may be holding the message. Nothing was duplicated, and nothing else was tried.`,
+              detail:
+                "written into the live session on this computer; it didn't begin a turn for it, so it may be holding the message. Nothing was duplicated, and nothing else was tried.",
             },
             sent,
           );
@@ -2089,6 +2088,7 @@ export class ControlDaemon {
         `${id.slice(-8)}: claude -p (${narrow ?? o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
       );
       const stream = this.answerStream(r, id);
+      /* v8 ignore next -- place() refuses a Claude Code session with no transcript */
       const before = place.transcript ? transcriptEnd(place.transcript.file) : 0;
       const res = await this.owning(target, () =>
         this.slot(() =>
@@ -2160,6 +2160,7 @@ export class ControlDaemon {
         this.deps.log(say);
       }
     }
+    /* v8 ignore next -- see above: a cold run of a Claude Code session always has one */
     const ran = place.transcript ? ranInMode(place.transcript.file, before) : null;
     if (ran) notes.push(`the turn ran in ${ran}${o.narrow ? ", the mode the session itself was in" : ""}`);
     return notes.length ? { detail: notes.join("; ") } : {};

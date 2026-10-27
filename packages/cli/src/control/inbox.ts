@@ -167,7 +167,7 @@ export function vetInbox(
     return { code: "recycled_pid", detail: "another process has that pid now" };
   const st = (o.stat ?? statSocket)(rec.socket);
   if (!st?.isSocket) return { code: "no_inbox", detail: "that session's inbox is not a socket any more" };
-  const uid = o.uid ?? (typeof process.getuid === "function" ? process.getuid() : undefined);
+  const uid = o.uid ?? ourUid();
   if (uid !== undefined && st.uid !== uid)
     return { code: "not_ours", detail: "that session's inbox belongs to another user on this computer" };
   if (rec.status !== IDLE_STATUS)
@@ -205,6 +205,11 @@ function aliveNow(pid: number): boolean {
     return (e as { code?: string }).code === "EPERM";
   }
 }
+
+/** This process's own uid. A runtime without `getuid` is Windows, which `vetInbox`
+ *  refuses before it gets here. */
+/* v8 ignore next -- see above */
+const ourUid = (): number | undefined => process.getuid?.();
 
 function statSocket(p: string): { isSocket: boolean; uid: number } | null {
   try {

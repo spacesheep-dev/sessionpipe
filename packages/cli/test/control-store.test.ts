@@ -234,6 +234,11 @@ describe("forks and aliases on disk", () => {
     expect(readState(f)).toEqual({ started: {}, modes: {}, copies: { a: { id: "b", at: "", reason: "" } } });
     writeFileSync(f, JSON.stringify({ copies: { a: 7, b: {}, c: { id: "" }, d: { id: "x" } } }));
     expect(readState(f).copies).toEqual({ d: { id: "x", at: "", reason: "" } });
+    // The modes each session's hooks reported: a word, or not kept at all.
+    writeFileSync(f, JSON.stringify({ modes: { a: "plan", b: 7, c: "not a mode at all!" } }));
+    expect(readState(f).modes).toEqual({ a: "plan" });
+    writeFileSync(f, JSON.stringify({ modes: "plan" }));
+    expect(readState(f).modes).toEqual({});
     writeFileSync(f, JSON.stringify({ copies: "b" }));
     expect(readState(f)).toEqual({ started: {}, modes: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));

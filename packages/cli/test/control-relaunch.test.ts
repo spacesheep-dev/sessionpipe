@@ -245,6 +245,7 @@ describe.runIf(unix)("the mode a cold run is launched with", () => {
   });
 
   it("on an auto machine whose Claude Code has auto turned off, the turn still runs and the ack says so", async () => {
+    env.SP_TRANSCRIPT = transcriptFile(SID);
     homeDefault("bypassPermissions", { disableAutoMode: "disable" });
     await startDaemon({ cfg: { mode: "auto" } });
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "auto, disabled" });
@@ -252,6 +253,9 @@ describe.runIf(unix)("the mode a cold run is launched with", () => {
     expect(ack).toMatchObject({ outcome: "delivered", mode: "resume" });
     expect(String(ack.detail)).toContain("ran in Manual mode");
     expect(String(ack.detail)).toContain("sessionpipe control mode inherit");
+    // The mode the new turn's own row recorded, said plainly and not as a narrowing.
+    expect(String(ack.detail)).toContain("the turn ran in auto");
+    expect(String(ack.detail)).not.toContain("the mode the session itself was in");
     expect(modeFlag(runs()[0]?.argv ?? [])).toBe("auto");
     // Said once in the log, however many acks carry it.
     const again = await rx.send({ session: SESSION, kind: "prompt", text: "again" });
@@ -341,6 +345,8 @@ describe.runIf(unix)("a copy, when nothing can reach the session", () => {
             at: new Date(Date.now() - 30 * 3600_000).toISOString(),
             reason: "x",
           },
+          // What a daemon up to 0.10.0 wrote: an id and no date, so no day of its own.
+          "33333333-3333-4333-8333-333333333333": { id: "c", at: "", reason: "" },
         },
       }),
     );

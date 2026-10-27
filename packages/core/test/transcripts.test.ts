@@ -323,7 +323,7 @@ describe("readClaude: the person's mid-turn messages", () => {
     ]);
   });
 
-  it("skips task notifications, wrappers sent as a queued command, other attachments", () => {
+  it("skips task notifications, an origin that is nobody's words, wrappers sent as a queued command", () => {
     const all = readClaude(QUEUED, 0);
     const words = [...all.turns.flatMap((t) => [t.user, t.assistant]), all.open?.user ?? ""].join("\n");
     expect(words).not.toMatch(/task-notification|cross-session-message|hello/);
@@ -357,12 +357,16 @@ describe("readClaude: the person's mid-turn messages", () => {
         q({ type: "queued_command", prompt: "   " }),
         q({ type: "queued_command", prompt: "side", origin: { kind: "human" } }, { isSidechain: true }),
         q({ type: "queued_command", prompt: [{ type: "image" }] }),
+        // No origin key at all, which older Claude Code wrote: the person's.
+        q({ type: "queued_command", prompt: "" }),
+        // An origin that is nobody's words: not the person, not another session.
+        q({ type: "queued_command", prompt: "from the harness", origin: { kind: "agent" } }),
         assistant("hi"),
         "",
       ],
       0,
     );
-    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 6 }], line: 7 });
+    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 8 }], line: 9 });
   });
 });
 
