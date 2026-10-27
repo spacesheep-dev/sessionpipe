@@ -250,7 +250,7 @@ export const KeyTypes = z
   .array(z.enum(["passkey", "device"]))
   .min(1)
   .max(2);
-export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
 /** How much a started session may do without anyone approving it (CONTROL.md §3.1),
  *  narrowest first. Closed: nothing is wider than `auto`. */
 export const StartPermission = z.enum(["read", "safe", "edits", "auto"]);
@@ -430,9 +430,11 @@ export const ControlAck = z.object({
         mode: DeliveryMode.optional(),
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
-        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`);
+        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`,
+         *  `ambiguous_home` when one session id is filed in several of the harness's accounts);
          *  failed: `file` when a start's attachment couldn't be fetched, checked or written,
-         *  `model` when the harness wouldn't run the start's model. */
+         *  `model` when the harness wouldn't run the start's model, `held` when a message was
+         *  written into a live session's own inbox and that session didn't take it (§6.3). */
         code: z
           .string()
           .regex(/^[a-z_]{1,40}$/)

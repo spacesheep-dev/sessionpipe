@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Which one process holds a Claude Code session, and which account it belongs to when
-// more than one has its transcript (spec/CONTROL.md §6, Homes; §6.4 `inbox`). Registry
+// more than one has its transcript (spec/CONTROL.md §6, Homes; §6.3 `inbox`). Registry
 // rows are files in a temp dir; the live pid is this test process's own.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";

@@ -36,6 +36,7 @@
               "sdk",
               "waiter",
               "turn",
+              "inbox",
               "api",
               "resume",
               "fork"

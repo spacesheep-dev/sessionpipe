@@ -421,7 +421,7 @@ function pidAlive(pid: number): boolean {
 }
 
 /** One live Claude Code process's registry row, `<config>/sessions/<pid>.json`, as the
- *  in-place `inbox` lane needs it (spec/CONTROL.md §6.4). Every session that registers
+ *  in-place `inbox` lane needs it (spec/CONTROL.md §6.3). Every session that registers
  *  files one — a terminal window, the desktop app and a claude.ai bridge worker alike,
  *  all of them `kind: "interactive"`; a `-p` one-shot's row is not one of those. */
 export interface LiveRecord {
@@ -497,7 +497,7 @@ export function liveRecords(session: string, dirs: string | readonly string[]): 
 
 /** The ONE live process that holds this session, or null. Two rows — two accounts, or
  *  two processes in one — is a refusal rather than a guess: a lane that writes into a
- *  live session has to know which process it is writing to (spec/CONTROL.md §6.4). */
+ *  live session has to know which process it is writing to (spec/CONTROL.md §6.3). */
 export function liveRecord(session: string, dirs: string | readonly string[]): LiveRecord | null {
   const all = liveRecords(session, dirs);
   return all.length === 1 ? (all[0] as LiveRecord) : null;
@@ -535,11 +535,52 @@ export function hookMode(payload: unknown): string | null {
  *  against (2.1.310): `bypassPermissions` is `bypass`; a mode that prompts before it
  *  acts is `prompting`. `plan` is neither — its class there depends on a capability and
  *  a TTY this code cannot see — and nor is `auto`, nor a mode nothing has recorded, so
- *  those get no in-place lane at all (spec/CONTROL.md §6.4). */
+ *  those get no in-place lane at all (spec/CONTROL.md §6.3). */
 export function peerClass(mode: string | null | undefined): "bypass" | "prompting" | null {
   if (mode === "bypassPermissions") return "bypass";
   if (mode === "default" || mode === "manual" || mode === "dontAsk" || mode === "acceptEdits") return "prompting";
   return null;
+}
+
+/** One Claude Code account's permission settings, user scope only
+ *  (`<config dir>/settings.json`): a folder's own settings may tighten these but never
+ *  loosen them, and a managed policy may tighten them further. Only the three keys
+ *  something here acts on.
+ *
+ *  Reading user scope alone can overstate how wide a home is, never understate it, and
+ *  everything that reads this treats a wider answer as a reason NOT to act (the inbox
+ *  lane needs the machine's class to equal the session's own; a narrowing is re-asserted
+ *  only where the home's default is at least as wide). */
+export interface HomeSettings {
+  /** `permissions.defaultMode`: what a session with no flag starts in. Null: not said,
+   *  or the file could not be read. */
+  defaultMode: string | null;
+  /** `disableAutoMode: "disable"`: asking for auto mode quietly gives Manual instead. */
+  disableAutoMode: boolean;
+  /** `disableBypassPermissionsMode: "disable"`: this home cannot be in bypass at all. */
+  disableBypass: boolean;
+}
+
+export const NO_HOME_SETTINGS: HomeSettings = { defaultMode: null, disableAutoMode: false, disableBypass: false };
+
+export function homeSettings(configDir: string | undefined, home = os.homedir()): HomeSettings {
+  const file = path.join(configDir ?? path.join(home, ".claude"), "settings.json");
+  let j: Record<string, unknown>;
+  try {
+    j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return { ...NO_HOME_SETTINGS };
+  }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return { ...NO_HOME_SETTINGS };
+  const p = (j.permissions && typeof j.permissions === "object" ? j.permissions : {}) as Record<string, unknown>;
+  // Both spellings: Claude Code reads these two under `permissions`, and settings
+  // written by hand (and its own older docs) put them at the top level.
+  const off = (k: string) => j[k] === "disable" || p[k] === "disable";
+  return {
+    defaultMode: typeof p.defaultMode === "string" && CLAUDE_MODES.includes(p.defaultMode) ? p.defaultMode : null,
+    disableAutoMode: off("disableAutoMode"),
+    disableBypass: off("disableBypassPermissionsMode"),
+  };
 }
 
 /** Written in the last 90 s, and not by a job of ours. */

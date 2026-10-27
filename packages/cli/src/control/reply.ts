@@ -16,6 +16,62 @@ export function transcriptEnd(file: string): number {
   }
 }
 
+/** Who asked for the first turn the transcript gained after a delivery: `peer` — the
+ *  message this daemon wrote into the session's own inbox, recognised by the mark in the
+ *  text it was written with; `other` — any other turn, the person typing in the same
+ *  second above all, or another local process's peer message. Null while nothing has
+ *  been written yet.
+ *
+ *  This is the second half of a delivery's proof. The hook's own `UserPromptSubmit` says
+ *  a turn began and carries no text, so on its own it cannot tell this message's turn
+ *  from the person's: confirming on it alone acked a delivery that was really a hold,
+ *  and then sent the answer to THEIR prompt back to the receiver as the answer to this
+ *  message. */
+export function firstAsk(file: string, from: number, mark: string): "peer" | "other" | null {
+  const size = transcriptEnd(file);
+  if (size <= from) return null;
+  let text: string;
+  const fd = openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(Math.min(size - from, 1024 * 1024));
+    const n = readSync(fd, buf, 0, buf.length, from);
+    text = buf.subarray(0, n).toString("utf8");
+  } catch {
+    /* v8 ignore next 2 -- readSync throws only on a file that vanished mid-read */
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+  const cut = text.lastIndexOf("\n");
+  if (cut < 0) return null;
+  for (const line of text.slice(0, cut).split("\n")) {
+    if (!line) continue;
+    let j: Record<string, unknown>;
+    try {
+      j = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (j.type !== "user" || j.isSidechain || j.isCompactSummary || j.repeatsCompactSummary) continue;
+    // A turn's own tool traffic is recorded as `user` records too; they are not asks.
+    if (j.toolUseResult !== undefined) continue;
+    const c = (j.message as { content?: unknown } | undefined)?.content;
+    if (Array.isArray(c) && c.some((b) => (b as { type?: unknown } | null)?.type === "tool_result")) continue;
+    const origin = j.origin as { kind?: unknown; body?: unknown } | undefined;
+    const said = `${typeof origin?.body === "string" ? origin.body : ""}\n${rowText(c)}`;
+    return origin?.kind === "peer" && said.includes(mark) ? "peer" : "other";
+  }
+  return null;
+}
+
+const rowText = (c: unknown): string => {
+  if (typeof c === "string") return c;
+  if (!Array.isArray(c)) return "";
+  return c
+    .map((b) => (typeof (b as { text?: unknown })?.text === "string" ? (b as { text: string }).text : ""))
+    .join("\n");
+};
+
 /** Claude Code records after the delivery → the turn's answer once the turn ended
  *  (an assistant record with `stop_reason: "end_turn"`), else null. The answer is the
  *  turn's assistant text, in order; sidechains (subagents) are not the session's words. */

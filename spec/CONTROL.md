@@ -367,8 +367,8 @@ A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `not_a_command`, `wrong_machine`, `unknown_kind`, `bad_session`, `bad_fields`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
-(`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`). A daemon up
-to 0.9.0 sends `mode` where this document says `permission`.
+(`folder`, `no_attention`, `no_session`, `ambiguous_home`, `start_limit`, `permission`,
+`model`). A daemon up to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
 runs in a Worker, a browser and Node). A receiver SHOULD run it on arrival as an early
@@ -386,13 +386,121 @@ used:
 | `sdk` | The daemon started the session itself (Agent SDK streaming input) and still holds it | Claude Code | 0 turns |
 | `waiter` | The session runs `sessionpipe wait` in the background (§8) | Claude Code | 0 turns, no network |
 | `turn` | The session is mid-turn: the message lands at its next Stop | Claude Code, Codex, Gemini CLI (AfterAgent), Cursor, Copilot CLI, Droid, Kiro | 0 turns |
+| `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3) | Claude Code | 0 turns |
 | `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
 | `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`), an ACP agent that can reopen a session (`session/load`) | cold start |
-| `fork` | Live and idle, with no waiter | Claude Code (`--fork-session`) | cold start |
+| `fork` | Live and idle, with no lane above | Claude Code (`--fork-session`) | cold start |
 
 Nothing fits: acked `unsupported`. **Never two writers on one transcript**: a session a
-live process holds is never resumed; it gets a fork, and later messages to it go to
-the same fork.
+live process holds is never resumed; it gets an in-place lane or a fork, and later
+messages to it go to the same copy.
+
+Two rules hold across the in-place modes:
+
+- **A message never chooses a permission mode.** In an in-place mode no mode is picked
+  at all: the turn is the session's own, in whatever mode the person left it in. A
+  daemon MUST NOT change a session's permission mode in order to deliver a message, and
+  MUST NOT declare to a session a permission class other than the machine's own.
+- **The mode is chosen before the first byte, and one message is never delivered
+  twice.** Vetting and class resolution happen up front; once a byte has been written to
+  a session the message is committed, whatever the session then does with it. A daemon
+  MUST NOT fall through to another mode after writing, and MUST NOT retry. A second
+  attempt needs a new signed command from the person, with a new nonce.
+
+### 6.1 Homes
+
+A session id can be filed in more than one of a harness's accounts (Claude Code: one
+`projects/` tree per config dir). The machine resolves which account a message is for
+from the session itself: the one whose own live-session registry says a process holds it.
+Nothing live, or two accounts live, is acked `refused` with code `ambiguous_home`, whose
+`detail` names the accounts by their directory name and never by path — a guess there
+put a message into an account that was signed out.
+
+### 6.2 The session's mode
+
+Some decisions below need the permission mode a live session is actually running in. A
+machine MUST read that from what the session itself reports — every Claude Code hook
+payload carries `permission_mode` — and MUST NOT infer it from the machine's own
+settings or from a flag it once passed. The reference daemon keeps the latest value per
+session in its own state, outside every harness account, under no other lock than its
+single event loop, and writes nothing when the value hasn't changed.
+
+A mode can be changed at the keyboard without recording anything, so what is stored and
+what is true can disagree. A daemon MUST treat that as the ordinary case rather than as
+an error: the confirmation in §6.3 is what settles it.
+
+### 6.3 `inbox`
+
+Claude Code publishes a local inbox for each live session in its own session registry,
+and takes one JSON line on it: a `user` frame that becomes a real prompt in that
+process. The writer is the daemon's alone — it is not part of any library's public
+surface and no command line exposes it.
+
+Before writing, a daemon MUST check all of:
+
+- exactly **one** live registry record for that session across the harness's accounts
+  (two is a refusal, not a guess), in the account §6.1 resolved;
+- the record's inbox protocol is the one the daemon speaks;
+- the record says the live process is one of the harness's own interactive sessions — a
+  registry record is a file any process of that uid can write;
+- the record's folder passes the machine's allowlist, since a signed command carries no
+  folder;
+- the socket is a socket, owned by the daemon's own uid;
+- the process is alive and its start time matches the record's, compared in one time
+  zone — a registry that writes UTC and a `ps` that answers in local time disagree by
+  hours and every delivery reads as a recycled pid;
+- the record says the session is **idle** (a session mid-turn takes `turn` instead);
+- the session's own permission mode (§6.2) resolves to a class the lane can name, and
+  that class is the machine's own (below);
+- the command was signed at most **120 s** ago, judged by the **signed** `iat` and never
+  by the envelope's `at`, which the receiver writes and does not sign — the party that
+  queues a message must not also choose the clock by which it is judged fresh;
+- and, where the inbox vets a sender by a key rather than by uid (everywhere but macOS),
+  that the key is readable.
+
+Any of these failing means the mode does not apply, and the message goes to whatever
+rung is next — which is a refusal to write, not a refusal to deliver. A receiver SHOULD
+set `expires_at` no further out than the freshness window for a session it expects to be
+reached this way. Every one of these checks, and every other reason not to write, is
+made BEFORE the mode is chosen, so that a reason found late cannot end a message on a
+mode it never used.
+
+**The class the machine declares is its own, never the target's.** The sender states a
+permission class in the message; the receiving session takes one whose class matches its
+own and silently parks one that does not. A daemon that echoed the target's class back
+would leave that check with nothing to compare. The machine's class is `bypass` only
+where the person set the machine to name no mode at all (`inherit`, §2) and the
+resolved account's own default is a mode with permission prompts off and is allowed to
+be; every other machine is `prompting`. A daemon MUST NOT widen its own class to make a
+delivery fit, and MUST NOT use this mode where the two classes differ. Declaring buys
+delivery, never escalation: the receiving session still applies its own permission
+settings, and a peer can grant it nothing.
+
+The message travels in the receiver's canonical envelope. A daemon MUST build it in the
+receiver's own attribute order and MUST confirm that what it built reads back as what it
+meant before sending — the receiver parses an envelope by rebuilding it, so anything
+that does not round-trip is parked unread rather than refused out loud. A body that
+would close the envelope early is a message this mode cannot carry, and that too is
+found before the mode is chosen. The envelope carries who the message is from, as the
+receiver's own host, cleaned to what can sit in an attribute and read as a name; it
+carries no claim the machine cannot vouch for. The frame is sent at the lowest priority
+the inbox offers, so the message becomes a turn of its own rather than joining one in
+flight, and it carries a mark identifying the message.
+
+**A write is not delivery, and a turn is not proof by itself.** The daemon MUST confirm
+within a short window (8 s here) that the session began a turn **for this message** —
+the row the harness writes for that turn says which message asked for it — and MUST NOT
+treat any other turn begun in that window as the confirmation: a message written and
+parked while the person typed something of their own would otherwise be acked
+delivered, and the answer to THEIR words sent back as the answer to this one.
+Unconfirmed, it is acked `failed` with code `held` and says plainly that the message was
+sent, may be held, and was not duplicated. It MUST NOT try another mode.
+
+A message the session has not taken may still be released to it later, so for as long as
+that can happen (300 s, the receiving inbox's own hold) the mode stays shut for that
+session: a daemon MUST NOT write a second message into an inbox where one of its own is
+still unconfirmed. Otherwise the obvious thing to do — send it again — puts two copies
+of the person's words in one place, and a released hold delivers both.
 
 ### `prompt`
 
@@ -418,8 +526,8 @@ files are on disk before the waiter or the Stop hook hands the text over. A file
 fails is acked `failed` with code `file`, nothing written for it is kept, and the
 message is not delivered.
 
-In the in-place modes (`waiter`, `turn`) the session answers in its own turn, so the
-daemon acks `taken` when it hands the message over and follows the session's own
+In the in-place modes (`waiter`, `turn`, `inbox`) the session answers in its own turn, so
+the daemon acks `taken` when it hands the message over and follows the session's own
 transcript until that turn ends; the final `delivered` ack carries the turn's text as
 its `reply`, so the person reads the answer where they asked. A turn that doesn't end
 within 30 minutes is acked `delivered` without one. The framed message tells the model
@@ -607,7 +715,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. `code` `held`: a message was written into a live session's own inbox and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode (§6.3). |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -636,6 +744,9 @@ send → delivered time.
   `delivered` with `applied`; a hello with `start`.
 - `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
   whose `mode` is `inherit` (§2).
+- `conformance/delivery/24`–`25` — a prompt delivered in place through the session's own
+  inbox and acked `delivered` with `mode: "inbox"`; and one written into that inbox that
+  the session never took, acked `failed` with code `held` once and never retried (§6.3).
 
 ## 12. Status
 

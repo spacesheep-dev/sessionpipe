@@ -44,9 +44,19 @@ import {
 } from "@sessionpipe/core/control";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
+import * as inbox from "./inbox.js";
 import { ask, type LocalReply, type LocalRequest } from "./local.js";
-import { awaitAnswer, transcriptEnd } from "./reply.js";
-import { type DeliveryMode, frame, frameStart, IN_PLACE_ANSWER, kindPath, routePrompt } from "./route.js";
+import { awaitAnswer, firstAsk, transcriptEnd } from "./reply.js";
+import {
+  type DeliveryMode,
+  frame,
+  frameInbox,
+  frameStart,
+  IN_PLACE_ANSWER,
+  inboxMark,
+  kindPath,
+  routePrompt,
+} from "./route.js";
 import {
   type Ack,
   AckOutbox,
@@ -70,13 +80,17 @@ const {
   isUuid,
   liveProcess,
   loginHint,
+  homeSettings,
+  liveRecord,
   parseResult,
+  peerClass,
   recentlyWritten,
   resolveHome,
   sessionFolder,
 } = claudeControl;
 type Caps = claudeControl.Caps;
 type Transcript = claudeControl.Transcript;
+type LiveRecord = claudeControl.LiveRecord;
 
 /** Where a session lives: its folder, and how the harness names it. */
 interface Placed {
@@ -154,6 +168,29 @@ const RECENT_ACKS_MS = 25 * 3600_000;
 /** How many sessions' recorded permission modes are kept (CONTROL.md §6, The session's
  *  mode). One entry is a session ref and a word; the oldest go first. */
 const MODES_KEPT = 500;
+/** A message written into a live session has to be fresh: a job queued while the person
+ *  sat in front of that session must not be written into it an hour later, when they may
+ *  have moved on or changed its mode (CONTROL.md §6.3). Measured from the SIGNED time
+ *  (`cmd.iat`), never from the envelope the receiver stamped — the party that does the
+ *  queuing must not also choose the clock. Too old is not a failure: the lane simply
+ *  doesn't apply and the message takes the next rung. */
+const INBOX_FRESH_MS = 120_000;
+/** How long a written-but-untaken message keeps the inbox lane shut for its session:
+ *  Claude Code holds an unmatched message that long before dropping it, and a hold can
+ *  be released, so a second write would mean the person's words arriving twice. */
+const HOLD_TTL_MS = 300_000;
+/** After the session's own `UserPromptSubmit`, how long and how often its transcript is
+ *  read for the row that says which message the turn is for (`firstAsk`). The hook fires
+ *  before the harness has written the row; this is the gap between the two. */
+const PEER_ROW_TRIES = 6;
+const PEER_ROW_WAIT_MS = 250;
+/** One message at a time waits on a session's next turn: two would both be settled by
+ *  one turn, and one answer would be acked as the answer to both. */
+const PARKED_ACK = {
+  outcome: "failed" as const,
+  code: "parked",
+  detail: "another message for that session is still waiting for it to answer; send this one again in a moment",
+};
 /** Events that prove a pending permission prompt was resolved some other way. */
 const CLOSES_ATTENTION = new Set([
   "PostToolUse",
@@ -227,6 +264,10 @@ export interface DaemonDeps {
   codexModels?: () => string[];
   run: (bin: string, args: string[], o: RunOptions) => Promise<RunResult>;
   sdk?: SdkHost | null;
+  /** How a message is written into a live session's own inbox (inbox.ts). A test passes
+   *  its own, to drive the one refusal that can only happen between the look and the
+   *  first byte: the session ending in between. */
+  writeInbox?: typeof inbox.writeInbox;
   /** How long to follow a live session's turn for an in-place answer (tests shorten it). */
   answerWaitMs?: number;
   /** Close an SDK session idle this long (a held session costs ~300 MB). */
@@ -266,6 +307,9 @@ interface TurnPending {
   text: string;
   session: string;
   queuedAt: number;
+  /** When the person signed it: carried through a reroute, because an in-place lane's
+   *  freshness window is measured from that and never from the receiver's envelope. */
+  iat: number;
 }
 
 interface Live {
@@ -345,6 +389,15 @@ export class ControlDaemon {
   private readonly inflight = new Set<string>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly lastEnd = new Map<string, number>();
+  /** Per session: who is waiting for its next `UserPromptSubmit` — the first half of an
+   *  in-place delivery's proof. At most ONE per session: two waiters would both be
+   *  settled by one turn, and that turn's answer acked as the answer to both. */
+  private readonly prompted = new Map<string, (ok: boolean) => void>();
+  /** Per session: a message written into its own inbox that it has not taken yet. The
+   *  receiving inbox parks one whose class it can't match and drops it after five
+   *  minutes, and a hold can be RELEASED later (a mode change does it), so for that long
+   *  another write would mean the person's words arriving twice (CONTROL.md §6.3). */
+  private readonly parked = new Map<string, { at: number; id: string }>();
   private state: DaemonState;
   private running = false;
   private readonly polling = new Map<string, PollState>();
@@ -704,13 +757,26 @@ export class ControlDaemon {
       l.attentions.clear();
     }
     if (e.event === "UserPromptSubmit" || e.event === "SessionStart") {
-      if (e.event === "UserPromptSubmit") l.midTurn = true;
+      if (e.event === "UserPromptSubmit") {
+        l.midTurn = true;
+        // A turn began. Whether it is the turn a written message caused is the next
+        // question (`tookIt`); this is only the signal that there is one to look at.
+        const waiting = this.prompted.get(named);
+        if (waiting) {
+          this.prompted.delete(named);
+          waiting(true);
+        }
+      }
       return;
     }
     if (e.event === "Stop" && l.continued) {
       l.continued = false;
       return;
     }
+    if (e.event === "SessionEnd")
+      // The session is gone: a message written into its inbox will never be taken, so
+      // the lane is not kept shut for a window that has closed.
+      this.parked.delete(named);
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
       l.midTurn = false;
       l.continued = false;
@@ -922,6 +988,9 @@ export class ControlDaemon {
       "turn",
       "resume",
       "fork",
+      // A live session's own inbox is Claude Code's; it is checked again, in full, for
+      // every message, so this says the lane exists here and nothing more.
+      ...(this.deps.claude() ? (["inbox"] as const) : []),
       ...(this.deps.sdk ? (["sdk"] as const) : []),
       // Every ACP agent's turn is acked `api` (§6).
       ...(harnesses.some((h) => acpControl.acpAgent(h)) ? (["api"] as const) : []),
@@ -1476,7 +1545,150 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "delivered", mode: held.mode ?? "sdk" }, sent);
   }
 
-  private view(session: string, place: Placed) {
+  /** The permission mode a Claude Code session's own hooks last reported, or null. */
+  private modeOf(id: string): string | null {
+    return this.state.modes[`claude-code:${id}`] ?? null;
+  }
+
+  /** The permission class THIS MACHINE would declare to a session in `configDir`
+   *  (CONTROL.md §6.3) — never the target's own, which it would then be echoing back,
+   *  leaving the receiver's own check with nothing to compare.
+   *
+   *  `bypass` only where the person set this machine to `inherit`, so nothing here picks
+   *  a mode at all, and that account's own default is bypass and is allowed to be. Every
+   *  other machine is `prompting`: on `safe` and `auto` the daemon names a mode of its
+   *  own for the runs it starts, so it is not a machine that leaves sessions as it finds
+   *  them. */
+  private machineClass(configDir: string | undefined): inbox.PeerClass {
+    if (this.cfg.mode !== "inherit") return "prompting";
+    const h = homeSettings(configDir);
+    return h.defaultMode === "bypassPermissions" && !h.disableBypass ? "bypass" : "prompting";
+  }
+
+  /** What the `inbox` lane found when it looked at this session, BEFORE anything was
+   *  written (CONTROL.md §6.3): the one process that holds it and the class to declare,
+   *  or why not. `null` means the lane does not apply at all.
+   *
+   *  EVERY reason not to write belongs here rather than at the write site: a refusal
+   *  found here leaves `inbox` out of the ladder, so the message takes the next rung,
+   *  while one found after the lane was chosen would end the message. */
+  private inboxLook(
+    session: string,
+    place: Placed,
+    o: { iat?: number; body?: string } = {},
+  ): { rec: LiveRecord; declare: inbox.PeerClass } | { code: string; detail: string } | null {
+    const ref = parseSessionRef(session);
+    if (ref?.harness !== "claude-code" || !place.transcript) return null;
+    const target = this.state.copies[ref.id] ?? ref.id;
+    // A run of the daemon's own holding it is not a session to write into: the message
+    // queues behind that run and resumes it.
+    if (this.ownRuns.has(target)) return null;
+    const held = this.parkedFor(session);
+    if (held)
+      return {
+        code: "parked",
+        detail: `a message sent ${Math.round((this.deps.now() - held.at) / 1000)} s ago is still waiting in that session, so this one is not written in beside it`,
+      };
+    if (o.iat !== undefined && this.deps.now() - o.iat > INBOX_FRESH_MS)
+      return {
+        code: "stale",
+        detail: `a message written into a live session must arrive within ${INBOX_FRESH_MS / 1000} s of being signed, and this one was signed ${Math.round((this.deps.now() - o.iat) / 1000)} s ago`,
+      };
+    const rec = liveRecord(target, this.deps.claudeDirs());
+    const why = inbox.vetInbox(rec, {
+      sessionClass: peerClass(this.modeOf(target)),
+      machineClass: this.machineClass(place.transcript.configDir),
+      configDir: place.transcript.configDir,
+      platform: this.deps.platform ?? process.platform,
+      ...(rec ? { procStart: inbox.procStartOf(rec.pid), token: () => inbox.peerToken(rec) } : {}),
+    });
+    if (why) return why;
+    const r = rec as LiveRecord;
+    // The envelope is built and read back before the lane is chosen, so a body it can't
+    // carry costs the message a rung rather than its delivery.
+    if (
+      o.body !== undefined &&
+      !inbox.envelope({ fromMode: this.machineClass(place.transcript.configDir), body: o.body })
+    )
+      return { code: "unsendable", detail: "that message can't be put in an envelope this lane can be sure of" };
+    return { rec: r, declare: this.machineClass(place.transcript.configDir) };
+  }
+
+  /** A write into this session's inbox that it has not taken, inside the receiving
+   *  inbox's own hold window. */
+  private parkedFor(session: string): { at: number; id: string } | null {
+    const p = this.parked.get(session);
+    if (!p) return null;
+    if (this.deps.now() - p.at <= HOLD_TTL_MS) return p;
+    this.parked.delete(session);
+    return null;
+  }
+
+  /** Resolves true when this session begins a turn of its own within `ms` — the first
+   *  half of the proof that a message written to its inbox became a prompt (§6.3). Null
+   *  when one message is already waiting on this session's next turn. */
+  private awaitPrompted(session: string, ms: number): { ok: Promise<boolean>; cancel: () => void } | null {
+    /* v8 ignore next -- the per-session delivery queue admits one at a time; this is the backstop */
+    if (this.prompted.has(session)) return null;
+    let settle!: (v: boolean) => void;
+    const ok = new Promise<boolean>((res) => {
+      settle = res;
+    });
+    this.prompted.set(session, settle);
+    const drop = () => {
+      if (this.prompted.get(session) === settle) this.prompted.delete(session);
+    };
+    const t = setTimeout(() => {
+      drop();
+      settle(false);
+    }, ms);
+    t.unref?.();
+    return {
+      ok: ok.then((v) => {
+        clearTimeout(t);
+        drop();
+        return v;
+      }),
+      cancel: () => {
+        clearTimeout(t);
+        drop();
+        settle(false);
+      },
+    };
+  }
+
+  /** Did the session take the message that was just written, or only begin some other
+   *  turn? `UserPromptSubmit` says a turn began; it carries no text, so the proof that
+   *  it is OUR turn is the row the harness wrote for it — a `user` row whose origin is a
+   *  peer, carrying this message's own mark. Anything else (the person typing in the
+   *  same second, another local process's message) means the write is still parked, and
+   *  the answer to THEIR prompt must not be sent back as the answer to this one. */
+  private async tookIt(
+    started: { ok: Promise<boolean> },
+    session: string,
+    from: { file: string; offset: number } | null,
+    mark: string,
+  ): Promise<boolean> {
+    if (!(await started.ok)) return false;
+    /* v8 ignore next -- answerFrom is null only off Claude Code, which has no inbox lane */
+    if (!from) return true;
+    for (let i = 0; i < PEER_ROW_TRIES; i++) {
+      const row = firstAsk(from.file, from.offset, mark);
+      if (row === "peer") return true;
+      if (row !== null) {
+        this.deps.log(`${session.slice(0, 24)}: the turn that began was asked for by something else`);
+        return false;
+      }
+      await new Promise<void>((res) => {
+        const t = setTimeout(res, PEER_ROW_WAIT_MS);
+        t.unref?.();
+      });
+    }
+    this.deps.log(`${session.slice(0, 24)}: a turn began and nothing was written for it yet`);
+    return false;
+  }
+
+  private view(session: string, place: Placed, look?: ReturnType<ControlDaemon["inboxLook"]>) {
     const ref = parseSessionRef(session)!;
     const l = this.live.get(session);
     if (ref.harness !== "claude-code") {
@@ -1492,6 +1704,8 @@ export class ControlDaemon {
         sdk: this.sdkSessions.has(ref.id),
         waiter: !!l?.waiter && !l.waiter.destroyed,
         midTurn: !!l?.midTurn,
+        // The inbox lane is Claude Code's own local socket; no other harness has one.
+        inbox: false,
         live,
         known: true,
         canFork: false,
@@ -1516,6 +1730,7 @@ export class ControlDaemon {
       sdk: this.sdkSessions.has(ref.id),
       waiter: !!l?.waiter && !l.waiter.destroyed,
       midTurn: !!l?.midTurn,
+      inbox: !!look && "rec" in look,
       live,
       known: !!t,
       canFork: !!claude?.caps.fork,
@@ -1523,13 +1738,24 @@ export class ControlDaemon {
     };
   }
 
-  private async prompt(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number): Promise<void> {
-    const route = routePrompt(this.view(cmd.session, place));
+  private async prompt(
+    r: PairedReceiver,
+    id: string,
+    cmd: ControlCommand,
+    place: Placed,
+    sent: number,
+    o: { noInbox?: boolean } = {},
+  ): Promise<void> {
+    const text = cmd.text as string;
+    const framed = `${frameInbox(text, r.url, id)}\n\n${IN_PLACE_ANSWER}`;
+    const look = o.noInbox ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed });
+    const route = routePrompt(this.view(cmd.session, place, look));
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });
     const ref = parseSessionRef(cmd.session)!;
-    const text = cmd.text as string;
+    if (look && !("rec" in look))
+      this.deps.log(`${id.slice(-8)}: not in place via its own inbox (${look.code}: ${look.detail})`);
     switch (route.mode) {
       case "waiter": {
         const l = this.live.get(cmd.session)!;
@@ -1542,7 +1768,7 @@ export class ControlDaemon {
       }
       case "turn": {
         const l = this.liveOf(cmd.session);
-        const p: TurnPending = { receiver: r, msgId: id, text, session: cmd.session, queuedAt: sent };
+        const p: TurnPending = { receiver: r, msgId: id, text, session: cmd.session, queuedAt: sent, iat: cmd.iat };
         l.turnQueue.push(p);
         // It waits for the session's Stop: the receiver must not keep handing it back.
         this.finish(r, id, { outcome: "taken" });
@@ -1568,6 +1794,54 @@ export class ControlDaemon {
           sent,
         );
       }
+      case "inbox": {
+        const { rec, declare } = look as { rec: LiveRecord; declare: inbox.PeerClass };
+        const from = this.answerFrom(cmd.session);
+        // Watch for the session's own next turn BEFORE the write, or a session that
+        // begins one in milliseconds would be missed. One watcher per session, so one
+        // turn can never confirm two messages: inboxLook keeps the lane shut while
+        // another write is unconfirmed, and this is the backstop.
+        const started = this.awaitPrompted(cmd.session, inbox.CONFIRM_MS);
+        /* v8 ignore next 2 -- one in-place delivery per session at a time (`serial`); this is the backstop */
+        if (!started) return this.finish(r, id, PARKED_ACK);
+        const out = await (this.deps.writeInbox ?? inbox.writeInbox)(rec, {
+          body: framed,
+          fromName: inbox.senderName(r.url),
+          sessionClass: declare,
+          machineClass: declare,
+          configDir: rec.configDir,
+          platform: this.deps.platform ?? process.platform,
+          token: inbox.peerToken(rec),
+        });
+        if (!("written" in out)) {
+          started.cancel();
+          // Nothing was written, so the lane simply does not apply (§6.3): the message
+          // takes the next rung — a resume, a copy — rather than dying on a lane it
+          // never used. The vetting happened a moment ago; what changes here is the
+          // session ending between the look and the first byte.
+          this.deps.log(`${id.slice(-8)}: the inbox lane refused before writing (${out.code}: ${out.detail})`);
+          return this.prompt(r, id, cmd, place, sent, { noInbox: true });
+        }
+        this.deps.log(`${id.slice(-8)}: into ${cmd.session.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
+        this.parked.set(cmd.session, { at: this.deps.now(), id });
+        if (!(await this.tookIt(started, cmd.session, from, inboxMark(id))))
+          // The bytes went out, and they are not sent again on any lane: the session may
+          // be holding the message (its inbox parks one whose class doesn't match, and
+          // drops it after five minutes). Say exactly that, and nothing that invites the
+          // same words to be sent twice into one place.
+          return this.finish(
+            r,
+            id,
+            {
+              outcome: "failed",
+              code: "held",
+              detail: `written into the live session on this computer; it didn't begin a turn for it, so it may be holding the message. Nothing was duplicated, and nothing else was tried.`,
+            },
+            sent,
+          );
+        this.parked.delete(cmd.session);
+        return this.followAnswer(r, id, "inbox", cmd.session, from, sent);
+      }
       case "resume":
       case "fork":
         return this.headless(r, id, cmd, place, route.mode, sent);
@@ -1588,18 +1862,23 @@ export class ControlDaemon {
     return out;
   }
 
-  /** A turn message whose Stop never took it: route again, now that it isn't mid-turn. */
+  /** A turn message whose Stop never took it: route again, now that it isn't mid-turn.
+   *  In the session's own delivery queue, like every other prompt — two messages
+   *  rerouted at one Stop would otherwise both take an in-place lane at once, and one
+   *  turn's answer would be acked as the answer to both. */
   private async reroute(p: TurnPending): Promise<void> {
-    const l = this.liveOf(p.session);
-    l.midTurn = false;
-    const place = this.place(p.session);
-    if ("refused" in place) return this.finish(p.receiver, p.msgId, { outcome: "refused", code: place.refused });
-    const cmd = { kind: "prompt", session: p.session, text: p.text } as ControlCommand;
-    this.inflight.delete(p.msgId);
-    this.inflight.add(p.msgId);
-    await this.prompt(p.receiver, p.msgId, cmd, place, p.queuedAt).catch((e) =>
-      this.finish(p.receiver, p.msgId, { outcome: "failed", detail: String((e as Error)?.message || e) }),
-    );
+    await this.serial(`deliver:${p.session}`, async () => {
+      const l = this.liveOf(p.session);
+      l.midTurn = false;
+      const place = this.place(p.session);
+      if ("refused" in place) return this.finish(p.receiver, p.msgId, { outcome: "refused", code: place.refused });
+      const cmd = { kind: "prompt", session: p.session, text: p.text, iat: p.iat } as ControlCommand;
+      this.inflight.delete(p.msgId);
+      this.inflight.add(p.msgId);
+      await this.prompt(p.receiver, p.msgId, cmd, place, p.queuedAt).catch((e) =>
+        this.finish(p.receiver, p.msgId, { outcome: "failed", detail: String((e as Error)?.message || e) }),
+      );
+    });
   }
 
   /** Jobs for one session (and its copy) run one at a time, in order. */
@@ -1885,7 +2164,7 @@ export class ControlDaemon {
   private followAnswer(
     r: PairedReceiver,
     id: string,
-    mode: "waiter" | "turn",
+    mode: "waiter" | "turn" | "inbox",
     session: string,
     from: { file: string; offset: number } | null,
     sent: number,

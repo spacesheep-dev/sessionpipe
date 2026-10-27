@@ -4,7 +4,7 @@
 import { acpControl } from "@sessionpipe/core";
 import type { ControlKind } from "@sessionpipe/core/control";
 
-export type DeliveryMode = "sdk" | "waiter" | "turn" | "api" | "resume" | "fork";
+export type DeliveryMode = "sdk" | "waiter" | "turn" | "inbox" | "api" | "resume" | "fork";
 
 export interface SessionView {
   harness: string;
@@ -14,6 +14,9 @@ export interface SessionView {
   waiter: boolean;
   /** Between a turn's start and its Stop (the Stop hook will ask). */
   midTurn: boolean;
+  /** A live, idle, vetted session whose own permission class is this machine's: its own
+   *  local inbox takes the message (§6.3). */
+  inbox: boolean;
   /** A live process holds the session (registry entry or a fresh transcript write). */
   live: boolean;
   /** The transcript exists on this machine (Codex, Antigravity: the session was placed). */
@@ -30,17 +33,31 @@ export type Route = { mode: DeliveryMode } | { unsupported: string } | { refused
  *  new one (`claude -p`, `codex exec`, `agy -p`, or any ACP agent as its client). */
 export const HEADLESS = new Set(["claude-code", "codex", "antigravity", ...acpControl.ACP_HARNESSES]);
 
+/** The ladder in one place, so its order is a fact and not a shape of the code: the
+ *  first rung that fits wins (spec/CONTROL.md §6). The in-place rungs come first,
+ *  because the session answers in the person's own window or thread, in its own
+ *  permission mode, with nothing started and nothing replayed. Among those, the ones
+ *  the session itself opened — a parked waiter, a running turn — come before the one
+ *  where the daemon writes to it unasked. */
+export const DELIVERY_LADDER = ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"] as const;
+
+/** Whether each rung fits this session, as the ladder walks it. */
+const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
+  sdk: (s) => s.sdk,
+  waiter: (s) => s.waiter,
+  turn: (s) => s.midTurn,
+  inbox: (s) => s.inbox,
+  api: (s) => s.api,
+  resume: (s) => HEADLESS.has(s.harness) && s.known && !s.live,
+  fork: (s) => HEADLESS.has(s.harness) && s.known && s.live && s.canFork,
+};
+
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
- *  session gets a fork, never a resume. */
+ *  session gets an in-place lane or a fork, never a resume. */
 export function routePrompt(s: SessionView): Route {
-  if (s.sdk) return { mode: "sdk" };
-  if (s.waiter) return { mode: "waiter" };
-  if (s.midTurn) return { mode: "turn" };
-  if (s.api) return { mode: "api" };
+  for (const mode of DELIVERY_LADDER) if (FITS[mode](s)) return { mode };
   if (!HEADLESS.has(s.harness)) return { unsupported: `no idle delivery for ${s.harness} yet` };
   if (!s.known) return { refused: "no_session" };
-  if (!s.live) return { mode: "resume" };
-  if (s.canFork) return { mode: "fork" };
   return {
     unsupported:
       s.harness === "claude-code"
@@ -81,11 +98,18 @@ export const IN_PLACE_ANSWER =
   "Answer it right here, as you would answer the person at the keyboard: your reply is sent back to them automatically. Don't run a command or call a tool just to send it.";
 
 export function frame(text: string, receiver: string): string {
-  let host = receiver;
-  try {
-    host = new URL(receiver).host;
-  } catch {}
-  return `Message via ${host} (sessionpipe control, signed on the sender's device):\n\n${text}`;
+  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device):\n\n${text}`;
+}
+
+/** What the daemon looks for in the row the session writes for the turn this message
+ *  caused (§6.3): a turn is only proof of delivery when it is THIS message's turn. */
+export const inboxMark = (id: string): string => `message ${id.slice(-12)}`;
+
+/** The framed text for the `inbox` lane: `frame()` with that mark in it, since the
+ *  message becomes a prompt of the session's own and the daemon has to recognise it
+ *  again in the transcript. */
+export function frameInbox(text: string, receiver: string, id: string): string {
+  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${inboxMark(id)}):\n\n${text}`;
 }
 
 /** A new session's first message: the person's words first, where they come from after.
@@ -94,9 +118,15 @@ export function frame(text: string, receiver: string): string {
  *  (2026-10-02). In a new session there is no one else's conversation to tell it apart
  *  from, so the source line can follow the ask. */
 export function frameStart(text: string, receiver: string): string {
-  let host = receiver;
+  return `${text}\n\n(Sent via ${hostOf(receiver)} with sessionpipe control, signed on the sender's device.)`;
+}
+
+/** The receiver's own host, for a line a person reads; the whole string when it is not
+ *  a URL. */
+export function hostOf(receiver: string): string {
   try {
-    host = new URL(receiver).host;
-  } catch {}
-  return `${text}\n\n(Sent via ${host} with sessionpipe control, signed on the sender's device.)`;
+    return new URL(receiver).host;
+  } catch {
+    return receiver;
+  }
 }
