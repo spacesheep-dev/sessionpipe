@@ -285,25 +285,63 @@ export interface Transcript {
   project: string;
 }
 
-/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir. */
-export function findTranscript(session: string, dirs: string[]): Transcript | null {
-  if (!UUID_RE.test(session)) return null;
-  for (const dir of dirs) {
-    let projects: import("node:fs").Dirent[] = [];
+/** <config dir>/projects/<folder>/<session>.jsonl in one Claude Code config dir. */
+function transcriptIn(session: string, dir: string): Transcript | null {
+  let projects: import("node:fs").Dirent[] = [];
+  try {
+    projects = readdirSync(path.join(dir, "projects"), { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const p of projects) {
+    if (!p.isDirectory()) continue;
+    const file = path.join(dir, "projects", p.name, `${session}.jsonl`);
     try {
-      projects = readdirSync(path.join(dir, "projects"), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const p of projects) {
-      if (!p.isDirectory()) continue;
-      const file = path.join(dir, "projects", p.name, `${session}.jsonl`);
-      try {
-        if (statSync(file).isFile()) return { file, configDir: dir, project: p.name };
-      } catch {}
-    }
+      if (statSync(file).isFile()) return { file, configDir: dir, project: p.name };
+    } catch {}
   }
   return null;
+}
+
+/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir. */
+export function findTranscript(session: string, dirs: readonly string[]): Transcript | null {
+  if (!UUID_RE.test(session)) return null;
+  for (const dir of dirs) {
+    const t = transcriptIn(session, dir);
+    if (t) return t;
+  }
+  return null;
+}
+
+/** Every config dir that holds this session's transcript, in the order given. One
+ *  session id can be filed in several accounts: a transcript copied between homes, the
+ *  same id resumed under another account. There were six such ids on one Mac in
+ *  October 2026, and picking the first — which is what reading one home does — put a
+ *  message into an account that was signed out. */
+export function findTranscripts(session: string, dirs: readonly string[]): Transcript[] {
+  if (!UUID_RE.test(session)) return [];
+  const out: Transcript[] = [];
+  for (const dir of dirs) {
+    const t = transcriptIn(session, dir);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/** Which Claude Code account a session belongs to, when more than one has its
+ *  transcript: the one whose own `sessions/` says a live process holds it. `ambiguous`
+ *  — nothing live, or two homes live — is a refusal rather than a guess, and names the
+ *  homes by their directory name alone, since an ack travels to the receiver. Null when
+ *  no home holds the session at all. */
+export type HomeChoice = { transcript: Transcript } | { ambiguous: string[] };
+
+export function resolveHome(session: string, dirs: readonly string[]): HomeChoice | null {
+  const all = findTranscripts(session, dirs);
+  if (!all.length) return null;
+  if (all.length === 1) return { transcript: all[0] as Transcript };
+  const live = all.filter((t) => liveRecords(session, t.configDir).length > 0);
+  if (live.length === 1) return { transcript: live[0] as Transcript };
+  return { ambiguous: [...new Set(all.map((t) => path.basename(t.configDir)))].sort() };
 }
 
 const projectName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -382,27 +420,94 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** One live Claude Code process's registry row, `<config>/sessions/<pid>.json`, as the
+ *  in-place `inbox` lane needs it (spec/CONTROL.md §6.4). Every session that registers
+ *  files one — a terminal window, the desktop app and a claude.ai bridge worker alike,
+ *  all of them `kind: "interactive"`; a `-p` one-shot's row is not one of those. */
+export interface LiveRecord {
+  /** The config dir this row was read from: the lane never crosses accounts. */
+  configDir: string;
+  file: string;
+  pid: number;
+  /** Claude Code's own local inbox for this process, or null when it published none. */
+  socket: string | null;
+  /** 1 is the only inbox protocol this code speaks; anything else is refused. */
+  peerProtocol: number | null;
+  /** The process's start time as the registry spells it (UTC), so a recycled pid can be
+   *  told from the process that filed the row. */
+  procStart: string | null;
+  status: string | null;
+  /** `interactive` for a session the harness holds open for the person. */
+  kind: string | null;
+  entrypoint: string | null;
+  /** `<pid>.<sha>.key`, 0600: where the inbox's auth token lives (needed off macOS). */
+  keyFile: string | null;
+}
+
+const registryRow = (file: string, configDir: string, j: Record<string, unknown>): LiveRecord => {
+  const pid = Number(j.pid ?? path.basename(file).slice(0, -5));
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  let keyFile: string | null = null;
+  try {
+    // Claude Code's own spelling: `<pid>.<64 hex>.key`, 0600, beside the registry row.
+    const want = new RegExp(`^${pid}\\.[0-9a-f]{64}\\.key$`);
+    const hit = readdirSync(path.dirname(file)).find((n) => want.test(n));
+    if (hit) keyFile = path.join(path.dirname(file), hit);
+  } catch {}
+  return {
+    configDir,
+    file,
+    pid,
+    socket: str(j.messagingSocketPath),
+    peerProtocol: typeof j.peerProtocol === "number" ? j.peerProtocol : null,
+    procStart: str(j.procStart),
+    status: str(j.status),
+    kind: str(j.kind),
+    entrypoint: str(j.entrypoint),
+    keyFile,
+  };
+};
+
+/** Every live registry row for this session, across the config dirs given. A row whose
+ *  pid is gone is not one: the file outlives the process. */
+export function liveRecords(session: string, dirs: string | readonly string[]): LiveRecord[] {
+  const out: LiveRecord[] = [];
+  for (const dir of typeof dirs === "string" ? [dirs] : dirs) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(path.join(dir, "sessions")).filter((n) => /^\d+\.json$/.test(n));
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      const file = path.join(dir, "sessions", n);
+      let j: Record<string, unknown>;
+      try {
+        j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (String(j.sessionId) !== session) continue;
+      const row = registryRow(file, dir, j);
+      if (pidAlive(row.pid)) out.push(row);
+    }
+  }
+  return out;
+}
+
+/** The ONE live process that holds this session, or null. Two rows — two accounts, or
+ *  two processes in one — is a refusal rather than a guess: a lane that writes into a
+ *  live session has to know which process it is writing to (spec/CONTROL.md §6.4). */
+export function liveRecord(session: string, dirs: string | readonly string[]): LiveRecord | null {
+  const all = liveRecords(session, dirs);
+  return all.length === 1 ? (all[0] as LiveRecord) : null;
+}
+
 /** A Claude Code process holds this session right now: its registry file,
  *  <config>/sessions/<pid>.json, names it and the pid is alive (interactive and
  *  Agent SDK sessions both file one). */
 export function liveProcess(session: string, configDir: string): boolean {
-  let names: string[] = [];
-  try {
-    names = readdirSync(path.join(configDir, "sessions")).filter((n) => /^\d+\.json$/.test(n));
-  } catch {
-    return false;
-  }
-  for (const n of names) {
-    try {
-      const j = JSON.parse(readFileSync(path.join(configDir, "sessions", n), "utf8")) as {
-        sessionId?: unknown;
-        pid?: unknown;
-      };
-      if (String(j.sessionId) !== session) continue;
-      if (pidAlive(Number(j.pid ?? n.slice(0, -5)))) return true;
-    } catch {}
-  }
-  return false;
+  return liveRecords(session, configDir).length > 0;
 }
 
 /** Written in the last 90 s, and not by a job of ours. */

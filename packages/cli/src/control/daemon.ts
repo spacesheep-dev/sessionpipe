@@ -72,6 +72,7 @@ const {
   loginHint,
   parseResult,
   recentlyWritten,
+  resolveHome,
   sessionFolder,
 } = claudeControl;
 type Caps = claudeControl.Caps;
@@ -1117,9 +1118,19 @@ export class ControlDaemon {
       return this.placeDriven(session, ref);
     if (ref.harness === "claude-code") {
       const target = this.state.copies[ref.id] ?? ref.id;
-      const t = findTranscript(target, this.deps.claudeDirs()) ?? findTranscript(ref.id, this.deps.claudeDirs());
-      if (!t)
+      const dirs = this.deps.claudeDirs();
+      // The account the session belongs to, not the first one that has its transcript:
+      // one id can be filed in several (CONTROL.md §6, Homes), and the home that holds
+      // it open is the one a message is for.
+      const home = resolveHome(target, dirs) ?? resolveHome(ref.id, dirs);
+      if (!home)
         return { refused: "no_session", why: `no Claude Code session ${shortId(ref.harness, ref.id)} on this machine` };
+      if ("ambiguous" in home)
+        return {
+          refused: "ambiguous_home",
+          why: `that session is filed in more than one Claude Code account on this machine (${home.ambiguous.join(", ")}) and none of them holds it open, so this machine can't tell which one the message is for`,
+        };
+      const t = home.transcript;
       const folder = sessionFolder(t);
       const ok = folder && this.allowed(folder);
       if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
