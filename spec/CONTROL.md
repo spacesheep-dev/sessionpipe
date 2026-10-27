@@ -389,10 +389,10 @@ used:
 | `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3) | Claude Code | 0 turns |
 | `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
 | `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`), an ACP agent that can reopen a session (`session/load`) | cold start |
-| `fork` | Live and idle, with no lane above | Claude Code (`--fork-session`) | cold start |
+| `fork` | Live and idle, with no mode above it | Claude Code (`--fork-session`) | cold start |
 
 Nothing fits: acked `unsupported`. **Never two writers on one transcript**: a session a
-live process holds is never resumed; it gets an in-place lane or a fork, and later
+live process holds is never resumed; it gets an in-place mode or a fork, and later
 messages to it go to the same copy.
 
 Two rules hold across the in-place modes:
@@ -443,14 +443,14 @@ Before writing, a daemon MUST check all of:
 - the record's inbox protocol is the one the daemon speaks;
 - the record says the live process is one of the harness's own interactive sessions — a
   registry record is a file any process of that uid can write;
-- the record's folder passes the machine's allowlist, since a signed command carries no
-  folder;
+- the session's folder, resolved from the session itself as §5 step 6 requires, is on
+  the machine's allowlist (which is checked before any mode is chosen, for every kind);
 - the socket is a socket, owned by the daemon's own uid;
 - the process is alive and its start time matches the record's, compared in one time
   zone — a registry that writes UTC and a `ps` that answers in local time disagree by
   hours and every delivery reads as a recycled pid;
 - the record says the session is **idle** (a session mid-turn takes `turn` instead);
-- the session's own permission mode (§6.2) resolves to a class the lane can name, and
+- the session's own permission mode (§6.2) resolves to a class this mode can name, and
   that class is the machine's own (below);
 - the command was signed at most **120 s** ago, judged by the **signed** `iat` and never
   by the envelope's `at`, which the receiver writes and does not sign — the party that
