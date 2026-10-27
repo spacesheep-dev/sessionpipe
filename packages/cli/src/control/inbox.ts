@@ -38,10 +38,12 @@ export const CONFIRM_MS = 8_000;
 /** A registry row has to say this before anything is written: a message written into a
  *  running turn joins that turn, which is the `turn` lane's job, not this one's. */
 export const IDLE_STATUS = "idle";
-/** What a registry row says about a session Claude Code holds open for the person.
- *  Every row that publishes an inbox carries it — terminal windows, the desktop app and
- *  claude.ai bridge workers alike (47 of 47 measured). A row that doesn't is not ours
- *  to write to: a registry row is a file any process of this uid can write. */
+/** What a registry row says about a session Claude Code holds open for the person. Every
+ *  row that publishes an inbox carries it — terminal windows and claude.ai bridge workers
+ *  alike, 47 of 47 measured — and a row that doesn't is not ours to write to, since a
+ *  registry row is a file any process of this uid can write. A desktop-app session
+ *  publishes no inbox at all (none in three sweeps of 47–53 rows), so it is refused here
+ *  like anything else without one. */
 export const INTERACTIVE_KIND = "interactive";
 
 const TOKEN_RE = /^[0-9a-f]{32}$/;
@@ -330,6 +332,13 @@ export async function writeInbox(
   return await new Promise<WriteResult>((resolve) => {
     let done = false;
     let wrote = false;
+    let connected = false;
+    /** The bytes may be with the receiver. Once the socket is open this message is
+     *  committed — anything that goes out does so after that, and the inbox may read it
+     *  whenever it drains — and the one thing that must never happen is the same words
+     *  arriving twice. A ~20 KB line and a receiver that stalls past the timeout is
+     *  exactly that case: held, not tried somewhere else. */
+    const committed = () => wrote || connected;
     const finish = (res: WriteResult) => {
       if (done) return;
       done = true;
@@ -339,10 +348,15 @@ export async function writeInbox(
       } catch {}
       resolve(res);
     };
-    // Nothing happened at all: no connection, no error, no write taken. A write that DID
-    // go out resolved in its own callback, so there is nothing to weigh here.
+    // Nothing happened at all: no connection, no error, nothing out on the socket. Any
+    // of those and the message is committed, held rather than tried somewhere else.
     const timer = setTimeout(
-      () => finish({ code: "no_answer", detail: "that session's inbox didn't take the message" }),
+      () =>
+        finish(
+          committed()
+            ? { written: true, bytes: payload.length }
+            : { code: "no_answer", detail: "that session's inbox didn't take the message" },
+        ),
       timeoutMs,
     );
     let s: net.Socket;
@@ -352,13 +366,15 @@ export async function writeInbox(
       clearTimeout(timer);
       return resolve(gone(e));
     }
-    // An error AFTER the bytes went out is not a reason to send them again.
-    s.on("error", (e) => finish(wrote ? { written: true, bytes: payload.length } : gone(e)));
-    s.on("connect", () =>
+    // An error after the socket opened is not a reason to send the words again; one
+    // before it (the inbox was gone) leaves the message for the next rung.
+    s.on("error", (e) => finish(committed() ? { written: true, bytes: payload.length } : gone(e)));
+    s.on("connect", () => {
+      connected = true;
       s.write(payload, () => {
         wrote = true;
         finish({ written: true, bytes: payload.length });
-      }),
-    );
+      });
+    });
   });
 }

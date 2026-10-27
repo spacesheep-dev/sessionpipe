@@ -4,13 +4,23 @@
 // honest `held` ack when the session doesn't take it, and every gate that sends the
 // message down the ladder instead. The registry rows, the transcripts and the inbox are
 // real files and a real Unix socket in a temp dir; the live pid is this process's own.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { claudeControl } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import * as inboxWriter from "../src/control/inbox.js";
 import { ask } from "../src/control/local.js";
 import type { ControlConfig } from "../src/control/store.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -70,7 +80,7 @@ function transcript(sid: string, dir = configDir): void {
 function row(o: Record<string, unknown> = {}, dir = configDir): void {
   mkdirSync(path.join(dir, "sessions"), { recursive: true });
   writeFileSync(
-    path.join(dir, "sessions", `${process.pid}.json`),
+    path.join(dir, "sessions", `${(o.pid as number) ?? process.pid}.json`),
     JSON.stringify({
       sessionId: SID,
       pid: process.pid,
@@ -94,8 +104,8 @@ function homeDefault(mode: string | null, extra: Record<string, unknown> = {}, d
 
 /** What the session writes when it takes the message: the peer row the daemon matches
  *  on, then the turn's own answer and its end. */
-function answered(mark: string, text = "all three are merged"): void {
-  const f = transcriptFile(SID);
+function answered(mark: string, text = "all three are merged", sid = SID): void {
+  const f = transcriptFile(sid);
   const rows = [
     {
       type: "user",
@@ -329,6 +339,83 @@ describe.runIf(unix)("a message into a live session's own inbox", () => {
   });
 });
 
+describe.runIf(unix)("a session that already has a copy", () => {
+  const COPY = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+  const COPY_SESSION = `claude-code:${COPY}`;
+
+  /** The state a fork left behind: messages for SID go to the copy. */
+  function copyOf(): void {
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({
+        started: {},
+        modes: {},
+        parked: {},
+        copies_v2: {
+          [SID]: { id: COPY, at: new Date().toISOString(), reason: "it couldn't be reached in place" },
+        },
+      }),
+    );
+  }
+
+  it("is messaged in the copy's own inbox, and the copy's own turn is what delivers it", async () => {
+    copyOf();
+    transcript(COPY);
+    // The live process holds the COPY, not the session the person addressed.
+    row({ sessionId: COPY });
+    await startDaemon();
+    // And it is the copy's own hooks that report its mode.
+    await sawMode("bypassPermissions", COPY_SESSION);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "how is it going?" });
+    await wrote(1);
+    expect(frameIn()).toContain('from-mode="bypass"');
+    // The copy answers, under its own id: that is the turn the daemon is waiting for.
+    answered(markOf(q.id), "going well", COPY);
+    await ask(sock, { op: "event", session: COPY_SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({
+      outcome: "delivered",
+      mode: "inbox",
+      reply: "going well",
+    });
+    // Nothing was started, and the hold was let go of under the copy's own name.
+    expect(() => readFileSync(claudeLog, "utf8")).toThrow();
+    const state = JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
+      parked: Record<string, unknown>;
+    };
+    expect(state.parked).toEqual({});
+  });
+
+  it("is not messaged in the inbox of a copy whose own mode is not this machine's class", async () => {
+    copyOf();
+    transcript(COPY);
+    row({ sessionId: COPY });
+    await startDaemon();
+    await sawMode("acceptEdits", COPY_SESSION);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "and now?" });
+    // Nothing is written, and the rung below is not a copy either: a copy is a leaf.
+    const ack = await rx.waitAck(q.id, 15_000);
+    expect(ack).toMatchObject({ outcome: "unsupported" });
+    expect(String(ack.detail)).toContain("a copy is never itself copied");
+    expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("class_mismatch"))).toBe(true);
+  });
+
+  it("is never copied again: the person is told that the copy is open too", async () => {
+    copyOf();
+    transcript(COPY);
+    // Live, with no inbox at all: the rung below would be a copy, which a copy never gets.
+    row({ sessionId: COPY, messagingSocketPath: undefined });
+    await startDaemon();
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "a copy of a copy?" });
+    const ack = await rx.waitAck(q.id, 15_000);
+    expect(ack).toMatchObject({ outcome: "unsupported" });
+    expect(String(ack.detail)).toBe(
+      "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
+    );
+  });
+});
+
 describe.runIf(unix)("a message the session doesn't take", () => {
   it("is acked held, once, and is never written anywhere else", async () => {
     row();
@@ -394,9 +481,36 @@ describe.runIf(unix)("a message the session doesn't take", () => {
     expect(log.some((l) => l.includes("nothing was written for it yet"))).toBe(true);
   });
 
+  it("outlives the daemon that wrote it: a restart is not a second chance to write", async () => {
+    row();
+    await startDaemon({ cfg: { limits: { copies_per_day: 0 } } });
+    await sawMode("bypassPermissions");
+    const first = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
+    expect(await rx.waitAck(first.id, 15_000)).toMatchObject({ outcome: "failed", code: "held" });
+    const state = () =>
+      (
+        JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
+          parked: Record<string, { at: string; id: string }>;
+        }
+      ).parked;
+    expect(state()[SESSION]).toMatchObject({ id: first.id });
+    // An update restarts the daemon; the person does the obvious thing.
+    await d?.stop();
+    d = null;
+    await startDaemon({ cfg: { limits: { copies_per_day: 0 } } });
+    await sawMode("bypassPermissions");
+    const again = await rx.send({ session: SESSION, kind: "prompt", text: "did you see this?" });
+    expect(await rx.waitAck(again.id, 15_000)).toMatchObject({ outcome: "refused", code: "copy_limit" });
+    expect(written).toHaveLength(1);
+    expect(log.some((l) => l.includes("parked"))).toBe(true);
+  });
+
   it("a session that has ended isn't kept waiting for a message it can never take", async () => {
     row();
     await startDaemon();
+    // Most sessions that end were never written to: that end is not a hold to let go of.
+    await ask(sock, { op: "event", session: SESSION, event: "SessionEnd" }, 500);
+    expect(existsSync(path.join(tmp, "state", "control", "state.json"))).toBe(false);
     await sawMode("bypassPermissions");
     const first = await rx.send({ session: SESSION, kind: "prompt", text: "still there?" });
     await rx.waitAck(first.id, 15_000);
@@ -537,6 +651,54 @@ describe.runIf(unix)("what the lane will not write into", () => {
     expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
     expect(written).toEqual([]);
     expect(log.some((l) => l.includes("no_key"))).toBe(true);
+  });
+
+  it("a command dated in the future, which the verifier still admits", async () => {
+    row();
+    await startDaemon();
+    await sawMode("bypassPermissions");
+    // The verifier takes an `iat` up to five minutes ahead (a clock running fast is not
+    // an attack), so the window is an absolute age or it stretches to seven.
+    const q = await rx.send(
+      { session: SESSION, kind: "prompt", text: "from a fast clock", iat: Date.now() + 240_000 },
+      { confirm: true },
+    );
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("stale"))).toBe(true);
+  });
+
+  it("a session a rung above the inbox can take: the look is never paid for", async () => {
+    // No registry row at all, so a look would refuse `no_record` and say so in the log.
+    // The session is mid-turn, which is a rung above: nothing looks.
+    await startDaemon();
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "mid-turn" });
+    await settle(200);
+    expect(rx.acks.find((a) => a.id === q.id)).toMatchObject({ outcome: "taken" });
+    expect(log.some((l) => l.includes("not in place via its own inbox"))).toBe(false);
+  });
+
+  it("the writer is told the session's own class and the machine's own, separately", async () => {
+    row();
+    const seen: { sessionClass: unknown; machineClass: unknown }[] = [];
+    await startDaemon({
+      extra: {
+        writeInbox: async (rec, o) => {
+          seen.push({ sessionClass: o.sessionClass, machineClass: o.machineClass });
+          return inboxWriter.writeInbox(rec, o);
+        },
+      },
+    });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "which classes?" });
+    await wrote(1);
+    // Read at the write, not carried from the look: the writer re-checks the pair, and
+    // refuses before a byte when a mode changed in between (claude-peer's own tests).
+    expect(seen).toEqual([{ sessionClass: "bypass", machineClass: "bypass" }]);
+    answered(markOf(q.id), "both bypass");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "inbox" });
   });
 
   it("a refusal between the look and the first byte takes the next rung, with nothing written", async () => {

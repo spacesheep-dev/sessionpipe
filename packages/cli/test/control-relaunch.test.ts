@@ -277,6 +277,10 @@ describe.runIf(unix)("the mode a cold run is launched with", () => {
 describe.runIf(unix)("a copy, when nothing can reach the session", () => {
   it("is labelled, linked both ways, and told that the original is still open", async () => {
     liveNoInbox();
+    // The copy's own transcript is where its turn is: the note must read that one, not
+    // the session the person addressed, which gained nothing.
+    env.SP_TRANSCRIPT = transcriptFile(COPY);
+    transcript(COPY);
     await startDaemon();
     await sawMode("acceptEdits");
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "answer in a copy" });
@@ -286,6 +290,8 @@ describe.runIf(unix)("a copy, when nothing can reach the session", () => {
       mode: "fork",
       session: `claude-code:${COPY}`,
       copy_of: SESSION,
+      // The mode the COPY's own turn ran in, from the copy's own rows.
+      detail: "the turn ran in acceptEdits, the mode the session itself was in",
     });
     const run = runs()[0] as { argv: string[]; alive: string | null };
     expect(run.argv).toContain("--fork-session");
@@ -371,8 +377,15 @@ describe("the narrowing rule on its own", () => {
   const home = (defaultMode: string | null) => ({ defaultMode, disableAutoMode: false, disableBypass: false });
   it("is a closed list, and never the two modes a setting can change under it", () => {
     const { relaunchMode } = claudeControl;
+    // Nothing is narrower than plan, so it can never widen anything.
     expect(relaunchMode("plan", home(null))).toBe("plan");
-    expect(relaunchMode("dontAsk", home(null))).toBe("dontAsk");
+    expect(relaunchMode("plan", home("plan"))).toBe("plan");
+    // dontAsk is the same step as the account's own `default`: re-asserted there, and
+    // not on an account that defaults to plan or whose settings can't be read.
+    expect(relaunchMode("dontAsk", home("default"))).toBe("dontAsk");
+    expect(relaunchMode("dontAsk", home("bypassPermissions"))).toBe("dontAsk");
+    expect(relaunchMode("dontAsk", home("plan"))).toBeNull();
+    expect(relaunchMode("dontAsk", home(null))).toBeNull();
     expect(relaunchMode("acceptEdits", home("acceptEdits"))).toBe("acceptEdits");
     expect(relaunchMode("acceptEdits", home("auto"))).toBe("acceptEdits");
     expect(relaunchMode("acceptEdits", home("bypassPermissions"))).toBe("acceptEdits");

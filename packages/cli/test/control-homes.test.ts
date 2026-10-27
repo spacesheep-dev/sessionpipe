@@ -126,16 +126,22 @@ describe.runIf(unix)("one session id, several accounts", () => {
     expect(String(ack.detail)).not.toContain(tmp);
   });
 
-  it("two of them hold it open: refused too", async () => {
+  it("two of them hold it open: refused too, and the ack says which two", async () => {
     const a = path.join(tmp, "home-a");
     const b = path.join(tmp, "home-b");
+    const c = path.join(tmp, "home-c");
     transcript(a);
     transcript(b);
+    transcript(c);
     row(a, process.pid);
     row(b, process.ppid);
-    await startDaemon([a, b]);
+    await startDaemon([a, b, c]);
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "which one?" });
-    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "ambiguous_home" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "refused", code: "ambiguous_home" });
+    expect(String(ack.detail)).toContain("(home-a, home-b, home-c)");
+    expect(String(ack.detail)).toContain("more than one of them holds it open (home-a, home-b)");
+    expect(String(ack.detail)).not.toContain(tmp);
   });
 
   it("the one holding it open answers, whatever order the accounts are read in", async () => {

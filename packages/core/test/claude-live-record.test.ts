@@ -138,13 +138,17 @@ describe("resolveHome", () => {
   it("two accounts and none of them live: ambiguous, named by directory and nothing else", () => {
     const a = home("amb-a", { session: SESSION });
     const b = home("amb-b", { session: SESSION });
-    expect(resolveHome(SESSION, [b, a])).toEqual({ ambiguous: ["amb-a", "amb-b"] });
+    expect(resolveHome(SESSION, [b, a])).toEqual({ ambiguous: ["amb-a", "amb-b"], live: [] });
   });
 
-  it("two accounts and both live: ambiguous too", () => {
+  it("two accounts and both live: ambiguous too, and it says which two hold it open", () => {
     const a = home("both-a", { session: SESSION, rows: [{ pid: process.pid, sessionId: SESSION }] });
     const b = home("both-b", { session: SESSION, rows: [{ pid: process.ppid, sessionId: SESSION }] });
-    expect(resolveHome(SESSION, [a, b])).toEqual({ ambiguous: ["both-a", "both-b"] });
+    const cold = home("both-c", { session: SESSION });
+    expect(resolveHome(SESSION, [a, b, cold])).toEqual({
+      ambiguous: ["both-a", "both-b", "both-c"],
+      live: ["both-a", "both-b"],
+    });
     expect([a, b].every((d) => path.isAbsolute(d))).toBe(true);
   });
 });

@@ -349,11 +349,17 @@ describe("the mode a session's own hooks report", () => {
     );
     expect(homeSettings(undefined, home).defaultMode).toBe("plan");
   });
-  it("modeRank puts Claude Code's own modes in its own order, and an unknown one nowhere", () => {
+  it("modeRank is what a turn may do without being asked, and an unknown mode is nowhere", () => {
     expect(modeRank("plan")).toBeLessThan(modeRank("acceptEdits"));
-    expect(modeRank("acceptEdits")).toBeLessThan(modeRank("bypassPermissions"));
+    expect(modeRank("acceptEdits")).toBeLessThan(modeRank("auto"));
+    expect(modeRank("auto")).toBeLessThan(modeRank("bypassPermissions"));
+    // Manual, default and dontAsk share a step: none of them lets anything through that
+    // needs approval, so none is wider than the others.
+    expect(modeRank("dontAsk")).toBe(modeRank("default"));
+    expect(modeRank("manual")).toBe(modeRank("default"));
     expect(modeRank("nonsense")).toBe(-1);
     expect(modeRank(null)).toBe(-1);
+    expect(modeRank(undefined)).toBe(-1);
     expect(CLAUDE_MODES).toContain("dontAsk");
   });
 });

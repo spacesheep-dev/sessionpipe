@@ -50,6 +50,7 @@ import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
 import {
   COPY_NOTE,
   type DeliveryMode,
+  earlier,
   frame,
   frameInbox,
   frameStart,
@@ -64,8 +65,10 @@ import {
   type ControlConfig,
   type ControlMode,
   type DaemonState,
+  HOLD_TTL_MS,
   NonceStore,
   type PairedReceiver,
+  type Parked,
   readState,
   type StartOptions,
   startOptionsOf,
@@ -177,10 +180,6 @@ const MODES_KEPT = 500;
  *  queuing must not also choose the clock. Too old is not a failure: the lane simply
  *  doesn't apply and the message takes the next rung. */
 const INBOX_FRESH_MS = 120_000;
-/** How long a written-but-untaken message keeps the inbox lane shut for its session:
- *  Claude Code holds an unmatched message that long before dropping it, and a hold can
- *  be released, so a second write would mean the person's words arriving twice. */
-const HOLD_TTL_MS = 300_000;
 /** After the session's own `UserPromptSubmit`, how long and how often its transcript is
  *  read for the row that says which message the turn is for (`firstAsk`). The hook fires
  *  before the harness has written the row; this is the gap between the two. */
@@ -449,7 +448,7 @@ export class ControlDaemon {
   ) {
     this.nonces = new NonceStore(path.join(dir, "nonces.jsonl"), deps.now);
     this.acks = new AckOutbox(path.join(dir, "acks.jsonl"));
-    this.state = readState(path.join(dir, "state.json"));
+    this.state = readState(path.join(dir, "state.json"), deps.now());
     this.aliases = readAliases(aliasFile(dir));
   }
 
@@ -781,7 +780,7 @@ export class ControlDaemon {
     if (e.event === "SessionEnd")
       // The session is gone: a message written into its inbox will never be taken, so
       // the lane is not kept shut for a window that has closed.
-      this.parked.delete(named);
+      this.unpark(named);
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
       l.midTurn = false;
       l.continued = false;
@@ -1208,7 +1207,7 @@ export class ControlDaemon {
       if ("ambiguous" in home)
         return {
           refused: "ambiguous_home",
-          why: `that session is filed in more than one Claude Code account on this machine (${home.ambiguous.join(", ")}) and none of them holds it open, so this machine can't tell which one the message is for`,
+          why: `that session is filed in more than one Claude Code account on this machine (${home.ambiguous.join(", ")}) and ${home.live.length ? `more than one of them holds it open (${home.live.join(", ")})` : "none of them holds it open"}, so this machine can't tell which one the message is for`,
         };
       const t = home.transcript;
       const folder = sessionFolder(t);
@@ -1264,13 +1263,7 @@ export class ControlDaemon {
     // Oldest first: a machine that has run thousands of sessions keeps the recent ones.
     const over = Object.keys(this.state.modes).length - MODES_KEPT;
     for (const k of Object.keys(this.state.modes).slice(0, Math.max(0, over))) delete this.state.modes[k];
-    try {
-      writeState(path.join(this.dir, "state.json"), this.state);
-    } catch (e) {
-      this.deps.log(
-        `couldn't record ${session.slice(0, 24)}'s permission mode: ${String(/* v8 ignore next -- writeState throws fs Errors */ (e as Error)?.message || e)}`,
-      );
-    }
+    this.saveState(`${session.slice(0, 24)}'s permission mode`);
   }
 
   /** The folder the worker recorded for a session from its hooks (run.ts, facts). */
@@ -1550,9 +1543,10 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "delivered", mode: held.mode ?? "sdk" }, sent);
   }
 
-  /** The permission mode a Claude Code session's own hooks last reported, or null. */
-  private modeOf(id: string): string | null {
-    return this.state.modes[`claude-code:${id}`] ?? null;
+  /** The permission mode a session's own hooks last reported, or null. Keyed by the
+   *  session ref the hooks report under, which for a copy is the copy's own. */
+  private modeOf(ref: string): string | null {
+    return this.state.modes[ref] ?? null;
   }
 
   /** The permission class THIS MACHINE would declare to a session in `configDir`
@@ -1581,27 +1575,40 @@ export class ControlDaemon {
     session: string,
     place: Placed,
     o: { iat: number; body: string },
-  ): { rec: LiveRecord; declare: inbox.PeerClass } | { code: string; detail: string } | null {
+  ):
+    | { rec: LiveRecord; declare: inbox.PeerClass; key: string; cls: inbox.PeerClass | null }
+    | { code: string; detail: string }
+    | null {
     const ref = parseSessionRef(session);
     if (ref?.harness !== "claude-code" || !place.transcript) return null;
     const target = this.state.copies[ref.id]?.id ?? ref.id;
+    // The session this lane would write to, which is the copy where there is one: the
+    // hold, the watcher and the confirming row are all ITS (the copy's hooks report
+    // under its own id, and `answerFrom` already follows it). Keyed on the command's
+    // session instead, a copy's own answer was acked `held` and its words thrown away.
+    const key = `claude-code:${target}`;
     // A run of the daemon's own holding it is not a session to write into: the message
     // queues behind that run and resumes it.
     if (this.ownRuns.has(target)) return null;
-    const held = this.parkedFor(session);
+    const held = this.parkedFor(key);
     if (held)
       return {
         code: "parked",
-        detail: `a message sent ${Math.round((this.deps.now() - held.at) / 1000)} s ago is still waiting in that session, so this one is not written in beside it`,
+        detail: `a message sent ${Math.round(this.heldFor(held) / 1000)} s ago is still waiting in that session, so this one is not written in beside it`,
       };
-    if (this.deps.now() - o.iat > INBOX_FRESH_MS)
+    // An ABSOLUTE age: the verifier admits a command dated up to five minutes ahead
+    // (a clock running fast is not an attack), and that would otherwise stretch this
+    // window to seven.
+    const age = Math.abs(this.deps.now() - o.iat);
+    if (age > INBOX_FRESH_MS)
       return {
         code: "stale",
-        detail: `a message written into a live session must arrive within ${INBOX_FRESH_MS / 1000} s of being signed, and this one was signed ${Math.round((this.deps.now() - o.iat) / 1000)} s ago`,
+        detail: `a message written into a live session must arrive within ${INBOX_FRESH_MS / 1000} s of being signed, and this one is dated ${Math.round(age / 1000)} s from now`,
       };
     const rec = liveRecord(target, this.deps.claudeDirs());
+    const cls = peerClass(this.modeOf(key));
     const why = inbox.vetInbox(rec, {
-      sessionClass: peerClass(this.modeOf(target)),
+      sessionClass: cls,
       machineClass: this.machineClass(place.transcript.configDir),
       configDir: place.transcript.configDir,
       platform: this.deps.platform ?? process.platform,
@@ -1614,17 +1621,49 @@ export class ControlDaemon {
     const declare = this.machineClass(place.transcript.configDir);
     if (!inbox.envelope({ fromMode: declare, body: o.body }))
       return { code: "unsendable", detail: "that message can't be put in an envelope this lane can be sure of" };
-    return { rec: r, declare };
+    return { rec: r, declare, key, cls };
   }
 
   /** A write into this session's inbox that it has not taken, inside the receiving
-   *  inbox's own hold window. */
-  private parkedFor(session: string): { at: number; id: string } | null {
-    const p = this.parked.get(session);
+   *  inbox's own hold window. Kept in the daemon's state, not in memory: an update
+   *  restarts the daemon, and a resend inside the window would otherwise put a second
+   *  copy of the person's words in the same inbox (CONTROL.md §6.3). */
+  private parkedFor(session: string): Parked | null {
+    const p = this.state.parked[session];
     if (!p) return null;
-    if (this.deps.now() - p.at <= HOLD_TTL_MS) return p;
-    this.parked.delete(session);
+    if (this.heldFor(p) <= HOLD_TTL_MS) return p;
+    this.unpark(session);
     return null;
+  }
+
+  /** How long ago that message was written. `park` writes the stamp and `readState`
+   *  admits only one that parses, so there is no third answer. */
+  private heldFor(p: Parked): number {
+    return this.deps.now() - Date.parse(p.at);
+  }
+
+  private park(session: string, id: string): void {
+    this.state.parked[session] = { at: new Date(this.deps.now()).toISOString(), id };
+    this.saveState(`the message waiting in ${session.slice(0, 24)}`);
+  }
+
+  private unpark(session: string): void {
+    // Called for every session that ends, most of which were never written to.
+    if (!this.state.parked[session]) return;
+    delete this.state.parked[session];
+    this.saveState(`that ${session.slice(0, 24)} has taken its message`);
+  }
+
+  /** The daemon's own state, written where a restart will read it again. A failure is
+   *  logged and nothing else: it costs a record, never a delivery. */
+  private saveState(what: string): void {
+    try {
+      writeState(path.join(this.dir, "state.json"), this.state);
+    } catch (e) {
+      this.deps.log(
+        `couldn't record ${what}: ${String(/* v8 ignore next -- writeState throws fs Errors */ (e as Error)?.message || e)}`,
+      );
+    }
   }
 
   /** Resolves true when this session begins a turn of its own within `ms` — the first
@@ -1707,11 +1746,12 @@ export class ControlDaemon {
         sdk: this.sdkSessions.has(ref.id),
         waiter: !!l?.waiter && !l.waiter.destroyed,
         midTurn: !!l?.midTurn,
-        // The inbox lane is Claude Code's own local socket; no other harness has one.
+        // The inbox is Claude Code's own local socket; no other harness has one.
         inbox: false,
         live,
         known: true,
         canFork: false,
+        copied: false,
         api: false,
       };
     }
@@ -1736,10 +1776,10 @@ export class ControlDaemon {
       inbox: !!look && "rec" in look,
       live,
       known: !!t,
-      // A copy is never itself copied: a message for a session that already has one
-      // resumes that copy, and when the copy is live too the person is told rather than
-      // handed a copy of a copy (CONTROL.md §6 `fork`).
-      canFork: !!claude?.caps.fork && !this.state.copies[ref.id],
+      canFork: !!claude?.caps.fork,
+      // A message for a session that already has a copy goes to that copy; when the copy
+      // is live too the person is told, rather than handed a copy of a copy.
+      copied: !!this.state.copies[ref.id],
       api: false,
     };
   }
@@ -1754,14 +1794,23 @@ export class ControlDaemon {
   ): Promise<void> {
     const text = cmd.text as string;
     const framed = `${frameInbox(text, r.url, id)}\n\n${IN_PLACE_ANSWER}`;
-    const look = o.noInbox ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed });
-    const route = routePrompt(this.view(cmd.session, place, look));
+    // The ladder is walked once without the inbox first: its look reads a registry, a
+    // settings file and a process's start time (a `ps`, on this one thread), and a
+    // message that a rung above it takes — a held session, a parked waiter, a running
+    // turn — was never going to use it.
+    const first = routePrompt(this.view(cmd.session, place, null));
+    const over = o.noInbox || ("mode" in first && earlier(first.mode, "inbox"));
+    const look = over ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed });
+    const route = over ? first : routePrompt(this.view(cmd.session, place, look));
+    // Said before the message's own outcome: why the session was not reached in place is
+    // the machine's own business, and it is the same fact whether the rung below it
+    // delivered, refused, or wasn't there either.
+    if (look && !("rec" in look))
+      this.deps.log(`${id.slice(-8)}: not in place via its own inbox (${look.code}: ${look.detail})`);
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });
     const ref = parseSessionRef(cmd.session)!;
-    if (look && !("rec" in look))
-      this.deps.log(`${id.slice(-8)}: not in place via its own inbox (${look.code}: ${look.detail})`);
     switch (route.mode) {
       case "waiter": {
         const l = this.live.get(cmd.session)!;
@@ -1801,19 +1850,26 @@ export class ControlDaemon {
         );
       }
       case "inbox": {
-        const { rec, declare } = look as { rec: LiveRecord; declare: inbox.PeerClass };
+        const { rec, declare, key } = look as {
+          rec: LiveRecord;
+          declare: inbox.PeerClass;
+          key: string;
+          cls: inbox.PeerClass | null;
+        };
         const from = this.answerFrom(cmd.session);
         // Watch for the session's own next turn BEFORE the write, or a session that
         // begins one in milliseconds would be missed. One watcher per session, so one
         // turn can never confirm two messages: inboxLook keeps the lane shut while
         // another write is unconfirmed, and this is the backstop.
-        const started = this.awaitPrompted(cmd.session, inbox.CONFIRM_MS);
+        const started = this.awaitPrompted(key, inbox.CONFIRM_MS);
         /* v8 ignore next 2 -- one in-place delivery per session at a time (`serial`); this is the backstop */
         if (!started) return this.finish(r, id, PARKED_ACK);
         const out = await (this.deps.writeInbox ?? inbox.writeInbox)(rec, {
           body: framed,
           fromName: inbox.senderName(r.url),
-          sessionClass: declare,
+          // Read again here, not carried from the look: a mode changed between the two
+          // (§6.2 calls that the ordinary case) is caught before the socket is opened.
+          sessionClass: peerClass(this.modeOf(key)),
           machineClass: declare,
           configDir: rec.configDir,
           platform: this.deps.platform ?? process.platform,
@@ -1828,9 +1884,9 @@ export class ControlDaemon {
           this.deps.log(`${id.slice(-8)}: the inbox lane refused before writing (${out.code}: ${out.detail})`);
           return this.prompt(r, id, cmd, place, sent, { noInbox: true });
         }
-        this.deps.log(`${id.slice(-8)}: into ${cmd.session.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
-        this.parked.set(cmd.session, { at: this.deps.now(), id });
-        if (!(await this.tookIt(started, cmd.session, from, inboxMark(id))))
+        this.deps.log(`${id.slice(-8)}: into ${key.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
+        this.park(key, id);
+        if (!(await this.tookIt(started, key, from, inboxMark(id))))
           // The bytes went out, and they are not sent again on any lane: the session may
           // be holding the message (its inbox parks one whose class doesn't match, and
           // drops it after five minutes). Say exactly that, and nothing that invites the
@@ -1846,8 +1902,8 @@ export class ControlDaemon {
             },
             sent,
           );
-        this.parked.delete(cmd.session);
-        return this.followAnswer(r, id, "inbox", cmd.session, from, sent);
+        this.unpark(key);
+        return this.followAnswer(r, id, "inbox", key, from, sent);
       }
       case "resume":
       case "fork":
@@ -2082,14 +2138,16 @@ export class ControlDaemon {
       // means no flag, and on this fleet no flag is the account's default, which is
       // wider than what the person set the session to. Beside `-p`, where modeFlags
       // would have put one; the prompt stays last.
-      const narrow = recorded || this.cfg.mode !== "inherit" ? null : relaunchMode(this.modeOf(target), home);
+      const narrow =
+        recorded || this.cfg.mode !== "inherit" ? null : relaunchMode(this.modeOf(`claude-code:${target}`), home);
       if (narrow) args.splice(1, 0, "--permission-mode", narrow);
       this.deps.log(
         `${id.slice(-8)}: claude -p (${narrow ?? o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
       );
       const stream = this.answerStream(r, id);
-      /* v8 ignore next -- place() refuses a Claude Code session with no transcript */
-      const before = place.transcript ? transcriptEnd(place.transcript.file) : 0;
+      // place() refuses a Claude Code session with no transcript, so there is one.
+      const own = (place.transcript as Transcript).file;
+      const before = transcriptEnd(own);
       const res = await this.owning(target, () =>
         this.slot(() =>
           this.deps.run(claude.bin, args, {
@@ -2122,7 +2180,7 @@ export class ControlDaemon {
           at: new Date(this.deps.now()).toISOString(),
           reason: "the session was open on this computer and couldn't be reached in place",
         };
-        writeState(path.join(this.dir, "state.json"), this.state);
+        this.saveState(`the copy of ${shortId("claude-code", ref.id)}`);
         this.lastEnd.set(ran, this.deps.now());
       }
       this.finish(
@@ -2134,7 +2192,14 @@ export class ControlDaemon {
           reply: out.reply,
           ...(ran !== ref.id ? { session: `claude-code:${ran}` } : {}),
           ...(mode === "fork" && ran !== target ? { copy_of: `claude-code:${target}` } : {}),
-          ...this.ranNote(place, before, { narrow, home }),
+          // A copy's turn is in the COPY's transcript, from its first row: the session
+          // the command named gained nothing, and reading its file would say what the
+          // person is doing in it rather than what this turn ran in.
+          ...this.ranNote(
+            ran === target
+              ? { file: own, from: before, narrow, home }
+              : { file: findTranscript(ran, this.deps.claudeDirs())?.file ?? null, from: 0, narrow, home },
+          ),
         },
         sent,
       );
@@ -2145,11 +2210,13 @@ export class ControlDaemon {
    *  `prompt`): what the new turn's own row recorded, which is what it ran in rather
    *  than what was asked for — and, on a machine set to auto whose Claude Code has auto
    *  turned off, that the turn ran in Manual mode and what fixes it. */
-  private ranNote(
-    place: Placed,
-    before: number,
-    o: { narrow: string | null; home: claudeControl.HomeSettings },
-  ): { detail?: string } {
+  private ranNote(o: {
+    /** The transcript the new turn is in: the session's own, or the copy's. */
+    file: string | null;
+    from: number;
+    narrow: string | null;
+    home: claudeControl.HomeSettings;
+  }): { detail?: string } {
     const notes: string[] = [];
     if (this.cfg.mode === "auto" && o.home.disableAutoMode) {
       const say =
@@ -2160,8 +2227,7 @@ export class ControlDaemon {
         this.deps.log(say);
       }
     }
-    /* v8 ignore next -- see above: a cold run of a Claude Code session always has one */
-    const ran = place.transcript ? ranInMode(place.transcript.file, before) : null;
+    const ran = o.file ? ranInMode(o.file, o.from) : null;
     if (ran) notes.push(`the turn ran in ${ran}${o.narrow ? ", the mode the session itself was in" : ""}`);
     return notes.length ? { detail: notes.join("; ") } : {};
   }

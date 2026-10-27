@@ -23,6 +23,9 @@ export interface SessionView {
   known: boolean;
   /** This Claude Code can copy a session (`--fork-session`); no other harness can. */
   canFork: boolean;
+  /** It already has a copy, which is where its messages go: a copy is a leaf and is
+   *  never itself copied (§6 `prompt`). */
+  copied: boolean;
   /** The harness has an input API (OpenCode, Codex app-server) — none is wired yet. */
   api: boolean;
 }
@@ -41,6 +44,11 @@ export const HEADLESS = new Set(["claude-code", "codex", "antigravity", ...acpCo
  *  where the daemon writes to it unasked. */
 export const DELIVERY_LADDER = ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"] as const;
 
+/** Does `a` sit above `b` on the ladder? The rungs above `inbox` are all free to test,
+ *  so a message that takes one of them never pays for the inbox's own look. */
+export const earlier = (a: DeliveryMode, b: DeliveryMode): boolean =>
+  DELIVERY_LADDER.indexOf(a) < DELIVERY_LADDER.indexOf(b);
+
 /** Whether each rung fits this session, as the ladder walks it. */
 const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
   sdk: (s) => s.sdk,
@@ -49,7 +57,7 @@ const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
   inbox: (s) => s.inbox,
   api: (s) => s.api,
   resume: (s) => HEADLESS.has(s.harness) && s.known && !s.live,
-  fork: (s) => HEADLESS.has(s.harness) && s.known && s.live && s.canFork,
+  fork: (s) => HEADLESS.has(s.harness) && s.known && s.live && s.canFork && !s.copied,
 };
 
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
@@ -61,7 +69,9 @@ export function routePrompt(s: SessionView): Route {
   return {
     unsupported:
       s.harness === "claude-code"
-        ? "the session is open and this Claude Code can't copy it (no --fork-session)"
+        ? s.copied
+          ? "the session is open, and so is the copy its messages already go to; a copy is never itself copied"
+          : "the session is open and this Claude Code can't copy it (no --fork-session)"
         : `the session is open in ${s.harness} right now, and a ${s.harness} session can't be copied: send it again once it has been idle a couple of minutes`,
   };
 }

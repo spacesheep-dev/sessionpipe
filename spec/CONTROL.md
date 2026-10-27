@@ -72,7 +72,8 @@ credential: without the `poll_key` nobody is handed the machine's token.
 The pairing request and every hello MAY carry the machine's allowed `folders` and its
 `mode` (`safe`: nothing that needs approval runs unattended; `auto`: the harness's auto
 mode; `inherit`: no permission flag, so each harness starts in its own default on the
-machine, as the person's own sessions there do), so a receiver can offer a folder
+machine, as the person's own sessions there do — with one exception, §6 `prompt`, where
+a relaunch may say again the narrowing a session itself chose), so a receiver can offer a folder
 picker for a new session, and `files: true` when the machine takes attachments on a
 `start` (§6), and `prompt_files: true` when it takes them on a `prompt` too. They are
 informational: the machine checks its own list again (§5 step 6). The mode, like the
@@ -412,9 +413,10 @@ Two rules hold across the in-place modes:
 A session id can be filed in more than one of a harness's accounts (Claude Code: one
 `projects/` tree per config dir). The machine resolves which account a message is for
 from the session itself: the one whose own live-session registry says a process holds it.
-Nothing live, or two accounts live, is acked `refused` with code `ambiguous_home`, whose
-`detail` names the accounts by their directory name and never by path — a guess there
-put a message into an account that was signed out.
+Nothing live, or more than one live, is acked `refused` with code `ambiguous_home`, whose
+`detail` says which of the two it is, names the accounts that have the transcript and,
+where more than one is live, which ones — all by their directory name and never by path.
+A guess there put a message into an account that was signed out.
 
 ### 6.2 The session's mode
 
@@ -438,8 +440,11 @@ surface and no command line exposes it.
 
 Before writing, a daemon MUST check all of:
 
-- exactly **one** live registry record for that session across the harness's accounts
-  (two is a refusal, not a guess), in the account §6.1 resolved;
+- exactly **one** live registry record across the harness's accounts (two is a refusal,
+  not a guess) for the session this would write to — which is the **copy** where the
+  session the command named has one (§6 `prompt`), since that is where its messages go;
+  the hold, the watcher and the confirming row are then the copy's too, in the account
+  §6.1 resolved;
 - the record's inbox protocol is the one the daemon speaks;
 - the record says the live process is one of the harness's own interactive sessions — a
   registry record is a file any process of that uid can write;
@@ -452,9 +457,10 @@ Before writing, a daemon MUST check all of:
 - the record says the session is **idle** (a session mid-turn takes `turn` instead);
 - the session's own permission mode (§6.2) resolves to a class this mode can name, and
   that class is the machine's own (below);
-- the command was signed at most **120 s** ago, judged by the **signed** `iat` and never
-  by the envelope's `at`, which the receiver writes and does not sign — the party that
-  queues a message must not also choose the clock by which it is judged fresh;
+- the command's signed `iat` is at most **120 s** from now, in either direction — judged
+  by the **signed** time and never by the envelope's `at`, which the receiver writes and
+  does not sign, and as an absolute age because §5 step 4 admits a command dated up to
+  five minutes ahead, which would otherwise stretch this window to seven;
 - and, where the inbox vets a sender by a key rather than by uid (everywhere but macOS),
   that the key is readable.
 
@@ -499,8 +505,9 @@ sent, may be held, and was not duplicated. It MUST NOT try another mode.
 A message the session has not taken may still be released to it later, so for as long as
 that can happen (300 s, the receiving inbox's own hold) the mode stays shut for that
 session: a daemon MUST NOT write a second message into an inbox where one of its own is
-still unconfirmed. Otherwise the obvious thing to do — send it again — puts two copies
-of the person's words in one place, and a released hold delivers both.
+still unconfirmed, and MUST remember that across its own restart — an update restarts it,
+and the window outlives the process. Otherwise the obvious thing to do — send it again —
+puts two copies of the person's words in one place, and a released hold delivers both.
 
 ### `prompt`
 
@@ -546,13 +553,18 @@ reported (§6.2) and never from a flag it once asked for:
 
 | The session's own last mode | The flag on a relaunch |
 |---|---|
-| `plan`, `dontAsk` | that one |
-| `acceptEdits` | that one, where the account's own default is at least as wide; otherwise none |
+| `plan` | that one: nothing the harness has is narrower |
+| `dontAsk`, `acceptEdits` | that one, where the account's own default is at least as wide; otherwise none |
 | `default`, `manual`, `auto`, `bypassPermissions`, nothing recorded | none |
 
 A daemon MUST NOT emit `auto` or `bypassPermissions` this way — the two values a setting
 can quietly turn into something else — and MUST NOT re-assert anything wider than what
-the machine itself does with no flag. A session the machine started keeps the options its
+the machine itself does with no flag. "At least as wide" is read against the account's
+own default (Claude Code: `permissions.defaultMode`, user scope); a folder's settings or
+a managed policy may narrow that further, and they narrow what the re-asserted mode can
+do as well, so the comparison errs on the side of asking. A session the person put in
+Manual (`default` or `manual`) comes back at the account's own default, knowingly: a hook
+payload cannot tell a mode they chose from one nobody chose. A session the machine started keeps the options its
 start recorded (**Options** below), which this does not touch. Where a machine's mode
 asks for a mode the harness's own settings turn off (`auto` where auto is disabled), the
 turn still runs and the ack SHOULD say what it ran in instead and what would fix it. The
@@ -786,7 +798,7 @@ send → delivered time.
   inbox and acked `delivered` with `mode: "inbox"`; one written into that inbox that the
   session never took, acked `failed` with code `held` once and never retried (§6.3); and
   a copy's ack, naming the copy in `session` and the session the person addressed in
-  `copy_of` (§6 `prompt`).
+  `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
 
 ## 12. Status
 

@@ -167,6 +167,7 @@ describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
       live: false,
       known: true,
       canFork: false,
+      copied: false,
     };
     expect(routePrompt({ ...view, api: true })).toEqual({ mode: "api" });
     expect(routePrompt({ ...view, api: false })).toHaveProperty("unsupported");

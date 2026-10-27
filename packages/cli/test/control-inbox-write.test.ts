@@ -354,6 +354,40 @@ describe("the one line it writes", () => {
     expect(out).toMatchObject({ written: true });
   });
 
+  it("a socket that opened and took nothing yet is still committed, never tried elsewhere", async () => {
+    await listen();
+    // The line can be 20 KB. A receiver that stalls past the timeout and drains after it
+    // has the words; falling through to a copy would deliver them twice. Anything on the
+    // socket — or the socket merely being open — means held, which is the caller's
+    // business and never another rung's.
+    // A socket that connects, takes the write and says nothing about it: the buffer a
+    // real one would be holding, with no callback and no error.
+    const quiet = (): net.Socket => {
+      const opened: (() => void)[] = [];
+      const s = {
+        on(ev: string, fn: () => void) {
+          if (ev === "connect") opened.push(fn);
+          return s;
+        },
+        write: () => true,
+        destroy: () => {},
+        bytesWritten: 0,
+      } as unknown as net.Socket;
+      process.nextTick(() => {
+        for (const fn of opened) fn();
+      });
+      return s;
+    };
+    const out = await writeInbox(rec(), {
+      body: "x".repeat(1000),
+      ...ok,
+      configDir: dir,
+      timeoutMs: 40,
+      connect: quiet,
+    });
+    expect(out).toMatchObject({ written: true });
+  });
+
   it("an inbox that never answers is not a write", async () => {
     await listen({ silent: true });
     // A socket nothing ever reads from: the write is still taken by the kernel, so this

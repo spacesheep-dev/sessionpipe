@@ -187,6 +187,7 @@ describe("routing (CONTROL.md §6)", () => {
     live: false,
     known: true,
     canFork: true,
+    copied: false,
     api: false,
   };
   it("takes the first mode that fits", () => {
@@ -201,6 +202,13 @@ describe("routing (CONTROL.md §6)", () => {
     expect(routePrompt({ ...base })).toEqual({ mode: "resume" });
     expect(routePrompt({ ...base, live: true })).toEqual({ mode: "fork" });
     expect(routePrompt({ ...base, live: true, canFork: false })).toHaveProperty("unsupported");
+    // A session that already has a copy is not copied again, and is told which it is.
+    expect(routePrompt({ ...base, live: true, copied: true })).toEqual({
+      unsupported: "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
+    });
+    expect(routePrompt({ ...base, live: true, canFork: false })).toEqual({
+      unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
+    });
     expect(routePrompt({ ...base, known: false })).toEqual({ refused: "no_session" });
     expect(routePrompt({ ...base, harness: "kiro" })).toHaveProperty("unsupported");
     expect(routePrompt({ ...base, harness: "codex", midTurn: true })).toEqual({ mode: "turn" });

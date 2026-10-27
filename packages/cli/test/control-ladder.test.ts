@@ -532,6 +532,7 @@ describe.runIf(unix)("the answer read from a live session", () => {
     writeState(path.join(tmp, "state", "control", "state.json"), {
       started: {},
       modes: {},
+      parked: {},
       copies: { [SID]: { id: COPY, at: new Date().toISOString(), reason: "a test put it there" } },
     });
     await startDaemon();

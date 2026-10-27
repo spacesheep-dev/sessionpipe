@@ -330,10 +330,13 @@ export function findTranscripts(session: string, dirs: readonly string[]): Trans
 
 /** Which Claude Code account a session belongs to, when more than one has its
  *  transcript: the one whose own `sessions/` says a live process holds it. `ambiguous`
- *  — nothing live, or two homes live — is a refusal rather than a guess, and names the
- *  homes by their directory name alone, since an ack travels to the receiver. Null when
- *  no home holds the session at all. */
-export type HomeChoice = { transcript: Transcript } | { ambiguous: string[] };
+ *  is a refusal rather than a guess — it names every account that has the transcript,
+ *  and in `live` the ones holding it open, which is none of them or more than one. Both
+ *  are named by their directory name alone, since an ack travels to the receiver. Null
+ *  when no account has the session at all. */
+export type HomeChoice = { transcript: Transcript } | { ambiguous: string[]; live: string[] };
+
+const homeName = (t: Transcript) => path.basename(t.configDir);
 
 export function resolveHome(session: string, dirs: readonly string[]): HomeChoice | null {
   const all = findTranscripts(session, dirs);
@@ -341,7 +344,10 @@ export function resolveHome(session: string, dirs: readonly string[]): HomeChoic
   if (all.length === 1) return { transcript: all[0] as Transcript };
   const live = all.filter((t) => liveRecords(session, t.configDir).length > 0);
   if (live.length === 1) return { transcript: live[0] as Transcript };
-  return { ambiguous: [...new Set(all.map((t) => path.basename(t.configDir)))].sort() };
+  return {
+    ambiguous: [...new Set(all.map(homeName))].sort(),
+    live: [...new Set(live.map(homeName))].sort(),
+  };
 }
 
 const projectName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -510,11 +516,25 @@ export function liveProcess(session: string, configDir: string): boolean {
   return liveRecords(session, configDir).length > 0;
 }
 
-/** Claude Code's own permission modes, narrowest first (its own order, 2.1.310).
- *  `plan` asks for everything and writes nothing; `bypassPermissions` asks for nothing.
- *  Used to tell one mode from another and to compare two, never to pick one. */
-export const CLAUDE_MODES = ["plan", "default", "manual", "dontAsk", "acceptEdits", "auto", "bypassPermissions"];
-export const modeRank = (m: string | null | undefined): number => (m ? CLAUDE_MODES.indexOf(m) : -1);
+/** Claude Code's own permission modes, by how much a turn may do in them without being
+ *  asked about (its own order, 2.1.310). `plan` writes nothing at all. `default`,
+ *  `manual` and `dontAsk` share a step: none of them lets anything through that needs
+ *  approval — the first two ask the person, `dontAsk` refuses instead. `acceptEdits`
+ *  writes files; `auto` runs most things; `bypassPermissions` asks about nothing.
+ *
+ *  Used to tell one mode from another and to compare two, never to pick one. -1 is "not
+ *  a mode this code knows", which compares below everything. */
+export const MODE_RANK: Record<string, number> = {
+  plan: 0,
+  default: 1,
+  manual: 1,
+  dontAsk: 1,
+  acceptEdits: 2,
+  auto: 3,
+  bypassPermissions: 4,
+};
+export const CLAUDE_MODES = Object.keys(MODE_RANK);
+export const modeRank = (m: string | null | undefined): number => (m && m in MODE_RANK ? (MODE_RANK[m] as number) : -1);
 
 /** The permission mode a hook payload reports for its own session, or null. Claude Code
  *  writes `permission_mode` on every hook payload; `permissionMode` is the spelling its
@@ -584,15 +604,20 @@ export function homeSettings(configDir: string | undefined, home = os.homedir())
 }
 
 /** The `--permission-mode` a relaunch of ONE session re-asserts, or null for no flag at
- *  all (spec/CONTROL.md §6 `prompt`). Only a narrowing the session itself chose:
+ *  all (spec/CONTROL.md §6 `prompt`). Only a narrowing the session itself chose, and
+ *  only where it is one:
  *
- *  - `plan` and `dontAsk` always: both are narrower than any account's default, and the
- *    person chose them at that keyboard;
- *  - `acceptEdits` only where the account's own default is at least that wide, so a
- *    re-assertion can never be wider than what the machine itself does with no flag.
- *    Settings that can't be read mean it isn't re-asserted;
+ *  - `plan` always: nothing this harness has is narrower, so it cannot widen anything;
+ *  - `dontAsk` and `acceptEdits` where the account's own default is at least as wide
+ *    (`MODE_RANK`), so a re-assertion is never wider than what the machine itself does
+ *    with no flag. Settings that can't be read mean it isn't re-asserted;
  *  - everything else — `default`, `manual`, `auto`, `bypassPermissions`, nothing
  *    recorded — is no flag, and the account's own default decides.
+ *
+ *  The default it compares against is the account's own (`permissions.defaultMode`, user
+ *  scope). A folder's settings or a managed policy may narrow that further, invisibly
+ *  here; both narrow what the re-asserted mode can actually do too, so the comparison
+ *  errs on the side of asking.
  *
  *  It never returns `auto` or `bypassPermissions`: the two values a setting can quietly
  *  turn into something else, and the two this code must never write. `auto` is the
@@ -602,8 +627,9 @@ export function homeSettings(configDir: string | undefined, home = os.homedir())
  *  No flag is not neutral. On a fleet whose accounts default to bypass it is the widest
  *  outcome there is, which is why a narrowing the person chose has to be said again. */
 export function relaunchMode(recorded: string | null | undefined, home: HomeSettings): string | null {
-  if (recorded === "plan" || recorded === "dontAsk") return recorded;
-  if (recorded === "acceptEdits" && modeRank(home.defaultMode) >= modeRank("acceptEdits")) return recorded;
+  if (recorded === "plan") return recorded;
+  if ((recorded === "dontAsk" || recorded === "acceptEdits") && modeRank(home.defaultMode) >= modeRank(recorded))
+    return recorded;
   return null;
 }
 
