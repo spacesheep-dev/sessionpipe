@@ -139,8 +139,9 @@ A session can hand a task to another agent on this machine and get the answer ba
 and prints its reply on stdout (the child's id and progress on stderr), so Claude Code
 can use Codex for a review, Codex can ask Gemini, and any harness with a shell can use
 any other. The request never leaves the machine: it goes over the daemon's local socket
-(the one `wait` uses), the daemon runs the agent in an allowed folder at the machine's
-mode or narrower, caps it as it caps a start, and stops a chain at two deep. Both
+(the one `wait` uses), the daemon runs the agent in an allowed folder at `safe` (or
+`read`; never wider than the machine's mode), caps it as it caps a start, and stops a
+chain at two deep. Both
 sessions' events say what happened (`delegation.started` / `delegation.ended` on the
 asker, `delegated_by` on the answerer). A receiver can do the same from outside with
 `reply_to` on a `start` or a `prompt`: the answer comes back into that session as a

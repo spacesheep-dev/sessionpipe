@@ -230,7 +230,7 @@ describe.runIf(unix)("ask <agent> <task>", () => {
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
     expect(r.err).toBe(
-      "sessionpipe ask: no control daemon is answering on this machine. Run `sessionpipe ask on` once at its terminal: that starts the daemon as a service and keeps it running.\n",
+      "sessionpipe ask: no control daemon is answering on this machine. The person runs `sessionpipe ask on` once at its terminal (not from inside a session): that starts the daemon as a service and keeps it running.\n",
     );
   });
 
@@ -286,6 +286,10 @@ describe.runIf(unix)("ask <agent> <task>", () => {
     await serve(answer());
     expect((await run(["codex", "-v", "means", "verbose"])).code).toBe(0);
     expect(seen[0]).toMatchObject({ text: "-v means verbose" });
+    // After `--` every word is the task, so text that starts like a flag moves nothing.
+    expect((await run(["codex", "--json", "--", "--cwd", "/elsewhere", "--model", "x"])).code).toBe(0);
+    expect(seen[1]).toMatchObject({ text: "--cwd /elsewhere --model x", cwd: project });
+    expect(seen[1]).not.toHaveProperty("model");
   });
 });
 
@@ -302,6 +306,24 @@ describe("ask on / off / status", () => {
     expect(r.out).toContain(`Allowed ${project} for asked agents`);
     expect(r.out).toContain("Daemon: launchd agent (stand-in)");
     expect(r.out).toContain("`sessionpipe ask setup`");
+  });
+  it("on from inside a session is refused, unless --yes: allowing a folder and installing a service is the person's call", async () => {
+    for (const inside of [
+      { CLAUDE_CODE_SESSION_ID: SID },
+      { CODEX_SESSION_ID: "t1" },
+      { SESSIONPIPE_CONTROL_JOB: "1" },
+    ]) {
+      const r = await run(["on"], { env: { ...env, ...inside } });
+      expect(r.code, JSON.stringify(inside)).toBe(1);
+      expect(r.out).toBe("");
+      expect(r.err).toContain("ask them to run `sessionpipe ask on` at this machine's terminal");
+      expect(readControl(env)).toBeNull();
+      expect(installService).not.toHaveBeenCalled();
+    }
+    const r = await run(["on", "--yes"], { env: { ...env, CLAUDE_CODE_SESSION_ID: SID } });
+    expect(r.code).toBe(0);
+    expect(readControl(env)).toMatchObject({ ask: true, folders: [project] });
+    expect(installService).toHaveBeenCalledTimes(1);
   });
   it("on from the home folder allows nothing and says so; --no-service installs none; a paired machine keeps its config", async () => {
     vi.spyOn(process, "cwd").mockReturnValue(home);

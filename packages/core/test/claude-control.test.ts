@@ -137,8 +137,17 @@ describe("capabilities and mode flags", () => {
 });
 
 describe("env, login and hints", () => {
-  it("claudeEnv drops the in-session markers and names the account's config dir", () => {
-    const base = { PATH: "/bin", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CONFIG_DIR: "/acct" };
+  it("claudeEnv drops the in-session markers and any lineage, and names the account's config dir", () => {
+    const base = {
+      PATH: "/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CONFIG_DIR: "/acct",
+      // A daemon started from inside an asked session: none of this is the child's.
+      SESSIONPIPE_ASKED_BY: "codex:a1",
+      SESSIONPIPE_ASK_CHAIN: "codex:a1",
+      SESSIONPIPE_LAUNCHED_BY: "codex:a1",
+    };
     expect(claudeEnv(undefined, base)).toEqual({
       PATH: "/bin",
       CLAUDE_CONFIG_DIR: "/acct",

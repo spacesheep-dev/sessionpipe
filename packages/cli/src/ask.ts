@@ -20,8 +20,10 @@ import { waitSession } from "./control/wait.js";
 import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 
 export const ASK_HELP = `  sessionpipe ask <agent|harness:id> "<task>" [--cwd DIR] [--permission read|safe] [--model M] [--json] [--quiet]
-                                                   (hand a task to another agent here; its answer comes back on stdout)
-  sessionpipe ask on | off | status                (whether sessions on this machine may ask each other)
+                                                   (hand a task to another agent here; its answer comes back on stdout;
+                                                    \`--text -\` reads the task from stdin, words after \`--\` are the task)
+  sessionpipe ask on | off | status                (whether sessions on this machine may ask each other; \`on\` is the
+                                                    person's to run at the terminal, never a session's)
   sessionpipe ask setup [--remove]                 (tell Claude Code and Codex the command exists)`;
 
 /** What the asker writes where. `out` is one line on stdout: the answer, or a status
@@ -47,7 +49,7 @@ const HARNESS = /^[a-z][a-z0-9-]{0,39}$/;
  *  the harness's own command timeout is the asker's, as for `wait`. */
 const ASK_TIMEOUT_MS = 2 ** 31 - 1;
 const VALUED = new Set(["--cwd", "--permission", "--model", "--text"]);
-const SWITCHES = new Set(["--json", "--quiet", "--remove", "--no-service"]);
+const SWITCHES = new Set(["--json", "--quiet", "--remove", "--no-service", "--yes"]);
 
 /** Run `sessionpipe ask …`; `argv` starts with "ask". Returns the exit code: 0 with the
  *  answer on stdout, 1 when the daemon refused or the run failed, 2 for a usage error. */
@@ -57,6 +59,12 @@ export async function askMain(argv: string[], io: AskIo, o: AskOptions = {}): Pr
   const rest: string[] = [];
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i] as string;
+    // After `--` every word is the task, flags or not: a task composed from text that
+    // happens to start with --cwd or --model never moves the child or picks its model.
+    if (a === "--") {
+      rest.push(...argv.slice(i + 1));
+      break;
+    }
     if (VALUED.has(a)) flags[a] = argv[++i] ?? "";
     else if (SWITCHES.has(a)) flags[a] = true;
     else if (/^--?[a-z]/.test(a) && !rest.length) {
@@ -70,7 +78,7 @@ export async function askMain(argv: string[], io: AskIo, o: AskOptions = {}): Pr
       io.err(`usage:\n${ASK_HELP}\n`);
       return 2;
     case "on":
-      return on(argv, io, env, o.distDir, harnesses, !!flags["--no-service"]);
+      return on(argv, io, env, o.distDir, harnesses, !!flags["--no-service"], !!flags["--yes"]);
     case "off":
       return off(io, env);
     case "status":
@@ -188,7 +196,7 @@ async function askOnce(
   await askMany(socketPath(stateDir(env), env), req, onReply, ASK_TIMEOUT_MS);
   if (state === "nothing")
     io.err(
-      "sessionpipe ask: no control daemon is answering on this machine. Run `sessionpipe ask on` once at its terminal: that starts the daemon as a service and keeps it running.\n",
+      "sessionpipe ask: no control daemon is answering on this machine. The person runs `sessionpipe ask on` once at its terminal (not from inside a session): that starts the daemon as a service and keeps it running.\n",
     );
   else if (state === "asked") {
     endLine();
@@ -222,7 +230,18 @@ function on(
   distDir: string | undefined,
   harnesses: (env: NodeJS.ProcessEnv) => string[],
   noService: boolean,
+  yes: boolean,
 ): number {
+  // The person's command, at the terminal: it allows a folder and installs a service
+  // that runs for good. A session's shell carries its harness's id (or the daemon's job
+  // mark), and a model that read "run `sessionpipe ask on`" in a refusal would run it
+  // there; it gets told whose command that is instead, unless the person said --yes.
+  if (!yes && (env.SESSIONPIPE_CONTROL_JOB || env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID)) {
+    io.err(
+      "sessionpipe ask on: this runs inside a session. Turning asking on allows a folder and installs the daemon as a service, which is the person's decision: ask them to run `sessionpipe ask on` at this machine's terminal (or `sessionpipe ask on --yes` here, if they say so).\n",
+    );
+    return 1;
+  }
   // A service must point at a copy that stays (pair's rule), never an npx cache.
   if (distDir && viaNpx(distDir)) {
     rerunGlobally(argv, io.out);

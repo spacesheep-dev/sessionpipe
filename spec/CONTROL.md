@@ -588,13 +588,19 @@ Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>
 ```
 
 `<short id>` is the answering session's short id (PROTOCOL.md §3) and `<receiver host>`
-the host of the receiver that carried the command. The relay is not a command: it is
+the host of the receiver that carried the command. The machine places `reply_to` when
+the command arrives, as it places the session of any `prompt` (§5 step 6): a session it
+does not know, or one in a folder its allowlist excludes, makes the command no handoff
+at all — it runs and is acked as usual, nothing is relayed, and no event is written on
+that session, since a signer's say-so is no reason to write to a session the machine
+does not have or will not touch. The relay is not a command: it is
 not acked, it is never relayed further, and `reply_to` is read from the signed bytes
 and nowhere else. Its fate lives in the events (PROTOCOL.md §4): when the daemon
 takes the command it emits on `reply_to` a `delegation.started` with `via: "handoff"`
 and `to` the command's session, and when it is done a `delegation.ended` whose
 `relayed` says `delivered`, `unsupported` (no mode fits `reply_to`, or its folder is
-not allowed) or `failed`. A command whose final ack is not `delivered` relays nothing;
+no longer allowed) or `failed`; `delegation.started` is emitted only for a `reply_to`
+the machine placed. A command whose final ack is not `delivered` relays nothing;
 its `delegation.ended` has `ok: false`, the ack's `code` or `detail` as `error`, and no
 `relayed`. The session that answers carries `delegated_by: <reply_to>` on its events
 (PROTOCOL.md §3), so a receiver can draw the lineage.
@@ -721,14 +727,18 @@ first, from the caller's own environment (below). It MAY name `permission` (`rea
 | `ask_off` | Asking is off on this machine. It is on by default; `sessionpipe ask off` turns it off and `on` back on. |
 | `harness` | The harness is not one this machine can run headlessly, or the session is not one it can deliver a prompt to. |
 | `folder` | The folder is not on the machine's allowlist (§5 step 6). |
-| `depth` | The chain already has two sessions: A may ask B, B may ask C, C MUST NOT ask. |
-| `loop` | The target session is the asker, or one of the sessions in its chain. |
-| `start_limit` | The machine's caps on starts (§6 `start`) are reached. They count an ask's start as a receiver's, and the headless slot is the same slot. |
+| `depth` | The chain already has two sessions: A may ask B, B may ask C, C MUST NOT ask. The daemon counts for itself as well, from the asks it has in hand (the one waiting on the asker, the one waiting on that one's asker), so a session that cleared its environment is no shallower. |
+| `loop` | The target session is the asker, one of the sessions in its chain, or a session that is itself waiting on an ask the daemon has in hand (its turn ends only when that answer is back). Counted under the names the daemon knows the sessions by: a Codex session asked under its start's name and asking under its own id is one session. |
+| `start_limit` | The machine's caps on starts (§6 `start`) are reached — they count an ask's start as a receiver's, and the headless slot is the same slot — or the asker, or the session asked, already has three asks in hand. |
 | `bad_fields` | Anything else out of shape. |
 
-**The child** runs at the machine's `mode`, narrowed by `permission` when the ask names
-one and never widened: an ask can no more turn approval off than a command can
-(§3.1). A new session is started as a `start` would be, an existing one gets the text
+**The child** runs at `safe`, or at `read` when the ask names it, and never wider than
+the machine's `mode`: an ask is a model's doing, not the person's, so a machine the
+person put in `edits` or `auto` for their receivers runs an asked agent at `safe` all
+the same, and an ask can no more turn approval off than a command can (§3.1). An
+existing session runs the ask under the same cap, narrower than its own level and
+never wider; an ACP agent, which takes no level (§6), runs as the machine's mode says.
+A new session is started as a `start` would be, an existing one gets the text
 as a `prompt` would (§6, the first mode that fits), with one more paragraph framing it,
 so the model knows where the task came from and that its answer goes back by itself:
 

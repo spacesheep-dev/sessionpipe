@@ -150,8 +150,9 @@ back: `sessionpipe ask codex "review the diff on this branch"` runs Codex headle
 waits, and prints its reply on stdout, so Claude Code can use Codex for a review, Codex
 can ask Gemini, and any harness with a shell can use any other. The request never
 leaves the machine: it goes over the daemon's local socket (the one `wait` uses), the
-daemon runs the agent in an allowed folder at the machine's mode or narrower, caps it
-as it caps a `start`, and stops a chain at two deep. Both sessions' events say what
+daemon runs the agent in an allowed folder at `safe` (`--permission read` narrows it;
+never wider than the machine's mode, whatever that is), caps it as it caps a `start`,
+and stops a chain at two deep. Both sessions' events say what
 happened (`delegation.started` / `delegation.ended` on the asker, `delegated_by` on
 the answerer), so a receiver shows the lineage. `sessionpipe ask on` turns it on, with
 or without a receiver; `sessionpipe ask setup` tells Claude Code and Codex the command

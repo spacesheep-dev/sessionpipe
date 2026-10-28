@@ -57,7 +57,8 @@ const a = process.argv.slice(2);
 const log = (o) => fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(o) + "\\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 log({ bin: path.basename(process.argv[1]), argv: a, cwd: process.cwd(), job: process.env.SESSIONPIPE_CONTROL_JOB || null,
-  asked_by: process.env.SESSIONPIPE_ASKED_BY || null, chain: process.env.SESSIONPIPE_ASK_CHAIN || null });
+  asked_by: process.env.SESSIONPIPE_ASKED_BY || null, chain: process.env.SESSIONPIPE_ASK_CHAIN || null,
+  launched_by: process.env.SESSIONPIPE_LAUNCHED_BY || null });
 `;
   writeFileSync(
     fakeCodex,
@@ -99,6 +100,7 @@ interface Run {
   job: string | null;
   asked_by: string | null;
   chain: string | null;
+  launched_by: string | null;
 }
 const runs = (): Run[] =>
   existsSync(calls)
@@ -322,6 +324,7 @@ describe("the request's shape (askProblem)", () => {
     expect(askProblem(req({ cwd: "relative" }))).toMatch(/absolute folder/);
     expect(askProblem(req({ chain: "a" as unknown as string[] }))).toMatch(/chain is/);
     expect(askProblem(req({ chain: [""] }))).toMatch(/chain is/);
+    expect(askProblem(req({ chain: ["not a ref\n"] }))).toMatch(/chain is a list of sessions/);
     expect(askProblem(req({ chain: Array.from({ length: 9 }, () => ASKER) }))).toMatch(/chain is/);
     expect(askProblem(req({ permission: "auto" as "read" }))).toMatch(/read or safe/);
     expect(askProblem(req({ model: "-bad" }))).toMatch(/a model is/);
@@ -420,9 +423,7 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13)", () => {
     await startDaemon();
     const first = await askIt(req({ text: "build it" }));
     const session = (first.end as { session: string }).session;
-    const { got, end } = await askIt(
-      req({ session, text: "and test it", permission: "read", from: `codex:${THREAD}` }),
-    );
+    const { got, end } = await askIt(req({ session, text: "and test it", permission: "read", from: "gemini-cli:g1" }));
     // The session is known at once: it is the one asked for.
     expect(got[0]).toEqual({ op: "asked", ask_id: expect.any(String), session });
     expect(end).toMatchObject({
@@ -440,10 +441,10 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13)", () => {
       'sandbox_mode="read-only"',
       "--",
       THREAD,
-      frameAsk("and test it", `codex:${THREAD}`),
+      frameAsk("and test it", "gemini-cli:g1"),
     ]);
-    expect(second).toMatchObject({ asked_by: `codex:${THREAD}`, chain: `codex:${THREAD}` });
-    const ev = await until(() => (events("codex", THREAD).length === 2 ? events("codex", THREAD) : null));
+    expect(second).toMatchObject({ asked_by: "gemini-cli:g1", chain: "gemini-cli:g1" });
+    const ev = await until(() => (events("gemini-cli", "g1").length === 2 ? events("gemini-cli", "g1") : null));
     expect(ev.map((e) => e.type)).toEqual(["delegation.started", "delegation.ended"]);
     expect(ev[0]?.data).toMatchObject({ via: "ask", harness: "codex", to: session });
   });
@@ -515,9 +516,9 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13)", () => {
     expect(await refused(req({ harness: "claude-code", session: `claude-code:${OTHER}` }))).toMatchObject({
       code: "folder",
     });
-    expect(await refused(req({ chain: ["claude-code:a1", "codex:b2"] }))).toMatchObject({
+    expect(await refused(req({ chain: ["gemini-cli:a1", "codex:b2"] }))).toMatchObject({
       code: "depth",
-      detail: "an ask goes 2 deep at most: claude-code:a1 asked codex:b2, which asked this session, which can't ask on",
+      detail: "an ask goes 2 deep at most: gemini-cli:a1 asked codex:b2, which asked this session, which can't ask on",
     });
     expect(await refused(req({ text: " " }))).toMatchObject({ code: "bad_fields" });
     expect(await refused({ ...req(), permission: "auto" as "read" })).toMatchObject({ code: "bad_fields" });
@@ -617,8 +618,11 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to)", () => {
     expect(runs().map((r) => r.bin)).toEqual(["codex"]);
   });
 
-  it("reply_to in a folder the machine doesn't allow: relayed unsupported too", { timeout: 20_000 }, async () => {
-    await startDaemon({ receivers: true });
+  it("reply_to in a folder the machine doesn't allow: no handoff at all — the command runs, nothing is relayed, nothing is written on that session; a folder that stops being allowed mid-run is unsupported at relay time", {
+    timeout: 20_000,
+  }, async () => {
+    const log: string[] = [];
+    await startDaemon({ receivers: true, extra: { log: (l) => log.push(l) } });
     const elsewhere = path.join(tmp, "elsewhere");
     mkdirSync(elsewhere);
     const OTHER = SID.replace(/^8c/, "7b");
@@ -631,6 +635,24 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to)", () => {
       reply_to: `claude-code:${OTHER}`,
     });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
+    expect(log.find((l) => l.includes("isn't a session this machine can place"))).toMatch(
+      /reply_to claude-code:7b\S+ isn't a session this machine can place \(that session's folder isn't one this machine allows\); the command runs, nothing is relayed/,
+    );
+    expect(runs().map((r) => r.bin)).toEqual(["codex"]);
+    expect(existsSync(path.join(tmp, "state", "outbox"))).toBe(false);
+    // Allowed when the command arrives, not any more when the reply is ready: the started
+    // event went out, and ended says unsupported, as for a session no mode fits.
+    d?.reload({ ...cfg({ receivers: true }), folders: [project, elsewhere] });
+    const q2 = await rx.send({
+      kind: "start",
+      session: `codex:${SID.replace(/^8c/, "5e")}`,
+      cwd: project,
+      text: "go again",
+      reply_to: `claude-code:${OTHER}`,
+    });
+    await until(() => events("claude-code", OTHER).length === 1);
+    d?.reload(cfg({ receivers: true }));
+    expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "delivered" });
     const ev = await until(() => (events("claude-code", OTHER).length === 2 ? events("claude-code", OTHER) : null));
     expect(ev[1]?.data).toMatchObject({ ok: true, relayed: "unsupported", error: expect.stringContaining("folder") });
   });
@@ -703,15 +725,134 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
     });
   });
 
-  it("on an inherit machine the cap is the level itself; a model goes to the start", { timeout: 20_000 }, async () => {
+  it("on an inherit machine an ask runs at safe, the one level a message may name there; a model goes to the start", {
+    timeout: 20_000,
+  }, async () => {
     await startDaemon({ mode: "inherit" });
     const first = await askIt(req({ text: "build it", model: "o3" }));
     expect(first.end?.op).toBe("answer");
     expect(runs()[0]?.argv).toContain("o3");
-    expect(runs()[0]?.argv.join(" ")).not.toMatch(/sandbox|approve/);
+    expect(runs()[0]?.argv.slice(5, 7)).toEqual(["-s", "workspace-write"]);
+    expect(runs()[0]?.argv.join(" ")).not.toMatch(/approve/);
     const session = (first.end as { session: string }).session;
     expect((await askIt(req({ session, text: "read it", permission: "read" }))).end?.op).toBe("answer");
     expect(runs()[1]?.argv).toContain('sandbox_mode="read-only"');
+  });
+
+  it("an ask that names no level runs at safe, on an auto machine too; a session a receiver started at auto takes the ask at safe; wider than safe can't be named", {
+    timeout: 20_000,
+  }, async () => {
+    await startDaemon({ mode: "auto", receivers: true });
+    // A receiver's start with no level runs at the machine's mode, auto…
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
+    expect(runs()[0]?.argv).toContain("--approve-for-me");
+    // …an ask's new session at safe, the workspace sandbox: an ask is a model's doing, not the person's…
+    const fresh = await askIt(req({ text: "review" }));
+    expect(fresh.end?.op).toBe("answer");
+    expect(runs()[1]?.argv.slice(5, 7)).toEqual(["-s", "workspace-write"]);
+    // …and an ask into the receiver's auto session runs that turn at safe, narrower than its own level.
+    const into = await askIt(req({ session: `codex:${RECV}`, text: "and this" }));
+    expect(into.end?.op).toBe("answer");
+    expect(runs()[2]?.argv).toContain('sandbox_mode="workspace-write"');
+    expect(runs()[2]?.argv.join(" ")).not.toMatch(/approve|auto_review/);
+    expect(runs()[2]?.argv.at(-1)).toBe(frameAsk("and this", ASKER));
+    // Read narrows further; anything wider than safe is out of shape, whatever the machine's mode.
+    expect((await askIt(req({ session: `codex:${RECV}`, text: "look", permission: "read" }))).end?.op).toBe("answer");
+    expect(runs()[3]?.argv).toContain('sandbox_mode="read-only"');
+    expect((await askIt({ ...req(), permission: "auto" as "read" })).end).toMatchObject({ code: "bad_fields" });
+    expect(runs()).toHaveLength(4);
+  });
+
+  it("the daemon counts depth and loops for itself: a session waiting on an ask can't be asked from a clean environment, and the session it asked can't ask on", {
+    timeout: 20_000,
+  }, async () => {
+    await startDaemon();
+    // G asks A (the Claude Code session here, a waiter parked): in hand until A answers.
+    const waited = waitForMessage(ASKER, { env });
+    await new Promise((r) => setTimeout(r, 100));
+    const first = askIt(req({ harness: "claude-code", session: ASKER, from: "gemini-cli:g1", text: "think" }));
+    await waited;
+    // A asks B, a new Codex session, with a chain that says nothing: counted all the same.
+    const second = askIt(req({ text: "help", chain: [] }));
+    await until(
+      () => existsSync(path.join(tmp, "state", "control", "aliases.json")) && Object.keys(aliases()).length === 1,
+    );
+    const b = `codex:${THREAD}`;
+    // B, under its own id and with no chain, can't ask on: the daemon knows B answers A, which answers G.
+    expect((await askIt(req({ from: b, chain: [], text: "more" }))).end).toMatchObject({
+      code: "depth",
+      detail: `an ask goes 2 deep at most: ${b} is answering an ask nested in another one here, so it can't ask on`,
+    });
+    // Nobody can ask A while A waits on B — not a process with no name, not a stranger, and not
+    // B (two deep already, so depth says so first): A's turn ends only when B's answer is back.
+    const anon = req({ harness: "claude-code", session: ASKER, text: "ping" });
+    delete anon.from;
+    expect((await askIt(anon)).end).toMatchObject({
+      code: "loop",
+      detail: expect.stringContaining("is waiting on an ask of its own"),
+    });
+    expect(
+      (await askIt(req({ harness: "claude-code", session: ASKER, from: "gemini-cli:g7", text: "ping" }))).end,
+    ).toMatchObject({ code: "loop" });
+    expect((await askIt(req({ harness: "claude-code", session: ASKER, from: b, text: "ping" }))).end).toMatchObject({
+      code: "depth",
+    });
+    expect((await second).end?.op).toBe("answer");
+    answer(SID, project, "Done.");
+    expect((await first).end).toMatchObject({ op: "answer", text: "Done." });
+    // Nothing in hand any more: the same asks go through.
+    expect(d?.busy()).toBeNull();
+    expect((await askIt(req({ from: b, chain: [], text: "more" }))).end?.op).toBe("answer");
+  });
+
+  it("a session takes three asks at a time, as asker and as asked: the fourth is refused start_limit before it begins", {
+    timeout: 20_000,
+  }, async () => {
+    await startDaemon();
+    const first = await askIt(req({ text: "open" }));
+    const session = (first.end as { session: string }).session;
+    const three = [1, 2, 3].map((n) => askIt(req({ session, text: `turn ${n}` })));
+    await new Promise((r) => setTimeout(r, 100));
+    // The session asked is full: a fourth, from anyone, is refused at once.
+    const onTarget = await askIt(req({ session, text: "turn 4", from: "gemini-cli:g4" }));
+    expect(onTarget.got).toEqual([onTarget.end]);
+    expect(onTarget.end).toMatchObject({
+      op: "refused",
+      code: "start_limit",
+      detail: `${session.slice(0, 24)} has 3 asks waiting on it already; a session takes 3 at a time`,
+    });
+    // The asker is full too: not even a new session for it, until one of its three is answered.
+    expect((await askIt(req({ text: "a fourth" }))).end).toMatchObject({
+      code: "start_limit",
+      detail: `${ASKER} has 3 asks in hand already; a session asks 3 at a time`,
+    });
+    expect((await Promise.all(three)).map((r) => r.end?.op)).toEqual(["answer", "answer", "answer"]);
+    expect((await askIt(req({ session, text: "turn 5" }))).end?.op).toBe("answer");
+    expect(runs()).toHaveLength(5);
+  });
+
+  it("the daemon's own lineage never reaches a child: a receiver's start and an ask from nobody start clean", {
+    timeout: 20_000,
+  }, async () => {
+    // A daemon started from a shell that was itself asked (`control run` inside a session).
+    const stale = {
+      SESSIONPIPE_ASKED_BY: "codex:stale",
+      SESSIONPIPE_ASK_CHAIN: "codex:stale",
+      SESSIONPIPE_LAUNCHED_BY: "codex:stale",
+    };
+    await startDaemon({ receivers: true, extra: { env: { ...env, ...stale } } });
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
+    expect(runs()[0]).toMatchObject({ job: "1", asked_by: null, chain: null, launched_by: null });
+    const anon = req();
+    delete anon.from;
+    expect((await askIt(anon)).end?.op).toBe("answer");
+    expect(runs()[1]).toMatchObject({ job: "1", asked_by: null, chain: "unknown", launched_by: null });
+    // And a child the daemon runs for an asker carries that asker, nothing older.
+    const into = await askIt(req({ session: `codex:${RECV}`, from: ASKER }));
+    expect(into.end, JSON.stringify(into.end)).toMatchObject({ op: "answer" });
+    expect(runs()[2]).toMatchObject({ asked_by: ASKER, chain: ASKER, launched_by: null });
   });
 
   it("an ACP session takes no level or model; with no agent here there is nothing to ask", async () => {
@@ -837,8 +978,11 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to): the other modes and e
     expect(runs()).toEqual([]);
   });
 
-  it("reply_to no session on this machine: relayed failed, and why", { timeout: 20_000 }, async () => {
-    await startDaemon({ receivers: true });
+  it("reply_to no session on this machine: no handoff — the command runs and is acked as usual, nothing is relayed, no event and no outbox for a session a signer made up", {
+    timeout: 20_000,
+  }, async () => {
+    const log: string[] = [];
+    await startDaemon({ receivers: true, extra: { log: (l) => log.push(l) } });
     const NOBODY = SID.replace(/^8c/, "6a");
     const q = await rx.send({
       kind: "start",
@@ -848,12 +992,12 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to): the other modes and e
       reply_to: `claude-code:${NOBODY}`,
     });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
-    const ev = await until(() => (events("claude-code", NOBODY).length === 2 ? events("claude-code", NOBODY) : null));
-    expect(ev[1]?.data).toMatchObject({
-      ok: true,
-      relayed: "failed",
-      error: expect.stringMatching(/no Claude Code session/),
-    });
+    expect(log.find((l) => l.includes("isn't a session this machine can place"))).toMatch(/no Claude Code session/);
+    expect(runs().map((r) => r.bin)).toEqual(["codex"]);
+    expect(existsSync(path.join(tmp, "state", "outbox"))).toBe(false);
+    expect(existsSync(path.join(tmp, "state", "facts"))).toBe(false);
+    // Exactly one final ack, as ever: the relay's fate is never a second one.
+    expect(rx.acks.filter((a) => a.id === q.id && a.outcome !== "taken" && a.outcome !== "progress")).toHaveLength(1);
   });
 
   it("a relay whose run throws: relayed failed, in its words", { timeout: 20_000 }, async () => {

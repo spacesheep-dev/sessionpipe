@@ -271,6 +271,10 @@ interface Handoff {
 /** How deep an ask may already be: A asks B, B may ask C, C may not ask (§13). */
 const ASK_DEPTH = 2;
 const ASK_CHAIN_MAX = 8;
+/** Asks one session may have in hand at once, as the asker or as the session asked
+ *  (§13 `start_limit`): an ask into a session that already exists takes no start, so
+ *  nothing else bounds how many a looping model queues on one. */
+const ASKS_IN_HAND = 3;
 const ASK_HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
 
 /** An ask's fields as the wire has them (local.ts), checked before any rule: what is
@@ -288,12 +292,8 @@ export function askProblem(req: AskRequest): string | null {
   if (typeof r.text !== "string" || !r.text.trim() || r.text.length > TEXT_MAX)
     return `an ask needs text, at most ${TEXT_MAX} characters`;
   if (typeof r.cwd !== "string" || !path.isAbsolute(r.cwd) || r.cwd.length > 1024) return "cwd is an absolute folder";
-  if (
-    !Array.isArray(r.chain) ||
-    r.chain.length > ASK_CHAIN_MAX ||
-    r.chain.some((c) => typeof c !== "string" || !c || c.length > 160)
-  )
-    return "chain is a list of the asks this one is nested in, outermost first";
+  if (!Array.isArray(r.chain) || r.chain.length > ASK_CHAIN_MAX || r.chain.some((c) => !parseSessionRef(c)))
+    return "chain is a list of sessions, <harness>:<id>, outermost first: the asks this one is nested in";
   if (r.permission !== undefined && r.permission !== "read" && r.permission !== "safe")
     return "a permission is read or safe: an ask runs narrower than the machine's mode, never wider";
   if (r.model !== undefined && (typeof r.model !== "string" || r.model.length > MODEL_MAX || !MODEL_RE.test(r.model)))
@@ -504,6 +504,11 @@ export class ControlDaemon {
   /** Commands with `reply_to` in hand, by message id: their reply follows into that
    *  session after their own final ack (CONTROL.md §6). */
   private readonly handoffs = new Map<string, Handoff>();
+  /** Asks in hand, by ask id: who asked whom. The depth and loop rules (§13) count from
+   *  here as well as from the chain the caller reports, which is the caller's own to
+   *  clear: B, asked by A, can't ask A back from a clean environment, and C, asked by B
+   *  under A, can't ask on by forgetting its chain. */
+  private readonly asks = new Map<string, { from: string | null; to: string }>();
 
   constructor(
     private cfg: ControlConfig,
@@ -2359,7 +2364,7 @@ export class ControlDaemon {
       cwd,
       mode: this.cfg.mode,
       label,
-      env: { ...(this.deps.env ?? process.env), ...o.env },
+      env: { ...jobEnv(this.deps.env), ...o.env },
       ...(o.load ? { load: o.load } : {}),
       onText: (t) => stream.set(t),
       log: (l) => this.deps.log(`${id.slice(-8)}: ${l}`),
@@ -2422,9 +2427,10 @@ export class ControlDaemon {
     return cmd.reply_to ? { [DELEGATED_BY_ENV]: cmd.reply_to, SESSIONPIPE_ASK_CHAIN: cmd.reply_to } : {};
   }
 
-  /** An ask's `permission` on a prompt (CONTROL.md §13) caps the run of the session it
-   *  names: narrower than the session's own level, never wider. A receiver's prompt
-   *  carries none (the verifier refuses it), so this leaves it alone. */
+  /** An ask's `permission` on a prompt (CONTROL.md §13; an ask always names one, safe
+   *  unless it says read) caps the run of the session it names: narrower than the
+   *  session's own level, never wider. A receiver's prompt carries none (the verifier
+   *  refuses it), so this leaves it alone. */
   private capped(o: StartOptions, cmd: ControlCommand): StartOptions {
     if (!cmd.permission) return o;
     return { ...o, permission: o.permission === "inherit" ? cmd.permission : narrower(o.permission, cmd.permission) };
@@ -2436,6 +2442,33 @@ export class ControlDaemon {
   }
 
   // --- asking another agent (CONTROL.md §13) ----------------------------------------
+
+  /** A session under the name the daemon itself knows it by: the copy a Claude Code
+   *  session's later runs moved to, the id a driven harness picked behind the daemon's
+   *  alias — so a Codex session asked under its start's name and asking under its own
+   *  rollout id is one session to the depth and loop rules. */
+  private realRef(session: string): string {
+    const ref = parseSessionRef(session);
+    /* v8 ignore next -- every ref here passed askProblem or came from the daemon */
+    if (!ref) return session;
+    if (ref.harness === "claude-code") return `${ref.harness}:${this.state.copies[ref.id] ?? ref.id}`;
+    return `${ref.harness}:${this.aliasOf(ref.harness, ref.id)?.id ?? ref.id}`;
+  }
+
+  /** How many asks in hand `from` is already answering: the ask that targets it, the
+   *  one that targets that ask's asker, and so on up. Nothing for nobody's session. */
+  private askDepth(from: string | null): number {
+    let depth = 0;
+    const seen = new Set<string>();
+    for (let at = from ? this.realRef(from) : null; at && !seen.has(at); ) {
+      seen.add(at);
+      const above = [...this.asks.values()].find((a) => this.realRef(a.to) === at);
+      if (!above) break;
+      depth++;
+      at = above.from ? this.realRef(above.from) : null;
+    }
+    return depth;
+  }
 
   /** `sessionpipe ask`: a session on this machine hands a task to another agent and gets
    *  the answer back on this connection. The trust boundary is the socket's, the one
@@ -2479,13 +2512,43 @@ export class ControlDaemon {
       session = `${req.harness}:${randomUUID()}`;
       cwd = ok;
     }
-    if (req.chain.length >= ASK_DEPTH)
+    // The depth the caller's chain admits, and the one the daemon counts for itself from
+    // the asks it has in hand: a session that cleared its environment is still, to the
+    // daemon, the session some ask is waiting on.
+    const counted = this.askDepth(req.from ?? null);
+    if (req.chain.length >= ASK_DEPTH || counted >= ASK_DEPTH)
       return refuse(
         "depth",
-        `an ask goes ${ASK_DEPTH} deep at most: ${req.chain[0]} asked ${req.chain[1]}, which asked this session, which can't ask on`,
+        req.chain.length >= ASK_DEPTH
+          ? `an ask goes ${ASK_DEPTH} deep at most: ${req.chain[0]} asked ${req.chain[1]}, which asked this session, which can't ask on`
+          : `an ask goes ${ASK_DEPTH} deep at most: ${req.from} is answering an ask nested in another one here, so it can't ask on`,
       );
-    if (target && (req.from === session || req.chain.includes(session)))
-      return refuse("loop", `${session.slice(0, 24)} is waiting on this very ask`);
+    const inHand = [...this.asks.values()];
+    if (target) {
+      const real = this.realRef(session);
+      if ([req.from, ...req.chain].some((a) => a && this.realRef(a) === real))
+        return refuse("loop", `${session.slice(0, 24)} is waiting on this very ask`);
+      // Asked under one name, asking under another, from any environment: a session that
+      // is itself waiting on an ask can't be asked — its turn only ends when that answer
+      // is back, so a message to it waits for the very thing it would be part of.
+      if (inHand.some((a) => a.from && this.realRef(a.from) === real))
+        return refuse(
+          "loop",
+          `${session.slice(0, 24)} is waiting on an ask of its own; it can take this one once that answer is back`,
+        );
+      const asked = inHand.filter((a) => this.realRef(a.to) === real).length;
+      if (asked >= ASKS_IN_HAND)
+        return refuse(
+          "start_limit",
+          `${session.slice(0, 24)} has ${asked} asks waiting on it already; a session takes ${ASKS_IN_HAND} at a time`,
+        );
+    }
+    const asking = req.from ? inHand.filter((a) => a.from === req.from).length : 0;
+    if (asking >= ASKS_IN_HAND)
+      return refuse(
+        "start_limit",
+        `${req.from} has ${asking} asks in hand already; a session asks ${ASKS_IN_HAND} at a time`,
+      );
     const askId = ulid(this.deps.now());
     const sent = this.deps.now();
     const from = req.from ? parseSessionRef(req.from)! : null;
@@ -2502,7 +2565,14 @@ export class ControlDaemon {
         text: req.text.slice(0, 200),
       });
     this.inflight.add(askId);
-    const level = req.permission ? { permission: req.permission } : {};
+    this.asks.set(askId, { from: req.from ?? null, to: session });
+    // The level the child runs at (§13): read when the ask says so, else safe, and never
+    // wider than the machine's mode. An ask is a model's doing, not the person's, so the
+    // machine's own edits or auto never carry over to it. An ACP agent takes no level
+    // (§6) and runs as the machine's mode says.
+    const level = acpControl.acpAgent(parseSessionRef(session)!.harness)
+      ? {}
+      : { permission: req.permission ?? narrower("safe", claudeControl.ceilingLevel(this.cfg.mode)) };
     try {
       if (!target) {
         const cmd = {
@@ -2515,8 +2585,8 @@ export class ControlDaemon {
         } as ControlCommand;
         await this.startSession(sink, askId, cmd, sent);
       } else {
-        // `permission` on a prompt is the cap a run of the session gets (capped()); the
-        // session keeps its own model.
+        // `permission` on a prompt is the cap a run of the session gets (capped()), safe
+        // unless the ask said read; the session keeps its own model.
         const cmd = { kind: "prompt", session, text: req.text, ...level } as ControlCommand;
         await this.serial(`deliver:${session}`, async () => {
           const now = this.place(session);
@@ -2570,6 +2640,7 @@ export class ControlDaemon {
         if (a.outcome === "taken") return begin();
         // An answer always follows an `asked`; a run refused before it began sends none.
         if (a.outcome === "delivered") begin();
+        this.asks.delete(askId);
         const ms = this.deps.now() - sent;
         const to = a.session ?? session;
         const ok = a.outcome === "delivered";
@@ -2603,6 +2674,17 @@ export class ControlDaemon {
    *  on the session that gets the answer, as an ask is on the session that asked. */
   private handoff(r: PairedReceiver, id: string, cmd: ControlCommand, harness: string, sent: number): void {
     const to = parseSessionRef(cmd.reply_to)!;
+    // Only a session this machine can place now: one it knows, in a folder it allows.
+    // Anything else is no handoff at all — the command runs and is acked as usual, and
+    // nothing is written on a session the machine doesn't know, or won't touch, on a
+    // signer's say-so (§6): no outbox, no event.
+    const place = this.place(cmd.reply_to as string);
+    if ("refused" in place) {
+      this.deps.log(
+        `${id.slice(-8)}: reply_to ${(cmd.reply_to as string).slice(0, 24)} isn't a session this machine can place (${place.why}); the command runs, nothing is relayed`,
+      );
+      return;
+    }
     const askId = ulid(this.deps.now());
     this.handoffs.set(id, { receiver: r, askId, to, from: cmd.session, sent });
     this.deps.log(`${id.slice(-8)}: a handoff; the reply goes to ${(cmd.reply_to as string).slice(0, 24)}`);

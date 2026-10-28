@@ -140,8 +140,9 @@ network. Claude Code's session id comes from `CLAUDE_CODE_SESSION_ID`.
 From inside a session: hands the task to another agent on this machine (an agent by name
 for a new session, or `<harness>:<id>` to continue one) and prints its answer on stdout,
 with the child's id and progress on stderr. The request goes over the daemon's local
-socket, never through a receiver; the daemon runs the agent in an allowed folder at the
-machine's mode or narrower, caps it as it caps a start, and stops a chain at two deep.
+socket, never through a receiver; the daemon runs the agent in an allowed folder at
+`safe` (or `read`; never wider than the machine's mode), caps it as it caps a start, and
+stops a chain at two deep.
 Exit 0 with the answer, 1 when refused or failed, 2 for a usage error.
 
 {{usage ask on}}

@@ -141,7 +141,13 @@ beforeEach(() => {
     SESSIONPIPE_SOCKET: sock,
     CODEX_HOME: path.join(tmp, "codex-home"),
   };
-  for (const k of ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "SESSIONPIPE_ASK_CHAIN", "SESSIONPIPE_ASKED_BY"])
+  for (const k of [
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_SESSION_ID",
+    "SESSIONPIPE_ASK_CHAIN",
+    "SESSIONPIPE_ASKED_BY",
+    "SESSIONPIPE_CONTROL_JOB",
+  ])
     delete env[k];
   writeConfig({ ...DEFAULT_CONFIG, machine: "testbox", sinks: [] }, env.SESSIONPIPE_CONFIG);
   vi.spyOn(os, "homedir").mockReturnValue(home);
@@ -198,7 +204,7 @@ describe.runIf(unix)("sessionpipe ask against the daemon", () => {
   it("no daemon on the socket: exit 1 and what to run", async () => {
     const r = await run(["codex", "anyone?"]);
     expect(r.code).toBe(1);
-    expect(r.err).toContain("Run `sessionpipe ask on` once at its terminal");
+    expect(r.err).toContain("The person runs `sessionpipe ask on` once at its terminal");
     expect(runs()).toEqual([]);
   });
 });

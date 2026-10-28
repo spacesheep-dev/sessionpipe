@@ -22,7 +22,10 @@ it.
   `Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>):`,
   through its normal prompt routing, never wider than `reply_to`'s own mode. On any other
   kind, malformed, or naming the command's own session: `bad_fields` (vectors `137`–`141`).
-  The relay is not a command: it is not acked and never relayed further.
+  A `reply_to` the machine can't place when the command arrives (no such session there,
+  or one outside its allowlist) makes the command no handoff: it runs and is acked as
+  usual, nothing is relayed, and no event is emitted on that session. The relay is not
+  a command: it is not acked and never relayed further.
 - **Two event types on the asking session** (PROTOCOL.md §4, tier 0):
   `delegation.started` (`ask_id`, `via`: `ask` · `handoff`, `harness`, `to?`; tier 1 adds
   `text`, ≤ 200 chars) and `delegation.ended` (`ask_id`, `to?`, `ok`, `ms`, `error?`,
@@ -146,7 +149,7 @@ Adopting 0.10.0 while machines still run 0.9.0:
   is on, that the agent is one it can run headlessly or a session it can reach, the folder
   allowlist, the depth (two deep at most), loops and the start caps, each with its code
   (`ask_off` · `harness` · `folder` · `depth` · `loop` · `start_limit` · `bad_fields`), runs
-  the child at the machine's mode or narrower, frames the task so the model answers in
+  the child at `safe` (or `read`), never wider than the machine's mode, frames the task so the model answers in
   place, and sets `SESSIONPIPE_ASKED_BY` and `SESSIONPIPE_ASK_CHAIN` in the child's
   environment. A `prompt` or a `start` MAY carry `reply_to`, a session on the same
   machine that gets the answer as a message once the command's turn ends, through the

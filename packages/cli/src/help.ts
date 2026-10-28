@@ -33,7 +33,8 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "control run": "control run",
     wait: "wait [--session <harness>:<id>]",
     ask: 'ask <agent|harness:id> "<task>" [--cwd DIR] [--permission read|safe] [--model M] [--json] [--quiet] (or: ask on|off|status|setup)',
-    "ask on": "ask on [--no-service] (sessions here may ask another agent; the daemon runs even with no receiver)",
+    "ask on":
+      "ask on [--no-service] [--yes] (sessions here may ask another agent; the daemon runs even with no receiver; the person's command, --yes from inside a session)",
     "ask off": "ask off (no session here may ask another agent)",
     "ask status": "ask status (on or off, the daemon, the agents it can ask, the folders they may run in)",
     "ask setup":
