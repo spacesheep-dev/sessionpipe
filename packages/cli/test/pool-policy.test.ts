@@ -269,6 +269,26 @@ describe("observe", () => {
     observe(s, "c", { status: 429, retryAfterMs: 365 * 24 * 3_600_000 }, T0 + 1);
     expect(s.accounts[2]?.hold_until).toBe(T0 + 1 + MAX_HOLD_MS);
   });
+  it("F9: a hold set in the future (the clock went back) is cut to a minute, not stretched", () => {
+    const s = st([acct("a"), acct("b")]);
+    observe(s, "a", { status: 429, retryAfterMs: 300_000 }, T0);
+    expect(s.accounts[0]).toMatchObject({ hold_until: T0 + 300_000, hold_at: T0, hold_why: "limit" });
+    expect(roomAt(s.accounts[0] as AccountState, T0 - 3_600_000)).toBe(T0 - 3_600_000 + HOLD_MS);
+    expect(roomAt(s.accounts[0] as AccountState, T0 + 1)).toBe(T0 + 300_000);
+    // An old state.json with no hold_at keeps the absolute time.
+    s.accounts[1]!.hold_until = T0 + 300_000;
+    expect(roomAt(s.accounts[1] as AccountState, T0 - 3_600_000)).toBe(T0 + 300_000);
+    // Fresh numbers tidy a hold that ran out, with its time.
+    observe(s, "a", { windows: [{ id: "five_hour", used_percent: 1 }] }, T0 + 300_000);
+    expect(s.accounts[0]!.hold_at).toBeUndefined();
+    expect(s.accounts[0]!.hold_why).toBeUndefined();
+    // A rest after a limit keeps the limit's reason; a rest on its own is a rest.
+    observe(s, "a", { status: 429, retryAfterMs: 1_000 }, T0);
+    observe(s, "a", { upstream5xx: true }, T0);
+    expect(s.accounts[0]!.hold_why).toBe("limit");
+    observe(s, "b", { upstream5xx: true }, T0);
+    expect(s.accounts[1]!.hold_why).toBe("upstream");
+  });
   it("a 5xx rests the account a minute", () => {
     const s = st([acct("a")]);
     expect(observe(s, "a", { upstream5xx: true }, T0)).toBe(false);

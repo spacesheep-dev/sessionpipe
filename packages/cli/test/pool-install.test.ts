@@ -10,6 +10,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -244,5 +245,72 @@ describe("cleanEnv", () => {
     expect(cleanEnv(env)).toEqual({ PATH: "/bin", OTHER: "x" });
     for (const k of POOL_ENV_KEYS) expect(env[k]).toBeDefined();
     expect(cleanEnv()).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+  });
+});
+
+describe("what the soak found", () => {
+  it("F6: with a keep dir, off gives back the file's own bytes, inline arrays included; edits made meanwhile win", () => {
+    if (!posix) return;
+    const keep = path.join(tmp, "keep");
+    const original = '{\n  "permissions": { "allow": ["Bash", "Read"] },\n  "model": "opus"\n}\n';
+    put("inline", original);
+    put("edited", original);
+    put("fresh", "{}\n");
+    installPoolEnv([dir("inline"), dir("edited"), dir("fresh")], { ...o, keep });
+    expect(readFileSync(file("inline"), "utf8")).not.toBe(original);
+    expect(statSync(keep).mode & 0o777).toBe(0o700);
+    expect(readdirSync(keep).length).toBe(3);
+    for (const f of readdirSync(keep)) expect(statSync(path.join(keep, f)).mode & 0o777).toBe(0o600);
+    // On again (a rotation) keeps the first copy, not the reformatted one.
+    installPoolEnv([dir("inline")], { ...o, token: "tok_2", lastToken: o.token, keep });
+    writeFileSync(file("edited"), readFileSync(file("edited"), "utf8").replace('"opus"', '"sonnet"'));
+    const r = uninstallPoolEnv([dir("inline"), dir("edited"), dir("fresh"), dir("none")], {
+      ...o,
+      token: "tok_2",
+      keep,
+    });
+    expect(r.map((x) => x.changed)).toEqual([true, true, true, false]);
+    expect(readFileSync(file("inline"), "utf8")).toBe(original);
+    expect(JSON.parse(readFileSync(file("edited"), "utf8"))).toEqual({
+      permissions: { allow: ["Bash", "Read"] },
+      model: "sonnet",
+    });
+    expect(readFileSync(file("edited"), "utf8")).not.toBe(original);
+    expect(readFileSync(file("fresh"), "utf8")).toBe("{}\n");
+    expect(readdirSync(keep)).toEqual([]);
+    // A kept copy that is not JSON any more (someone wrote in the keep dir): the formatted file.
+    installPoolEnv([dir("inline")], { ...o, keep });
+    writeFileSync(path.join(keep, readdirSync(keep)[0]!), "{broken");
+    uninstallPoolEnv([dir("inline")], { ...o, keep });
+    expect(JSON.parse(readFileSync(file("inline"), "utf8"))).toEqual({
+      permissions: { allow: ["Bash", "Read"] },
+      model: "opus",
+    });
+    // Without a keep dir, as before: valid, same meaning, JSON.stringify's layout.
+    installPoolEnv([dir("inline")], o);
+    uninstallPoolEnv([dir("inline")], o);
+    expect(JSON.parse(readFileSync(file("inline"), "utf8"))).toEqual({
+      permissions: { allow: ["Bash", "Read"] },
+      model: "opus",
+    });
+  });
+  it("F7: a file created in a config dir reached through a symlink is removed again by off", () => {
+    if (!posix) return;
+    const real = dir("linked-real");
+    mkdirSync(real);
+    const link = path.join(tmp, "linked-dir");
+    symlinkSync(real, link);
+    const on = installPoolEnv([link], o);
+    const created = on.filter((r) => r.created).map((r) => r.file);
+    expect(created).toEqual([path.join(link, "settings.json")]);
+    const off = uninstallPoolEnv([real], { ...o, created });
+    expect(off[0]).toMatchObject({ changed: true, note: "removed (sessionpipe created it)" });
+    expect(existsSync(path.join(real, "settings.json"))).toBe(false);
+    // A created path that no longer resolves is compared as written.
+    installPoolEnv([link], o);
+    expect(uninstallPoolEnv([link], { ...o, created: [path.join(tmp, "gone", "settings.json")] })[0]).toEqual({
+      file: path.join(link, "settings.json"),
+      changed: true,
+    });
   });
 });

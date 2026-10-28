@@ -16,6 +16,13 @@
 // carries one (Claude Code itself creates it 0644), a symlinked settings.json is
 // followed to its target and the report names where the token went, and a config dir
 // anyone else can write to is skipped.
+//
+// JSON.stringify has one layout, so a file with an inline array would come back from
+// `off` reformatted. `keep` names a directory where the bytes of a file `on` changes are
+// kept (0600, under the state dir); `off` writes them back when the file still means the
+// same thing without our keys, so the person gets their file as it was.
+
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -56,6 +63,8 @@ export interface Ours {
   lastPort?: number | undefined;
   /** The bearer before `pool on` minted this one. */
   lastToken?: string | undefined;
+  /** Where the original bytes of a changed file are kept for `off` (see the header). */
+  keep?: string | undefined;
 }
 
 const isOurs = (env: Record<string, unknown>, o: Ours): boolean => {
@@ -72,7 +81,7 @@ const anySet = (env: Record<string, unknown>): boolean => POOL_ENV_KEYS.some((k)
 
 type Shape = { indent: string; eol: string; finalNewline: boolean };
 type JsonFile =
-  | { ok: true; existed: boolean; value: Record<string, unknown>; shape: Shape }
+  | { ok: true; existed: boolean; value: Record<string, unknown>; shape: Shape; raw: string }
   | { ok: false; existed: true; reason: string };
 
 /** Mirrors claude-shaped.ts's readJsonFile (not exported from core): a parse failure
@@ -82,7 +91,7 @@ function readJsonFile(file: string): JsonFile {
   try {
     raw = readFileSync(file, "utf8");
   } catch {
-    return { ok: true, existed: false, value: {}, shape: { indent: "  ", eol: "\n", finalNewline: true } };
+    return { ok: true, existed: false, value: {}, shape: { indent: "  ", eol: "\n", finalNewline: true }, raw: "" };
   }
   let value: unknown;
   try {
@@ -99,6 +108,7 @@ function readJsonFile(file: string): JsonFile {
     existed: true,
     value: value as Record<string, unknown>,
     shape: { indent: m?.[1] ?? "  ", eol: raw.includes("\r\n") ? "\r\n" : "\n", finalNewline: /\r?\n$/.test(raw) },
+    raw,
   };
 }
 
@@ -123,6 +133,23 @@ const target = (file: string): { file: string; linked: boolean } => {
     return { file, linked: false };
   }
 };
+
+/** The same file, through any symlink on the way (`created` is compared this way, so a
+ *  dir reached through a link, or macOS's /tmp, still matches). */
+const same = (a: string, b: string): boolean => {
+  const real = (f: string) => {
+    try {
+      return realpathSync(f);
+    } catch {
+      return f;
+    }
+  };
+  return a === b || real(a) === real(b);
+};
+
+/** Where a file's original bytes are kept: one entry per file path. */
+const kept = (keep: string, file: string): string =>
+  path.join(keep, `${createHash("sha256").update(file).digest("hex").slice(0, 16)}.json`);
 
 /** A config dir another user could write to: a token written there is theirs too. */
 const looseDir = (dir: string): boolean => {
@@ -163,6 +190,10 @@ export function installPoolEnv(dirs: readonly string[], o: Ours): InstallReport[
     const note = linked ? { note: `a symlink; the token is in ${file}` } : {};
     if (!changed) return { file, changed: false, ...note };
     settings.env = env;
+    if (o.keep && f.existed && !existsSync(kept(o.keep, file))) {
+      mkdirSync(o.keep, { recursive: true, mode: 0o700 });
+      writeFileSync(kept(o.keep, file), f.raw, { mode: 0o600 });
+    }
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, formatJson(settings, f.shape));
     // Claude Code's own file is 0644; with our bearer in it, it is ours to tighten.
@@ -187,11 +218,22 @@ export function uninstallPoolEnv(dirs: readonly string[], o: Ours & { created?: 
     if (!isOurs(env, o)) return { file, changed: false, skipped: true, note: "left alone: set by someone else" };
     for (const k of POOL_ENV_KEYS) delete env[k];
     if (!Object.keys(env).length) delete settings.env;
-    if (o.created?.includes(file) && !Object.keys(settings).length) {
+    if (o.created?.some((c) => same(c, file)) && !Object.keys(settings).length) {
       unlinkSync(file);
       return { file, changed: true, note: "removed (sessionpipe created it)" };
     }
-    writeFileSync(file, formatJson(settings, f.shape));
+    // The original bytes, when the file still says the same thing without our keys;
+    // otherwise the person edited it since, and their edits win over their layout.
+    const original = o.keep ? kept(o.keep, file) : null;
+    let text = formatJson(settings, f.shape);
+    if (original && existsSync(original)) {
+      const raw = readFileSync(original, "utf8");
+      try {
+        if (JSON.stringify(JSON.parse(raw)) === JSON.stringify(settings)) text = raw;
+      } catch {}
+      unlinkSync(original);
+    }
+    writeFileSync(file, text);
     return { file, changed: true };
   });
 }

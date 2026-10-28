@@ -9,12 +9,13 @@
 // Written like control.json: whole, to a temp file, then renamed. pool.json never
 // carries a secret: the pool's bearer is `pool:token` in the secrets store and an
 // account's credential `pool:<id>`, as JSON.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { configFile, stateDir } from "@sessionpipe/core";
 import { writePrivate } from "../control/store.js";
 import {
   defaultRunner,
+  probe,
   type Runner,
   type SecretStore,
   type StoreName,
@@ -51,6 +52,8 @@ export interface PoolConfig {
 
 export interface PoolStateAccount {
   hold_until?: number;
+  hold_at?: number;
+  hold_why?: "limit" | "upstream";
   error?: string;
   limits?: PoolLimits;
   limits_at?: number;
@@ -131,6 +134,8 @@ export function readPoolState(env: NodeJS.ProcessEnv = process.env): PoolState {
       if (!a || typeof a !== "object") continue;
       const o: PoolStateAccount = {};
       if (typeof a.hold_until === "number") o.hold_until = a.hold_until;
+      if (typeof a.hold_at === "number") o.hold_at = a.hold_at;
+      if (a.hold_why === "limit" || a.hold_why === "upstream") o.hold_why = a.hold_why;
       if (typeof a.error === "string") o.error = a.error;
       if (a.limits && Array.isArray(a.limits.windows)) {
         o.limits = { windows: a.limits.windows, ...(a.limits.status !== undefined ? { status: a.limits.status } : {}) };
@@ -184,12 +189,23 @@ export class PoolSecrets {
   }
 
   get(cfg: PoolConfig, name: string): string | null {
+    return this.read(cfg, name).value;
+  }
+
+  /** The value, and whether a missing one is really missing or the store can't be
+   *  read right now (a 0000 file, a locked keychain): the listener answers those two
+   *  differently. The keychain is probed only when an item came back empty. */
+  read(cfg: PoolConfig, name: string): { value: string | null; unreadable: boolean } {
     const where = this.store(cfg);
     if (where === "file") {
-      const v = readJson(poolSecretsFile(this.env))?.[name];
-      return typeof v === "string" && v ? v : null;
+      const file = poolSecretsFile(this.env);
+      const all = readJson(file);
+      if (!all) return { value: null, unreadable: existsSync(file) };
+      const v = all[name];
+      return { value: typeof v === "string" && v ? v : null, unreadable: false };
     }
-    return secretGet(where, name, this.run);
+    const value = secretGet(where, name, this.run);
+    return { value, unreadable: value === null && !probe(where, this.run) };
   }
 
   /** False when the store refused (then nothing was written anywhere). */

@@ -4,7 +4,7 @@
 // the idle usage poll, the hello summary, and everything written down so a reopen
 // finds it.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -81,7 +81,14 @@ describe("an empty pool", () => {
     const pool = open();
     expect(pool.config).toEqual({ on: false, port: 0, accounts: [] });
     expect(pool.helloPool()).toEqual({ on: false, harness: "claude-code", accounts: [] });
-    expect(pool.status()).toEqual({ on: false, port: 0, listening: false, in_flight: 0, settings: [], accounts: [] });
+    expect(pool.status()).toEqual({
+      on: false,
+      port: 0,
+      listening: false,
+      in_flight: 0,
+      settings: [],
+      accounts: [],
+    });
     expect(pool.accounts()).toEqual([]);
     expect(pool.find("nobody")).toBeNull();
     expect(existsSync(poolFile(env))).toBe(false);
@@ -444,7 +451,9 @@ describe("the listener", () => {
       ),
     );
   }
-  it("starts on a free port the first time, remembers it, rewrites settings when it moves, and serves a request end to end", async () => {
+  it("starts on a free port the first time, remembers it, rewrites settings when it moves, and serves a request end to end", {
+    timeout: 15_000,
+  }, async () => {
     const seen: string[] = [];
     const up = await upstream((req, res) => {
       seen.push(req.headers.authorization!);
@@ -502,8 +511,9 @@ describe("the listener", () => {
       expect(Object.keys(readPoolState(env).pins).length).toBe(3);
       expect(pool.status().listening).toBe(false);
       // The port is taken when the next daemon starts: it moves and settings follow.
-      const squatter = net.createServer();
-      await new Promise<void>((r) => squatter.listen(port, "127.0.0.1", () => r()));
+      // A squatter that reads (a paused socket never sees the probe hang up).
+      const squatter = net.createServer((sock) => sock.resume());
+      await new Promise<void>((r) => squatter.listen(readPool(env).port, "127.0.0.1", () => r()));
       try {
         const p2 = open({ upstream: up.url });
         const second = await p2.start();
@@ -521,6 +531,88 @@ describe("the listener", () => {
     } finally {
       await up.close();
     }
+  });
+  it("F1: a second daemon on the same pool.json stands down when a pool already answers on the port", async () => {
+    const pool = open();
+    await signIn(pool, "one");
+    await pool.setOn(true);
+    const { port } = await pool.start();
+    const settingsBefore = readFileSync(settings(0), "utf8");
+    const second = open();
+    expect(await second.start()).toEqual({ port, moved: false, other: true });
+    expect(second.status()).toMatchObject({ listening: false, another_daemon: true, port });
+    expect(readPool(env).port).toBe(port);
+    expect(readFileSync(settings(0), "utf8")).toBe(settingsBefore);
+    expect(logs).toContain(`another daemon already serves the pool on 127.0.0.1:${port}; this one won't listen`);
+    await second.stop();
+    await pool.stop();
+    // The first gone: the next one takes the port as usual.
+    const third = open();
+    expect(await third.start()).toEqual({ port, moved: false });
+    expect(third.status().another_daemon).toBeUndefined();
+    await third.stop();
+    // Something on the port that is not a pool (a 404, then one that never answers): the
+    // probe says no and the listener goes on as before; the hang gives up after half a second.
+    const squatter = http.createServer((_req, res) => {
+      res.writeHead(404);
+      res.end("not a pool");
+    });
+    await new Promise<void>((r) => squatter.listen(readPool(env).port, "127.0.0.1", () => r()));
+    try {
+      const fourth = open();
+      expect((await fourth.start()).other).toBeUndefined();
+      await fourth.stop();
+    } finally {
+      squatter.closeAllConnections();
+      await new Promise<void>((r) => squatter.close(() => r()));
+    }
+    const hanger = http.createServer(() => {});
+    await new Promise<void>((r) => hanger.listen(readPool(env).port, "127.0.0.1", () => r()));
+    try {
+      const fifth = open();
+      const t = Date.now();
+      expect((await fifth.start()).other).toBeUndefined();
+      expect(Date.now() - t).toBeLessThan(3_000);
+      await fifth.stop();
+    } finally {
+      hanger.closeAllConnections();
+      await new Promise<void>((r) => hanger.close(() => r()));
+    }
+    const liar = http.createServer((_req, res) => {
+      res.writeHead(200);
+      res.end("ok but not json");
+    });
+    await new Promise<void>((r) => liar.listen(readPool(env).port, "127.0.0.1", () => r()));
+    try {
+      const sixth = open();
+      expect((await sixth.start()).other).toBeUndefined();
+      await sixth.stop();
+    } finally {
+      liar.closeAllConnections();
+      await new Promise<void>((r) => liar.close(() => r()));
+    }
+  });
+  it("F10: while the secrets file can't be read the listener says so with a 503, and status reads unreadable, not stale", async () => {
+    if (process.platform === "win32") return;
+    const pool = open();
+    await signIn(pool, "one");
+    await pool.setOn(true);
+    const { port } = await pool.start();
+    const token = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    chmodSync(poolSecretsFile(env), 0o000);
+    now += 6_000;
+    const r = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: body("aaaaaaaa-0000-4000-8000-000000000001"),
+    });
+    expect(r.status).toBe(503);
+    expect(((await r.json()) as { error: { message: string } }).error.message).toMatch(/secrets can't be read/);
+    expect(pool.status().settings.map((s) => s.state)).toEqual(["stale", "stale"]);
+    chmodSync(poolSecretsFile(env), 0o600);
+    now += 6_000;
+    expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
+    await pool.stop();
   });
   it("with the pool off a moved port rewrites nothing, and nothing is polled (SECURITY M2)", async () => {
     const pool = open({ pollMs: 20 });

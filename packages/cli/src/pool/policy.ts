@@ -30,6 +30,12 @@ export interface AccountState {
   error?: string;
   /** Out of the rotation until this time (ms): a 429's Retry-After, a 5xx rest. */
   hold_until?: number;
+  /** When the hold was set. A clock that then went backwards (NTP on a laptop) would
+   *  stretch a minute's rest into an hour; a hold set in the future is cut to HOLD_MS. */
+  hold_at?: number;
+  /** Why: `limit` (a 429 or a `rejected`: the pool knows the answer and says it itself)
+   *  or `upstream` (a 5xx rest: the upstream's own answer still passes through). */
+  hold_why?: "limit" | "upstream";
   /** The freshest numbers, whatever their source, and when they were taken (ms). */
   limits?: PoolLimits;
   limits_at?: number;
@@ -85,7 +91,11 @@ function rejectedUntil(a: AccountState, now: number): number | null {
 export function roomAt(a: AccountState, now: number): number | null {
   if (!a.enabled || a.error) return null;
   const times: number[] = [];
-  if (a.hold_until !== undefined && a.hold_until > now) times.push(a.hold_until);
+  const hold =
+    a.hold_until !== undefined && a.hold_at !== undefined && a.hold_at > now
+      ? Math.min(a.hold_until, now + HOLD_MS)
+      : a.hold_until;
+  if (hold !== undefined && hold > now) times.push(hold);
   const rej = rejectedUntil(a, now);
   if (rej !== null) times.push(rej);
   for (const w of a.limits?.windows ?? [])
@@ -164,11 +174,18 @@ export function observe(state: PolicyState, accountId: string, what: Observation
     };
     a.limits_at = now;
     // A hold that has run out is tidied away; a live one is trusted over the numbers.
-    if (a.hold_until !== undefined && a.hold_until <= now) delete a.hold_until;
+    if (a.hold_until !== undefined && a.hold_until <= now) {
+      delete a.hold_until;
+      delete a.hold_at;
+      delete a.hold_why;
+    }
     return changed;
   }
   if ("upstream5xx" in what) {
     a.hold_until = Math.max(a.hold_until ?? 0, now + HOLD_MS);
+    a.hold_at = now;
+    // A limit's hold keeps its reason; a rest never shortens or outranks it.
+    if (a.hold_why !== "limit") a.hold_why = "upstream";
     return false;
   }
   if ("error" in what) {
@@ -186,6 +203,8 @@ export function observe(state: PolicyState, accountId: string, what: Observation
     until = resets.length ? Math.min(...resets) : now + HOLD_MS;
   }
   a.hold_until = Math.max(a.hold_until ?? 0, until);
+  a.hold_at = now;
+  a.hold_why = "limit";
   return false;
 }
 

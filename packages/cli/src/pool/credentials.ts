@@ -11,6 +11,9 @@ import type { PoolCredential } from "./types.js";
 export const REFRESH_EARLY_MS = 5 * 60_000;
 /** Don't ask a store that just refused again before this. */
 export const STORE_RETRY_MS = 30_000;
+/** After a refresh the token endpoint failed (not refused), wait this long before the
+ *  next try: the sinks' cadence. Never one call per request. */
+export const REFRESH_BACKOFF_MS = [30_000, 60_000, 300_000] as const;
 
 export interface CredentialDeps {
   now: () => number;
@@ -32,6 +35,7 @@ export class Credentials {
   private readonly inflight = new Map<string, Promise<Fetched>>();
   private readonly refusedAt = new Map<string, number>();
   private readonly refreshedAt = new Map<string, number>();
+  private readonly failed = new Map<string, { at: number; n: number; detail: string }>();
   constructor(private readonly deps: CredentialDeps) {}
 
   /** Put a credential just obtained (login, import) into memory and the store. */
@@ -45,6 +49,7 @@ export class Credentials {
     this.cache.delete(id);
     this.refusedAt.delete(id);
     this.refreshedAt.delete(id);
+    this.failed.delete(id);
   }
 
   /** The access token to send now. `force` refreshes whatever the expiry says (a 401
@@ -75,15 +80,22 @@ export class Credentials {
     }
     if (!force && c.expires_at - now > REFRESH_EARLY_MS)
       return { ok: true, access: c.access, fresh: now - (this.refreshedAt.get(id) ?? 0) < 60_000 };
+    const f = this.failed.get(id);
+    if (f && now - f.at < (REFRESH_BACKOFF_MS[Math.min(f.n, REFRESH_BACKOFF_MS.length) - 1] as number)) {
+      if (c.expires_at > now) return { ok: true, access: c.access, fresh: false };
+      return { ok: false, why: "upstream", detail: f.detail };
+    }
     try {
       const next = await this.deps.refresh(c);
       this.cache.set(id, next);
+      this.failed.delete(id);
       this.refreshedAt.set(id, this.deps.now());
       if (!this.deps.save(id, next)) this.deps.log(`${id}: refreshed token kept in memory only; the store refused it`);
       return { ok: true, access: next.access, fresh: true };
     } catch (e) {
       const detail = String((e as Error).message ?? e);
       if (this.deps.isAuthError(e)) return { ok: false, why: "sign-in", detail };
+      this.failed.set(id, { at: now, n: (f?.n ?? 0) + 1, detail });
       // A stale token may still work for a while; the upstream decides.
       if (c.expires_at > this.deps.now()) return { ok: true, access: c.access, fresh: false };
       return { ok: false, why: "upstream", detail };

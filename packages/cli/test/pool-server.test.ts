@@ -127,7 +127,7 @@ const send = (path: string, init: RequestInit & { token?: string | null } = {}) 
   });
 
 /** A request-target or Host sent as written, which fetch would never do. */
-const raw = (o: { path: string; method?: string; host?: string; token?: string | null }) =>
+const raw = (o: { path: string; method?: string; host?: string; token?: string | null; big?: number }) =>
   new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = http.request(
       {
@@ -150,7 +150,7 @@ const raw = (o: { path: string; method?: string; host?: string; token?: string |
       },
     );
     req.on("error", reject);
-    req.end(o.method === "GET" ? undefined : body(S1));
+    req.end(o.method === "GET" ? undefined : body(S1, uuidOf("own"), o.big ? { pad: "x".repeat(o.big) } : {}));
   });
 
 beforeEach(async () => {
@@ -528,7 +528,8 @@ describe("streaming", () => {
 describe("nothing with room", () => {
   it("passes the upstream's own answer through on the session's account, else the first that can be asked", async () => {
     await start();
-    for (const a of state.accounts) a.hold_until = T0 + 60_000;
+    const full = { windows: [{ id: "five_hour", used_percent: 100, resets_at: new Date(T0 + 60_000).toISOString() }] };
+    for (const a of state.accounts) a.limits = full;
     state.pins[S1] = { account: "c", used: T0 };
     up.handler = (_req, res) =>
       json(
@@ -542,15 +543,24 @@ describe("nothing with room", () => {
     expect(await r.json()).toMatchObject({ error: { message: "upstream's own words" } });
     expect(up.seen.map((s) => s.headers.authorization)).toEqual(["Bearer access-c", "Bearer access-a"]);
     expect(srv!.stats.refused).toBe(0);
+    // The 429s just taken hold c and a for 30 s: now only b can be asked.
+    for (const a of state.accounts) {
+      delete a.hold_until;
+      delete a.hold_at;
+    }
     up.seen.length = 0;
     state.accounts[0]!.enabled = false;
     expect((await send("/v1/messages", { body: body(S2) })).status).toBe(429);
     expect(up.seen.map((s) => s.headers.authorization)).toEqual(["Bearer access-b", "Bearer access-c"]);
+    for (const a of state.accounts) {
+      delete a.hold_until;
+      delete a.hold_at;
+    }
     up.seen.length = 0;
     expect((await send("/v1/messages", { body: "no session here" })).status).toBe(429);
     expect(up.seen.map((s) => s.headers.authorization)).toEqual(["Bearer access-b", "Bearer access-c"]);
     // One account only: its 429 is the answer, nobody else to try.
-    state.accounts = [acct("a")];
+    state.accounts = [acct("a", { limits: full })];
     up.seen.length = 0;
     expect((await send("/v1/messages", { body: body(S1) })).status).toBe(429);
     expect(up.seen.length).toBe(1);
@@ -582,7 +592,8 @@ describe("nothing with room", () => {
     state.accounts[0]!.enabled = false;
     state.accounts[1]!.error = "sign in again";
     state.accounts[2]!.hold_until = T0 + 90_000;
-    creds.delete("c");
+    state.accounts[2]!.hold_at = T0;
+    state.accounts[2]!.hold_why = "limit";
     const r = await send("/v1/messages", { body: body(S1) });
     expect(r.status).toBe(429);
     expect(r.headers.get("retry-after")).toBe("90");
@@ -798,5 +809,106 @@ describe("the security review's findings", () => {
     await send("/v1/messages", { body: body(S1) });
     await send("/v1/messages", { body: body("anything-goes") });
     expect(Object.keys(state.pins)).toEqual([S1]);
+  });
+});
+
+describe("what the soak found", () => {
+  it("F3: while every account is held the pool answers its own 429 with the shortest hold; nobody upstream is asked", async () => {
+    await start();
+    for (const [i, a] of state.accounts.entries()) {
+      a.hold_until = T0 + (i + 1) * 10_000;
+      a.hold_at = T0;
+      a.hold_why = "limit";
+    }
+    const r = await send("/v1/messages", { body: body(S1) });
+    expect(r.status).toBe(429);
+    expect(r.headers.get("retry-after")).toBe("10");
+    expect(await r.json()).toMatchObject({ error: { type: "rate_limit_error", message: /no account has room until/ } });
+    expect(up.seen).toEqual([]);
+    expect(srv!.stats.refused).toBe(1);
+    // A full window (not a hold) still lets the upstream's own words through.
+    state.accounts[0]!.hold_until = T0 - 1;
+    state.accounts[0]!.limits = {
+      windows: [{ id: "five_hour", used_percent: 100, resets_at: new Date(T0 + 60_000).toISOString() }],
+    };
+    up.handler = (_req, res) =>
+      json(
+        res,
+        429,
+        { "retry-after": "7" },
+        { type: "error", error: { type: "rate_limit_error", message: "vendor's words" } },
+      );
+    const r2 = await send("/v1/messages", { body: body(S2) });
+    expect(await r2.json()).toMatchObject({ error: { message: "vendor's words" } });
+    expect(up.seen.map((x) => x.headers.authorization)).toEqual(["Bearer access-a"]);
+    // Accounts resting after a 5xx are asked: the upstream's own 503 is the answer.
+    for (const a of state.accounts) {
+      a.hold_until = T0 + 60_000;
+      a.hold_at = T0;
+      a.hold_why = "upstream";
+      delete a.limits;
+    }
+    up.seen.length = 0;
+    up.handler = (_req, res) =>
+      json(res, 503, {}, { type: "error", error: { type: "overloaded_error", message: "busy" } });
+    const r3 = await send("/v1/messages", { body: body(S2) });
+    expect(r3.status).toBe(503);
+    expect(up.seen.length).toBe(1);
+  });
+  it("F4: a refusal names the real cause: the store, the token endpoint, or nothing signed in", async () => {
+    await start();
+    creds.clear();
+    const r = await send("/v1/messages", { body: body(S1) });
+    expect(r.status).toBe(503);
+    expect(r.headers.get("retry-after")).toBe("30");
+    expect(await r.json()).toMatchObject({ error: { type: "api_error", message: /secrets can't be read right now/ } });
+    expect(up.seen).toEqual([]);
+    // Every token expired and the endpoint down: a 503 naming the endpoint, not a sign-in.
+    for (const id of ["a", "b", "c"]) {
+      creds.set(id, credential(id, -1_000, T0));
+      credentials.forget(id);
+    }
+    adapter.refresh = async () => {
+      throw new Error("HTTP 503");
+    };
+    const r2 = await send("/v1/messages", { body: body(S1) });
+    expect(r2.status).toBe(503);
+    expect(await r2.json()).toMatchObject({
+      error: { type: "api_error", message: "sessionpipe pool: Anthropic's token endpoint is not answering (HTTP 503)" },
+    });
+    expect(adapter.calls.refresh).toBeGreaterThan(0);
+    const n = adapter.calls.refresh;
+    // F5 through the listener: the next request inside the backoff asks the endpoint again for nobody.
+    await send("/v1/messages", { body: body(S1) });
+    expect(adapter.calls.refresh).toBe(n);
+    expect(state.accounts.every((a) => a.error === undefined)).toBe(true);
+  });
+  it("F10: while the secrets store can't be read the answer is a 503 that says so, never an unknown bearer", async () => {
+    let token: string | null = TOKEN;
+    await start({ token: () => token });
+    token = null;
+    const r = await send("/v1/messages", { body: body(S1) });
+    expect(r.status).toBe(503);
+    expect(r.headers.get("retry-after")).toBe("30");
+    expect(await r.json()).toMatchObject({ error: { type: "api_error", message: /secrets can't be read right now/ } });
+    expect((await send("/v1/messages", { body: body(S1), token: "anything" })).status).toBe(503);
+    expect((await send("/health", { method: "GET", token: null })).status).toBe(200);
+    token = TOKEN;
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
+  });
+  it("F8: a body over the cap gets the 413 itself, three times out of three, not a closed socket", async () => {
+    await start({ bodyCap: 64 * 1024 });
+    for (let i = 0; i < 3; i++) {
+      const r = await raw({ path: "/v1/messages", big: 80 * 1024 }).catch((e: Error) => ({
+        status: -1,
+        body: e.message,
+      }));
+      expect([i, r.status]).toEqual([i, 413]);
+    }
+    expect(up.seen).toEqual([]);
+    // Far past the cap: the answer still arrives, then node ends the socket.
+    const far = await raw({ path: "/v1/messages", big: 512 * 1024 }).catch(() => ({ status: -1, body: "closed" }));
+    expect(far.status).toBe(413);
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
   });
 });

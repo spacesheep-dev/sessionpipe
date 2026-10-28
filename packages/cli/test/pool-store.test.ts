@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // What the pool keeps on disk, at its edges: pool.json read defensively, state.json
 // round-tripped, secrets in the file fallback or a store, never in pool.json.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -107,6 +107,8 @@ describe("state.json", () => {
       accounts: {
         a: {
           hold_until: 9,
+          hold_at: 8,
+          hold_why: "limit" as const,
           error: "sign in again",
           limits: { windows: [{ id: "five_hour", used_percent: 1 }], status: "allowed" },
           limits_at: 4,
@@ -125,7 +127,7 @@ describe("state.json", () => {
       poolStateFile(env),
       JSON.stringify({
         pins: { ok: { account: "a", used: 1 }, bad: { account: 1 }, worse: null },
-        accounts: { a: null, b: "x", c: { hold_until: "soon", limits: { windows: "no" } } },
+        accounts: { a: null, b: "x", c: { hold_until: "soon", hold_why: "maybe", limits: { windows: "no" } } },
         pending: { id: "p", url: "u" },
       }),
     );
@@ -200,5 +202,47 @@ describe("secrets", () => {
     expect(existsSync(poolSecretsFile(env))).toBe(false);
     s.del(c, "pool:token");
     expect(s.get(c, "pool:token")).toBeNull();
+  });
+});
+
+describe("F10: a missing secret and a store that can't be read are told apart", () => {
+  it("file store: no file is missing; an unreadable or broken file is unreadable", () => {
+    const s = new PoolSecrets(env);
+    const c = cfg();
+    expect(s.read(c, "pool:token")).toEqual({ value: null, unreadable: false });
+    s.set(c, "pool:token", "tok");
+    expect(s.read(c, "pool:other")).toEqual({ value: null, unreadable: false });
+    expect(s.read(c, "pool:token")).toEqual({ value: "tok", unreadable: false });
+    writeFileSync(poolSecretsFile(env), "{nope");
+    expect(s.read(c, "pool:token")).toEqual({ value: null, unreadable: true });
+    if (process.platform !== "win32") {
+      writeFileSync(poolSecretsFile(env), JSON.stringify({ "pool:token": "tok" }));
+      chmodSync(poolSecretsFile(env), 0o000);
+      expect(s.read(c, "pool:token")).toEqual({ value: null, unreadable: true });
+      chmodSync(poolSecretsFile(env), 0o600);
+      expect(s.read(c, "pool:token")).toEqual({ value: "tok", unreadable: false });
+    }
+  });
+  it("keychain: an item not found is missing while the store answers a probe; a store that refuses everything is unreadable", () => {
+    let locked = false;
+    const items = new Map<string, string>();
+    const run: Runner = (_c, args, input) => {
+      if (locked) return { status: 36, stdout: "" };
+      if (args[0] === "find-generic-password")
+        return items.has(args[4]!) ? { status: 0, stdout: `${items.get(args[4]!)}\n` } : { status: 44, stdout: "" };
+      if (args[0] === "delete-generic-password") items.delete(args[4]!);
+      if (args[0] === "-i") {
+        const m = /-a "([^"]+)".* -w "([^"]+)"/.exec(input ?? "");
+        items.set(m![1]!, m![2]!);
+      }
+      return { status: 0, stdout: "" };
+    };
+    const s = new PoolSecrets(env, run);
+    const c = cfg({ secrets_in: "keychain" });
+    expect(s.read(c, "pool:token")).toEqual({ value: null, unreadable: false });
+    s.set(c, "pool:token", "tok");
+    expect(s.read(c, "pool:token")).toEqual({ value: "tok", unreadable: false });
+    locked = true;
+    expect(s.read(c, "pool:token")).toEqual({ value: null, unreadable: true });
   });
 });

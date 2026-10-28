@@ -2,7 +2,13 @@
 // Access tokens: from the store on demand, cached in memory, refreshed five minutes
 // early, one refresh in flight per account, and what each way of failing means.
 import { describe, expect, it } from "vitest";
-import { type CredentialDeps, Credentials, REFRESH_EARLY_MS, STORE_RETRY_MS } from "../src/pool/credentials.js";
+import {
+  type CredentialDeps,
+  Credentials,
+  REFRESH_BACKOFF_MS,
+  REFRESH_EARLY_MS,
+  STORE_RETRY_MS,
+} from "../src/pool/credentials.js";
 import type { PoolCredential } from "../src/pool/types.js";
 
 class AuthError extends Error {}
@@ -91,6 +97,7 @@ describe("Credentials", () => {
     tick(61_000);
     expect(await c.get("a")).toEqual({ ok: false, why: "upstream", detail: "503" });
     fail = Object.assign(new Error(), { message: undefined }) as Error;
+    tick(300_000); // past the backoff, so the endpoint is asked again
     expect(await c.get("a")).toMatchObject({ ok: false, why: "upstream" });
   });
   it("set puts a credential in memory and the store; forget drops it; a store that refuses is logged", async () => {
@@ -101,5 +108,50 @@ describe("Credentials", () => {
     expect(log).toEqual(["a: refreshed token kept in memory only; the store refused it"]);
     c.forget("a");
     expect(await c.get("a")).toMatchObject({ ok: false, why: "unreadable" });
+  });
+});
+
+describe("F5: a token endpoint that fails is not asked on every request", () => {
+  it("backs off 30 s, 60 s, then 5 min; a token with time left is sent meanwhile; success resets", async () => {
+    let calls = 0;
+    let down = true;
+    const { c, store, tick } = make({
+      refresh: async (x) => {
+        calls++;
+        if (down) throw new Error("503");
+        return { ...x, access: `${x.access}+`, expires_at: 9_999_999_999 };
+      },
+    });
+    store.set("a", cred("a", 1_000_000 + 10_000));
+    expect(await c.get("a")).toEqual({ ok: true, access: "a-a", fresh: false });
+    expect(await c.get("a")).toEqual({ ok: true, access: "a-a", fresh: false });
+    expect(calls).toBe(1);
+    tick(11_000); // expired now
+    expect(await c.get("a")).toEqual({ ok: false, why: "upstream", detail: "503" });
+    expect(calls).toBe(1);
+    tick(REFRESH_BACKOFF_MS[0]);
+    expect(await c.get("a")).toMatchObject({ ok: false, why: "upstream" });
+    expect(calls).toBe(2);
+    tick(REFRESH_BACKOFF_MS[1] - 1);
+    await c.get("a");
+    expect(calls).toBe(2);
+    tick(1);
+    await c.get("a");
+    expect(calls).toBe(3);
+    tick(REFRESH_BACKOFF_MS[2] - 1);
+    await c.get("a");
+    expect(calls).toBe(3);
+    tick(1);
+    await c.get("a");
+    expect(calls).toBe(4);
+    tick(REFRESH_BACKOFF_MS[2]);
+    down = false;
+    expect(await c.get("a")).toMatchObject({ ok: true, access: "a-a+", fresh: true });
+    c.forget("a");
+    store.set("a", cred("a", 1));
+    down = true;
+    await c.get("a");
+    await c.get("a");
+    expect(calls).toBe(6); // forget() cleared the backoff: one new try, the second call inside its window
   });
 });

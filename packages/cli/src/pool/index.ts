@@ -6,10 +6,13 @@
 //
 //   openPool(deps) → Pool                 reads pool.json and state.json; nothing listens yet
 //
-//   pool.start() → {port, moved}          the listener on 127.0.0.1 (pool.json's port, else a
+//   pool.start() → {port, moved, other?}  the listener on 127.0.0.1 (pool.json's port, else a
 //                                         free one, persisted); starts the idle usage poll
 //                                         (every 5 min). `moved` and `on`: settings were
-//                                         rewritten for the new port. Idempotent.
+//                                         rewritten for the new port. `other`: a pool already
+//                                         answers on pool.json's port, so this process did not
+//                                         listen and touched nothing (the daemon should stop
+//                                         here, as it does when the socket is taken). Idempotent.
 //   pool.stop()                           closes the listener and the poll; state is on disk.
 //   pool.setOn(true | false)              writes / removes the `env` block in every Claude Code
 //                                         settings.json (install.ts) and remembers `on`. Works
@@ -43,8 +46,10 @@
 // login), `pool_order` (not every account once), `pool_off`; failed `login` (the vendor
 // refused the code, the sign-in ran out) and `pool` (the secrets store refused).
 import { randomBytes } from "node:crypto";
+import http from "node:http";
 import net from "node:net";
-import { claudePool, claudeDirs as coreClaudeDirs, type InstallReport } from "@sessionpipe/core";
+import path from "node:path";
+import { claudePool, claudeDirs as coreClaudeDirs, type InstallReport, stateDir } from "@sessionpipe/core";
 import { bestStore, defaultRunner, type Runner } from "../secrets.js";
 import { Credentials } from "./credentials.js";
 import { type Imported, importLogins, type ResolvedLogin } from "./import.js";
@@ -149,6 +154,8 @@ export interface PoolStatus {
   port: number;
   /** The listener is up in this process. */
   listening: boolean;
+  /** Another daemon answers on pool.json's port; this process stood down (start()). */
+  another_daemon?: true;
   /** Requests it is answering right now (0 when it isn't up). */
   in_flight: number;
   settings: { file: string; state: PoolEnvState; note?: string }[];
@@ -157,7 +164,7 @@ export interface PoolStatus {
 }
 
 export interface Pool {
-  start(): Promise<{ port: number; moved: boolean }>;
+  start(): Promise<{ port: number; moved: boolean; other?: true }>;
   stop(): Promise<void>;
   setOn(on: boolean): Promise<InstallReport[]>;
   beginLogin(): { id: string; url: string; expires_at: string };
@@ -249,18 +256,22 @@ export function openPool(deps: PoolDeps): Pool {
     cached = { token: t, at: now() };
     return t;
   };
-  let cached: { token: string; at: number } | null = null;
-  const bearer = (): string => {
+  let cached: { token: string | null; at: number } | null = null;
+  /** The bearer; null while the store can't be read (the listener says so, 503), ""
+   *  when there is none yet. */
+  const bearer = (): string | null => {
     if (cached && now() - cached.at < BEARER_CACHE_MS) return cached.token;
-    const t = secrets.get(cfg, TOKEN_NAME) ?? "";
+    const r = secrets.read(cfg, TOKEN_NAME);
+    const t = r.unreadable ? null : (r.value ?? "");
     cached = { token: t, at: now() };
     return t;
   };
-  const ours = (token: string, lastToken?: string) => ({
+  const ours = (token: string | null, lastToken?: string) => ({
     port: cfg.port,
-    token,
+    token: token ?? "",
     lastPort: cfg.last_port,
     lastToken,
+    keep: path.join(stateDir(env), "pool", "settings"),
   });
 
   /** The policy's row for a config record, kept across re-syncs. */
@@ -282,6 +293,31 @@ export function openPool(deps: PoolDeps): Pool {
 
   let server: PoolServer | null = null;
   let poll: NodeJS.Timeout | null = null;
+  let other = false;
+
+  /** Is a pool already answering on this port? Asked before listening, so a second
+   *  daemon on the same pool.json (a launchd restart overlapping the old process, a
+   *  stray `control run`) never moves every Claude Code session to itself. */
+  const poolAnswers = (port: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      const req = http.get({ host: "127.0.0.1", port, path: "/health", agent: false }, (res) => {
+        let text = "";
+        res.on("data", (c) => {
+          text += c;
+        });
+        res.on("end", () => {
+          try {
+            resolve(res.statusCode === 200 && (JSON.parse(text) as { ok?: unknown }).ok === true);
+          } catch {
+            resolve(false);
+          }
+        });
+      });
+      const t = setTimeout(() => req.destroy(new Error("no answer")), 500);
+      t.unref();
+      req.on("close", () => clearTimeout(t));
+      req.on("error", () => resolve(false));
+    });
 
   /** Ask the usage endpoint for one account; the numbers go to the policy (no session). */
   const pollOne = async (id: string): Promise<void> => {
@@ -390,6 +426,12 @@ export function openPool(deps: PoolDeps): Pool {
 
     async start() {
       if (server) return { port: server.port, moved: false };
+      if (cfg.port && (await poolAnswers(cfg.port))) {
+        other = true;
+        log(`another daemon already serves the pool on 127.0.0.1:${cfg.port}; this one won't listen`);
+        return { port: cfg.port, moved: false, other: true };
+      }
+      other = false;
       server = await startPoolServer({
         adapter,
         fetch: fetchFn,
@@ -579,6 +621,7 @@ export function openPool(deps: PoolDeps): Pool {
         on: cfg.on,
         port: cfg.port,
         listening: server !== null,
+        ...(other ? { another_daemon: true } : {}),
         in_flight: server?.stats.in_flight ?? 0,
         settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer())) : [],
         accounts: cfg.accounts.map((a, i) => {

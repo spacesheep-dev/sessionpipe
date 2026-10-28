@@ -35,8 +35,9 @@ export interface PoolServerDeps {
   /** The port pool.json remembers; 0 or taken: a free one is picked. */
   port: number;
   /** The bearer Claude Code presents (settings.json); read on every request, since
-   *  `pool on` mints a new one in another process. */
-  token: () => string;
+   *  `pool on` mints a new one in another process. Null: the secrets store can't be
+   *  read right now, which is a 503, not an unknown bearer. */
+  token: () => string | null;
   on: () => boolean;
   /** Shared with the façade and mutated here through choose/observe/pin. */
   state: PolicyState;
@@ -138,20 +139,25 @@ function sendJson(res: http.ServerResponse, status: number, body: string, extra:
   res.end(body);
 }
 
-/** The body, whole, or null once it passed the cap (a 413 was sent). */
+/** The body, whole, or null once it passed the cap (a 413 was sent). The client is
+ *  still writing when the cap is hit: a socket destroyed on the spot reaches it as
+ *  EPIPE, not as the 413. So the answer goes out with `connection: close` and the rest
+ *  is dropped; node ends the socket once the answer is flushed, and the sender stops
+ *  there. */
 function readBody(req: http.IncomingMessage, res: http.ServerResponse, cap: number): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    // A destroyed request emits no more data and no end; a client that leaves
-    // mid-body is an error here and nothing else. Resolving twice is a no-op.
+    let over = false;
     req.on("data", (c: Buffer) => {
       size += c.length;
+      if (over) return;
       if (size > cap) {
+        over = true;
+        chunks.length = 0;
         sendJson(res, 413, errorBody("request_too_large", `sessionpipe pool: request body over ${cap} bytes`), {
           connection: "close",
         });
-        req.destroy();
         resolve(null);
         return;
       }
@@ -169,16 +175,42 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
   const short = (s: string | undefined) => (s ? s.slice(0, 8) : "-");
 
   /** When no account has room, the account whose own answer should pass through: the
-   *  session's, else the first that could be asked at all. Null: nothing to try. */
+   *  session's, else the first that could be asked at all. One held by a limit (a 429's
+   *  Retry-After, a `rejected`) is not asked again: the pool knows that answer and says
+   *  it itself. One resting after a 5xx is asked, so the upstream's own words come
+   *  through. Null: nothing to try. */
   const fallback = (session: string | undefined, tried: Set<string>): AccountState | null => {
-    const usable = (a: AccountState) => a.enabled && !a.error && !tried.has(a.id);
+    const now = deps.now();
+    const limited = (a: AccountState) => a.hold_why === "limit" && (a.hold_until ?? 0) > now;
+    const usable = (a: AccountState) => a.enabled && !a.error && !tried.has(a.id) && !limited(a);
     const p = session ? deps.state.pins[session] : undefined;
     const pinned = p && deps.state.accounts.find((a) => a.id === p.account && usable(a));
     return pinned ?? deps.state.accounts.find(usable) ?? null;
   };
 
-  const refuse = (res: http.ServerResponse): void => {
+  /** Why accounts were skipped on the way to a refusal, so the answer names the real
+   *  cause: a store that can't be read and a token endpoint that is down are 503s
+   *  (Claude Code retries those by itself); holds and nothing signed in are 429s. */
+  interface Skipped {
+    unreadable: number;
+    upstream: string | null;
+  }
+  const refuse = (res: http.ServerResponse, skipped: Skipped): void => {
     stats.refused++;
+    if (skipped.unreadable)
+      return sendJson(
+        res,
+        503,
+        errorBody("api_error", "sessionpipe pool: the pool's secrets can't be read right now (retrying every 30 s)"),
+        { "retry-after": "30" },
+      );
+    if (skipped.upstream !== null)
+      return sendJson(
+        res,
+        503,
+        errorBody("api_error", `sessionpipe pool: Anthropic's token endpoint is not answering (${skipped.upstream})`),
+        { "retry-after": "30" },
+      );
     const now = deps.now();
     const ats = deps.state.accounts.map((a) => roomAt(a, now)).filter((t): t is number => t !== null);
     const at = ats.length ? Math.min(...ats) : null;
@@ -197,6 +229,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
   ): Promise<void> {
     const session = deps.adapter.parseUserId(body)?.session;
     const tried = new Set<string>();
+    const skipped: Skipped = { unreadable: 0, upstream: null };
     const started = deps.now();
     let retried = false;
     let account = choose(deps.state, { session, now: started }).account ?? fallback(session, tried);
@@ -221,6 +254,8 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
           observe(deps.state, a.id, { error: "sign in again" }, deps.now());
           deps.onStanding?.();
         }
+        if (cred.ok === false && cred.why === "unreadable") skipped.unreadable++;
+        if (cred.ok === false && cred.why === "upstream") skipped.upstream = cred.detail;
         deps.log(`${a.id}: skipped — ${cred.ok ? "no account uuid on record" : cred.detail}`);
         account = next();
         continue;
@@ -322,7 +357,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       return;
     }
     deps.log(`no account could be tried (session ${short(session)})`);
-    refuse(res);
+    refuse(res, skipped);
   }
 
   const server = http.createServer((req, res) => {
@@ -340,7 +375,14 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       );
       return;
     }
-    if (!bearerOk(req.headers.authorization, deps.token())) {
+    const token = deps.token();
+    if (token === null) {
+      sendJson(res, 503, errorBody("api_error", "sessionpipe pool: the pool's secrets can't be read right now"), {
+        "retry-after": "30",
+      });
+      return;
+    }
+    if (!bearerOk(req.headers.authorization, token)) {
       sendJson(res, 401, errorBody("authentication_error", "sessionpipe pool: unknown bearer"));
       return;
     }
