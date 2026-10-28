@@ -155,7 +155,8 @@ async function askOnce(
         return;
       case "progress":
         if (!quiet) {
-          io.err(r.text.startsWith(shown) ? r.text.slice(shown.length) : `${shown ? "\n" : ""}${r.text}`);
+          // A text that restarts (shown is never empty then: anything starts with "") goes on its own line.
+          io.err(r.text.startsWith(shown) ? r.text.slice(shown.length) : `\n${r.text}`);
           shown = r.text;
         }
         return;

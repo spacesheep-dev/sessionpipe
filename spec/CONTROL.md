@@ -753,6 +753,13 @@ is visible on the asking session, when it is known, as `delegation.started` with
 the session's own outbox and sinks, with its own `seq`, so a receiver shows which
 session asked which, how long it took and (at tier 2) what came back.
 
+**At the terminal**, `sessionpipe ask` keeps the two streams apart so a model can read
+the answer and nothing else: the child's id and any progress go to **stderr**, the
+answer alone to **stdout**, exit `0`; a refusal or a failure goes to stderr with exit
+`1`; a usage error exits `2`, as `sessionpipe wait` does. `--json` prints
+`{ask_id, session, reply, ms}` instead. With no daemon answering on the socket it says
+what to run (`sessionpipe ask on`) and exits `1`.
+
 **How a session learns the command.** `sessionpipe ask setup` writes a short section
 into the harness's own instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
 saying the command exists, which agents are installed, and that a session MUST NOT use

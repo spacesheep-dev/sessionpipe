@@ -133,6 +133,36 @@ second one finds the first, says so and exits 0.
 Parks in a session's background so a message reaches it in place, in about 60 ms with no
 network. Claude Code's session id comes from `CLAUDE_CODE_SESSION_ID`.
 
+### Agents that ask agents
+
+{{usage ask}}
+
+From inside a session: hands the task to another agent on this machine (an agent by name
+for a new session, or `<harness>:<id>` to continue one) and prints its answer on stdout,
+with the child's id and progress on stderr. The request goes over the daemon's local
+socket, never through a receiver; the daemon runs the agent in an allowed folder at the
+machine's mode or narrower, caps it as it caps a start, and stops a chain at two deep.
+Exit 0 with the answer, 1 when refused or failed, 2 for a usage error.
+
+{{usage ask on}}
+
+Turns asking on (it is on once control is set up) and runs the daemon as a service, with or
+without a receiver.
+
+{{usage ask off}}
+
+Turns it off; the service goes too when no receiver needs it.
+
+{{usage ask status}}
+
+On or off, the daemon, the agents it can ask, the folders they may run in.
+
+{{usage ask setup}}
+
+Writes a short section into every Claude Code `CLAUDE.md` and Codex's `AGENTS.md`, between
+`<!-- sessionpipe ask -->` markers, so a session knows the command exists; `--remove` takes it
+out byte for byte. Hooks still inject nothing.
+
 ### Self-update
 
 {{usage update}}

@@ -132,6 +132,28 @@ refusal, listed in the reply; auto mode allows. An agent that never asks (OpenCo
 its own settings) runs its tools as it would at your terminal. Signing in is yours to do
 at the terminal: an agent that wants it says so in the reply.
 
+### Agents that ask agents
+
+A session can hand a task to another agent on this machine and get the answer back:
+`sessionpipe ask codex "review the diff on this branch"` runs Codex headlessly, waits,
+and prints its reply on stdout (the child's id and progress on stderr), so Claude Code
+can use Codex for a review, Codex can ask Gemini, and any harness with a shell can use
+any other. The request never leaves the machine: it goes over the daemon's local socket
+(the one `wait` uses), the daemon runs the agent in an allowed folder at the machine's
+mode or narrower, caps it as it caps a start, and stops a chain at two deep. Both
+sessions' events say what happened (`delegation.started` / `delegation.ended` on the
+asker, `delegated_by` on the answerer). A receiver can do the same from outside with
+`reply_to` on a `start` or a `prompt`: the answer comes back into that session as a
+message. `sessionpipe ask on` turns it on, with or without a receiver; `sessionpipe ask
+setup` tells Claude Code and Codex the command exists, in their own instruction files,
+since hooks never inject anything.
+
+```sh
+sessionpipe ask on                                        # once; the daemon runs as a service
+sessionpipe ask codex "review the diff on this branch"    # from inside any session; the answer is stdout
+sessionpipe ask status                                    # on or off, the daemon, the agents it can ask
+```
+
 ## Updates
 
 The control daemon keeps its own copy current. About a minute after it starts, and then

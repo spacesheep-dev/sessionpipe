@@ -34,6 +34,16 @@ vi.mock("../src/runtime.js", async (original) => ({
   viaNpx: vi.fn(() => false),
   rerunGlobally: vi.fn(),
 }));
+/** What `--text -` reads from this process's stdin when the caller gave no reader. */
+const piped = vi.hoisted(() => ({ stdin: null as string | null }));
+vi.mock("node:fs", async (original) => {
+  const real = await original<typeof import("node:fs")>();
+  const readFileSync = ((p: unknown, ...a: unknown[]) =>
+    p === 0 && piped.stdin !== null
+      ? piped.stdin
+      : (real.readFileSync as (...x: unknown[]) => unknown)(p, ...a)) as typeof real.readFileSync;
+  return { ...real, readFileSync };
+});
 
 const unix = process.platform !== "win32";
 const SID = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
@@ -237,6 +247,24 @@ describe.runIf(unix)("ask <agent> <task>", () => {
     );
   });
 
+  it("with no reader given, --text - reads this process's stdin", async () => {
+    await serve(answer());
+    piped.stdin = "piped task\n";
+    try {
+      expect((await run(["codex", "--text", "-"])).code).toBe(0);
+    } finally {
+      piped.stdin = null;
+    }
+    expect(seen[0]).toMatchObject({ op: "ask", text: "piped task\n" });
+  });
+
+  it("with no options it reads this process's environment and the agents on its PATH", async () => {
+    const err: string[] = [];
+    expect(await askMain(["ask"], { out: () => {}, err: (s) => void err.push(s) })).toBe(2);
+    expect(err.join("")).toContain(ASK_HELP);
+    expect(existsSync(sock)).toBe(false);
+  });
+
   it("usage errors are exit 2, before anything reaches the socket", async () => {
     const bad = async (argv: string[], says: string) => {
       const r = await run(argv);
@@ -301,6 +329,15 @@ describe("ask on / off / status", () => {
       expect.objectContaining({ cli: path.join(tmp, "nowhere", "cli.js") }),
     );
   });
+  it("on names the daemon's cli.js as it finds it: resolved when it is a file, as given otherwise", async () => {
+    await askMain(["ask", "on"], { out: () => {}, err: () => {} }, { env, harnesses: () => agents });
+    expect(installService).toHaveBeenLastCalledWith(expect.objectContaining({ cli: "cli.js" }));
+    rmSync(path.join(tmp, "dist", "cli.js"));
+    mkdirSync(path.join(tmp, "dist", "cli.js"));
+    await run(["on"]);
+    expect(installService).toHaveBeenLastCalledWith(expect.objectContaining({ cli: path.join(tmp, "dist", "cli.js") }));
+  });
+
   it("on through npx reruns the global copy, as pair does", async () => {
     vi.mocked(viaNpx).mockReturnValue(true);
     expect((await run(["on"])).code).toBe(0);
@@ -400,6 +437,17 @@ describe("ask setup", () => {
     writeFileSync(claude(), "keep");
     await run(["setup", "--remove"]);
     expect(readFileSync(claude(), "utf8")).toBe("keep");
+  });
+
+  it("with no HOME in the environment the files are under this user's home; a Codex home elsewhere is named whole", async () => {
+    expect(setupFiles({ HOME: "" })).toContain(path.join(home, ".codex", "AGENTS.md"));
+    expect(setupFiles().length).toBeGreaterThan(0);
+    const codexHome = path.join(tmp, "codex-elsewhere");
+    mkdirSync(codexHome);
+    const r = await run(["setup"], { env: { ...env, HOME: "", CODEX_HOME: codexHome } });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`✓ wrote the section into ${path.join(codexHome, "AGENTS.md")}`);
+    expect(r.out).toContain("· not here: ~/.claude/CLAUDE.md");
   });
 
   it("every Claude Code config dir, and Codex's home from CODEX_HOME", () => {
