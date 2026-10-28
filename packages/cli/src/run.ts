@@ -518,21 +518,31 @@ export async function runJob(
  *  `onLimits`). It goes the way a hook's events go — only with a tier-1 sink, the
  *  session's known facts for `session` (its own account_id included), redacted at rest,
  *  under the session's lock, then the sinks drain — so a receiver can't tell it from
- *  the status line's. Null: no sink wants it, or a hook holds the session right now
- *  (the next numbers come with the next request). */
+ *  the status line's. A hook holding the session's lock (its events are being written
+ *  right then) is waited for, up to `lockWaitMs`; past that the numbers are dropped
+ *  with a line in the log, never in silence (the live proof lost a turn's switch that
+ *  way). Null: no sink wants it, or the session stayed busy. */
 export async function appendObserved(
   state: string,
   harness: string,
   id: string,
   data: DataOf<"limits.observed">,
-  now = Date.now(),
+  opts: { now?: number; lockWaitMs?: number } = {},
 ): Promise<Event | null> {
   const cfg = readConfig();
   if (!cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1)) return null;
   const outbox = new Outbox(state);
   const ref = { harness, session: id };
-  const release = takeLock(state, ref);
-  if (!release) return null;
+  let release = takeLock(state, ref);
+  for (const until = Date.now() + (opts.lockWaitMs ?? OBSERVED_LOCK_WAIT_MS); !release && Date.now() < until; ) {
+    await new Promise((res) => setTimeout(res, 50));
+    release = takeLock(state, ref);
+  }
+  if (!release) {
+    log(state, `${harness} limits.observed for ${shortId(harness, id)} dropped: the session is busy`);
+    return null;
+  }
+  const now = opts.now ?? Date.now();
   let e: Event;
   try {
     const facts = factsState(state);
@@ -635,6 +645,8 @@ function clearBackoff(state: string, sink: string): void {
 
 /** How long a job waits for its session's lock before it goes back to the queue. */
 const LOCK_WAIT_MS = 6000;
+/** How long the pool's limits.observed waits for a hook that holds the session. */
+const OBSERVED_LOCK_WAIT_MS = 2000;
 /** Harnesses whose own files do not name the session's folder: the hooks' cwd is kept. */
 const CWD_FROM_HOOKS = new Set(["antigravity", "devin"]);
 

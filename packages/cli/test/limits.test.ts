@@ -150,7 +150,7 @@ describe("the pool's limits.observed (appendObserved)", () => {
       session: { account_id: "misha000-0000-4000-8000-000000000000", title: "the task" },
       harness_version: "2.1.312",
     });
-    const e = await appendObserved(tmp, "claude-code", SID, data, Date.parse("2026-10-29T10:00:00Z"));
+    const e = await appendObserved(tmp, "claude-code", SID, data, { now: Date.parse("2026-10-29T10:00:00Z") });
     expect(e).toMatchObject({
       type: "limits.observed",
       time: "2026-10-29T10:00:00.000Z",
@@ -174,6 +174,20 @@ describe("the pool's limits.observed (appendObserved)", () => {
     expect(e!.harness).toEqual({ name: "claude-code", event: "pool" });
   });
 
+  it("waits for a hook that holds the session, then writes; past the wait it drops the numbers and says so", async () => {
+    const { takeLock } = await import("@sessionpipe/core");
+    const release = takeLock(tmp, { harness: "claude-code", session: SID })!;
+    setTimeout(release, 100);
+    const e = await appendObserved(tmp, "claude-code", SID, data, { lockWaitMs: 2000 });
+    expect(e).toMatchObject({ type: "limits.observed", session: { id: SID } });
+    const held = takeLock(tmp, { harness: "claude-code", session: SID })!;
+    expect(await appendObserved(tmp, "claude-code", SID, data, { lockWaitMs: 120 })).toBeNull();
+    held();
+    expect(readFileSync(path.join(tmp, "log"), "utf8")).toMatch(
+      /claude-code limits\.observed for [0-9a-f]{8} dropped: the session is busy\n$/,
+    );
+  });
+
   it("not without a tier-1 sink, and not while a hook holds the session", async () => {
     sinkAt(0);
     expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
@@ -184,7 +198,7 @@ describe("the pool's limits.observed (appendObserved)", () => {
     sinkAt(1);
     const { takeLock } = await import("@sessionpipe/core");
     const release = takeLock(tmp, { harness: "claude-code", session: SID })!;
-    expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
+    expect(await appendObserved(tmp, "claude-code", SID, data, { lockWaitMs: 0 })).toBeNull();
     release();
     expect(sent()).toEqual([]);
   });
