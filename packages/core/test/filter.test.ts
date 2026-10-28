@@ -112,6 +112,8 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
+  "delegation.started": { 0: ["ask_id", "via", "harness", "to"], 1: ["text"] },
+  "delegation.ended": { 0: ["ask_id", "to", "ok", "ms", "error", "relayed"], 2: ["reply"] },
 };
 /** Every key any type carries, plus one the spec never names. */
 const EVERY_KEY: Record<string, unknown> = {
@@ -143,6 +145,13 @@ const EVERY_KEY: Record<string, unknown> = {
   trigger: "auto",
   submitted_by: "loop_wakeup",
   injected: true,
+  ask_id: "01K6ABCXYZ0123456789ABCDEF",
+  via: "ask",
+  harness: "codex",
+  to: "codex:0199a",
+  text: "review this",
+  relayed: "delivered",
+  reply: "r",
   extra: "never sent",
 };
 const TIERS: Tier[] = [0, 1, 2, 3];
@@ -202,6 +211,7 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
           attended: false,
           parent_id: null,
           launched_by: "codex:l",
+          delegated_by: "claude-code:d",
         } as Event["session"],
       }),
       3,
@@ -214,6 +224,7 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
       attended: false,
       parent_id: null,
       launched_by: "codex:l",
+      delegated_by: "claude-code:d",
     });
   });
   it("is idempotent without pii", () => {
@@ -293,6 +304,29 @@ describe("filterEvent: caps", () => {
       false,
     )!;
     expect(a.data.message).toBe(`${"m".repeat(200)}…`);
+  });
+  it("an ask's text is cut at 200 and its reply at 20 000, each at the tier that carries it", () => {
+    const started = filterEvent(
+      base({
+        type: "delegation.started",
+        data: { ask_id: "01K6ABCXYZ0123456789ABCDEF", via: "ask", harness: "codex", text: "t".repeat(300) },
+      }),
+      1,
+      false,
+    )!;
+    expect(started.data.text).toBe(`${"t".repeat(200)}…`);
+    const ended = filterEvent(
+      base({
+        type: "delegation.ended",
+        data: { ask_id: "01K6ABCXYZ0123456789ABCDEF", ok: true, ms: 5, reply: "r".repeat(30_000) },
+      }),
+      2,
+      false,
+    )!;
+    expect((ended.data.reply as string).length).toBe(20_001);
+    expect(filterEvent(base({ type: "delegation.ended", data: ended.data }), 1, false)!.data).not.toHaveProperty(
+      "reply",
+    );
   });
   it("capTail", () => {
     expect(capTail("abc", 5)).toBe("abc");
