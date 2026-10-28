@@ -348,9 +348,11 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
       env,
       pool,
     });
+    // The receiver is shared across the file: count, don't expect an empty list.
+    const before = rx.hellos.length;
     d.poolChanged();
     await new Promise((r) => setTimeout(r, 100));
-    expect(rx.hellos).toEqual([]);
+    expect(rx.hellos.length).toBe(before);
   });
 
   it("a pooled request being answered keeps the daemon busy; stop() closes the listener last", async () => {
