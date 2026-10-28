@@ -367,19 +367,24 @@ export const claudeCode: Adapter = {
   },
 };
 
+/** Claude Code runs a status line only on events (a new assistant message, a window's
+ *  reset), and the hook sends at most one change a minute, so a turn's last numbers
+ *  would wait for the next prompt. The timer runs it again while the session is idle. */
+const LINE_REFRESH_S = 60;
+
 /** Claude Code hands an account's limits only to its status line command
  *  (https://code.claude.com/docs/en/statusline), so with `--status-line` ours is that
  *  command. Someone else's status line is never replaced. Null: nothing to report. */
 function statusLine(file: string, want: boolean, cmd?: HookCommand): InstallReport | null {
   const f = readJsonFile(file);
   if (!f.ok) return null; // the hooks' report already says why
-  const cur = f.value.statusLine as { command?: unknown } | undefined;
+  const cur = f.value.statusLine as { command?: unknown; refreshInterval?: unknown } | undefined;
   const ours = typeof cur?.command === "string" && OURS.test(cur.command);
   const command = cmd?.([NAME, "StatusLine"]).command;
   if (want && cur && !ours)
     return { file, changed: false, skipped: true, note: "a status line of your own is set; limits are not read" };
-  if (want ? ours && cur?.command === command : !ours) return null;
-  if (want) f.value.statusLine = { type: "command", command };
+  if (want ? ours && cur?.command === command && cur?.refreshInterval === LINE_REFRESH_S : !ours) return null;
+  if (want) f.value.statusLine = { type: "command", command, refreshInterval: LINE_REFRESH_S };
   else delete f.value.statusLine;
   writeFileSync(file, formatJson(f.value, f));
   return { file, changed: true, note: want ? "status line written (account limits)" : "status line removed" };

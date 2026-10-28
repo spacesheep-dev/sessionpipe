@@ -263,7 +263,11 @@ describe("--status-line: Claude Code's limits come only through a status line", 
     writeFileSync(file(), before);
     const r1 = claudeCode.install(cmd, env, { statusLine: true }).filter(mine);
     expect(r1.map((r) => r.note)).toEqual([undefined, "status line written (account limits)"]);
-    expect(line()).toEqual({ type: "command", command: cmd(["claude-code", "StatusLine"]).command });
+    expect(line()).toEqual({
+      type: "command",
+      command: cmd(["claude-code", "StatusLine"]).command,
+      refreshInterval: 60,
+    });
     expect(claudeCode.install(cmd, env, { statusLine: true }).filter(mine)).toHaveLength(1);
     // Left alone when the person said nothing either way; a moved node path is rewritten.
     claudeCode.install(cmd2, env);
@@ -272,6 +276,14 @@ describe("--status-line: Claude Code's limits come only through a status line", 
     expect(line().command).toBe(cmd2(["claude-code", "StatusLine"]).command);
     claudeCode.uninstall(env);
     expect(readFileSync(file(), "utf8")).toBe(before);
+  });
+  it("runs again every minute, so a turn's last numbers do not wait for the next prompt", () => {
+    // An idle session runs no status line: without the timer, a change the hook held back
+    // (one a minute) reaches no receiver until the next assistant message.
+    const command = cmd(["claude-code", "StatusLine"]).command;
+    writeFileSync(file(), JSON.stringify({ statusLine: { type: "command", command } }));
+    expect(claudeCode.install(cmd, env, { statusLine: true }).filter(mine)[1]?.changed).toBe(true);
+    expect(line()).toEqual({ type: "command", command, refreshInterval: 60 });
   });
   it("never replaces a status line of the person's own, and says so", () => {
     writeFileSync(file(), JSON.stringify({ statusLine: { type: "command", command: "~/bin/my-line" } }));
