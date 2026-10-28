@@ -321,13 +321,36 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
     expect(await ask(sock, { op: "pool", action: "status" }, 2000)).toMatchObject({ status: { another_daemon: true } });
   });
 
-  it("a listener that won't start is logged, not fatal", async () => {
+  it("a listener that won't start is logged, not fatal; a rejection with no message is logged as it came", async () => {
     const pool = new FakePool();
     pool.on = true;
     pool.startFails = new Error("EADDRINUSE");
     await startDaemon(pool);
     expect(log).toContain("the pool's listener did not start: EADDRINUSE");
     expect(d!.status().pool).toMatchObject({ listening: false });
+    await d!.stop();
+    log = [];
+    pool.startFails = "no words" as unknown as Error;
+    await startDaemon(pool);
+    expect(log).toContain("the pool's listener did not start: no words");
+  });
+
+  it("poolChanged() on a daemon that isn't running sends nothing", async () => {
+    const pool = new FakePool();
+    d = new ControlDaemon(cfg(), path.join(tmp, "state", "control"), sock, {
+      now: Date.now,
+      fetch,
+      log: (s) => log.push(s),
+      claudeDirs: () => [],
+      claude: () => null,
+      run: async () => ({ code: 0, signal: null, stdout: "", stderr: "", tooBig: false, timedOut: false }),
+      sdk: null,
+      env,
+      pool,
+    });
+    d.poolChanged();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(rx.hellos).toEqual([]);
   });
 
   it("a pooled request being answered keeps the daemon busy; stop() closes the listener last", async () => {
