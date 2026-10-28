@@ -1,0 +1,5 @@
+---
+"sessionpipe": minor
+---
+
+`sessionpipe ask <agent|session> "<task>"`: a session hands a task to another agent on this machine and gets the answer on stdout (CONTROL.md §13). The request reaches the daemon on its local socket, never through a receiver; the daemon checks that asking is on (`sessionpipe ask on|off|status`, on by default), that the agent is one it can run headlessly or a session it can message, the folder allowlist, the depth (A asks B, B may ask C, C may not), loops and the start caps, runs the child at the machine's mode or narrower, and frames the task so the model answers in place. The child's events carry `delegated_by`; the asker's carry `delegation.started` and `delegation.ended`. A `prompt` or a `start` with `reply_to` is a handoff: after its final ack the daemon delivers the reply into that session as a message (§6 *Handoff*) and says how it went in the events. The pairing request and every hello say `ask` and `handoff: true`. `sessionpipe ask setup` writes a short section into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` so a session knows the command exists; hooks still inject nothing.

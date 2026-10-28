@@ -381,6 +381,83 @@
       ],
       "additionalProperties": {}
     },
+    "delegation.started": {
+      "type": "object",
+      "properties": {
+        "ask_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "via": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "handoff"
+          ]
+        },
+        "harness": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "ask_id",
+        "via",
+        "harness"
+      ],
+      "additionalProperties": {}
+    },
+    "delegation.ended": {
+      "type": "object",
+      "properties": {
+        "ask_id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "relayed": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "unsupported",
+            "failed"
+          ]
+        },
+        "reply": {
+          "type": "string",
+          "maxLength": 20000
+        }
+      },
+      "required": [
+        "ask_id",
+        "ok",
+        "ms"
+      ],
+      "additionalProperties": {}
+    },
     "native": {
       "type": "object",
       "properties": {},
@@ -405,6 +482,8 @@
     "subagent.started",
     "subagent.ended",
     "context.compacted",
+    "delegation.started",
+    "delegation.ended",
     "native"
   ]
 }

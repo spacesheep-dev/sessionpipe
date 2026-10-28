@@ -157,6 +157,9 @@ export interface ControlCommand {
   permission?: StartPermission;
   /** start only: the model the harness runs, as the harness names it. */
   model?: string;
+  /** start, prompt: `<harness>:<id>` of a session on the same machine that gets the
+   *  answer as a message once the turn ends (CONTROL.md §6, a handoff). */
+  reply_to?: string;
   nonce: string;
   iat: number;
 }
@@ -221,10 +224,10 @@ const UV = 0x04;
  *  on a machine that predates it instead of being ignored. */
 const COMMON_FIELDS: readonly string[] = ["v", "t", "machine", "kind", "session", "nonce", "iat", "note"];
 const FIELDS: Record<ControlKind, readonly string[]> = {
-  prompt: ["text", "files"],
+  prompt: ["text", "files", "reply_to"],
   "permission.answer": ["for", "decision"],
   cancel: [],
-  start: ["text", "cwd", "files", "permission", "model"],
+  start: ["text", "cwd", "files", "permission", "model", "reply_to"],
   "key.add": ["key", "name"],
 };
 
@@ -559,30 +562,45 @@ export function parseCommand(str: unknown): Parsed {
     return bad("malformed", "the command has no signing time");
   const has = (k: string) => c[k] !== undefined;
   const text = () => typeof c.text === "string" && c.text.trim().length > 0 && c.text.length <= TEXT_MAX;
+  // A handoff's reply_to (CONTROL.md §6): a session ref by the adapter's rule, never the
+  // command's own session. Whether that session is on this machine is the daemon's to say.
+  const replyToProblem = (): string | null => {
+    if (!has("reply_to")) return null;
+    if (!parseSessionRef(c.reply_to)) return "a reply_to names a session on this machine, <harness>:<id>";
+    if (c.reply_to === c.session) return "a reply_to can't name the command's own session";
+    return null;
+  };
   switch (c.kind as ControlKind) {
-    case "prompt":
+    case "prompt": {
       if (!text()) return bad("bad_fields", `a prompt needs text, at most ${TEXT_MAX} characters`);
-      if (has("for") || has("decision") || has("cwd")) return bad("bad_fields", "a prompt carries text and files");
+      if (has("for") || has("decision") || has("cwd"))
+        return bad("bad_fields", "a prompt carries text, files and a reply_to");
       if (has("files")) {
         const why = filesProblem(c.files);
         if (why) return bad("bad_fields", why);
       }
+      const why = replyToProblem();
+      if (why) return bad("bad_fields", why);
       break;
-    case "start":
+    }
+    case "start": {
       if (!text()) return bad("bad_fields", `a new session needs text, at most ${TEXT_MAX} characters`);
       if (typeof c.cwd !== "string" || !(isAbsolute(c.cwd) || HOME_RELATIVE_RE.test(c.cwd)) || c.cwd.length > 1024)
         return bad("bad_fields", "a new session needs an absolute folder, or one under ~");
       if (has("for") || has("decision"))
-        return bad("bad_fields", "a start carries text, cwd, files, a permission and a model");
+        return bad("bad_fields", "a start carries text, cwd, files, a permission, a model and a reply_to");
       if (has("files")) {
         const why = filesProblem(c.files);
         if (why) return bad("bad_fields", why);
       }
+      const why = replyToProblem();
+      if (why) return bad("bad_fields", why);
       if (has("permission") && levelRank(c.permission) < 0)
         return bad("bad_fields", `a permission is one of ${START_PERMISSIONS.join(", ")}`);
       if (has("model") && (typeof c.model !== "string" || c.model.length > MODEL_MAX || !MODEL_RE.test(c.model)))
         return bad("bad_fields", `a model is 1 to ${MODEL_MAX} letters, digits and ._:/@[]-, not starting with a dash`);
       break;
+    }
     case "permission.answer":
       if (typeof c.for !== "string" || !c.for || c.for.length > 128) return bad("bad_fields", "which attention?");
       if (c.decision !== "allow" && c.decision !== "deny") return bad("bad_fields", "allow or deny?");
@@ -627,6 +645,8 @@ export function parseCommand(str: unknown): Parsed {
   if (c.kind !== "key.add" && (has("key") || has("name"))) return bad("bad_fields", "only a key.add carries a key");
   if (c.kind !== "start" && c.kind !== "prompt" && has("files"))
     return bad("bad_fields", "only a start or a prompt carries files");
+  if (c.kind !== "start" && c.kind !== "prompt" && has("reply_to"))
+    return bad("bad_fields", "only a start or a prompt carries a reply_to");
   if (c.kind !== "start" && (has("permission") || has("model")))
     return bad("bad_fields", "only a start carries a model or a permission");
   const allowed = FIELDS[c.kind as ControlKind];
