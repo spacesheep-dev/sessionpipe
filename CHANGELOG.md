@@ -5,6 +5,50 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.11.0)
+
+What a 0.11.0 daemon or hook sends and accepts beyond 0.10.0. Everything is additive on
+protocol 1, and a receiver sees each capability in the machine's hello before it may use
+it.
+
+- **Hello and pairing request say `ask` and `handoff`** (CONTROL.md §2). `ask` is whether
+  sessions on that machine may ask another agent (`sessionpipe ask`, §13: on unless the
+  person turned it off); `handoff: true` says a `start` or a `prompt` may carry
+  `reply_to`. A machine that says neither is 0.10.0: send it no `reply_to`.
+- **`reply_to` on a `start` or a `prompt`** (CONTROL.md §3.1, §6 *Handoff*): `<harness>:<id>`
+  of a session on the same machine, never the command's own `session`, inside the signed
+  bytes. The command runs and is acked exactly as before, one final ack; after a
+  `delivered` ack the machine delivers the reply into `reply_to` as a message framed
+  `Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>):`,
+  through its normal prompt routing, never wider than `reply_to`'s own mode. On any other
+  kind, malformed, or naming the command's own session: `bad_fields` (vectors `137`–`141`).
+  The relay is not a command: it is not acked and never relayed further.
+- **Two event types on the asking session** (PROTOCOL.md §4, tier 0):
+  `delegation.started` (`ask_id`, `via`: `ask` · `handoff`, `harness`, `to?`; tier 1 adds
+  `text`, ≤ 200 chars) and `delegation.ended` (`ask_id`, `to?`, `ok`, `ms`, `error?`,
+  `relayed?`: `delivered` · `unsupported` · `failed`; tier 2 adds `reply`, ≤ 20 000 chars).
+  They travel through the session's own outbox with its own `seq`. For a handoff,
+  `delegation.started` comes when the machine takes the command (`to` is the command's
+  session) and `delegation.ended` after its final ack; a command whose final ack isn't
+  `delivered` relays nothing, and its `delegation.ended` has `ok: false` and no `relayed`.
+  For an ask that starts a new Codex or ACP session, `to` is the id the daemon minted, the
+  name the child's own events go by.
+- **`session.delegated_by`** (PROTOCOL.md §3, tier 0): `<harness>:<id>` of the session this
+  one was started or resumed for, on every event of the child, from `SESSIONPIPE_ASKED_BY`
+  the way `launched_by` comes from `SESSIONPIPE_LAUNCHED_BY`. Lineage across harnesses,
+  never authority: join it with `delegation.*.to`, and never read it as a subagent.
+- **Nothing a receiver sends can start an ask.** It arrives on the daemon's local socket
+  only (CONTROL.md §13); a receiver learns of it through the events.
+
+Adopting 0.11.0 while machines still run 0.10.0:
+
+- Offer a handoff (`reply_to`) only for a machine whose latest hello says `handoff: true`;
+  a 0.10.0 machine refuses the command `bad_fields`, since its field set is closed.
+- Read an absent `ask` or `handoff` as "not on this machine", an absent `delegated_by` as
+  unknown, and keep a `delegation.*` event you don't know as you keep any other type.
+- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.11.0's
+  `sessionpipe-core/control` and its vectors (`137`–`141` are new).
+
 ### For receivers (0.10.0)
 
 What a 0.10.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
@@ -95,6 +139,24 @@ Adopting 0.10.0 while machines still run 0.9.0:
 
 ### Protocol changes
 
+- Control: **a session asks another agent, and a handoff brings the answer back**
+  (CONTROL.md §2, §3.1, §6 *Handoff*, new §13; PROTOCOL.md §3, §4, §5; PRIVACY.md §1;
+  still Draft). `sessionpipe ask <harness|session> "<text>"` reaches the machine's daemon
+  on its local socket, never through a receiver; the daemon checks, in order, that asking
+  is on, that the agent is one it can run headlessly or a session it can reach, the folder
+  allowlist, the depth (two deep at most), loops and the start caps, each with its code
+  (`ask_off` · `harness` · `folder` · `depth` · `loop` · `start_limit` · `bad_fields`), runs
+  the child at the machine's mode or narrower, frames the task so the model answers in
+  place, and sets `SESSIONPIPE_ASKED_BY` and `SESSIONPIPE_ASK_CHAIN` in the child's
+  environment. A `prompt` or a `start` MAY carry `reply_to`, a session on the same
+  machine that gets the answer as a message once the command's turn ends, through the
+  normal routing and never wider; the verifier takes it on those two kinds only, never
+  the command's own session. Two event types on the asking session, `delegation.started`
+  and `delegation.ended` (tier 0; `text` at 1, `reply` at 2), and one session field,
+  `delegated_by`, read by the hook like `launched_by`. Hello and pairing request gain
+  `ask` and `handoff`. Schemas: `control-command` gains `reply_to`, `control-hello` and
+  `control-pair` gain `ask` and `handoff`, `event` gains `session.delegated_by`,
+  `event-data` the two types. Five new control vectors (`137`–`141`).
 - Control: **device keys** (CONTROL.md §2, §3.2, §5, §11; HTTP.md §1; still Draft). An
   app whose web view can't run WebAuthn (a desktop or phone app) signs with a P-256
   key held in hardware and verified each use: `{id, alg: -7, spki, type: "device",
