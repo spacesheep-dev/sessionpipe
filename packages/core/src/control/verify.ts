@@ -62,10 +62,32 @@ export const narrower = (a: StartPermission, b: StartPermission): StartPermissio
 
 export const COMMAND_TYPE = "sessionpipe.control";
 export const GRANT_TYPE = "sessionpipe.grant";
-export const CONTROL_KINDS = ["prompt", "permission.answer", "cancel", "start", "key.add"] as const;
+export const CONTROL_KINDS = ["prompt", "permission.answer", "cancel", "start", "key.add", "pool"] as const;
 /** The session a `key.add` names: the machine's own key store, not a coding session. */
 export const KEY_STORE_SESSION = "sessionpipe:keys";
+/** The session a `pool` names: the machine's account pool (CONTROL.md §6 `pool`). */
+export const POOL_SESSION = "sessionpipe:pool";
 export type ControlKind = (typeof CONTROL_KINDS)[number];
+/** What a `pool` command may ask (CONTROL.md §6 `pool`). Closed: an action added later
+ *  is refused by every machine that predates it. */
+export const POOL_ACTIONS = [
+  "on",
+  "off",
+  "enable",
+  "disable",
+  "remove",
+  "order",
+  "refresh",
+  "login.begin",
+  "login.complete",
+] as const;
+export type PoolAction = (typeof POOL_ACTIONS)[number];
+/** A pooled account's id (or a pending sign-in's): what `session.account_id` carries. */
+export const POOL_ACCOUNT_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+/** An `order` names at most this many accounts: the pool holds no more. */
+export const POOL_ORDER_MAX = 20;
+/** The pasted `code#state` of a sign-in, in characters, on one line. */
+export const POOL_CODE_MAX = 512;
 
 /** COSE algorithm ids a trusted key may use. */
 export const ES256 = -7;
@@ -157,6 +179,15 @@ export interface ControlCommand {
   permission?: StartPermission;
   /** start only: the model the harness runs, as the harness names it. */
   model?: string;
+  /** pool only (session `sessionpipe:pool`): what to do with the account pool. */
+  pool_action?: PoolAction;
+  /** pool: the account (enable, disable, remove, refresh), or the pending sign-in's id
+   *  (login.complete). */
+  pool_account?: string;
+  /** pool, order: every account of the pool once, in the order wanted. */
+  pool_order?: string[];
+  /** pool, login.complete: the `code#state` the person pasted back. */
+  pool_code?: string;
   nonce: string;
   iat: number;
 }
@@ -226,7 +257,10 @@ const FIELDS: Record<ControlKind, readonly string[]> = {
   cancel: [],
   start: ["text", "cwd", "files", "permission", "model"],
   "key.add": ["key", "name"],
+  pool: ["pool_action", "pool_account", "pool_order", "pool_code"],
 };
+/** The fields only a `pool` carries. */
+const POOL_FIELDS = FIELDS.pool;
 
 // --- encodings ------------------------------------------------------------------
 
@@ -623,8 +657,15 @@ export function parseCommand(str: unknown): Parsed {
         return bad("bad_fields", "a key.add carries the key and a name");
       break;
     }
+    case "pool": {
+      if (c.session !== POOL_SESSION) return bad("bad_session", `a pool command names ${POOL_SESSION}`);
+      const why = poolProblem(c);
+      if (why) return bad("bad_fields", why);
+      break;
+    }
   }
   if (c.kind !== "key.add" && (has("key") || has("name"))) return bad("bad_fields", "only a key.add carries a key");
+  if (c.kind !== "pool" && POOL_FIELDS.some(has)) return bad("bad_fields", "only a pool command carries pool fields");
   if (c.kind !== "start" && c.kind !== "prompt" && has("files"))
     return bad("bad_fields", "only a start or a prompt carries files");
   if (c.kind !== "start" && (has("permission") || has("model")))
@@ -636,6 +677,45 @@ export function parseCommand(str: unknown): Parsed {
   if (has("note") && (typeof c.note !== "string" || c.note.length > NOTE_MAX))
     return bad("bad_fields", `a note is text, at most ${NOTE_MAX} characters`);
   return { ok: true, cmd: c as unknown as ControlCommand };
+}
+
+/** Why a `pool` command's fields break the rules (CONTROL.md §6 `pool`), or null when
+ *  they don't. Each action takes exactly its own fields: an account where the action
+ *  names one, the whole order for `order`, the pasted code for `login.complete`. The
+ *  machine still checks the account exists and the order is complete (`refused`). */
+export function poolProblem(c: Record<string, unknown>): string | null {
+  const action = c.pool_action;
+  if (!POOL_ACTIONS.includes(action as PoolAction))
+    return `a pool command's action is one of ${POOL_ACTIONS.join(", ")}`;
+  const a = action as PoolAction;
+  const account = c.pool_account !== undefined;
+  const order = c.pool_order !== undefined;
+  const code = c.pool_code !== undefined;
+  const needsAccount = a === "enable" || a === "disable" || a === "remove" || a === "login.complete";
+  if (needsAccount && !account) return `${a} names an account`;
+  if (account && !needsAccount && a !== "refresh") return `${a} names no account`;
+  if (account && (typeof c.pool_account !== "string" || !POOL_ACCOUNT_RE.test(c.pool_account)))
+    return "an account id is 1 to 128 letters, digits and ._:-";
+  if (order !== (a === "order")) return a === "order" ? "order carries the whole order" : `${a} carries no order`;
+  if (order) {
+    const o = c.pool_order;
+    if (!Array.isArray(o) || o.length < 1 || o.length > POOL_ORDER_MAX)
+      return `an order is a list of 1 to ${POOL_ORDER_MAX} account ids`;
+    if (!o.every((id) => typeof id === "string" && POOL_ACCOUNT_RE.test(id)))
+      return "an account id is 1 to 128 letters, digits and ._:-";
+    if (new Set(o).size !== o.length) return "an order names each account once";
+  }
+  if (code !== (a === "login.complete"))
+    return a === "login.complete" ? "login.complete carries the pasted code" : `${a} carries no code`;
+  if (
+    code &&
+    (typeof c.pool_code !== "string" ||
+      !c.pool_code ||
+      c.pool_code.length > POOL_CODE_MAX ||
+      /[\r\n]/.test(c.pool_code))
+  )
+    return `a code is 1 to ${POOL_CODE_MAX} characters on one line`;
+  return null;
 }
 
 /** Why a start's or a prompt's `files` breaks the rules (CONTROL.md §3.1), or null when it doesn't. */

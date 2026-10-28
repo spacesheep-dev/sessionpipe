@@ -134,6 +134,42 @@ included). The daemon reads the accounts again for every hello, so a new sign-in
 named without pairing again. A receiver MUST NOT treat them as anything but a label:
 nothing on the machine is checked against them.
 
+A hello MAY carry `pool`: the machine's **account pool** (§6 `pool`), several accounts
+of one harness behind the daemon so a session keeps going when one account's limit is
+reached ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):
+
+```json
+"pool": {"on": true, "harness": "claude-code", "accounts": [
+  {"id": "b3f0c1d2-…", "email": "a@b.c", "label": "Fiction", "enabled": true, "status": "ready", "current": true},
+  {"id": "7a1e2f3b-…", "email": "m@b.c", "enabled": true, "status": "limited", "until": "2026-10-29T10:00:00.000Z",
+   "limited_by": "seven_day", "windows": [{"id": "five_hour", "used_percent": 12, "resets_at": "2026-10-29T08:00:00.000Z"},
+                                          {"id": "seven_day", "used_percent": 100, "resets_at": "2026-10-29T10:00:00.000Z"}]}
+]}
+```
+
+A daemon that knows the pool sends `pool` in **every** hello, whether or not the pool
+is on (`on`), and with `on: false` and `accounts: []` when nothing is set up, so a
+receiver tells "no pool" from "an old daemon". `accounts` (at most 20) are in the
+machine's order: each one's `id` (the same string `session.account_id` and
+`limits.observed.account_id` carry for it, so a receiver joins the three without a
+map), `email` or `label` where known (they travel only here, as `accounts` above),
+`enabled`, a `status` — `ready` (has room), `limited` (used up until `until`, where the
+machine knows when), `error` (needs the person: sign in again), `disabled` (turned off)
+— `current: true` on the one serving new sessions now, and MAY carry `windows`, the
+account's freshest numbers in the shape of `limits.observed.windows` (1–8; from the
+idle usage poll when no session asked recently, since an idle account's numbers ride
+on no session and would reach no receiver otherwise), and, when the status is
+`limited` or `error`, `limited_by`: the id of the window that took the account out
+(`seven_day`), or `rejected` (the vendor's status) or `error` (sign in again) for the
+causes that are no window. A receiver reads `windows` as it reads `limits.observed` (a
+window whose `resets_at` has passed has reset) and MUST NOT send it on as an event: it
+is a hello's reading, for the receiver's own page. A daemon MUST send a hello **at once** when the pool changes (on or off,
+an account added, removed, reordered, enabled or disabled, a status change), as it does
+for its folders, so the receiver's page follows the machine rather than its own guess.
+A hello without `pool` is a daemon that predates the pool: a receiver MUST NOT offer
+pool controls for it. Whether a receiver may ask anything of the pool is §6 `pool`; the
+hello is a reading, never a promise.
+
 Keys are listed and removed one at a time on the machine (`sessionpipe control keys`,
 `sessionpipe control keys remove <id>`); `sessionpipe control off` removes the machine,
 its keys and its token, and tells the receiver (`POST {control}/off`). Adding another
@@ -217,7 +253,7 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 |-------|------|
 | `v`, `t` | `1`, `"sessionpipe.control"`. |
 | `machine` | The machine's id: `m_` then 16–40 base64url characters. |
-| `kind` | `prompt` · `permission.answer` · `cancel` · `start` (§5). |
+| `kind` | `prompt` · `permission.answer` · `cancel` · `start` · `key.add` (§2) · `pool` (§6). |
 | `session` | `<harness>:<id>`. The id follows its adapter's rule ([ADAPTERS.md](ADAPTERS.md)); for `claude-code` it is a UUID. |
 | `text` | `prompt`, `start`: the message for the model, 1 – **20 000** characters, not all whitespace (a real task brief runs to pages). |
 | `for`, `decision` | `permission.answer` only: the `attention_id` being answered, and `allow` or `deny`. |
@@ -226,13 +262,18 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `files` | `start` and `prompt`, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
 | `permission` | `start` only, optional: `read`, `safe`, `edits` or `auto` (below). Any other value is `bad_fields`. |
 | `model` | `start` only, optional: the model the harness should run, 1 – **100** characters matching `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$` (never a leading `-`). The harness's own name for it; the machine passes it as one argument, never through a shell. |
+| `pool_action` | `pool` only, required: `on` · `off` · `enable` · `disable` · `remove` · `order` · `refresh` · `login.begin` · `login.complete` (§6 `pool`). Any other value is `bad_fields`: the list is closed, so an action added later is refused by every machine that predates it. |
+| `pool_account` | `pool`: an account's id as the hello lists it, or a pending sign-in's id, `[A-Za-z0-9._:-]{1,128}`. Required by `enable`, `disable`, `remove` and `login.complete`; optional on `refresh`; `bad_fields` on any other action. |
+| `pool_order` | `pool`, `order` only, required there: 1 – **20** account ids, no repeats. |
+| `pool_code` | `pool`, `login.complete` only, required there: what the person pasted back from the sign-in page (`code#state`), 1 – **512** characters, no line feed or carriage return. |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
 | `iat` | Epoch milliseconds on the signing device's clock, an integer. |
 
 Each kind carries the fields of this table that name it, and `v`, `t`, `machine`, `kind`,
 `session`, `nonce`, `iat` and `note`; any other field (one this table doesn't list
 included) makes the command malformed (`bad_fields`): `files` on any kind but `start`
-and `prompt`, and `permission` or `model` on any kind but `start`, included. The whole
+and `prompt`, `permission` or `model` on any kind but `start`, and a `pool_*` field on
+any kind but `pool` (or on a `pool` whose action doesn't take it), included. The whole
 string is at most **48 000** characters (the text, JSON-escaped, and the rest).
 
 **Permission levels.** A `start` MAY say how much the new session may do without anyone
@@ -367,7 +408,8 @@ A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `not_a_command`, `wrong_machine`, `unknown_kind`, `bad_session`, `bad_fields`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
-(`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`). A daemon up
+(`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`, and for a
+`pool` command `pool_account`, `pool_order`, `pool_off`, §6). A daemon up
 to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
@@ -561,6 +603,53 @@ short, has another hash, or cannot be written, the command is acked `failed` wit
 code `file` and a `detail` naming the file and the reason, nothing that was written
 for it is kept, and **no session starts**.
 
+### `pool`
+
+Session `sessionpipe:pool`, the machine's account pool (§2 `pool`, PRIVACY.md §3): the
+only kind besides `key.add` that names no coding session. A receiver can only **ask**;
+the machine decides, acts and acks. The pool itself — which account serves a request —
+is the machine's policy and no command changes it: a request goes to the first account
+in the person's order that has room, and a session stays on its account while that
+account has room. The commands shape the order and the roster:
+
+| `pool_action` | Takes | Does |
+|---|---|---|
+| `on` | — | Turns the pool on: the machine points its harness at the daemon. Already on: `delivered`. |
+| `off` | — | Turns it off and removes exactly what `on` wrote. The accounts stay. |
+| `enable` · `disable` | `pool_account` | Puts an account in, or out of, rotation. |
+| `remove` | `pool_account` | Removes the account and deletes its credential. |
+| `order` | `pool_order` | The complete order: every account of the pool once, nothing else. |
+| `refresh` | `pool_account?` | Reads the account's usage from the vendor now; without an account, every account's. |
+| `login.begin` | — | Starts a sign-in for a new account. Acked `delivered` with `detail` = the pending login id, one space, the URL to open; the person opens it on any device, and the vendor's page hands them a code. |
+| `login.complete` | `pool_account` (the pending login id), `pool_code` | Finishes it: the machine exchanges the code, learns the account's id and email, and adds it to the end of the order. A pending login the machine doesn't hold (expired after 10 minutes, or never begun) is refused `pool_account`. |
+
+Every check of §5 runs first. Then the machine answers:
+
+- `delivered`, with no `mode` and `detail` = its one-line summary of the pool as it now
+  stands (`on · 3 accounts · 2 with room · serving Fiction`), or for `login.begin` the
+  id and URL above. The daemon also sends a hello at once (§2), which is the state a
+  receiver shows; `detail` is for the person who asked.
+- `refused` with `pool_account` for an `enable`, `disable`, `remove`, `refresh` or
+  `login.complete` whose account (or pending login) the machine does not hold;
+  `pool_order` for an order that does not name every account of the pool exactly once;
+  `pool_off` for `refresh`, `login.begin` or `login.complete` while the pool is off (the
+  machine calls the vendor only for a pool the person turned on, PRIVACY.md §3).
+- `failed` with `code` `login` when the vendor would not take the code, or `pool` when
+  the vendor call a `refresh` or `login.complete` needs did not go through; `detail` says
+  what, never a token.
+- `unsupported` when the daemon knows the kind but this machine cannot pool (no harness
+  of the pool's kind installed, or a platform the listener does not run on). A daemon
+  that **predates** the kind refuses it `unknown_kind` at the verifier, as it would any
+  kind it doesn't know, so a receiver MUST NOT send `pool` to a machine whose last hello
+  had no `pool`.
+
+A `pool` command is a change to what every session on the machine runs through, so a
+receiver SHOULD ask for a fresh confirm (§3.2) for `on`, `off`, `remove` and
+`login.complete`, as it may for a `key.add`, and MUST show which machine it is for. No
+command adds an account's credential from the receiver's side: `login.complete` carries
+a one-time code the vendor issued to the person, and the exchange happens on the
+machine.
+
 ## 7. Attention lifecycle
 
 `attention.needed` (kind `permission`) → optional verified `permission.answer` →
@@ -607,7 +696,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -626,8 +715,11 @@ send → delivered time.
   `prompt`, and `111`–`136` device keys (§2, §3.2): signatures for each purpose,
   purposes and rp ids swapped, WebAuthn fields where they don't belong, a device key
   a machine stored as a passkey, and `key.add` and enrollment of device keys, valid
-  and broken. The reference verifier and every receiver that pre-checks MUST agree
-  with all of them.
+  and broken; `137`–`163` the `pool` command (§6): every action valid, then a coding
+  session named, no action, an unknown action, each action with another's field or
+  without its own, an order too long, empty or repeating, a code with a line feed or
+  too long, pool fields on a prompt, and an order swapped after signing. The reference
+  verifier and every receiver that pre-checks MUST agree with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
@@ -636,6 +728,8 @@ send → delivered time.
   `delivered` with `applied`; a hello with `start`.
 - `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
   whose `mode` is `inherit` (§2).
+- `conformance/delivery/24` — a hello with `pool` (§2): on, three accounts in order,
+  one current, one limited with `until`, one disabled.
 
 ## 12. Status
 

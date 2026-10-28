@@ -20,6 +20,9 @@ import {
   FILES_MAX,
   fromB64url,
   MODEL_MAX,
+  POOL_CODE_MAX,
+  POOL_ORDER_MAX,
+  POOL_SESSION,
   RECEIVER_MAX_AGE_MS,
   RS256,
   type SignedCommand,
@@ -988,11 +991,139 @@ describe.runIf(WRITE)("write control vectors", () => {
       );
     }
 
+    // --- the pool (CONTROL.md §6 `pool`): 137–163, after the device keys ---
+    const pool: Vector[] = [];
+    {
+      const ACC = "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+      const ACC2 = "7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3";
+      const poolCmd = (fields: Record<string, unknown>) =>
+        commandStr({ kind: "pool", session: POOL_SESSION, text: undefined, ...fields });
+      const pv = (name: string, description: string, s: SignedCommand, expect: Vector["expect"]) =>
+        pool.push({ name, description, input: { signed: s, ...base() }, expect });
+      const okp = async (name: string, description: string, fields: Record<string, unknown>) =>
+        pv(name, description, await signed(pk, day, poolCmd(fields)), { ok: true, via: "grant", kind: "pool" });
+      const badp = async (name: string, description: string, fields: Record<string, unknown>, code = "bad_fields") =>
+        pv(name, description, await signed(pk, day, poolCmd(fields)), { ok: false, code });
+
+      await okp("valid-pool-on", "Turn the machine's account pool on: the action alone.", { pool_action: "on" });
+      await okp("valid-pool-off", "Turn it off.", { pool_action: "off" });
+      await okp("valid-pool-enable", "Put an account back in rotation, by the id its hello lists.", {
+        pool_action: "enable",
+        pool_account: ACC,
+      });
+      await okp("valid-pool-disable", "Take an account out of rotation without removing it.", {
+        pool_action: "disable",
+        pool_account: ACC,
+      });
+      await okp("valid-pool-remove", "Remove an account and its credentials from the pool.", {
+        pool_action: "remove",
+        pool_account: ACC,
+      });
+      await okp("valid-pool-order", "The whole order: every account of the pool, once each.", {
+        pool_action: "order",
+        pool_order: [ACC2, ACC],
+      });
+      await okp("valid-pool-refresh", "Read every account's usage now: no account named.", { pool_action: "refresh" });
+      await okp("valid-pool-refresh-account", "Read one account's usage now.", {
+        pool_action: "refresh",
+        pool_account: ACC,
+      });
+      await okp("valid-pool-login-begin", "Start a sign-in: the ack carries the URL and the pending login id.", {
+        pool_action: "login.begin",
+      });
+      {
+        const c = poolCmd({
+          pool_action: "login.complete",
+          pool_account: "login_7Qm2xK9pLw",
+          pool_code: `${"a".repeat(64)}#${"b".repeat(32)}`,
+        });
+        pv(
+          "valid-pool-login-complete",
+          "Finish a sign-in with the pasted code#state, for the pending login id login.begin acked; a confirm, as a key.add often is.",
+          { cmd: c, confirm: await pk.assert(await sha256(c)) },
+          { ok: true, via: "confirm", kind: "pool" },
+        );
+      }
+      await badp(
+        "pool-coding-session",
+        "A pool command must name the pool (sessionpipe:pool), not a coding session.",
+        { session: "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e", pool_action: "on" },
+        "bad_session",
+      );
+      await badp("pool-no-action", "A pool command with no action.", {});
+      await badp("pool-unknown-action", "An action the spec doesn't define (`add`): the list is closed.", {
+        pool_action: "add",
+      });
+      await badp("pool-enable-no-account", "enable names an account.", { pool_action: "enable" });
+      await badp("pool-enable-with-order", "An order beside an enable: each action takes exactly its own fields.", {
+        pool_action: "enable",
+        pool_account: ACC,
+        pool_order: [ACC],
+      });
+      await badp("pool-on-with-account", "on takes no account.", { pool_action: "on", pool_account: ACC });
+      await badp("pool-order-missing", "order carries the whole order.", { pool_action: "order" });
+      await badp("pool-order-empty", "An empty order.", { pool_action: "order", pool_order: [] });
+      await badp(
+        "pool-order-too-long",
+        `An order of ${POOL_ORDER_MAX + 1} accounts: the pool holds at most ${POOL_ORDER_MAX}.`,
+        {
+          pool_action: "order",
+          pool_order: Array.from({ length: POOL_ORDER_MAX + 1 }, (_, i) => `acc_${i}`),
+        },
+      );
+      await badp("pool-order-repeats", "An order that names an account twice.", {
+        pool_action: "order",
+        pool_order: [ACC, ACC2, ACC],
+      });
+      await badp("pool-account-bad-char", "An account id with a space and a slash.", {
+        pool_action: "remove",
+        pool_account: "acc 1/2",
+      });
+      await badp("pool-login-complete-no-code", "login.complete carries the pasted code.", {
+        pool_action: "login.complete",
+        pool_account: "login_7Qm2xK9pLw",
+      });
+      await badp("pool-code-newline", "A code with a line feed in it: a code is one line.", {
+        pool_action: "login.complete",
+        pool_account: "login_7Qm2xK9pLw",
+        pool_code: "abc#xyz\nrm -rf ~",
+      });
+      await badp("pool-code-too-long", `A code of ${POOL_CODE_MAX + 1} characters.`, {
+        pool_action: "login.complete",
+        pool_account: "login_7Qm2xK9pLw",
+        pool_code: "c".repeat(POOL_CODE_MAX + 1),
+      });
+      await badp("pool-with-text", "A pool command carrying a prompt's text.", { pool_action: "on", text: "hi" });
+      pv(
+        "prompt-with-pool-action",
+        "Only a pool command carries pool fields.",
+        await signed(pk, day, commandStr({ pool_action: "off" })),
+        { ok: false, code: "bad_fields" },
+      );
+      {
+        const c = poolCmd({ pool_action: "order", pool_order: [ACC, ACC2] });
+        const s = await signed(pk, day, c);
+        pv(
+          "tampered-pool-order",
+          "Signed with one order, carried with another: the receiver swapped the accounts after the device signed.",
+          { ...s, cmd: c.replace(`["${ACC}","${ACC2}"]`, `["${ACC2}","${ACC}"]`) },
+          { ok: false, code: "bad_csig" },
+        );
+      }
+    }
+
     mkdirSync(dir, { recursive: true });
     const names = new Set<string>();
     let n = 0;
     let wrote = 0;
-    const all = [...out.slice(0, split), ...enroll, ...out.slice(split, files), ...out.slice(files), ...device];
+    const all = [
+      ...out.slice(0, split),
+      ...enroll,
+      ...out.slice(split, files),
+      ...out.slice(files),
+      ...device,
+      ...pool,
+    ];
     for (const v of all) {
       do n++;
       while (RESERVED.has(n));

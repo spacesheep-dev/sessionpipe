@@ -22,7 +22,8 @@
         "permission.answer",
         "cancel",
         "start",
-        "key.add"
+        "key.add",
+        "pool"
       ]
     },
     "session": {
@@ -187,6 +188,40 @@
       "minLength": 1,
       "maxLength": 100,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+    },
+    "pool_action": {
+      "type": "string",
+      "enum": [
+        "on",
+        "off",
+        "enable",
+        "disable",
+        "remove",
+        "order",
+        "refresh",
+        "login.begin",
+        "login.complete"
+      ]
+    },
+    "pool_account": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "pool_order": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+      },
+      "uniqueItems": true
+    },
+    "pool_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\r\\n]+$"
     },
     "nonce": {
       "type": "string",

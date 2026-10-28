@@ -420,6 +420,10 @@
         "plan": {
           "type": "string",
           "maxLength": 64
+        },
+        "account_id": {
+          "type": "string",
+          "maxLength": 128
         }
       },
       "required": [

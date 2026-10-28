@@ -75,6 +75,16 @@ describe("filterEvent", () => {
     expect(e.session.account_id).toBeUndefined();
     expect(e.data.message).toBe("mail [email] at ~/x");
     expect(e.privacy).toEqual({ rulesets: ["secrets@1", "pii@1"], pii: true });
+    // The account a pooled session's numbers belong to is the same identifier: dropped too.
+    const limits = base({
+      type: "limits.observed",
+      data: { windows: [{ id: "five_hour", used_percent: 40 }], plan: "max", account_id: "acct-2" },
+    });
+    expect(filterEvent(limits, 1, false)!.data.account_id).toBe("acct-2");
+    expect(filterEvent(limits, 1, true)!.data).toEqual({
+      windows: [{ id: "five_hour", used_percent: 40 }],
+      plan: "max",
+    });
   });
   it("keeps an unknown type whole", () => {
     const e = filterEvent(base({ type: "x.y", data: { anything: 1 } }), 0, false)!;
@@ -112,7 +122,7 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
-  "limits.observed": { 1: ["windows", "plan"] },
+  "limits.observed": { 1: ["windows", "plan", "account_id"] },
 };
 /** Every key any type carries, plus one the spec never names. */
 const EVERY_KEY: Record<string, unknown> = {
@@ -146,6 +156,7 @@ const EVERY_KEY: Record<string, unknown> = {
   injected: true,
   windows: [{ id: "five_hour", used_percent: 23.5 }],
   plan: "max",
+  account_id: "acct-2",
   extra: "never sent",
 };
 const TIERS: Tier[] = [0, 1, 2, 3];

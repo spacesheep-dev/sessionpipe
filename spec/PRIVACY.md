@@ -67,7 +67,7 @@ anonymity:
 | Phone numbers (E.164 and common national forms) | → `[phone]` |
 | Home directory paths | → `~` (already the rule for `session.cwd`; here applied inside every string) |
 | `session.machine` | → the first 8 hex characters of its SHA-256 |
-| `session.account_id` | dropped |
+| `session.account_id`, and `limits.observed`'s `account_id` | dropped |
 
 Vectors: `conformance/redaction/pii.json`.
 
@@ -92,6 +92,22 @@ on (`sessionpipe titles on`), the Claude Code adapter reads Claude Code's sign-i
 machine to ask claude.ai for a session's name, the one fact claude.ai never writes to the
 machine. The token goes to `api.anthropic.com` alone, for that read; it is never stored,
 logged, put in an event, or sent to a sink. Only the name comes back, as `session.title`.
+
+**The other exception is the account pool, and only after the person turns it on**
+([CONTROL.md §6 `pool`](CONTROL.md#pool), [ADAPTERS.md](ADAPTERS.md) *Pool*). A person
+with several accounts for one harness may run `sessionpipe pool on` and `pool add` at
+the machine's own terminal. From then on, and only then, the machine's daemon holds the
+credentials of **the accounts the person added** (copied from the harness's own login
+with `pool add --import`, or signed in with `pool add --login`), in sessionpipe's own
+secrets store, and sends each one only to **that vendor's own endpoints**, only for
+**the person's own requests** (the harness's requests, which it routes, and the vendor's
+usage and token-refresh calls that keep those accounts usable). Nothing is read, called
+or sent before `pool on` or `pool add`; `pool off` removes what `pool on` wrote; `pool
+remove` deletes the credential. No credential, no token and no email reaches an event,
+an ack, a log or a receiver: a receiver learns the accounts' ids, labels and emails only
+in the hello, as it does the harness's own accounts above, and their usage only as
+`limits.observed`. Nothing here extends to any other harness, to any other vendor, to
+any other endpoint, or to anything `install` or `connect` does.
 
 ## 4. For receivers
 

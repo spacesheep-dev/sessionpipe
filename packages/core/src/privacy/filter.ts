@@ -49,7 +49,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
-  "limits.observed": { 1: ["windows", "plan"] },
+  "limits.observed": { 1: ["windows", "plan", "account_id"] },
 };
 
 const SESSION_ALLOW = [
@@ -131,7 +131,11 @@ export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: Filter
     const s = reducePiiDeep(out.session, opts.home) as Record<string, unknown>;
     if (typeof s.machine === "string") s.machine = hashMachine(s.machine);
     delete s.account_id;
-    out = { ...out, session: s as Event["session"], data: reducePiiDeep(out.data, opts.home) };
+    const d = reducePiiDeep(out.data, opts.home) as Record<string, unknown>;
+    // limits.observed names the account its numbers belong to: the same identifier
+    // pii@1 drops from the session block, so it goes the same way.
+    delete d.account_id;
+    out = { ...out, session: s as Event["session"], data: d };
     rulesets.push(RULESET_PII);
   }
   out.privacy = { rulesets, pii };

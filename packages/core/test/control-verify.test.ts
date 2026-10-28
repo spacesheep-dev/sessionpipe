@@ -21,6 +21,10 @@ import {
   MODEL_RE,
   narrower,
   originAllowed,
+  POOL_ACTIONS,
+  POOL_CODE_MAX,
+  POOL_ORDER_MAX,
+  POOL_SESSION,
   parseCommand,
   parseGrant,
   parseSessionRef,
@@ -238,6 +242,75 @@ describe("parseCommand", () => {
     expect(code({ name: "x" })).toBe("bad_fields: only a key.add carries a key");
   });
 
+  it("pool: the pool session, one action, and exactly that action's fields", () => {
+    const pool = (f: Record<string, unknown>) => code({ kind: "pool", session: POOL_SESSION, text: undefined, ...f });
+    const acc = "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    // Each action with what it takes.
+    for (const pool_action of ["on", "off", "refresh", "login.begin"])
+      expect(pool({ pool_action }), pool_action).toBe("ok");
+    for (const pool_action of ["enable", "disable", "remove", "refresh"])
+      expect(pool({ pool_action, pool_account: acc }), pool_action).toBe("ok");
+    expect(pool({ pool_action: "order", pool_order: [acc, "acc_2"] })).toBe("ok");
+    expect(pool({ pool_action: "order", pool_order: Array.from({ length: POOL_ORDER_MAX }, (_, i) => `a${i}`) })).toBe(
+      "ok",
+    );
+    expect(pool({ pool_action: "login.complete", pool_account: "login_1", pool_code: "abc#xyz" })).toBe("ok");
+    expect(pool({ pool_action: "login.complete", pool_account: "login_1", pool_code: "c".repeat(POOL_CODE_MAX) })).toBe(
+      "ok",
+    );
+    expect(pool({ pool_action: "on", note: "from the phone" })).toBe("ok");
+    // The action.
+    expect(pool({})).toBe(`bad_fields: a pool command's action is one of ${POOL_ACTIONS.join(", ")}`);
+    expect(pool({ pool_action: "add" })).toMatch(/^bad_fields: a pool command's action is one of /);
+    expect(pool({ pool_action: 1 })).toMatch(/^bad_fields: a pool command's action is one of /);
+    // The account.
+    for (const a of ["enable", "disable", "remove", "login.complete"])
+      expect(pool({ pool_action: a, pool_code: "c" }), a).toBe(`bad_fields: ${a} names an account`);
+    for (const a of ["on", "off", "order", "login.begin"])
+      expect(pool({ pool_action: a, pool_account: acc }), a).toBe(`bad_fields: ${a} names no account`);
+    for (const bad of ["", "a".repeat(129), "a b", "a\n", 5, null, ["a"]])
+      expect(pool({ pool_action: "enable", pool_account: bad }), JSON.stringify(bad)).toBe(
+        "bad_fields: an account id is 1 to 128 letters, digits and ._:-",
+      );
+    // The order.
+    expect(pool({ pool_action: "order" })).toBe("bad_fields: order carries the whole order");
+    expect(pool({ pool_action: "on", pool_order: [acc] })).toBe("bad_fields: on carries no order");
+    for (const bad of [[], "a", {}, Array.from({ length: POOL_ORDER_MAX + 1 }, (_, i) => `a${i}`)])
+      expect(pool({ pool_action: "order", pool_order: bad }), JSON.stringify(bad)).toBe(
+        `bad_fields: an order is a list of 1 to ${POOL_ORDER_MAX} account ids`,
+      );
+    for (const bad of [[1], ["a", ""], ["a b"], [null]])
+      expect(pool({ pool_action: "order", pool_order: bad }), JSON.stringify(bad)).toBe(
+        "bad_fields: an account id is 1 to 128 letters, digits and ._:-",
+      );
+    expect(pool({ pool_action: "order", pool_order: ["a", "b", "a"] })).toBe(
+      "bad_fields: an order names each account once",
+    );
+    // The code.
+    expect(pool({ pool_action: "login.complete", pool_account: "l" })).toBe(
+      "bad_fields: login.complete carries the pasted code",
+    );
+    expect(pool({ pool_action: "login.begin", pool_code: "c" })).toBe("bad_fields: login.begin carries no code");
+    for (const bad of ["", "c".repeat(POOL_CODE_MAX + 1), "ab\ncd", "ab\rcd", 7, ["c"]])
+      expect(pool({ pool_action: "login.complete", pool_account: "l", pool_code: bad }), JSON.stringify(bad)).toBe(
+        `bad_fields: a code is 1 to ${POOL_CODE_MAX} characters on one line`,
+      );
+    // The session, and other kinds' fields.
+    expect(code({ kind: "pool", text: undefined, pool_action: "on" })).toBe(
+      `bad_session: a pool command names ${POOL_SESSION}`,
+    );
+    expect(pool({ pool_action: "on", text: "x" })).toBe(
+      "bad_fields: the command carries a field its kind doesn't have: text",
+    );
+    expect(pool({ pool_action: "on", cwd: "/x" })).toBe(
+      "bad_fields: the command carries a field its kind doesn't have: cwd",
+    );
+    expect(code({ pool_action: "on" })).toBe("bad_fields: only a pool command carries pool fields");
+    expect(code({ kind: "cancel", text: undefined, pool_account: acc })).toBe(
+      "bad_fields: only a pool command carries pool fields",
+    );
+  });
+
   const START = { kind: "start", session: "codex:0199a", cwd: "/w" };
   it("start options: a permission of the four levels, a model as one safe argument", () => {
     for (const permission of START_PERMISSIONS) expect(code({ ...START, permission })).toBe("ok");
@@ -294,8 +367,29 @@ describe("parseCommand", () => {
       base: { session: KEY_STORE_SESSION, text: undefined, key: { id: "a".repeat(20), alg: -7, spki: "b".repeat(50) } },
       own: { name: "iPhone" },
     },
+    pool: {
+      base: {
+        session: POOL_SESSION,
+        text: undefined,
+        pool_action: "login.complete",
+        pool_account: "l",
+        pool_code: "c",
+      },
+      own: {},
+    },
   };
-  const OPTIONAL_ELSEWHERE = { files: [], permission: "safe", model: "sonnet", key: {}, name: "x", cwd: "/w" };
+  const OPTIONAL_ELSEWHERE = {
+    files: [],
+    permission: "safe",
+    model: "sonnet",
+    key: {},
+    name: "x",
+    cwd: "/w",
+    pool_action: "on",
+    pool_account: "a",
+    pool_order: ["a"],
+    pool_code: "c",
+  };
   it("each kind carries its own fields, the common ones and nothing else", () => {
     for (const [kind, { base, own }] of Object.entries(KINDS)) {
       expect(code({ kind, ...base, ...own, note: "why" }), kind).toBe("ok");

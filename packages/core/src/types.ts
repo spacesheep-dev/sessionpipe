@@ -21,3 +21,7 @@ export type ControlMessage = z.infer<typeof S.ControlMessage>;
 export type ControlAck = z.infer<typeof S.ControlAck>;
 export type AttentionKind = z.infer<typeof S.AttentionKind>;
 export type HarnessAccount = z.infer<typeof S.HarnessAccount>;
+export type ControlHello = z.infer<typeof S.ControlHello>;
+/** The machine's account pool as its hello lists it (CONTROL.md §2 `pool`). */
+export type ControlHelloPool = z.infer<typeof S.ControlHelloPool>;
+export type PoolAccount = z.infer<typeof S.PoolAccount>;

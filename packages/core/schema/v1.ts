@@ -231,6 +231,9 @@ export const EventData = z.object({
   "limits.observed": Loose.extend({
     windows: z.array(LimitWindow).min(1).max(8),
     plan: z.string().max(64).optional(),
+    /** The account the numbers belong to, as `session.account_id` spells it, when the
+     *  session was served by another account than its own (the pool, CONTROL.md §2). */
+    account_id: z.string().max(128).optional(),
   }),
   native: Loose,
 });
@@ -260,7 +263,22 @@ const B64Url = z.string().regex(/^[A-Za-z0-9_-]*$/, "base64url, no padding");
 export const MachineId = z.string().regex(/^m_[A-Za-z0-9_-]{16,40}$/, "m_ + 16–40 base64url");
 /** `<harness>:<id>`; the id follows its adapter's rule (Claude Code: a UUID). */
 export const SessionRef = z.string().regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/, "<harness>:<session id>");
-export const ControlKind = z.enum(["prompt", "permission.answer", "cancel", "start", "key.add"]);
+export const ControlKind = z.enum(["prompt", "permission.answer", "cancel", "start", "key.add", "pool"]);
+/** What a `pool` command asks of the machine's account pool (CONTROL.md §6 `pool`). */
+export const PoolAction = z.enum([
+  "on",
+  "off",
+  "enable",
+  "disable",
+  "remove",
+  "order",
+  "refresh",
+  "login.begin",
+  "login.complete",
+]);
+/** A pooled account's id: what `session.account_id` and `limits.observed.account_id`
+ *  carry for it (Claude Code: the account UUID), or a pending sign-in's id. */
+export const PoolAccountId = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/, "an account id");
 /** The kinds of key a machine or a receiver handles (CONTROL.md §2). Absent: passkeys only. */
 export const KeyTypes = z
   .array(z.enum(["passkey", "device"]))
@@ -343,6 +361,20 @@ export const ControlCommand = z.object({
   permission: StartPermission.optional(),
   /** start only: the model the harness runs. As `permission`: only when advertised. */
   model: ModelId.optional(),
+  /** pool (session `sessionpipe:pool`): what to do with the machine's account pool.
+   *  Each action takes exactly the fields CONTROL.md §6 `pool` lists for it. */
+  pool_action: PoolAction.optional(),
+  /** enable, disable, remove, login.complete (the pending sign-in's id); refresh MAY. */
+  pool_account: PoolAccountId.optional(),
+  /** order: every account of the pool, once each, in the order wanted. */
+  pool_order: z.array(PoolAccountId).min(1).max(20).meta({ uniqueItems: true }).optional(),
+  /** login.complete: what the person pasted back from the sign-in page (`code#state`). */
+  pool_code: z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[^\r\n]+$/, "one line")
+    .optional(),
   /** At least 16 random bytes, base64url. */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/),
   /** Epoch ms, the signing device's clock. */
@@ -540,6 +572,44 @@ export const ControlPaired = z.object({
   account: z.string().max(200).optional(),
 });
 
+/** One account in the machine's pool, as its hello lists it (CONTROL.md §2 `pool`).
+ *  `id` is the string `session.account_id` and `limits.observed.account_id` carry, so
+ *  a receiver joins the three without a map. The email travels only here. */
+export const PoolAccount = z.object({
+  id: PoolAccountId,
+  email: z.string().max(254).optional(),
+  /** What the person calls it, when they named it. */
+  label: z.string().min(1).max(80).optional(),
+  enabled: z.boolean(),
+  /** ready: has room; limited: every window the pool watches is used up until `until`;
+   *  error: needs the person (sign in again); disabled: turned off by the person. */
+  status: z.enum(["ready", "limited", "error", "disabled"]),
+  /** Serving new sessions right now. At most one account says so. */
+  current: z.boolean().optional(),
+  /** limited: when it has room again, where the machine knows. */
+  until: Rfc3339.optional(),
+  /** The account's freshest numbers, as limits.observed would carry them: from the
+   *  idle usage poll when no session asked recently, since an idle account's numbers
+   *  ride on no session and would reach no receiver otherwise. */
+  windows: z.array(LimitWindow).min(1).max(8).optional(),
+  /** limited or error only: what took the account out. A window's id (`seven_day`), or
+   *  `rejected` (the vendor's status) or `error` (sign in again) for the non-window causes. */
+  limited_by: z
+    .string()
+    .regex(/^[a-z0-9_]{1,64}$/)
+    .optional(),
+});
+
+/** The machine's account pool (CONTROL.md §2 `pool`): present in EVERY hello of a daemon
+ *  that knows the pool (`on: false`, `accounts: []` when nothing is set up), so a
+ *  receiver tells "no pool" from "an old daemon"; `accounts` in the machine's order. */
+export const ControlHelloPool = z.object({
+  on: z.boolean(),
+  /** The harness the pool serves. Only `claude-code` today. */
+  harness: HarnessName,
+  accounts: z.array(PoolAccount).max(20),
+});
+
 /** `POST {control}/hello`: what the machine can do right now. */
 export const ControlHello = z.object({
   name: z.string().min(1).max(80),
@@ -582,6 +652,9 @@ export const ControlHello = z.object({
     .optional(),
   /** As in control-pair.json. */
   key_types: KeyTypes.optional(),
+  /** The machine's account pool, when its daemon has one; sent again the moment the
+   *  pool changes. A hello without it is a daemon that predates the pool. */
+  pool: ControlHelloPool.optional(),
 });
 
 export const WellKnown = z.object({
