@@ -132,6 +132,52 @@ refusal, listed in the reply; auto mode allows. An agent that never asks (OpenCo
 its own settings) runs its tools as it would at your terminal. Signing in is yours to do
 at the terminal: an agent that wants it says so in the reply.
 
+## The pool: several Claude accounts, one session that keeps going
+
+Claude Code can't change account mid-session, but its requests can. `sessionpipe pool`
+keeps several Claude accounts behind one loopback listener the control daemon runs on
+this machine; Claude Code is pointed at it through the `env` block of its
+`settings.json` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and the two flags that
+keep its first-party features on). Each request goes to the first account in your order
+that has room, a session stays on its account while that account has room, and when the
+account's 5-hour or weekly window is used up the next request simply goes to the next
+account: the session notices nothing. The numbers each account reports arrive as
+`limits.observed` with `account_id`, so a receiver's usage page shows every account
+([spec](../../spec/CONTROL.md#pool), [what it reads](../../spec/ADAPTERS.md),
+[privacy](../../spec/PRIVACY.md)).
+
+```sh
+sessionpipe pool add --import        # copy every Claude Code login on this machine into the pool
+sessionpipe pool add --login         # sign in to another account: a URL, then paste the code to --code -
+sessionpipe pool on                  # write the env block; installs the daemon's service if it isn't there
+sessionpipe pool                     # the accounts in order, each with its room left and reset times
+sessionpipe pool order <id|email>…   # the complete order; enable | disable | remove | refresh too
+sessionpipe pool off                 # remove exactly what `on` wrote; the accounts stay
+```
+
+Nothing here happens until you run `pool add` or `pool on` yourself: `install` and
+`connect` never touch the pool. The credentials you add live in sessionpipe's own secrets
+store (the keychain where there is one), are sent only to the vendor's own endpoints for
+your own requests, and never appear on an event, in an ack or on the terminal. The
+vendor is called (requests forwarded, idle usage read every five minutes) only while the
+pool is on; `pool add --login` and `pool refresh` at the terminal are the exceptions,
+because you asked. Whether pooling is allowed by each account's plan is yours to check;
+sessionpipe doesn't change any limit.
+
+New Claude Code sessions use the pool from the moment `pool on` returns; sessions
+already running pick it up at their next start, since Claude Code reads
+`settings.json`'s `env` when it starts. While the pool is on, every Claude Code request
+on the machine depends on the daemon: if it isn't running, Claude Code gets "connection
+refused", and `sessionpipe pool` says so (`sessionpipe control run` in a terminal, or the
+service `pool on` installs). The daemon runs for the pool alone, with no receiver
+paired; `control off` keeps the service while the pool is on. While the daemon runs,
+every `sessionpipe pool` command goes to it over the local socket, since it holds the
+listener, the session pins and the credentials; with no daemon the command runs here and
+the daemon reads the result when it starts. From a receiver, the same actions arrive as
+a signed `pool` command; turning it on or off, removing or reordering accounts, and
+finishing a sign-in need a fresh confirm with your passkey or device key, never a day
+grant alone. `sessionpipe uninstall` runs `pool off` first.
+
 ## Updates
 
 The control daemon keeps its own copy current. About a minute after it starts, and then

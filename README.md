@@ -143,6 +143,15 @@ sessionpipe control folders add ~/work                   # where messaged sessio
 sessionpipe control mode safe                            # or auto or inherit; what a messaged session may do
 ```
 
+The same daemon can keep **several Claude accounts behind one loopback listener**, so a
+Claude Code session keeps going when one account's limit is reached: `sessionpipe pool
+add --import`, then `sessionpipe pool on`. A request goes to the first account in your
+order that has room, a session stays on its account while it has room, and each
+account's numbers arrive as `limits.observed` with `account_id`, so a receiver shows
+every account's room. Opt-in only, credentials in the machine's own secrets store and
+sent only to the vendor ([the pool](packages/cli/README.md#the-pool-several-claude-accounts-one-session-that-keeps-going),
+[CONTROL.md §6 `pool`](spec/CONTROL.md#pool)).
+
 ## Three promises
 
 - **No telemetry.** sessionpipe reports to the sinks you configured and to nobody else.
