@@ -1,0 +1,38 @@
+{
+  "_comment": "Token-endpoint and profile answers (shapes from Claude Code 2.1.312 and bb's pooler; every value is fake).",
+  "token": {
+    "token_type": "Bearer",
+    "access_token": "sk-ant-oat01-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+    "refresh_token": "sk-ant-ort01-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+    "expires_in": 28800,
+    "scope": "user:inference user:profile org:create_api_key",
+    "organization": { "uuid": "11111111-2222-4333-8444-555555555555", "name": "Example Org" },
+    "account": { "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "email_address": "pool-one@example.com" }
+  },
+  "token_without_refresh": {
+    "access_token": "sk-ant-oat01-FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2FAKE2",
+    "expires_in": 28800
+  },
+  "profile": {
+    "account": {
+      "uuid": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+      "email": "pool-one@example.com",
+      "display_name": "Pool One",
+      "has_claude_max": true,
+      "has_claude_pro": false,
+      "subscription_type": "max",
+      "rate_limit_tier": "default_claude_max_20x"
+    },
+    "organization": {
+      "uuid": "11111111-2222-4333-8444-555555555555",
+      "name": "Example Org",
+      "organization_type": "claude_max",
+      "rate_limit_tier": "default_claude_max_20x"
+    }
+  },
+  "profile_bare": {
+    "account": { "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "email": "pool-one@example.com" },
+    "organization": { "name": "", "organization_type": "claude_pro" }
+  },
+  "profile_broken": { "account": { "uuid": "not-a-uuid", "email": "pool-one@example.com" } }
+}

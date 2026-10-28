@@ -1,0 +1,26 @@
+{
+  "_comment": "GET /api/oauth/usage as the pooler reads it (shape from bb's parser and Claude Code's window names; values made up). utilization is a percent here; resets_at RFC 3339 or epoch seconds.",
+  "typical": {
+    "five_hour": { "utilization": 23.7, "resets_at": "2025-10-29T12:00:00.000000+00:00" },
+    "seven_day": { "utilization": 61.49, "resets_at": "2025-11-03T11:00:00Z" },
+    "seven_day_opus": { "utilization": 12, "resets_at": 1762167600 },
+    "seven_day_oauth_apps": null,
+    "extra_usage": { "is_enabled": false, "utilization": null, "monthly_limit": null, "used_credits": null }
+  },
+  "odd": {
+    "five_hour": { "utilization": "23", "resets_at": "2025-10-29T12:00:00Z" },
+    "seven_day": { "utilization": 150.04, "resets_at": "whenever" },
+    "Seven-Day": { "utilization": 1, "resets_at": 1762167600 },
+    "limits": [{ "kind": "weekly_scoped", "percent": 3 }],
+    "a": { "utilization": 1 },
+    "b": { "utilization": 2 },
+    "c": { "utilization": 3 },
+    "d": { "utilization": 4 },
+    "e": { "utilization": 5 },
+    "f": { "utilization": 6 },
+    "g": { "utilization": 7 },
+    "h": { "utilization": 8 },
+    "i": { "utilization": 9 }
+  },
+  "empty": { "extra_usage": null }
+}

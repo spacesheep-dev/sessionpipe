@@ -1,0 +1,54 @@
+{
+  "_comment": "Response header sets as api.anthropic.com sends them (names from Claude Code 2.1.312 and bb's pooler; values made up). Utilization is a fraction, resets are epoch seconds.",
+  "allowed": {
+    "anthropic-ratelimit-unified-status": "allowed",
+    "anthropic-ratelimit-unified-5h-utilization": "0.237",
+    "anthropic-ratelimit-unified-5h-reset": "1761738000",
+    "anthropic-ratelimit-unified-5h-status": "allowed",
+    "anthropic-ratelimit-unified-7d-utilization": "0.6149",
+    "anthropic-ratelimit-unified-7d-reset": "1762167600",
+    "anthropic-ratelimit-unified-7d-status": "allowed",
+    "request-id": "req_011FAKE0000000000000001",
+    "content-type": "text/event-stream"
+  },
+  "warning_with_model_window": {
+    "anthropic-ratelimit-unified-status": "allowed_warning",
+    "anthropic-ratelimit-unified-5h-utilization": "0.9",
+    "anthropic-ratelimit-unified-5h-reset": "1761738000",
+    "anthropic-ratelimit-unified-5h-status": "allowed_warning",
+    "anthropic-ratelimit-unified-7d-utilization": "0.4",
+    "anthropic-ratelimit-unified-7d-reset": "1762167600",
+    "anthropic-ratelimit-unified-7d_opus-utilization": "0.9612",
+    "anthropic-ratelimit-unified-7d_opus-reset": "1762167600",
+    "anthropic-ratelimit-unified-7d_opus-status": "allowed_warning"
+  },
+  "rejected": {
+    "anthropic-ratelimit-unified-status": "rejected",
+    "anthropic-ratelimit-unified-5h-utilization": "1",
+    "anthropic-ratelimit-unified-5h-reset": "1761738000",
+    "anthropic-ratelimit-unified-5h-status": "rejected",
+    "anthropic-ratelimit-unified-7d-utilization": "0.72",
+    "anthropic-ratelimit-unified-7d-reset": "1762167600",
+    "anthropic-ratelimit-unified-representative-claim": "five_hour",
+    "anthropic-ratelimit-unified-reset": "1761738000",
+    "retry-after": "1800"
+  },
+  "status_only": {
+    "anthropic-ratelimit-unified-status": "allowed"
+  },
+  "garbage": {
+    "anthropic-ratelimit-unified-status": "maybe",
+    "anthropic-ratelimit-unified-5h-utilization": "lots",
+    "anthropic-ratelimit-unified-5h-reset": "yesterday",
+    "anthropic-ratelimit-unified-7d-utilization": "",
+    "anthropic-ratelimit-unified-7d-reset": "-5",
+    "anthropic-ratelimit-unified-representative-claim": "Five Hour!",
+    "anthropic-ratelimit-unified-reset": "soon",
+    "anthropic-ratelimit-unified-7d_this_window_name_is_far_too_long_for_a_limit_window_id_to_be_accepted_by_the_schema-utilization": "0.5",
+    "anthropic-ratelimit-unified-overage-status": "allowed"
+  },
+  "none": {
+    "content-type": "application/json",
+    "request-id": "req_011FAKE0000000000000002"
+  }
+}

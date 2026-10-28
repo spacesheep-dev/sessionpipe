@@ -1,0 +1,9 @@
+{
+  "_comment": "Request bodies as Claude Code 2.1.312 builds metadata.user_id (a JSON string) and as older builds did (user_<hash>_account_<uuid>_session_<uuid>). Kept as strings so the exact bytes are the fixture.",
+  "json_form": "{\"model\":\"claude-sonnet-4-5\",\"max_tokens\":32000,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\\",\\\"account_uuid\\\":\\\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\\\",\\\"session_id\\\":\\\"12345678-1234-4123-8123-123456789abc\\\"}\"},\"stream\":true,\"temperature\":1e-7}",
+  "legacy_form": "{\"model\":\"claude-sonnet-4-5\",\"metadata\":{\"user_id\":\"user_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef_account_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee_session_12345678-1234-4123-8123-123456789abc\"},\"messages\":[]}",
+  "user_id_twice": "{\"messages\":[{\"role\":\"user\",\"content\":\"{\\\"user_id\\\":\\\"x\\\"}\"}],\"metadata\":{\"user_id\":\"user_abc_account_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee_session_12345678-1234-4123-8123-123456789abc\"}}",
+  "escaped_literal": "{\"metadata\":{\"user_id\":\"user\\u005fabc_account_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee_session_12345678-1234-4123-8123-123456789abc\"}}",
+  "no_account": "{\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"abc\\\",\\\"session_id\\\":\\\"12345678-1234-4123-8123-123456789abc\\\"}\"}}",
+  "no_metadata": "{\"model\":\"claude-sonnet-4-5\",\"messages\":[]}"
+}
