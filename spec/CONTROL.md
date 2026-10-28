@@ -409,7 +409,7 @@ A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
 (`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`, and for a
-`pool` command `pool_account`, `pool_order`, `pool_off`, §6). A daemon up
+`pool` command `confirm_required`, `pool_account`, `pool_order`, `pool_off`, §6). A daemon up
 to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
@@ -643,9 +643,13 @@ Every check of §5 runs first. Then the machine answers:
   kind it doesn't know, so a receiver MUST NOT send `pool` to a machine whose last hello
   had no `pool`.
 
-A `pool` command is a change to what every session on the machine runs through, so a
-receiver SHOULD ask for a fresh confirm (§3.2) for `on`, `off`, `remove` and
-`login.complete`, as it may for a `key.add`, and MUST show which machine it is for. No
+A `pool` command is a change to what every session on the machine runs through, so
+`on`, `off`, `remove`, `order`, `disable` and `login.complete` are verified by a fresh
+confirm (§3.2) or not at all: one that arrives on a day grant alone is refused
+`confirm_required` by the machine (vector 164 is the confirmed form; a stolen receiver
+session holds a day key, never the person's passkey or device key). `enable`,
+`refresh` and `login.begin` take a grant, as a prompt does. A receiver MUST ask for the
+confirm where the machine will want it, and MUST show which machine it is for. No
 command adds an account's credential from the receiver's side: `login.complete` carries
 a one-time code the vendor issued to the person, and the exchange happens on the
 machine.
@@ -715,7 +719,7 @@ send → delivered time.
   `prompt`, and `111`–`136` device keys (§2, §3.2): signatures for each purpose,
   purposes and rp ids swapped, WebAuthn fields where they don't belong, a device key
   a machine stored as a passkey, and `key.add` and enrollment of device keys, valid
-  and broken; `137`–`163` the `pool` command (§6): every action valid, then a coding
+  and broken; `137`–`164` the `pool` command (§6): every action valid, then a coding
   session named, no action, an unknown action, each action with another's field or
   without its own, an order too long, empty or repeating, a code with a line feed or
   too long, pool fields on a prompt, and an order swapped after signing. The reference

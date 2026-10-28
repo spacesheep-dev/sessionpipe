@@ -81,7 +81,7 @@ describe("an empty pool", () => {
     const pool = open();
     expect(pool.config).toEqual({ on: false, port: 0, accounts: [] });
     expect(pool.helloPool()).toEqual({ on: false, harness: "claude-code", accounts: [] });
-    expect(pool.status()).toEqual({ on: false, port: 0, listening: false, settings: [], accounts: [] });
+    expect(pool.status()).toEqual({ on: false, port: 0, listening: false, in_flight: 0, settings: [], accounts: [] });
     expect(pool.accounts()).toEqual([]);
     expect(pool.find("nobody")).toBeNull();
     expect(existsSync(poolFile(env))).toBe(false);

@@ -168,6 +168,8 @@ describe("which kinds go where", () => {
     expect(kindPath("start", "goose")).toBe("start");
     expect(kindPath("start", "gemini-cli")).toBe("start");
     expect(kindPath("start", "kiro")).toEqual({ unsupported: "can't start a kiro session" });
+    // The pool names no coding session: the same path whatever harness is asked.
+    expect(kindPath("pool", "kiro")).toBe("pool");
   });
 });
 

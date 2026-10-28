@@ -145,6 +145,8 @@ export interface PoolStatus {
   port: number;
   /** The listener is up in this process. */
   listening: boolean;
+  /** Requests it is answering right now (0 when it isn't up). */
+  in_flight: number;
   settings: { file: string; state: PoolEnvState; note?: string }[];
   accounts: (PoolAccount & AccountSummary & { limits?: PoolLimits })[];
   pending?: { id: string; url: string; expires_at: string };
@@ -168,6 +170,18 @@ export interface Pool {
   status(): PoolStatus;
   helloPool(): HelloPool;
   readonly config: PoolConfig;
+}
+
+/** The pool in one line, for an ack's `detail` and the first line of `sessionpipe pool`
+ *  (CONTROL.md §6): `on · 3 accounts · 2 with room · serving Fiction`. */
+export function summaryLine(s: Pick<PoolStatus, "on" | "accounts">): string {
+  const n = s.accounts.length;
+  const room = s.accounts.filter((a) => a.status === "ready").length;
+  const current = s.accounts.find((a) => a.current);
+  const parts = [s.on ? "on" : "off", `${n} account${n === 1 ? "" : "s"}`];
+  if (n) parts.push(`${room} with room`);
+  if (current) parts.push(`serving ${current.label || current.email}`);
+  return parts.join(" · ");
 }
 
 export function openPool(deps: PoolDeps): Pool {
@@ -524,6 +538,7 @@ export function openPool(deps: PoolDeps): Pool {
         on: cfg.on,
         port: cfg.port,
         listening: server !== null,
+        in_flight: server?.stats.in_flight ?? 0,
         settings: cfg.port
           ? installedPoolEnv(dirs(), { port: cfg.port, token: secrets.get(cfg, TOKEN_NAME) ?? "" })
           : [],

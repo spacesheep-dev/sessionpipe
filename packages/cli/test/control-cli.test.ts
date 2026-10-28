@@ -13,7 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "../src/control/cli.js";
 import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
+import { readPool } from "../src/pool/index.js";
 
+vi.mock("../src/pool/index.js", async (original) => ({
+  ...(await original<typeof import("../src/pool/index.js")>()),
+  readPool: vi.fn(() => ({ on: false, port: 0, accounts: [] })),
+}));
 vi.mock("../src/control/pair.js", async (original) => ({
   ...(await original<typeof import("../src/control/pair.js")>()),
   pair: vi.fn(async () => {}),
@@ -306,6 +311,12 @@ describe("control mode, keys, off, status, help", () => {
     vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [] });
     await run("off");
     expect(uninstallService).toHaveBeenCalledTimes(1);
+    // The pool is on: Claude Code here depends on the daemon, so the service stays.
+    vi.mocked(readPool).mockReturnValueOnce({ on: true, port: 51234, accounts: [] });
+    vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [] });
+    await run("off");
+    expect(uninstallService).toHaveBeenCalledTimes(1);
+    expect(said()).toContain("The daemon's service stays: the pool is on (`sessionpipe pool off` first to remove it).");
   });
 
   it.runIf(process.platform !== "win32")("status: the daemon's answer as JSON, or that it isn't running", async () => {

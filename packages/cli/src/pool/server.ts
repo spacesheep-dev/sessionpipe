@@ -54,6 +54,8 @@ export interface PoolStats {
   refused: number;
   /** Requests whose client left before the answer ended. */
   aborted: number;
+  /** Requests being answered right now (the daemon's busy(): never restart mid-stream). */
+  in_flight: number;
 }
 
 export interface PoolServer {
@@ -123,7 +125,7 @@ function readBody(req: http.IncomingMessage, res: http.ServerResponse, cap: numb
 }
 
 export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
-  const stats: PoolStats = { requests: 0, upstream: 0, retries: 0, refused: 0, aborted: 0 };
+  const stats: PoolStats = { requests: 0, upstream: 0, retries: 0, refused: 0, aborted: 0, in_flight: 0 };
   const base = (deps.upstream ?? deps.adapter.POOL_ENDPOINTS.api).replace(/\/$/, "");
   const cap = deps.bodyCap ?? BODY_CAP;
   const short = (s: string | undefined) => (s ? s.slice(0, 8) : "-");
@@ -295,6 +297,8 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       sendJson(res, 401, errorBody("authentication_error", "sessionpipe pool: unknown bearer"));
       return;
     }
+    stats.in_flight++;
+    res.once("close", () => stats.in_flight--);
     void readBody(req, res, cap).then(async (body) => {
       if (body === null) return;
       try {

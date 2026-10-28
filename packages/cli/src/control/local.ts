@@ -20,7 +20,25 @@ export type LocalRequest =
   /** `sessionpipe control status`. */
   | { op: "status" }
   /** `sessionpipe update` installed a new copy: restart onto it once nothing is in hand. */
-  | { op: "restart" };
+  | { op: "restart" }
+  /** `sessionpipe pool …` while the daemon runs: the daemon holds the pool's engine
+   *  (pins, credentials, the listener), so a change goes through it. `status` reads;
+   *  the rest are CONTROL.md §6's actions, plus `import` (reads this machine's own
+   *  Claude Code logins, which no receiver may ask for). */
+  | { op: "pool"; action: PoolOp; account?: string; order?: string[]; code?: string };
+
+export type PoolOp =
+  | "status"
+  | "on"
+  | "off"
+  | "enable"
+  | "disable"
+  | "remove"
+  | "order"
+  | "refresh"
+  | "login.begin"
+  | "login.complete"
+  | "import";
 
 export type LocalReply =
   | { op: "message"; text: string; id: string }
@@ -30,7 +48,19 @@ export type LocalReply =
   /** A newer waiter for the same session took over; this one stops. */
   | { op: "replaced" }
   | { op: "ok" }
-  | { op: "status"; status: unknown };
+  | { op: "status"; status: unknown }
+  /** A pool op's answer: the ack it would earn (CONTROL.md §6) and the pool as it now
+   *  stands (`status`: the façade's PoolStatus; `detail`: the summary line, or a
+   *  login.begin's "<pending id> <URL>"). */
+  | {
+      op: "pool";
+      outcome: "delivered" | "refused" | "failed" | "unsupported";
+      code?: string;
+      detail: string;
+      status?: unknown;
+      /** `import`: what was added and what was left out (control/pool.ts Imported). */
+      imported?: unknown;
+    };
 
 /** Where the daemon listens. `SESSIONPIPE_SOCKET` overrides (tests). */
 export function socketPath(state: string, env: NodeJS.ProcessEnv = process.env): string {

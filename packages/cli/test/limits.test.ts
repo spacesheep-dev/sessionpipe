@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFil
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { runJob } from "../src/run.js";
+import { appendObserved, factsState, runJob } from "../src/run.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-limits-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -135,5 +135,57 @@ describe("Claude Code: the status line's limits", () => {
         },
       },
     ]);
+  });
+});
+
+describe("the pool's limits.observed (appendObserved)", () => {
+  const SID = "0b4a6e3c-1d2f-4a5b-8c6d-7e8f9a0b1c2d";
+  const data = {
+    windows: [{ id: "five_hour", used_percent: 61, resets_at: "2026-10-29T12:00:00.000Z", window_minutes: 300 }],
+    account_id: "fiction0-0000-4000-8000-000000000000",
+  };
+
+  it("a valid tier-1 event on the session, with the account and the session's own facts, delivered to the sink", async () => {
+    factsState(tmp).save("claude-code", SID, {
+      session: { account_id: "misha000-0000-4000-8000-000000000000", title: "the task" },
+      harness_version: "2.1.312",
+    });
+    const e = await appendObserved(tmp, "claude-code", SID, data, Date.parse("2026-10-29T10:00:00Z"));
+    expect(e).toMatchObject({
+      type: "limits.observed",
+      time: "2026-10-29T10:00:00.000Z",
+      harness: { name: "claude-code", version: "2.1.312", event: "pool" },
+      session: { id: SID, account_id: "misha000-0000-4000-8000-000000000000", title: "the task" },
+      data,
+    });
+    // At the sink: tier 1 (the type's), the account named.
+    expect(sent()).toMatchObject([
+      { id: e!.id, tier: 1, data: { account_id: "fiction0-0000-4000-8000-000000000000" } },
+    ]);
+    // A second one takes the next seq.
+    const again = await appendObserved(tmp, "claude-code", SID, data);
+    expect(again!.session.seq).toBe(e!.session.seq + 1);
+  });
+
+  it("a session with no facts yet: id, seq and machine, nothing invented", async () => {
+    const fresh = "7c0c6b1a-2e3f-4a5b-9c8d-1e2f3a4b5c6d";
+    const e = await appendObserved(tmp, "claude-code", fresh, data);
+    expect(e!.session).toEqual({ id: fresh, seq: 0, machine: expect.any(String) });
+    expect(e!.harness).toEqual({ name: "claude-code", event: "pool" });
+  });
+
+  it("not without a tier-1 sink, and not while a hook holds the session", async () => {
+    sinkAt(0);
+    expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
+    sinkAt(2, { max_tier: 0 });
+    expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
+    sinkAt(1, { paused: "2026-10-29T10:00:00Z" });
+    expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
+    sinkAt(1);
+    const { takeLock } = await import("@sessionpipe/core");
+    const release = takeLock(tmp, { harness: "claude-code", session: SID })!;
+    expect(await appendObserved(tmp, "claude-code", SID, data)).toBeNull();
+    release();
+    expect(sent()).toEqual([]);
   });
 });

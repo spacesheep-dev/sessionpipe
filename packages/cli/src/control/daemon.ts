@@ -42,9 +42,11 @@ import {
   type StartPermission,
   verifyCommand,
 } from "@sessionpipe/core/control";
+import type { Pool } from "../pool/index.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import { ask, type LocalReply, type LocalRequest } from "./local.js";
+import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { awaitAnswer, transcriptEnd } from "./reply.js";
 import { type DeliveryMode, frame, frameStart, IN_PLACE_ANSWER, kindPath, routePrompt } from "./route.js";
 import {
@@ -122,6 +124,12 @@ const SDK_CAPS: Caps = {
   promptsNone: false,
   fork: true,
 };
+
+/** Pool actions that change what every session on the machine runs through, or
+ *  delete a credential: a fresh confirm (CONTROL.md §3.2, §6 `pool`), never a day
+ *  grant alone — a stolen receiver session must not be able to put its own account
+ *  first or take the person's out. */
+const POOL_CONFIRM = new Set(["on", "off", "remove", "order", "disable", "login.complete"]);
 
 /** A failure the harness puts down to the model it was asked to run. */
 const MODEL_FAILURE_RE = /\bmodel\b/i;
@@ -245,6 +253,10 @@ export interface DaemonDeps {
   updateStatus?: () => unknown;
   /** Another daemon took the socket path: this one has stopped and should exit. */
   onLostSocket?: () => void;
+  /** The machine's account pool (pool/index.ts): its listener runs in this process,
+   *  every hello carries its state, and `pool` commands and socket ops go to it.
+   *  Absent: this daemon can't pool (a `pool` command is `unsupported`). */
+  pool?: Pool;
 }
 
 /** Another daemon already answers on the socket: this one must not start. */
@@ -313,6 +325,8 @@ export interface Status {
   /** Null when the daemon could restart now (nothing in hand); otherwise what it holds. */
   busy: string | null;
   update?: unknown;
+  /** The account pool, when this daemon has one (`sessionpipe pool` has the whole picture). */
+  pool?: { on: boolean; port: number; listening: boolean; accounts: number; with_room: number; in_flight: number };
 }
 
 /** The machine's own caps (CONTROL.md §6 `start`): every command is the owner's,
@@ -397,6 +411,9 @@ export class ControlDaemon {
     this.running = true;
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     await this.listen();
+    // The pool's listener comes up before anything that could take time: while the
+    // pool is on, every Claude Code request on this machine goes through it.
+    await this.syncPool();
     for (const r of this.cfg.receivers) void this.pollLoop(r);
     this.helloTimer = setInterval(() => void this.helloAll(), HELLO_EVERY_MS);
     this.helloTimer.unref();
@@ -443,6 +460,32 @@ export class ControlDaemon {
         unlinkSync(this.sock);
       } catch {}
     this.sockId = null;
+    // Last: a request mid-stream finishes while the rest shuts down.
+    await this.deps.pool?.stop();
+  }
+
+  /** The pool's listener and its idle usage poll run exactly while the pool is on
+   *  (PRIVACY.md §3: the vendor is called only for a pool the person turned on):
+   *  up after `on`, down after `off`, whatever accounts exist. Idempotent either way. */
+  private async syncPool(): Promise<void> {
+    const p = this.deps.pool;
+    if (!p) return;
+    const s = p.status();
+    if (!s.on) {
+      if (s.listening) await p.stop();
+      return;
+    }
+    try {
+      await p.start();
+    } catch (e) {
+      this.deps.log(`the pool's listener did not start: ${String((e as Error)?.message || e)}`);
+    }
+  }
+
+  /** The pool changed what a hello says (pool/index.ts `onChange`): say it now, as a
+   *  folder change does. */
+  poolChanged(): void {
+    if (this.running) void this.helloAll();
   }
 
   /** Null when nothing is in hand, so a restart would interrupt nothing; otherwise what
@@ -451,6 +494,8 @@ export class ControlDaemon {
    *  message to it would fork rather than wait for its Stop), unless it has been silent
    *  for ten minutes: a session killed mid-turn never sends its Stop. */
   busy(): string | null {
+    const pooled = this.deps.pool?.status().in_flight ?? 0;
+    if (pooled) return `${pooled} pooled request(s) being answered`;
     if (this.inflight.size) return `${this.inflight.size} message(s) in hand`;
     if (this.procs || this.ownRuns.size) return "a headless agent run";
     if (this.startsRunning) return "a session starting";
@@ -545,6 +590,19 @@ export class ControlDaemon {
       start: this.startOptions(),
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
+      ...(this.deps.pool ? { pool: this.poolSummary() } : {}),
+    };
+  }
+
+  private poolSummary(): NonNullable<Status["pool"]> {
+    const s = (this.deps.pool as Pool).status();
+    return {
+      on: s.on,
+      port: s.port,
+      listening: s.listening,
+      accounts: s.accounts.length,
+      with_room: s.accounts.filter((a) => a.status === "ready").length,
+      in_flight: s.in_flight,
     };
   }
 
@@ -669,6 +727,13 @@ export class ControlDaemon {
         return;
       case "restart":
         this.reply(s, this.deps.onRestart?.() ? { op: "ok" } : { op: "none" });
+        return;
+      case "pool":
+        void runPoolRequest(this.deps.pool, req, { terminal: true }).then(async (r) => {
+          if (r.outcome === "delivered") await this.syncPool();
+          const { status, ...rest } = r;
+          this.reply(s, { op: "pool", ...rest, ...(status ? { status } : {}) });
+        });
         return;
       default:
         s.destroy();
@@ -939,6 +1004,8 @@ export class ControlDaemon {
         start,
         // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
         key_types: [...KEY_TYPES],
+        // The account pool, in every hello of a daemon that has one (§2 `pool`).
+        ...(this.deps.pool ? { pool: this.deps.pool.helloPool() } : {}),
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
       const st = this.polling.get(r.control + r.machine);
@@ -1068,6 +1135,32 @@ export class ControlDaemon {
     // A device this machine already trusts vouched for a new one (CONTROL.md §2): the
     // signature just verified against an enrolled key, so the new key joins the store.
     if (cmd.kind === "key.add") return this.addKey(r, m.id, cmd, sent);
+    // The machine's account pool (CONTROL.md §6 `pool`): no coding session either; the
+    // façade decides and the ack says what the pool now is. Nothing of an account but
+    // what the asker named reaches the ack.
+    if (cmd.kind === "pool") {
+      if (POOL_CONFIRM.has(cmd.pool_action as string) && v.via !== "confirm")
+        return this.finish(r, m.id, {
+          outcome: "refused",
+          code: "confirm_required",
+          detail: `pool ${cmd.pool_action} needs a fresh confirm, not a day grant`,
+        });
+      const out = await runPoolRequest(this.deps.pool, poolRequestOf(cmd));
+      if (out.outcome === "delivered") await this.syncPool();
+      this.deps.log(
+        `pool ${String(cmd.pool_action)}: ${out.outcome}${out.outcome === "delivered" ? "" : ` — ${out.detail}`}`,
+      );
+      return this.finish(
+        r,
+        m.id,
+        {
+          outcome: out.outcome,
+          ...(out.outcome !== "delivered" && out.code ? { code: out.code } : {}),
+          detail: out.detail,
+        },
+        sent,
+      );
+    }
     const ref = parseSessionRef(cmd.session)!;
     const kp = kindPath(cmd.kind, ref.harness);
     if (typeof kp === "object") return this.finish(r, m.id, { outcome: "unsupported", detail: kp.unsupported });

@@ -1110,6 +1110,18 @@ describe.runIf(WRITE)("write control vectors", () => {
           { ok: false, code: "bad_csig" },
         );
       }
+      {
+        // 164: the form the machine takes for on, off, remove, order, disable and
+        // login.complete (§6 `pool`): a confirm over the command, where the day-grant
+        // form (137) is refused `confirm_required` by the machine.
+        const c = poolCmd({ pool_action: "on" });
+        pv(
+          "valid-pool-on-confirmed",
+          "Turn the pool on with a fresh confirm: what the machine requires for on, off, remove, order, disable and login.complete; the same command on a day grant alone (137) verifies but the machine refuses it confirm_required.",
+          { cmd: c, confirm: await pk.assert(await sha256(c)) },
+          { ok: true, via: "confirm", kind: "pool" },
+        );
+      }
     }
 
     mkdirSync(dir, { recursive: true });

@@ -53,7 +53,7 @@ export function routePrompt(s: SessionView): Route {
 export function kindPath(
   kind: ControlKind,
   harness: string,
-): "prompt" | "permission" | "cancel" | "start" | { unsupported: string } {
+): "prompt" | "permission" | "cancel" | "start" | "pool" | { unsupported: string } {
   switch (kind) {
     case "prompt":
       return "prompt";
@@ -67,6 +67,9 @@ export function kindPath(
       return "cancel";
     case "start":
       return HEADLESS.has(harness) ? "start" : { unsupported: `can't start a ${harness} session` };
+    // No session at all (`sessionpipe:pool`): the machine's pool, whatever harness is asked.
+    case "pool":
+      return "pool";
     default:
       return { unsupported: `unknown kind ${String(kind)}` };
   }

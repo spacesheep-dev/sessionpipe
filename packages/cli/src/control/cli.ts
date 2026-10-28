@@ -18,10 +18,11 @@ import {
   writeConfig,
 } from "@sessionpipe/core";
 
-const { claudeLogin, detectCaps, findClaude, runClaude } = claudeControl;
+const { claudeLogin, detectCaps, findClaude, isUuid, runClaude } = claudeControl;
 
 import { isBroad } from "../connect.js";
-import { drain, VERSION } from "../run.js";
+import { openPool, readPool } from "../pool/index.js";
+import { appendObserved, drain, VERSION } from "../run.js";
 import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
@@ -30,7 +31,15 @@ import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { loadSdk } from "./sdk.js";
-import { type ControlMode, controlFile, controlState, parseMode, readControl, writeControl } from "./store.js";
+import {
+  type ControlConfig,
+  type ControlMode,
+  controlFile,
+  controlState,
+  parseMode,
+  readControl,
+  writeControl,
+} from "./store.js";
 import { waitForMessage, waitSession } from "./wait.js";
 
 export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]
@@ -280,7 +289,12 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
     }
     case "off": {
       const c = await off({ out, ...(argv[2] ? { url: argv[2] } : {}) });
-      if (c && !c.receivers.length) uninstallService();
+      // The service runs the pool too: while the pool is on, Claude Code here depends on it.
+      if (c && !c.receivers.length) {
+        if (readPool().on)
+          out("  The daemon's service stays: the pool is on (`sessionpipe pool off` first to remove it).");
+        else uninstallService();
+      }
       return;
     }
     case "status": {
@@ -304,12 +318,43 @@ export function enabledHarnesses(harnesses: Record<string, { enabled?: boolean }
 }
 
 async function runDaemon(out: (s?: string) => void, distDir: string): Promise<void> {
-  const cfg = readControl();
-  if (!cfg?.receivers.length) {
-    out("control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)");
-    return;
-  }
+  const paired = readControl();
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
+  let d: ControlDaemon | null = null;
+  const upstream = testUpstream(process.env);
+  // The account pool (pool/index.ts) lives in this process: its listener, its pins,
+  // its credentials. Opened first, since whether it is on decides whether there is a
+  // daemon to run at all.
+  const pool = openPool({
+    log,
+    env: process.env,
+    onChange: () => d?.poolChanged(),
+    // An account's numbers, read off a request a Claude Code session made: a tier-1
+    // `limits.observed` on that session, through the outbox like a hook's, naming the
+    // account. An idle poll names no session; its numbers stay in the hello.
+    onLimits: (uuid, session, limits) => {
+      if (!session || !isUuid(session) || !limits.windows.length) return;
+      void appendObserved(stateDir(), "claude-code", session, { windows: limits.windows, account_id: uuid }).catch(
+        (e: unknown) =>
+          log(`limits.observed for ${session.slice(0, 8)} not written: ${String((e as Error)?.message || e)}`),
+      );
+    },
+    ...(upstream ? { upstream } : {}),
+  });
+  if (upstream) log(`pool requests go to ${upstream} (SESSIONPIPE_POOL_UPSTREAM, tests only)`);
+  if (!paired?.receivers.length) {
+    if (!pool.config.on) {
+      out("control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)");
+      return;
+    }
+    log("the pool is on; control isn't paired (`sessionpipe control pair <receiver>` adds messages)");
+  }
+  const cfg: ControlConfig = paired ?? {
+    name: machineName(readConfig(), os.hostname()),
+    folders: [],
+    mode: "safe",
+    receivers: [],
+  };
   let claude: { bin: string; caps: ReturnType<typeof detectCaps>; sig: string } | null = null;
   const claudeNow = () => {
     const bin = findClaude();
@@ -320,7 +365,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   };
   const sdk = await loadSdk({ claudeBin: findClaude(), env: process.env, log });
   let updater: AutoUpdater | null = null;
-  const d = new ControlDaemon(cfg, controlState(), socketPath(stateDir()), {
+  d = new ControlDaemon(cfg, controlState(), socketPath(stateDir()), {
     now: Date.now,
     fetch,
     log,
@@ -342,6 +387,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     updateStatus: () => (updater ? updater.record() : null),
     // Two daemons started at once and the other one holds the socket: leave it to it.
     onLostSocket: () => process.exit(0),
+    pool,
   });
   try {
     await d.start();
@@ -411,6 +457,20 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     restart,
   });
   updater.start();
+}
+
+/** The pool's fake upstream for tests, and only there: honoured under vitest and only
+ *  when it is a loopback address, so no plist, shell profile or .envrc in the daemon's
+ *  real environment can send pooled requests (bearers included) anywhere else. */
+export function testUpstream(env: NodeJS.ProcessEnv): string | null {
+  const u = env.SESSIONPIPE_POOL_UPSTREAM;
+  if (!u || !env.VITEST) return null;
+  try {
+    const host = new URL(u).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "[::1]" ? u : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function waitMain(argv: string[], out: (s?: string) => void): Promise<void> {

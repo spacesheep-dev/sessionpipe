@@ -17,6 +17,7 @@ import {
   adapterByName,
   Cursors,
   capTail,
+  type DataOf,
   type DeliveryResult,
   type Event,
   type FactsState,
@@ -510,6 +511,48 @@ export async function runJob(
   const delivered = (await drain(state, cfg.sinks, outbox, ref)) ?? {};
   if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
   return { events, delivered };
+}
+
+/** One event for a session with no hook behind it: the pool's `limits.observed`, when
+ *  the daemon read an account's numbers off a request the session made (pool/index.ts
+ *  `onLimits`). It goes the way a hook's events go — only with a tier-1 sink, the
+ *  session's known facts for `session` (its own account_id included), redacted at rest,
+ *  under the session's lock, then the sinks drain — so a receiver can't tell it from
+ *  the status line's. Null: no sink wants it, or a hook holds the session right now
+ *  (the next numbers come with the next request). */
+export async function appendObserved(
+  state: string,
+  harness: string,
+  id: string,
+  data: DataOf<"limits.observed">,
+  now = Date.now(),
+): Promise<Event | null> {
+  const cfg = readConfig();
+  if (!cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1)) return null;
+  const outbox = new Outbox(state);
+  const ref = { harness, session: id };
+  const release = takeLock(state, ref);
+  if (!release) return null;
+  let e: Event;
+  try {
+    const facts = factsState(state);
+    const mem = facts.get(harness, id);
+    const known = (mem.session as Partial<Session> | undefined) ?? {};
+    const version = mem.harness_version as string | undefined;
+    e = makeEvent(
+      { type: "limits.observed", harnessEvent: "pool", data },
+      {
+        harness: { name: harness, ...(version ? { version } : {}) },
+        session: { ...known, id, seq: outbox.nextSeq(ref), machine: machineName(cfg, os.hostname()) },
+        now,
+      },
+    );
+    outbox.append(ref, [{ ...e, session: redactDeep(e.session), data: redactDeep(e.data) }]);
+  } finally {
+    release();
+  }
+  await drain(state, cfg.sinks, outbox, ref);
+  return e;
 }
 
 /** One worker drains a machine's sinks at a time (the `flush` lock). Another whose

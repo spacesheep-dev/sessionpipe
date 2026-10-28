@@ -10,19 +10,35 @@ import path from "node:path";
 import { writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { restartVia, supervise, UPDATE_EXIT } from "../src/control/autoupdate.js";
-import { controlMain } from "../src/control/cli.js";
+import { controlMain, testUpstream } from "../src/control/cli.js";
 import { type DaemonDeps, DaemonRunning } from "../src/control/daemon.js";
 import { loadSdk } from "../src/control/sdk.js";
 import { controlFile, writeControl } from "../src/control/store.js";
-import { drain } from "../src/run.js";
+import type { PoolDeps } from "../src/pool/index.js";
+import { appendObserved, drain } from "../src/run.js";
 import { secretGet } from "../src/secrets.js";
 
 const seen = vi.hoisted(() => ({
-  daemons: [] as { cfg: unknown; deps: DaemonDeps; stopped: number; reloaded: unknown[] }[],
+  daemons: [] as { cfg: unknown; deps: DaemonDeps; stopped: number; reloaded: unknown[]; hellos: number }[],
   updaters: [] as { deps: { restart: (from: string, to: string) => Promise<void> }; stopped: number }[],
   startFails: null as Error | null,
   onStart: null as null | ((deps: DaemonDeps) => void),
   watchers: [] as (() => void)[],
+  pool: { on: false, deps: null as PoolDeps | null, started: 0 },
+}));
+vi.mock("../src/pool/index.js", async (original) => ({
+  ...(await original<typeof import("../src/pool/index.js")>()),
+  openPool: vi.fn((deps: PoolDeps) => {
+    seen.pool.deps = deps;
+    return {
+      config: { on: seen.pool.on, port: 0, accounts: [] },
+      status: () => ({ on: seen.pool.on, port: 0, listening: false, in_flight: 0, settings: [], accounts: [] }),
+      async start() {
+        seen.pool.started++;
+      },
+      async stop() {},
+    };
+  }),
 }));
 
 vi.mock("../src/control/daemon.js", async (original) => {
@@ -47,6 +63,10 @@ vi.mock("../src/control/daemon.js", async (original) => {
     }
     reload(c: unknown) {
       this.reloaded.push(c);
+    }
+    hellos = 0;
+    poolChanged() {
+      this.hellos++;
     }
   }
   return { ...real, ControlDaemon };
@@ -75,6 +95,7 @@ vi.mock("../src/control/sdk.js", () => ({ loadSdk: vi.fn(async () => null) }));
 vi.mock("../src/run.js", async (original) => ({
   ...(await original<typeof import("../src/run.js")>()),
   drain: vi.fn(async () => ({})),
+  appendObserved: vi.fn(async () => null),
 }));
 const updates = vi.hoisted(() => ({
   latestVersion: vi.fn(async () => "9.9.9"),
@@ -143,6 +164,8 @@ beforeEach(() => {
   seen.watchers.length = 0;
   seen.startFails = null;
   seen.onStart = null;
+  seen.pool = { on: false, deps: null, started: 0 };
+  vi.mocked(appendObserved).mockClear();
   signals = new Map(SIGS.map((s) => [s, emitter.listeners(s)]));
   vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
   core.findClaude.mockReset().mockReturnValue(null);
@@ -185,6 +208,69 @@ describe("control run", () => {
       "control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)",
     ]);
     expect(seen.daemons).toEqual([]);
+  });
+
+  it("the pool is on and nothing is paired: the daemon runs anyway, for the pool alone", async () => {
+    seen.pool.on = true;
+    await run();
+    expect(out[0]).toMatch(
+      /Z the pool is on; control isn't paired \(`sessionpipe control pair <receiver>` adds messages\)$/,
+    );
+    const { cfg, deps } = daemon();
+    expect(cfg).toMatchObject({ receivers: [], folders: [], mode: "safe" });
+    expect(deps.pool).toBeDefined();
+    expect(seen.updaters).toHaveLength(1);
+  });
+
+  it("the pool's hooks: a change sends a hello; numbers seen on a session's request become its limits.observed", async () => {
+    paired();
+    await run();
+    const d = daemon();
+    expect(d.deps.pool).toBeDefined();
+    const hooks = seen.pool.deps!;
+    expect(hooks.upstream).toBeUndefined();
+    hooks.onChange!();
+    expect(d.hellos).toBe(1);
+    const sid = "0b4a6e3c-1d2f-4a5b-8c6d-7e8f9a0b1c2d";
+    const limits = { windows: [{ id: "five_hour", used_percent: 61 }] };
+    hooks.onLimits!("acc-uuid", sid, limits);
+    expect(appendObserved).toHaveBeenCalledWith(expect.any(String), "claude-code", sid, {
+      windows: limits.windows,
+      account_id: "acc-uuid",
+    });
+    // No session (an idle poll), not a Claude Code session id, or no windows: nothing to append.
+    hooks.onLimits!("acc-uuid", null, limits);
+    hooks.onLimits!("acc-uuid", "not-a-uuid", limits);
+    hooks.onLimits!("acc-uuid", sid, { windows: [] });
+    expect(appendObserved).toHaveBeenCalledTimes(1);
+    // A write that fails is logged, with the session, never the numbers.
+    vi.mocked(appendObserved).mockRejectedValueOnce(new Error("disk full"));
+    hooks.onLimits!("acc-uuid", sid, limits);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(out.at(-1)).toMatch(/limits\.observed for 0b4a6e3c not written: disk full$/);
+    vi.mocked(appendObserved).mockRejectedValueOnce("no words");
+    hooks.onLimits!("acc-uuid", sid, limits);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(out.at(-1)).toMatch(/not written: no words$/);
+  });
+
+  it("the test-only upstream: honoured under vitest for a loopback address, said in the log, and nowhere else", async () => {
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "http://127.0.0.1:9", VITEST: "true" })).toBe(
+      "http://127.0.0.1:9",
+    );
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "http://localhost:9", VITEST: "true" })).toBe(
+      "http://localhost:9",
+    );
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "http://[::1]:9", VITEST: "true" })).toBe("http://[::1]:9");
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "http://127.0.0.1:9" })).toBeNull();
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "https://evil.example", VITEST: "true" })).toBeNull();
+    expect(testUpstream({ SESSIONPIPE_POOL_UPSTREAM: "not a url", VITEST: "true" })).toBeNull();
+    expect(testUpstream({})).toBeNull();
+    paired();
+    vi.stubEnv("SESSIONPIPE_POOL_UPSTREAM", "http://127.0.0.1:9");
+    await run();
+    expect(seen.pool.deps?.upstream).toBe("http://127.0.0.1:9");
+    expect(out[0]).toMatch(/pool requests go to http:\/\/127\.0\.0\.1:9 \(SESSIONPIPE_POOL_UPSTREAM, tests only\)$/);
   });
 
   it("hands the daemon this machine's claude (found once per binary), its login, and a token read again", async () => {
