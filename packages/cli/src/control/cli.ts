@@ -280,7 +280,13 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
     }
     case "off": {
       const c = await off({ out, ...(argv[2] ? { url: argv[2] } : {}) });
-      if (c && !c.receivers.length) uninstallService();
+      // The service goes with the last receiver, unless the person turned asking on
+      // (`sessionpipe ask on`, CONTROL.md §13): then the daemon still has the socket to serve.
+      if (c && !c.receivers.length) {
+        if (c.ask === true)
+          out("  The daemon stays: sessions here may still ask another agent (`sessionpipe ask off` removes it).");
+        else uninstallService();
+      }
       return;
     }
     case "status": {

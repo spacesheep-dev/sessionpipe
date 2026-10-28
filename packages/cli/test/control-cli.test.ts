@@ -306,6 +306,11 @@ describe("control mode, keys, off, status, help", () => {
     vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [] });
     await run("off");
     expect(uninstallService).toHaveBeenCalledTimes(1);
+    // Asking turned on by hand keeps the daemon for its socket; `ask off` is what removes it.
+    vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [], ask: true });
+    await run("off");
+    expect(uninstallService).toHaveBeenCalledTimes(1);
+    expect(said()).toContain("The daemon stays: sessions here may still ask another agent");
   });
 
   it.runIf(process.platform !== "win32")("status: the daemon's answer as JSON, or that it isn't running", async () => {

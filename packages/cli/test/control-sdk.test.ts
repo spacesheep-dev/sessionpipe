@@ -146,6 +146,14 @@ describe("loadSdk", () => {
     expect(seen.options[4]).toMatchObject({ sessionId: "s5", cwd: tmp });
     expect(seen.options[4]).not.toHaveProperty("permissionMode");
     expect(seen.options[4]).not.toHaveProperty("allowDangerouslySkipPermissions");
+    // An ask's lineage goes into the session's environment, over the process's own, and
+    // the control mark stays (CONTROL.md §13: the child's hooks stamp delegated_by).
+    host!
+      .start({ session: "s6", cwd: tmp, permission: "safe", env: { SESSIONPIPE_ASKED_BY: "codex:a1", HOME: "/x" } })
+      .close();
+    expect(seen.options[5]).toMatchObject({
+      env: { HOME: "/x", SESSIONPIPE_ASKED_BY: "codex:a1", SESSIONPIPE_CONTROL_JOB: "1" },
+    });
     s.close();
   });
 

@@ -51,6 +51,7 @@ export async function loadSdk(o: {
       permission,
       model,
       allowedTools,
+      env,
     }: {
       session: string;
       cwd: string;
@@ -58,6 +59,8 @@ export async function loadSdk(o: {
       model?: string;
       configDir?: string;
       allowedTools?: string[];
+      /** Over the process's own: an ask's lineage for the session's hooks (CONTROL.md §13). */
+      env?: Record<string, string>;
     }): SdkSession {
       const queue: unknown[] = [];
       let wake: (() => void) | null = null;
@@ -79,7 +82,7 @@ export async function loadSdk(o: {
           ...(model ? { model } : {}),
           ...(allowedTools?.length ? { allowedTools } : {}),
           ...(o.claudeBin ? { pathToClaudeCodeExecutable: o.claudeBin } : {}),
-          env: { ...(o.env ?? process.env), SESSIONPIPE_CONTROL_JOB: "1" },
+          env: { ...(o.env ?? process.env), ...env, SESSIONPIPE_CONTROL_JOB: "1" },
         },
       });
       const waiting: { resolve: (v: { reply: string; error?: string }) => void }[] = [];

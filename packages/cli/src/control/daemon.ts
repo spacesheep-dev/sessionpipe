@@ -27,6 +27,7 @@ import {
   claudeControl,
   codexControl,
   configFile,
+  DELEGATED_BY_ENV,
   deniedNote,
   type HarnessAccount,
   HELLO_HARNESSES_MAX,
@@ -2418,7 +2419,7 @@ export class ControlDaemon {
    *  command with `reply_to` was asked, as far as the child knows, by that session (§6). */
   private childEnv(r: Caller, cmd: ControlCommand): Record<string, string> {
     if (isSink(r)) return r.env ?? {};
-    return cmd.reply_to ? { SESSIONPIPE_ASKED_BY: cmd.reply_to, SESSIONPIPE_ASK_CHAIN: cmd.reply_to } : {};
+    return cmd.reply_to ? { [DELEGATED_BY_ENV]: cmd.reply_to, SESSIONPIPE_ASK_CHAIN: cmd.reply_to } : {};
   }
 
   /** An ask's `permission` on a prompt (CONTROL.md §13) caps the run of the session it
@@ -2559,7 +2560,7 @@ export class ControlDaemon {
     return {
       label: `ask ${askId.slice(-8)}`,
       frame: (text) => frameAsk(text, req.from),
-      env: { SESSIONPIPE_ASK_CHAIN: chain, ...(req.from ? { SESSIONPIPE_ASKED_BY: req.from } : {}) },
+      env: { SESSIONPIPE_ASK_CHAIN: chain, ...(req.from ? { [DELEGATED_BY_ENV]: req.from } : {}) },
       wantsReply: true,
       progress: (text, seq) => {
         begin();
