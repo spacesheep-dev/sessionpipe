@@ -10,7 +10,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { accountId, openPool, type Pool, type PoolDeps, PoolError } from "../src/pool/index.js";
+import { accountId, openPool, type Pool, type PoolDeps, PoolError, vendorOrigins } from "../src/pool/index.js";
 import { poolFile, poolSecretsFile, poolStateFile, readPool, readPoolState } from "../src/pool/store.js";
 import type { PoolLimits } from "../src/pool/types.js";
 import type { Runner } from "../src/secrets.js";
@@ -613,6 +613,60 @@ describe("the listener", () => {
     now += 6_000;
     expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
     await pool.stop();
+  });
+  it("N1: with a test upstream every vendor call goes there, the OAuth endpoints included", async () => {
+    const asked: string[] = [];
+    const up = await upstream((req, res) => {
+      asked.push(req.url as string);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ five_hour: { utilization: 7 } }));
+    });
+    try {
+      const seen: string[] = [];
+      const spy: typeof fetch = (input, init) => {
+        seen.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        return globalThis.fetch(input, init);
+      };
+      adapter.POOL_ENDPOINTS = {
+        api: "https://api.anthropic.com",
+        token: "https://platform.claude.com/v1/oauth/token",
+        profile: "https://api.anthropic.com/api/oauth/profile",
+        usage: "https://api.anthropic.com/api/oauth/usage",
+      };
+      adapter.usage = async (_a, _n, f) => {
+        await f("https://api.anthropic.com/api/oauth/usage?x=1");
+        await f(new URL("https://platform.claude.com/v1/oauth/token"));
+        await f(new Request("https://api.anthropic.com/api/oauth/profile", { method: "POST" }));
+        await f(`${up.url}/elsewhere`);
+        return usage(7);
+      };
+      const pool = open({ upstream: up.url, fetch: spy });
+      await signIn(pool, "one");
+      expect(asked).toEqual(["/api/oauth/usage?x=1", "/v1/oauth/token", "/api/oauth/profile", "/elsewhere"]);
+      expect(seen).toEqual([
+        `${up.url}/api/oauth/usage?x=1`,
+        `${up.url}/v1/oauth/token`,
+        `${up.url}/api/oauth/profile`,
+        `${up.url}/elsewhere`,
+      ]);
+      expect(vendorOrigins(adapter)).toEqual(["https://api.anthropic.com", "https://platform.claude.com"]);
+      expect(vendorOrigins({ POOL_ENDPOINTS: { api: "http://upstream.invalid" } })).toEqual([
+        "http://upstream.invalid",
+      ]);
+      // Without a test upstream the fetch is handed over as it is.
+      const direct = open({ fetch: spy });
+      seen.length = 0;
+      adapter.usage = async (_a, _n, f) => {
+        await f(`${up.url}/direct`);
+        return null;
+      };
+      await direct.refresh(); // "one" is in this dir already
+      expect(seen).toEqual([`${up.url}/direct`]);
+      await signIn(direct, "two");
+      expect(seen).toEqual([`${up.url}/direct`, `${up.url}/direct`]);
+    } finally {
+      await up.close();
+    }
   });
   it("with the pool off a moved port rewrites nothing, and nothing is polled (SECURITY M2)", async () => {
     const pool = open({ pollMs: 20 });

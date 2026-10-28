@@ -62,8 +62,9 @@ export type Exec = (cmd: string, args: string[]) => string;
 type Now = () => number;
 
 export interface PoolAdapter {
-  /** `api`: the base URL requests are forwarded to. */
-  POOL_ENDPOINTS: { api: string };
+  /** `api`: the base URL requests are forwarded to; the OAuth endpoints beside it. A
+   *  test upstream stands in for every one of their origins (index.ts, N1). */
+  POOL_ENDPOINTS: { api: string; token?: string; profile?: string; usage?: string };
   /** The rate-limit headers of a response → limits, or null when it carried none. */
   readLimits(headers: Headers, now: number): PoolLimits | null;
   /** The usage endpoint's JSON → limits, or null when it isn't one. */

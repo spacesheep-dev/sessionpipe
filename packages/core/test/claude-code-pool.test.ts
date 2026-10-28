@@ -193,6 +193,34 @@ describe("withAccount: the account part rewritten in place", () => {
     expect(parseUserId(Buffer.from(JSON.stringify(out)))!.account).toBe(OTHER);
     expect(out.tools[0]!.input_schema.user_id).toBe(id);
   });
+  it("N2: Claude Code 2.1.312 under ANTHROPIC_AUTH_TOKEN sends an empty account_uuid; the slot is filled", () => {
+    // The exact shape from the live proof's calls.jsonl (device id and session as recorded).
+    const inner =
+      '{"device_id":"652db2c0e1f24b7a9d3e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708","account_uuid":"","session_id":"155a60bd-f887-4961-8776-0a11db10fa12"}';
+    const body = JSON.stringify({
+      model: "claude-opus-5-5",
+      max_tokens: 32000,
+      messages: [{ role: "user", content: "Reply with the single word pooled." }],
+      metadata: { user_id: inner },
+      stream: true,
+    });
+    const out = withAccount(Buffer.from(body), OTHER);
+    expect(parseUserId(out)).toEqual({ session: "155a60bd-f887-4961-8776-0a11db10fa12", account: OTHER });
+    expect(out.toString()).toBe(body.replace('\\"account_uuid\\":\\"\\"', `\\"account_uuid\\":\\"${OTHER}\\"`));
+    expect(out.length).toBe(body.length + OTHER.length);
+    // The same, with a twin literal in a tool schema: structural, metadata's slot filled.
+    const twin = `{"tools":[{"input_schema":{"user_id":${JSON.stringify(inner)}}}],"metadata":{"user_id":${JSON.stringify(inner)}}}`;
+    const t = JSON.parse(withAccount(Buffer.from(twin), OTHER).toString()) as { metadata: { user_id: string } };
+    expect(JSON.parse(t.metadata.user_id)).toMatchObject({
+      account_uuid: OTHER,
+      session_id: "155a60bd-f887-4961-8776-0a11db10fa12",
+    });
+    // A JSON form with no account key at all, or the legacy form with none: left alone.
+    const noKey = Buffer.from(JSON.stringify({ metadata: { user_id: '{"device_id":"d","session_id":"s"}' } }));
+    expect(withAccount(noKey, OTHER)).toBe(noKey);
+    const broken = Buffer.from(JSON.stringify({ metadata: { user_id: "{oops" } }));
+    expect(withAccount(broken, OTHER)).toBe(broken);
+  });
   it("returns the same bytes when there is nothing to do", () => {
     const same = (text: string, to = OTHER) => {
       const b = Buffer.from(text);

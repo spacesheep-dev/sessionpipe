@@ -19,7 +19,7 @@ export class FakeAuthError extends Error {}
 export interface FakeAdapter extends PoolAdapter {
   logins: Map<string, { credential: PoolCredential; profile: PoolProfile }>;
   refresh: (c: PoolCredential, now: number) => Promise<PoolCredential>;
-  usage: (access: string, now: number) => Promise<PoolLimits | null>;
+  usage: (access: string, now: number, fetch: typeof globalThis.fetch) => Promise<PoolLimits | null>;
   profile: (access: string) => Promise<PoolProfile>;
   importable: ImportableLogin[];
   calls: { refresh: number; usage: number; completeLogin: number; importable: number };
@@ -125,9 +125,9 @@ export function fakeAdapter(): FakeAdapter {
     async fetchProfile(access) {
       return a.profile(access);
     },
-    async fetchUsage(access, _fetch, now) {
+    async fetchUsage(access, fetch, now) {
       calls.usage++;
-      return a.usage(access, now());
+      return a.usage(access, now(), fetch);
     },
     importableLogins() {
       calls.importable++;

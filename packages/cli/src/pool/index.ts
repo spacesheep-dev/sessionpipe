@@ -195,14 +195,44 @@ export function summaryLine(s: Pick<PoolStatus, "on" | "accounts">): string {
   return parts.join(" · ");
 }
 
+/** The origins the adapter talks to: the API and its OAuth endpoints. */
+export function vendorOrigins(adapter: Pick<PoolAdapter, "POOL_ENDPOINTS">): string[] {
+  const e = adapter.POOL_ENDPOINTS;
+  const out: string[] = [];
+  for (const u of [e.api, e.token, e.profile, e.usage]) {
+    if (!u) continue;
+    const origin = new URL(u).origin;
+    if (!out.includes(origin)) out.push(origin);
+  }
+  return out;
+}
+
+/** A fetch whose requests to any of `origins` go to `to` instead, path and query kept. */
+export function rerouted(fetchFn: typeof fetch, origins: readonly string[], to: string): typeof fetch {
+  const base = to.replace(/\/$/, "");
+  const swap = (url: string): string => {
+    const u = new URL(url);
+    return origins.includes(u.origin) ? `${base}${u.pathname}${u.search}` : url;
+  };
+  return (input, init) => {
+    if (typeof input === "string" || input instanceof URL) return fetchFn(swap(String(input)), init);
+    return fetchFn(new Request(swap(input.url), input), init);
+  };
+}
+
 export function openPool(deps: PoolDeps): Pool {
   const env = deps.env ?? process.env;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
-  const fetchFn = deps.fetch ?? globalThis.fetch;
+  const adapter: PoolAdapter = deps.adapter ?? claudePool;
+  // A test upstream stands in for the vendor entirely: the OAuth calls (usage polls,
+  // refreshes, the profile) go there too, so a test never reaches the vendor with a
+  // fake bearer. The adapter's constants stay; only the origin is swapped on the way.
+  const fetchFn = deps.upstream
+    ? rerouted(deps.fetch ?? globalThis.fetch, vendorOrigins(adapter), deps.upstream)
+    : (deps.fetch ?? globalThis.fetch);
   const run = deps.run ?? defaultRunner;
   const dirs = deps.claudeDirs ?? (() => coreClaudeDirs(env));
-  const adapter: PoolAdapter = deps.adapter ?? claudePool;
   const exec: Exec =
     deps.exec ??
     ((cmd, args) => {

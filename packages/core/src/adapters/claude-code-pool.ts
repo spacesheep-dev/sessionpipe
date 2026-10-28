@@ -267,24 +267,43 @@ export function withAccount(body: Buffer, accountUuid: string): Buffer {
   const id = userIdOf(body);
   if (id === null) return body;
   const current = partsOf(id).account;
-  if (!current || current.toLowerCase() === accountUuid.toLowerCase()) return body;
+  if (current && current.toLowerCase() === accountUuid.toLowerCase()) return body;
+  // Claude Code 2.1.312 under ANTHROPIC_AUTH_TOKEN sends the JSON form with
+  // `"account_uuid":""`: the slot is there, empty, and is filled the same way.
+  const empty = !current && id.startsWith("{") && emptyAccountSlot(id);
+  if (!current && !empty) return body;
   const text = body.toString("utf8");
   // The literal as JSON.stringify writes it; a body that escaped it another way
   // (`\u005f` for an underscore) is left alone rather than guessed at.
   const literal = JSON.stringify(id).slice(1, -1);
+  const was = current ?? "";
+  const at = current ? literal.indexOf(current) : literal.indexOf(EMPTY_SLOT) + EMPTY_SLOT.length;
   const ms = [...text.matchAll(/"user_id"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].filter((x) => x[1] === literal);
   if (!ms.length) return body;
   if (ms.length === 1) {
     const m = ms[0] as RegExpExecArray;
-    const start = m.index + m[0].length - 1 - literal.length + literal.indexOf(current);
-    return Buffer.from(text.slice(0, start) + accountUuid + text.slice(start + current.length), "utf8");
+    const start = m.index + m[0].length - 1 - literal.length + at;
+    return Buffer.from(text.slice(0, start) + accountUuid + text.slice(start + was.length), "utf8");
   }
   // The same literal under another `user_id` key too (a tool's input schema): rewrite
   // the one in `metadata` structurally rather than guess which literal is it. A round
   // trip costs the byte-stable cache key, not correctness.
   const j = JSON.parse(text) as { metadata: { user_id: string } };
-  j.metadata.user_id = id.replace(current, accountUuid);
+  if (current) j.metadata.user_id = id.replace(current, accountUuid);
+  else
+    j.metadata.user_id = JSON.stringify({ ...(JSON.parse(id) as Record<string, unknown>), account_uuid: accountUuid });
   return Buffer.from(JSON.stringify(j), "utf8");
+}
+
+/** `"account_uuid":""` as JSON.stringify writes it inside the escaped user_id literal. */
+const EMPTY_SLOT = '\\"account_uuid\\":\\"';
+/** The JSON form with an empty account: a slot to fill, not an account to replace. */
+function emptyAccountSlot(id: string): boolean {
+  try {
+    return (JSON.parse(id) as { account_uuid?: unknown }).account_uuid === "";
+  } catch {
+    return false;
+  }
 }
 
 // --- headers upstream -----------------------------------------------------------------
