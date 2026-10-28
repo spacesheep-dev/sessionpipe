@@ -151,6 +151,22 @@ describe("claudeToken", () => {
     };
     expect(claudeToken(dir(), {}, { platform: "linux", readFile: missing, now })).toBeNull();
   });
+  it("stops looking in the Keychain after a second, and reads the file instead", () => {
+    let t = NOW;
+    const clock = () => t;
+    const security = vi.fn(() => {
+      t += 600; // each lookup slow, as when a dialog waits for someone
+      return null;
+    });
+    const readFile = vi.fn(() => signIn());
+    // The default dir has two items and a user to ask by: four lookups, of which two run.
+    const def = path.join(home, ".claude");
+    expect(claudeToken(def, { HOME: home, USER: "ana" }, { platform: "darwin", security, readFile, now: clock })).toBe(
+      TOKEN,
+    );
+    expect(security).toHaveBeenCalledTimes(2);
+    expect(readFile).toHaveBeenCalledWith(path.join(def, ".credentials.json"));
+  });
   it("by default, the real file (and on a Mac, a Keychain with no such item first)", () => {
     mkdirSync(dir(), { recursive: true });
     writeFileSync(path.join(dir(), ".credentials.json"), signIn({ expiresAt: Date.now() + 3_600_000 }));
@@ -168,7 +184,10 @@ describe("fetchRemoteTitle", () => {
   });
   it("asks claude.ai for the session with the sign-in's token and its beta, and takes its title", async () => {
     const fetch = answer({ id: "session_01AbC", title: "  Session title\n discrepancy  " });
-    expect(await fetchRemoteTitle("session_01AbC", home, {}, deps(fetch))).toBe("Session title discrepancy");
+    expect(await fetchRemoteTitle("session_01AbC", home, {}, deps(fetch))).toEqual({
+      title: "Session title discrepancy",
+      asked: true,
+    });
     const [url, init] = fetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${REMOTE_TITLE_URL}session_01AbC`);
     expect(init.headers).toEqual({
@@ -179,35 +198,39 @@ describe("fetchRemoteTitle", () => {
     });
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
-  it("cuts a long title at 120 characters", async () => {
-    const t = await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: `${"word ".repeat(30)}end` })));
-    expect(t).toBe("word ".repeat(24).trim());
+  it("cuts a long title at 120 characters, never inside one", async () => {
+    const long = await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: `${"word ".repeat(30)}end` })));
+    expect(long.title).toBe("word ".repeat(24).trim());
+    const emoji = await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: `${"a".repeat(119)}😀b` })));
+    expect(emoji.title).toBe(`${"a".repeat(119)}😀`);
   });
-  it("is null, and asks nothing, for an id that is no claude.ai session or a dir with no usable sign-in", async () => {
+  const none = { title: null, asked: false };
+  it("asks nothing for an id that is no claude.ai session or a dir with no usable sign-in", async () => {
     const fetch = answer({ title: "x" });
-    expect(await fetchRemoteTitle("cse_01AbC", home, {}, deps(fetch))).toBeNull();
-    expect(await fetchRemoteTitle("session_1/../x", home, {}, deps(fetch))).toBeNull();
-    expect(await fetchRemoteTitle("session_1", home, {}, { ...deps(fetch), readFile: () => "{}" })).toBeNull();
+    expect(await fetchRemoteTitle("cse_01AbC", home, {}, deps(fetch))).toEqual(none);
+    expect(await fetchRemoteTitle("session_1/../x", home, {}, deps(fetch))).toEqual(none);
+    expect(await fetchRemoteTitle("session_1", home, {}, { ...deps(fetch), readFile: () => "{}" })).toEqual(none);
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("is null for a refusal, an answer with no title, or a failed call", async () => {
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ error: "not_found" }, 404)))).toBeNull();
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer(null)))).toBeNull();
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: 7 })))).toBeNull();
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: " \n " })))).toBeNull();
+  it("an answer without a title was asked; a refusal or a failed call was not", async () => {
+    const untitled = { title: null, asked: true };
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer(null)))).toEqual(untitled);
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: 7 })))).toEqual(untitled);
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ title: " \n " })))).toEqual(untitled);
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(answer({ error: "not_found" }, 404)))).toEqual(none);
     const down = vi.fn(async () => {
       throw new TypeError("fetch failed");
     });
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(down))).toBeNull();
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(down))).toEqual(none);
     const notJson = vi.fn(async () => new Response("<html>", { status: 200 }));
-    expect(await fetchRemoteTitle("session_1", home, {}, deps(notJson))).toBeNull();
+    expect(await fetchRemoteTitle("session_1", home, {}, deps(notJson))).toEqual(none);
   });
   it("by default uses the global fetch", async () => {
     const fetch = answer({ title: "From the app" });
     vi.stubGlobal("fetch", fetch);
     expect(
       await fetchRemoteTitle("session_1", home, {}, { platform: "linux", readFile: () => signIn(), now: () => NOW }),
-    ).toBe("From the app");
+    ).toEqual({ title: "From the app", asked: true });
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
@@ -257,7 +280,11 @@ describe("claudeCode.remoteFacts", () => {
       title_source: "harness",
     });
     expect(fetch.mock.calls[0]?.[0]).toBe(`${REMOTE_TITLE_URL}session_01N8ZGDLoGYbGjGkmmFPrm87`);
-    expect(state.mem).toEqual({ remote_title: "test_claude_fleet health check failures", remote_title_at: NOW });
+    expect(state.mem).toEqual({
+      remote_title: "test_claude_fleet health check failures",
+      remote_title_at: NOW,
+      remote_title_pending: false,
+    });
     expect(state.keys).toEqual([SID]);
   });
   it("a name of Claude Code's own (an ai-title, a registry auto name) gives way too", async () => {
@@ -290,14 +317,29 @@ describe("claudeCode.remoteFacts", () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(state.mem.remote_title_at).toBe(NOW + REMOTE_TITLE_REFRESH_MS);
   });
-  it("with no name yet, asks again after a minute, and sends the files' title meanwhile", async () => {
-    const state = memState({ remote_title: null, remote_title_at: NOW });
+  it("while claude.ai answers without a name, asks again after a minute, sending the files' title", async () => {
+    const state = memState({ remote_title: null, remote_title_at: NOW, remote_title_pending: true });
     const fetch = answer({ title: "" });
     expect(await remote(facts, state, fetch, NOW + REMOTE_TITLE_RETRY_MS - 1)).toBe(facts);
     expect(fetch).not.toHaveBeenCalled();
     expect(await remote(facts, state, fetch, NOW + REMOTE_TITLE_RETRY_MS)).toBe(facts);
     expect(fetch).toHaveBeenCalledOnce();
-    expect(state.mem).toEqual({ remote_title: null, remote_title_at: NOW + REMOTE_TITLE_RETRY_MS });
+    expect(state.mem).toEqual({
+      remote_title: null,
+      remote_title_at: NOW + REMOTE_TITLE_RETRY_MS,
+      remote_title_pending: true,
+    });
+  });
+  it("after a failed read waits ten minutes, so an unreadable sign-in isn't tried every minute", async () => {
+    const state = memState();
+    const fetch = answer({ title: "x" });
+    const unreadable = (at: number) =>
+      remoteFacts({ id: SID }, facts, file(), state, {}, { ...deps(fetch, at), readFile: () => "{}" });
+    expect(await unreadable(NOW)).toBe(facts);
+    expect(state.mem).toEqual({ remote_title: null, remote_title_at: NOW, remote_title_pending: false });
+    expect(await remote(facts, state, fetch, NOW + REMOTE_TITLE_RETRY_MS)).toBe(facts);
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await remote(facts, state, fetch, NOW + REMOTE_TITLE_REFRESH_MS)).title).toBe("x");
   });
   it("files its memory under the transcript's id when the session's is empty", async () => {
     const state = memState();

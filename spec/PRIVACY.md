@@ -123,5 +123,6 @@ are the controller of what it stores.
 - The optional daily version check is a plain read of the npm registry, off with
   `SESSIONPIPE_NO_UPDATE_CHECK=1`.
 - With remote titles on, the worker asks api.anthropic.com for the name of a Claude
-  Code session linked to claude.ai, at most every ten minutes a session. The request
-  carries that session's claude.ai id and its own sign-in's access token, nothing else.
+  Code session linked to claude.ai: once a minute while claude.ai has no name for it,
+  every ten minutes otherwise. The request carries that session's claude.ai id and its
+  own sign-in's access token, nothing else.

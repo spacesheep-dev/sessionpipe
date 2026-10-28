@@ -331,9 +331,15 @@ export const claudeCode: Adapter = {
     const mem = state.get(NAME, id);
     let title = typeof mem.remote_title === "string" ? mem.remote_title : null;
     const now = (deps?.now ?? Date.now)();
-    if (now - (Number(mem.remote_title_at) || 0) >= (title ? REMOTE_TITLE_REFRESH_MS : REMOTE_TITLE_RETRY_MS)) {
-      title = (await fetchRemoteTitle(bridgeId, configDirOf(transcript), env, deps)) ?? title;
-      state.save(NAME, id, { remote_title: title, remote_title_at: now });
+    const wait = mem.remote_title_pending === true ? REMOTE_TITLE_RETRY_MS : REMOTE_TITLE_REFRESH_MS;
+    if (now - (Number(mem.remote_title_at) || 0) >= wait) {
+      const read = await fetchRemoteTitle(bridgeId, configDirOf(transcript), env, deps);
+      title = read.title ?? title;
+      state.save(NAME, id, {
+        remote_title: title,
+        remote_title_at: now,
+        remote_title_pending: read.asked && !read.title,
+      });
     }
     return title ? { ...facts, title, title_source: "harness" } : facts;
   },

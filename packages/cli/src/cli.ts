@@ -1205,7 +1205,7 @@ function remoteTitles(): void {
     writeConfig(cfg);
     out(
       sub === "on"
-        ? "  ✓ Claude Code sessions linked to claude.ai now go by the name the Claude app shows. sessionpipe reads it from api.anthropic.com with each session's own Claude Code sign-in (the Keychain item Claude Code keeps, or .credentials.json), at most every ten minutes a session. `sessionpipe remote-titles off` stops it."
+        ? "  ✓ Claude Code sessions linked to claude.ai now go by the name the Claude app shows. sessionpipe reads it from api.anthropic.com with each session's own Claude Code sign-in (the Keychain item Claude Code keeps, or .credentials.json), every ten minutes a session, or once a minute until claude.ai names it. `sessionpipe remote-titles off` stops it."
         : "  ✓ Titles come from this machine's files only again, and sessionpipe reads no Claude Code sign-in.",
     );
     return;

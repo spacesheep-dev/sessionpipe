@@ -20,15 +20,24 @@ import path from "node:path";
 export const REMOTE_TITLE_URL = "https://api.anthropic.com/v1/sessions/";
 /** Claude Code's own beta for listing claude.ai sessions (`--teleport`). */
 export const REMOTE_TITLE_BETA = "ccr-byoc-2025-07-29";
-/** A read stands a minute while claude.ai has no name for the session yet (it names one
- *  after the first turn), and ten minutes once it has one (it renames as the work moves). */
+/** A read stands a minute while claude.ai answered without a name (it names a session after
+ *  its first turn), and ten minutes otherwise: after a name (it renames as the work moves),
+ *  and after a failure, so a sign-in nobody can read is not asked for every minute. */
 export const REMOTE_TITLE_RETRY_MS = 60_000;
 export const REMOTE_TITLE_REFRESH_MS = 10 * 60_000;
 /** A Keychain item whose access list leaves out `security` asks the person on screen, and
- *  nobody may be there to answer: the read gives up instead. */
-const KEYCHAIN_TIMEOUT_MS = 3000;
-const FETCH_TIMEOUT_MS = 5000;
+ *  nobody may be there to answer: the lookups give up after a second between them. With the
+ *  call's limit, a read ends well inside the 6 s a sibling hook waits for the session lock. */
+const KEYCHAIN_TIMEOUT_MS = 1000;
+const FETCH_TIMEOUT_MS = 3000;
 const SERVICE = "Claude Code-credentials";
+
+/** What claude.ai said: its name for the session, or none; `asked` when it answered at all
+ *  (no usable sign-in, a refusal and a timeout are not answers). */
+export interface RemoteTitleRead {
+  title: string | null;
+  asked: boolean;
+}
 
 export interface RemoteTitleDeps {
   platform?: NodeJS.Platform;
@@ -78,17 +87,23 @@ export function usableToken(blob: string | null, now: number): string | null {
   return t;
 }
 
-/** The session's config dir's Claude Code access token, or null. */
+/** The session's config dir's Claude Code access token, or null. The item found is that
+ *  dir's sign-in: an expired one is let go, never swapped for another item's. */
 export function claudeToken(dir: string, env: NodeJS.ProcessEnv, deps: RemoteTitleDeps = {}): string | null {
-  const now = (deps.now ?? Date.now)();
+  const clock = deps.now ?? Date.now;
+  const now = clock();
   if ((deps.platform ?? process.platform) === "darwin") {
     const security = deps.security ?? runSecurity;
     const user = env.USER || env.LOGNAME;
+    const lookups: string[][] = [];
     for (const service of keychainServices(dir, env.CLAUDE_CONFIG_DIR, env.HOME || "")) {
       // By account first: a service can hold a second, stale item a bare lookup returns.
-      const blob =
-        (user ? security(["find-generic-password", "-a", user, "-s", service, "-w"]) : null) ??
-        security(["find-generic-password", "-s", service, "-w"]);
+      if (user) lookups.push(["find-generic-password", "-a", user, "-s", service, "-w"]);
+      lookups.push(["find-generic-password", "-s", service, "-w"]);
+    }
+    for (const args of lookups) {
+      if (clock() - now >= KEYCHAIN_TIMEOUT_MS) break;
+      const blob = security(args);
       if (blob) return usableToken(blob, now);
     }
   }
@@ -99,17 +114,17 @@ export function claudeToken(dir: string, env: NodeJS.ProcessEnv, deps: RemoteTit
   return usableToken(blob, now);
 }
 
-/** The title claude.ai shows for `bridgeId` (`session_…`), or null: no usable token, a
- *  refusal, a timeout, an answer without a title. */
+/** The title claude.ai shows for `bridgeId` (`session_…`). */
 export async function fetchRemoteTitle(
   bridgeId: string,
   dir: string,
   env: NodeJS.ProcessEnv,
   deps: RemoteTitleDeps = {},
-): Promise<string | null> {
-  if (!/^session_[A-Za-z0-9]+$/.test(bridgeId)) return null;
+): Promise<RemoteTitleRead> {
+  const none = { title: null, asked: false };
+  if (!/^session_[A-Za-z0-9]+$/.test(bridgeId)) return none;
   const token = claudeToken(dir, env, deps);
-  if (!token) return null;
+  if (!token) return none;
   try {
     const res = await (deps.fetch ?? fetch)(REMOTE_TITLE_URL + bridgeId, {
       headers: {
@@ -120,11 +135,13 @@ export async function fetchRemoteTitle(
       },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return none;
     const title = ((await res.json()) as { title?: unknown } | null)?.title;
-    const t = typeof title === "string" ? title.replace(/\s+/g, " ").trim().slice(0, 120).trim() : "";
-    return t || null;
+    // Cut by characters, not UTF-16 units, so an emoji at the cut isn't split in half.
+    const t =
+      typeof title === "string" ? Array.from(title.replace(/\s+/g, " ").trim()).slice(0, 120).join("").trim() : "";
+    return { title: t || null, asked: true };
   } catch {
-    return null;
+    return none;
   }
 }
