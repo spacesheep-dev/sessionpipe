@@ -910,6 +910,15 @@ describe("StatusLine: the account's limits, as the status line is handed them", 
       },
     ]);
   });
+  it("passes a window Claude Code adds later under its own id, without minutes it never said", () => {
+    const r = hook("StatusLine", {
+      transcript_path: "/x.jsonl",
+      rate_limits: { seven_day_fable: { used_percentage: 12, resets_at: 1738857600 } },
+    });
+    expect(r?.events[0]?.data).toEqual({
+      windows: [{ id: "seven_day_fable", used_percent: 12, resets_at: "2025-02-06T16:00:00.000Z" }],
+    });
+  });
   it("reports nothing before the first response, or for an account without limits", () => {
     expect(hook("StatusLine", { transcript_path: "/x.jsonl" })).toBeNull();
     expect(hook("StatusLine", { transcript_path: "/x.jsonl", rate_limits: [] })).toBeNull();

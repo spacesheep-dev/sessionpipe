@@ -661,7 +661,7 @@ async function learnReceiver(s: SinkConfig, tier: Tier): Promise<void> {
 
 const TIER_TEXT: Record<Tier, string> = {
   0: "session state and timing, machine, folder, repo, branch, model, title, link, the KIND of attention needed — no tool names, no words",
-  1: "tier 0 + tool names, durations, ok/error, file paths, the attention message, subagents, compactions — no prompts",
+  1: "tier 0 + tool names, durations, ok/error, file paths, the attention message, subagents, compactions, account limits — no prompts",
   2: "tier 1 + your prompts and the assistant's text, secrets removed",
   3: "everything, including tool input and output",
 };

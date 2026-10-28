@@ -300,6 +300,16 @@ describe("codex limits: the newest rate_limits a turn wrote in the rollout", () 
       ],
     });
   });
+  it("reads the account's codex bucket, past a newer snapshot of a model's own", () => {
+    const f = file([
+      tokens(recorded),
+      tokens({ ...recorded, limit_id: "codex_other", primary: { used_percent: 90, window_minutes: 300 } }),
+    ]);
+    expect(codex.limits?.(f)?.windows).toEqual([
+      { id: "primary", used_percent: 6, window_minutes: 10080, resets_at: "2026-10-27T11:12:13.000Z" },
+    ]);
+    expect(codex.limits?.(file([tokens({ ...recorded, limit_id: "codex_other" })]))).toBeNull();
+  });
   it("is null with no window to read, no token_count, or no file", () => {
     expect(codex.limits?.(file([tokens({ primary: null, secondary: { used_percent: -1 } })]))).toBeNull();
     expect(codex.limits?.(file([]))).toBeNull();

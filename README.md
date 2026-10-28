@@ -115,7 +115,7 @@ Each sink is configured at a tier; the receiver declares its maximum; the lower 
 | Tier | What leaves | Who it is for |
 |-----:|-------------|---------------|
 | 0 | Session ids, state, timing, machine, repo, branch, model, title; attention *kind* | A presence board: "working / needs you / done" |
-| 1 | + tool names, durations, ok/error, file paths, attention message, subagents, compactions | An activity feed |
+| 1 | + tool names, durations, ok/error, file paths, attention message, subagents, compactions, account limits | An activity feed |
 | 2 | + your prompts and the assistant's text (`turn.transcript`), a running turn as it runs (`turn.progress`) | Memory, search, recaps |
 | 3 | + tool input and output, thinking, raw hook lines | Full replay, your own server only |
 

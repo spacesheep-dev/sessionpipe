@@ -379,7 +379,10 @@ function prune<T extends Record<string, unknown>>(o: T): T {
 /** The account's limits from the last `token_count` that carries them (recorded
  *  2026-10-21, codex-cli 0.163): `rate_limits.primary` / `secondary`, each with
  *  `used_percent`, `window_minutes` and `resets_at` in epoch seconds, and `plan_type`.
- *  Every turn writes one, so the tail is enough. */
+ *  Every turn writes one, so the tail is enough. Codex keeps one snapshot and overwrites
+ *  it with whichever bucket the server named last (`limit_id`: `codex`, or a model's own
+ *  such as `codex_other`), so only the account's `codex` bucket is read, never another's
+ *  windows under its names. */
 export function codexLimits(file: string): DataOf<"limits.observed"> | null {
   const { tail } = ends(file, 0, 256 * 1024);
   for (const r of parseLines(tail).reverse()) {
@@ -387,6 +390,7 @@ export function codexLimits(file: string): DataOf<"limits.observed"> | null {
     if (r.type !== "event_msg" || p?.type !== "token_count") continue;
     if (!p.rate_limits || typeof p.rate_limits !== "object") continue;
     const rl = p.rate_limits as Record<string, unknown>;
+    if (rl.limit_id != null && rl.limit_id !== "codex") continue;
     const windows: DataOf<"limits.observed">["windows"] = [];
     for (const id of ["primary", "secondary"]) {
       const w = rl[id] as { used_percent?: unknown; window_minutes?: unknown; resets_at?: unknown } | null;

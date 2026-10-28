@@ -120,7 +120,7 @@ Per-type `data` shapes are normative in
 | `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool ran, a turn ended), or a control answer. |
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?` | Subagent hooks; the subagent's own events carry `session.parent_id`. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
-| `limits.observed` | 1 | `windows[]` (1–8): `id` (the harness's own name for the window: `five_hour`, `seven_day`, `primary` …), `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?`, `window_minutes?`; `plan?` | The account's usage limits, when the harness reports new numbers: Codex's rollout after a turn, Claude Code's status line where the person made it ours (ADAPTERS.md). The numbers belong to the account, not the session: a receiver SHOULD keep the newest per (harness, `session.account_id`), or per machine when there is no account id. OPTIONAL for senders. |
+| `limits.observed` | 1 | `windows[]` (1–8): `id` (the harness's own name for the window, passed through as the harness spells it: `five_hour`, `seven_day`, `primary` …), `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?`, `window_minutes?` (only where the harness or its documentation says the length); `plan?` | The account's usage limits, when the harness reports new numbers: Codex's rollout after a turn, Claude Code's status line where the person made it ours (ADAPTERS.md). The numbers belong to the account, not the session: a receiver SHOULD keep the newest per (harness, `session.account_id`), or per machine when there is no account id. Each event is the whole set: a window it leaves out is not reported (Claude Code drops one once it resets). A window whose `resets_at` has passed has reset; a receiver SHOULD NOT show its last `used_percent` as current. OPTIONAL for senders. |
 | `native` | 3 | the raw hook JSON | Only on the native lane (HTTP.md §6); never emitted by the client. |
 
 Rules for all types:
@@ -173,6 +173,7 @@ What each tier carries. The full rules, the rulesets and guidance are in
 | Tool names, durations, ok/error | — | ✓ | ✓ | ✓ |
 | File paths touched | — | ✓ | ✓ | ✓ |
 | Attention message, prompt length, subagents, compactions | — | ✓ | ✓ | ✓ |
+| The account's usage limits (`limits.observed`) | — | ✓ | ✓ | ✓ |
 | Prompts and assistant text (`turn.transcript`, `turn.progress`) | — | — | ✓ | ✓ |
 | Tool input and output, thinking, raw lines | — | — | — | ✓ |
 | Secrets ruleset | n/a | always | always | always |
