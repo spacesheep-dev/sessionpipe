@@ -158,6 +158,8 @@ async function command(cmd: string): Promise<void> {
       return replay();
     case "update":
       return update();
+    case "remote-titles":
+      return remoteTitles();
     case "worker":
       return workerFromArgv();
     case "control":
@@ -192,6 +194,7 @@ Usage:
   sessionpipe tail [--session ID] [--tier N] [--harness NAME]
   sessionpipe backfill [--days 30] | forget <harness> <session> | replay --sink NAME
   sessionpipe update [off|on]       (install the latest now; off/on: the daemon's daily update)
+  sessionpipe remote-titles [on|off] (Claude Code: go by the name the Claude app shows; off by default)
 ${CONTROL_HELP}
 
 Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
@@ -1188,6 +1191,30 @@ function updateState(cfg: Config) {
     paired: pairedCount() > 0,
     rec: readUpdate(updateFile()),
   });
+}
+
+/** `sessionpipe remote-titles [on|off]`: whether Claude Code sessions linked to claude.ai go
+ *  by the name the Claude app shows (config.json `remote_titles`; spec/ADAPTERS.md, Claude
+ *  Code). The worker reads the config on every job, so nothing restarts. */
+function remoteTitles(): void {
+  const sub = args[1];
+  const cfg = readConfig();
+  if (sub === "on" || sub === "off") {
+    if (sub === "on") cfg.remote_titles = true;
+    else delete cfg.remote_titles;
+    writeConfig(cfg);
+    out(
+      sub === "on"
+        ? "  ✓ Claude Code sessions linked to claude.ai now go by the name the Claude app shows. sessionpipe reads it from api.anthropic.com with each session's own Claude Code sign-in (the Keychain item Claude Code keeps, or .credentials.json), at most every ten minutes a session. `sessionpipe remote-titles off` stops it."
+        : "  ✓ Titles come from this machine's files only again, and sessionpipe reads no Claude Code sign-in.",
+    );
+    return;
+  }
+  out(
+    cfg.remote_titles === true
+      ? "  remote titles: on (Claude Code sessions linked to claude.ai go by the name the Claude app shows)"
+      : "  remote titles: off (`sessionpipe remote-titles on` makes Claude Code sessions linked to claude.ai go by the name the Claude app shows)",
+  );
 }
 
 /** `sessionpipe update [off|on]`: install the latest release into this copy's prefix

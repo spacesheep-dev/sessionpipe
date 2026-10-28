@@ -85,7 +85,11 @@ harness wrote on the person's own machine (its transcript, its session registry,
 config's account id, or the API endpoint its settings name — that one value, never the
 token beside it). It never reads a credential file, never calls a vendor API, and
 never sends a token of the harness's anywhere. [ADAPTERS.md](ADAPTERS.md) states this
-per harness with the documentation URL.
+per harness with the documentation URL. One exception stays off until the person
+turns it on: Claude Code's remote titles (`sessionpipe remote-titles on`), which read
+a session's own Claude Code sign-in and send it to api.anthropic.com, the vendor that
+issued it, to learn the name the Claude app shows for that session (ADAPTERS.md,
+Claude Code, Facts).
 
 ## 4. For receivers
 
@@ -118,3 +122,6 @@ are the controller of what it stores.
 - No hosted receiver: the project operates no server that receives anyone's data.
 - The optional daily version check is a plain read of the npm registry, off with
   `SESSIONPIPE_NO_UPDATE_CHECK=1`.
+- With remote titles on, the worker asks api.anthropic.com for the name of a Claude
+  Code session linked to claude.ai, at most every ten minutes a session. The request
+  carries that session's claude.ai id and its own sign-in's access token, nothing else.

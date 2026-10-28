@@ -116,6 +116,16 @@ export interface Adapter {
     state: FactsState,
     env?: NodeJS.ProcessEnv,
   ): SessionFacts;
+  /** Facts the harness keeps off this machine (Claude Code: the name claude.ai shows), read
+   *  by the worker only when the person turned that on (config.json `remote_titles`,
+   *  spec/ADAPTERS.md). Given what facts() found, resolves the facts to send. */
+  remoteFacts?(
+    session: { id: string } & Partial<Session>,
+    facts: SessionFacts,
+    transcript: string | undefined,
+    state: FactsState,
+    env?: NodeJS.ProcessEnv,
+  ): Promise<SessionFacts>;
   backfill(sinceMs: number, env?: NodeJS.ProcessEnv): BackfillRow[];
 }
 

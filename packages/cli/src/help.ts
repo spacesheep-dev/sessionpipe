@@ -22,6 +22,9 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     update: "update [off|on] (install the latest now; off/on: the daemon's daily update)",
     "update off": "update off",
     "update on": "update on",
+    "remote-titles": "remote-titles [on|off] (Claude Code: go by the name the Claude app shows; off by default)",
+    "remote-titles on": "remote-titles on",
+    "remote-titles off": "remote-titles off",
     control: "control pair|mode|status|keys|off|run (use --help after a subcommand for its options)",
     "control pair":
       "control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]",

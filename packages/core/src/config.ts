@@ -33,6 +33,9 @@ export interface Config {
   harnesses: Record<string, { enabled?: boolean; created?: string[] }>;
   update_check?: boolean;
   keep_days?: number;
+  /** Claude Code sessions linked to claude.ai go by the name the Claude app shows, read
+   *  with the session's own Claude Code sign-in (spec/ADAPTERS.md). Off unless true. */
+  remote_titles?: boolean;
 }
 
 export const DEFAULT_CONFIG: Config = { sinks: [], harnesses: {}, update_check: true, keep_days: 30 };

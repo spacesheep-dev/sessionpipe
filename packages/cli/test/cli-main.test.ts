@@ -1279,6 +1279,23 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
   });
 });
 
+describe("remote-titles", () => {
+  it("is off until turned on; off takes the key out of config.json", async () => {
+    expect((await run("remote-titles")).lines).toEqual([
+      "  remote titles: off (`sessionpipe remote-titles on` makes Claude Code sessions linked to claude.ai go by the name the Claude app shows)",
+    ]);
+    expect((await run("remote-titles", "on")).text).toContain(
+      "✓ Claude Code sessions linked to claude.ai now go by the name the Claude app shows.",
+    );
+    expect(cfg().remote_titles).toBe(true);
+    expect((await run("remote-titles")).lines).toEqual([
+      "  remote titles: on (Claude Code sessions linked to claude.ai go by the name the Claude app shows)",
+    ]);
+    expect((await run("remote-titles", "off")).text).toContain("✓ Titles come from this machine's files only again");
+    expect(cfg()).not.toHaveProperty("remote_titles");
+  });
+});
+
 describe.skipIf(process.platform === "win32")("update", () => {
   it("off and on set the daemon's daily check", async () => {
     expect((await run("update", "off")).text).toContain("✓ The control daemon no longer checks npm");

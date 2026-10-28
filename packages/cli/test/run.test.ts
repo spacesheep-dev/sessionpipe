@@ -14,7 +14,7 @@ import {
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { Outbox, takeLock } from "@sessionpipe/core";
+import { adapterByName, Outbox, takeLock } from "@sessionpipe/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aliasFile, readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
 import { claimJob, enqueueJob, hasJobs, jobsDir, log, runJob, sweepJobs, versionLine } from "../src/run.js";
@@ -287,6 +287,42 @@ describe("runJob", () => {
         if (saved[i] === undefined) delete process.env[k];
         else process.env[k] = saved[i];
       });
+    }
+  });
+});
+
+describe("remote titles (config.json remote_titles)", () => {
+  it("the worker asks the adapter only when they are on, and only an adapter that has them", async () => {
+    const claude = adapterByName("claude-code") as Required<NonNullable<ReturnType<typeof adapterByName>>>;
+    const spy = vi.spyOn(claude, "remoteFacts").mockResolvedValue({ title: "From the app", title_source: "harness" });
+    const config = (o: Record<string, unknown>) => {
+      mkdirSync(tmp, { recursive: true });
+      writeFileSync(process.env.SESSIONPIPE_CONFIG as string, JSON.stringify({ sinks: [], harnesses: {}, ...o }));
+    };
+    const started = (id: string) => ({
+      harness: "claude-code",
+      event: "SessionStart",
+      argv: ["claude-code", "SessionStart"],
+      stdin: JSON.stringify({ session_id: id, cwd: tmp, source: "startup" }),
+      cwd: tmp,
+      env: {},
+      at: Date.now(),
+    });
+    const state = path.join(tmp, "remote");
+    try {
+      config({});
+      const off = await runJob(started("44444444-4444-4444-8444-444444444444"), { state });
+      expect(spy).not.toHaveBeenCalled();
+      expect(off.events[0]?.session).not.toHaveProperty("title");
+      config({ remote_titles: true });
+      const on = await runJob(started("55555555-5555-4555-8555-555555555555"), { state });
+      expect(spy).toHaveBeenCalledOnce();
+      expect(on.events[0]?.session).toMatchObject({ title: "From the app", title_source: "harness" });
+      await runJob(job("SessionStart", { source: "startup" }), { state });
+      expect(spy).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+      config({});
     }
   });
 });

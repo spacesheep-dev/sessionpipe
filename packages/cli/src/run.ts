@@ -356,7 +356,11 @@ export async function runJob(
     if (heavy) {
       // The hook's environment, not the worker's: a swept job may be run by a worker
       // another harness's hook spawned, whose env names none of this harness's homes.
-      const f = adapter.facts(r.session, r.transcript, r.hints ?? {}, facts, { ...process.env, ...job.env });
+      const hookEnv = { ...process.env, ...job.env };
+      let f = adapter.facts(r.session, r.transcript, r.hints ?? {}, facts, hookEnv);
+      // A name the harness keeps off this machine, only where the person turned that on.
+      if (cfg.remote_titles === true && adapter.remoteFacts)
+        f = await adapter.remoteFacts(r.session, f, r.transcript, facts, hookEnv);
       const { started_at: _s, last_at: _l, first_ask: _fa, harness_version, ...rest } = f;
       learned = rest;
       if (harness_version) facts.save(job.harness, id, { harness_version });

@@ -16,6 +16,12 @@ import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { gitFacts } from "../readers/git.js";
 import { isInjected, readClaude } from "../readers/transcripts.js";
 import type { HarnessAccount } from "../types.js";
+import {
+  fetchRemoteTitle,
+  REMOTE_TITLE_REFRESH_MS,
+  REMOTE_TITLE_RETRY_MS,
+  type RemoteTitleDeps,
+} from "./claude-remote-title.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
 import type {
   Adapter,
@@ -311,6 +317,25 @@ export const claudeCode: Adapter = {
     // session inherits "bridge", while the registry entry it writes has no bridge id of its own.
     if (typeof hints.attended === "boolean") out.attended = hints.attended || !!out.url;
     return out;
+  },
+
+  /** The name the Claude app shows, for a session with a claude.ai link: it ranks below the
+   *  person's own name (a rename, `custom`) and above every name Claude Code made itself,
+   *  and is sent as `harness`. Read at most as often as claude-remote-title.ts allows, and
+   *  a failed read keeps the last one. */
+  async remoteFacts(session, facts, transcript, state, env = process.env, deps?: RemoteTitleDeps) {
+    if (!transcript || facts.title_source === "custom") return facts;
+    const bridgeId = /^https:\/\/claude\.ai\/code\/(session_[A-Za-z0-9]+)$/.exec(facts.url ?? "")?.[1];
+    if (!bridgeId) return facts;
+    const id = session.id || path.basename(transcript, ".jsonl");
+    const mem = state.get(NAME, id);
+    let title = typeof mem.remote_title === "string" ? mem.remote_title : null;
+    const now = (deps?.now ?? Date.now)();
+    if (now - (Number(mem.remote_title_at) || 0) >= (title ? REMOTE_TITLE_REFRESH_MS : REMOTE_TITLE_RETRY_MS)) {
+      title = (await fetchRemoteTitle(bridgeId, configDirOf(transcript), env, deps)) ?? title;
+      state.save(NAME, id, { remote_title: title, remote_title_at: now });
+    }
+    return title ? { ...facts, title, title_source: "harness" } : facts;
   },
 
   backfill(sinceMs, env = process.env): BackfillRow[] {
