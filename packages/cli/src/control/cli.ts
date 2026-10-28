@@ -397,6 +397,13 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     log(`${e.message}; this one exits`);
     process.exit(0);
   }
+  // Running for the pool alone, and another daemon already serves it: the same as a
+  // taken socket — nothing left for this one to do.
+  if (!cfg.receivers.length && pool.status().another_daemon) {
+    log("control isn't paired and the pool is another daemon's; this one exits");
+    await d.stop();
+    process.exit(0);
+  }
   // Retry pending events even when a session has no more hooks. This also drains
   // what workers with a locked keychain left. The shared drain honours each sink's
   // wait and the machine-wide delivery lock, wherever its token lives.

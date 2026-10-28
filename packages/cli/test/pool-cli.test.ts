@@ -596,6 +596,19 @@ describe("sessionpipe pool, with the daemon running", () => {
     answer = { op: "pool", outcome: "delivered", detail: "on · 0 accounts", status: status({ listening: false }) };
     await run(["status"]);
     expect(lines[1]).toBe("  daemon:   running · the pool's listener isn't up");
+    // Another daemon holds the pool's port: the one that answered says so instead.
+    answer = {
+      op: "pool",
+      outcome: "delivered",
+      detail: "on · 0 accounts",
+      status: status({ listening: false, another_daemon: true }),
+    };
+    lines = [];
+    await run(["status"]);
+    expect(lines[1]).toBe("  daemon:   running · another daemon serves the pool on 127.0.0.1:51234");
+    lines = [];
+    await run(["on"]);
+    expect(lines).toContain("  Daemon: running · another daemon serves the pool on 127.0.0.1:51234");
     answer = { op: "pool", outcome: "refused", code: "pool_account", detail: "no pooled account is x" };
     await expect(run(["remove", "x"])).rejects.toThrow("no pooled account is x");
   });

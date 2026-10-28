@@ -90,10 +90,7 @@ export async function poolMain(
     return o;
   };
   const daemonLine = (r: Done) => {
-    if (r.daemon)
-      out(
-        `  daemon:   running${r.status.listening ? ` · listening on 127.0.0.1:${r.status.port}` : " · the pool's listener isn't up"}`,
-      );
+    if (r.daemon) out(`  daemon:   running${listenerWord(r.status)}`);
     else if (r.status.on) out(DAEMON_DOWN);
     else out("  daemon:   not running (nothing needs it while the pool is off)");
   };
@@ -110,7 +107,8 @@ export async function poolMain(
       out("  New Claude Code sessions use the pool; running ones from their next start.");
       if (!r.status.accounts.length)
         out("  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.");
-      if (r.daemon) out(`  Daemon: running${r.status.listening ? ` · listening on 127.0.0.1:${r.status.port}` : ""}`);
+      if (r.daemon)
+        out(`  Daemon: running${r.status.listening || r.status.another_daemon ? listenerWord(r.status) : ""}`);
       else out(`  Daemon: ${deps.installService()}`);
       return out(`  pool:     ${summaryLine(r.status)}`);
     }
@@ -229,13 +227,18 @@ function word(a: PoolStatus["accounts"][number], now: number): string {
   }
 }
 
+/** What the daemon that answered says about the listener. */
+const listenerWord = (s: PoolStatus): string =>
+  s.another_daemon
+    ? ` · another daemon serves the pool on 127.0.0.1:${s.port}`
+    : s.listening
+      ? ` · listening on 127.0.0.1:${s.port}`
+      : " · the pool's listener isn't up";
+
 function printStatus(r: Done, out: (s?: string) => void, now: number): void {
   const s = r.status;
   out(`  pool:     ${summaryLine(s)}`);
-  if (r.daemon)
-    out(
-      `  daemon:   running${s.listening ? ` · listening on 127.0.0.1:${s.port}` : " · the pool's listener isn't up"}`,
-    );
+  if (r.daemon) out(`  daemon:   running${listenerWord(s)}`);
   else if (s.on) out(DAEMON_DOWN);
   else out("  daemon:   not running (nothing needs it while the pool is off)");
   for (const a of s.accounts) {

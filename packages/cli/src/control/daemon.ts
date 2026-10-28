@@ -326,7 +326,16 @@ export interface Status {
   busy: string | null;
   update?: unknown;
   /** The account pool, when this daemon has one (`sessionpipe pool` has the whole picture). */
-  pool?: { on: boolean; port: number; listening: boolean; accounts: number; with_room: number; in_flight: number };
+  pool?: {
+    on: boolean;
+    port: number;
+    listening: boolean;
+    accounts: number;
+    with_room: number;
+    in_flight: number;
+    /** Another daemon answers on the pool's port; this one doesn't listen. */
+    another_daemon?: true;
+  };
 }
 
 /** The machine's own caps (CONTROL.md §6 `start`): every command is the owner's,
@@ -476,7 +485,11 @@ export class ControlDaemon {
       return;
     }
     try {
-      await p.start();
+      const r = await p.start();
+      // Another daemon already answers on the pool's port: the pool is its, as the
+      // socket would be. This one keeps only what else it was started for.
+      if (r.other)
+        this.deps.log(`another daemon already serves the pool on 127.0.0.1:${r.port}; this one leaves it to that one`);
     } catch (e) {
       this.deps.log(`the pool's listener did not start: ${String((e as Error)?.message || e)}`);
     }
@@ -603,6 +616,7 @@ export class ControlDaemon {
       accounts: s.accounts.length,
       with_room: s.accounts.filter((a) => a.status === "ready").length,
       in_flight: s.in_flight,
+      ...(s.another_daemon ? { another_daemon: true } : {}),
     };
   }
 

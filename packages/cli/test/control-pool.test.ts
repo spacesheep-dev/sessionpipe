@@ -37,12 +37,15 @@ class FakePool implements Pool {
   accountsList: FakeAccount[] = [];
   pending: { id: string; url: string; expires_at: string } | null = null;
   startFails: Error | null = null;
+  /** Another daemon answers on the port: start() stands down (the engine's F1). */
+  other = false;
   get config() {
     return { on: this.on, port: 51234, accounts: this.accountsList.map((a) => ({ ...a })) };
   }
   async start() {
     this.calls.push("start");
     if (this.startFails) throw this.startFails;
+    if (this.other) return { port: 51234, moved: false, other: true as const };
     this.started++;
     this.listening = true;
     return { port: 51234, moved: false };
@@ -123,6 +126,7 @@ class FakePool implements Pool {
       settings: [],
       accounts: this.accountsList.map((a, i) => ({ ...a, current: this.on && i === 0 && a.status === "ready" })),
       ...(this.pending ? { pending: this.pending } : {}),
+      ...(this.other ? { another_daemon: true as const } : {}),
     };
   }
   helloPool(): HelloPool {
@@ -304,6 +308,17 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
     await startDaemon(on);
     expect(on.started).toBe(1);
     expect(d!.status().pool).toMatchObject({ on: true, listening: true });
+  });
+
+  it("another daemon already serves the pool: said in the log, not listened for, shown in the status", async () => {
+    const pool = new FakePool();
+    pool.on = true;
+    pool.other = true;
+    await startDaemon(pool);
+    expect(log).toContain("another daemon already serves the pool on 127.0.0.1:51234; this one leaves it to that one");
+    expect(pool.started).toBe(0);
+    expect(d!.status().pool).toMatchObject({ on: true, listening: false, another_daemon: true });
+    expect(await ask(sock, { op: "pool", action: "status" }, 2000)).toMatchObject({ status: { another_daemon: true } });
   });
 
   it("a listener that won't start is logged, not fatal", async () => {

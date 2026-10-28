@@ -24,7 +24,7 @@ const seen = vi.hoisted(() => ({
   startFails: null as Error | null,
   onStart: null as null | ((deps: DaemonDeps) => void),
   watchers: [] as (() => void)[],
-  pool: { on: false, deps: null as PoolDeps | null, started: 0 },
+  pool: { on: false, deps: null as PoolDeps | null, started: 0, other: false },
 }));
 vi.mock("../src/pool/index.js", async (original) => ({
   ...(await original<typeof import("../src/pool/index.js")>()),
@@ -32,7 +32,15 @@ vi.mock("../src/pool/index.js", async (original) => ({
     seen.pool.deps = deps;
     return {
       config: { on: seen.pool.on, port: 0, accounts: [] },
-      status: () => ({ on: seen.pool.on, port: 0, listening: false, in_flight: 0, settings: [], accounts: [] }),
+      status: () => ({
+        on: seen.pool.on,
+        port: 0,
+        listening: false,
+        in_flight: 0,
+        settings: [],
+        accounts: [],
+        ...(seen.pool.other ? { another_daemon: true } : {}),
+      }),
       async start() {
         seen.pool.started++;
       },
@@ -164,7 +172,7 @@ beforeEach(() => {
   seen.watchers.length = 0;
   seen.startFails = null;
   seen.onStart = null;
-  seen.pool = { on: false, deps: null, started: 0 };
+  seen.pool = { on: false, deps: null, started: 0, other: false };
   vi.mocked(appendObserved).mockClear();
   signals = new Map(SIGS.map((s) => [s, emitter.listeners(s)]));
   vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
@@ -220,6 +228,21 @@ describe("control run", () => {
     expect(cfg).toMatchObject({ receivers: [], folders: [], mode: "safe" });
     expect(deps.pool).toBeDefined();
     expect(seen.updaters).toHaveLength(1);
+  });
+
+  it("unpaired, and another daemon already serves the pool: this one stops and exits 0, like a taken socket", async () => {
+    seen.pool.on = true;
+    seen.pool.other = true;
+    await run();
+    expect(out.at(-1)).toMatch(/Z control isn't paired and the pool is another daemon's; this one exits$/);
+    expect(daemon().stopped).toBe(1);
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // Paired, the daemon stays for its receivers.
+    paired();
+    vi.mocked(process.exit).mockClear();
+    await run();
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(daemon().stopped).toBe(0);
   });
 
   it("the pool's hooks: a change sends a hello; numbers seen on a session's request become its limits.observed", async () => {
