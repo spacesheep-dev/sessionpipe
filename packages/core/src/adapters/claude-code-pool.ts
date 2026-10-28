@@ -49,7 +49,16 @@ export const POOL_ENDPOINTS = {
   usage: "https://api.anthropic.com/api/oauth/usage",
   api: "https://api.anthropic.com",
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-  scopes: ["user:inference", "user:profile", "org:create_api_key"],
+  // The six Claude Code itself asks for with this client id: a token minted with fewer
+  // than the client's usual set is the kind of thing that fails only live.
+  scopes: [
+    "user:inference",
+    "user:profile",
+    "org:create_api_key",
+    "user:sessions:claude_code",
+    "user:mcp_servers",
+    "user:file_upload",
+  ],
   beta: "oauth-2025-04-20",
 } as const;
 

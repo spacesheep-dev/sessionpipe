@@ -253,7 +253,10 @@ describe("beginLogin: PKCE as Claude Code builds it", () => {
       ["client_id", POOL_ENDPOINTS.clientId],
       ["response_type", "code"],
       ["redirect_uri", POOL_ENDPOINTS.callback],
-      ["scope", "user:inference user:profile org:create_api_key"],
+      [
+        "scope",
+        "user:inference user:profile org:create_api_key user:sessions:claude_code user:mcp_servers user:file_upload",
+      ],
       ["code_challenge", challenge],
       ["code_challenge_method", "S256"],
       ["state", state],
