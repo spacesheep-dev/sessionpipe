@@ -244,6 +244,27 @@ describe("a start's options are checked before anything is taken", { timeout: 30
     }
     expect(runs).toEqual([]);
   });
+  it("a Claude Code whose --help couldn't be read: refused, saying so, at every level (#152)", async () => {
+    const caps = {
+      hasMode: false,
+      modes: [],
+      promptsNone: false,
+      fork: false,
+      unread: "`claude --help` timed out after 30 s",
+    };
+    await startDaemon({ mode: "auto", extra: { claude: () => ({ bin: "claude", caps }) } });
+    // Safe too: with no mode to name, it used to run with no permission flag at all.
+    for (const permission of ["auto", "safe"] as const) {
+      const q = await start(`claude-code:${NEW}`, { permission });
+      expect(await rx.waitAck(q.id)).toMatchObject({
+        outcome: "refused",
+        code: "permission",
+        detail:
+          "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute",
+      });
+    }
+    expect(runs).toEqual([]);
+  });
   it("a model for a harness that takes none: refused model", async () => {
     await startDaemon();
     const q = await start(`antigravity:${RECV}`, { model: "gemini-3" });

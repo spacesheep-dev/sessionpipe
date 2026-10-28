@@ -317,6 +317,9 @@ export function enabledHarnesses(harnesses: Record<string, { enabled?: boolean }
     .filter((n) => /^[a-z][a-z0-9-]{0,40}$/.test(n));
 }
 
+/** How long a `claude --help` that couldn't be read stands before it is asked again. */
+const UNREAD_RETRY_MS = 60_000;
+
 async function runDaemon(out: (s?: string) => void, distDir: string): Promise<void> {
   const paired = readControl();
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
@@ -355,12 +358,19 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     mode: "safe",
     receivers: [],
   };
-  let claude: { bin: string; caps: ReturnType<typeof detectCaps>; sig: string } | null = null;
+  // What `claude --help` lists, read once per binary. A --help that couldn't be read (a
+  // machine still starting up) is asked again a minute later: kept, it would refuse every
+  // message until a restart.
+  let claude: { bin: string; caps: ReturnType<typeof detectCaps>; sig: string; at: number } | null = null;
   const claudeNow = () => {
     const bin = findClaude();
     if (!bin) return null;
     const sig = `${bin}:${existsSync(bin) ? realpathSync(bin) : ""}`;
-    if (claude?.sig !== sig) claude = { bin, caps: detectCaps(bin), sig };
+    if (claude?.sig !== sig || (claude.caps.unread && Date.now() - claude.at >= UNREAD_RETRY_MS)) {
+      const caps = detectCaps(bin);
+      if (caps.unread) log(`${caps.unread}; asking again in a minute`);
+      claude = { bin, caps, sig, at: Date.now() };
+    }
     return claude;
   };
   const sdk = await loadSdk({ claudeBin: findClaude(), env: process.env, log });
