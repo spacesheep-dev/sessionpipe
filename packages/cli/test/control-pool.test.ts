@@ -336,8 +336,22 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
   });
 
   it("poolChanged() on a daemon that isn't running sends nothing", async () => {
+    // Its own receiver: the shared one keeps getting hellos from earlier daemons.
+    const own = new FakeReceiver();
+    await own.start();
+    const c = cfg();
+    c.receivers = [
+      {
+        ...c.receivers[0]!,
+        url: own.url,
+        control: `${own.url}/api/sessionpipe/v1/control`,
+        machine: own.machine,
+        token: own.token,
+        keys: [{ ...own.passkey.key, added_at: new Date().toISOString() }],
+      },
+    ];
     const pool = new FakePool();
-    d = new ControlDaemon(cfg(), path.join(tmp, "state", "control"), sock, {
+    d = new ControlDaemon(c, path.join(tmp, "state", "control"), sock, {
       now: Date.now,
       fetch,
       log: (s) => log.push(s),
@@ -348,11 +362,10 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
       env,
       pool,
     });
-    // The receiver is shared across the file: count, don't expect an empty list.
-    const before = rx.hellos.length;
     d.poolChanged();
     await new Promise((r) => setTimeout(r, 100));
-    expect(rx.hellos.length).toBe(before);
+    expect(own.hellos).toEqual([]);
+    await own.stop();
   });
 
   it("a pooled request being answered keeps the daemon busy; stop() closes the listener last", async () => {
