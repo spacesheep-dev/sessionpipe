@@ -136,7 +136,7 @@ describe("loadSdk", () => {
       pathToClaudeCodeExecutable: "/opt/claude",
       env: { HOME: tmp, SESSIONPIPE_CONTROL_JOB: "1" },
     });
-    expect(seen.options[0].env).toEqual({ HOME: tmp, SESSIONPIPE_AGENT_SDK: sdkFile, SESSIONPIPE_CONTROL_JOB: "1" });
+    expect(seen.options[0]!.env).toEqual({ HOME: tmp, SESSIONPIPE_AGENT_SDK: sdkFile, SESSIONPIPE_CONTROL_JOB: "1" });
     // An empty tool list is no list at all.
     host!.start({ session: "s2", cwd: tmp, permission: "safe", allowedTools: [] }).close();
     expect(seen.options[1]).not.toHaveProperty("allowedTools");
@@ -158,7 +158,7 @@ describe("loadSdk", () => {
     host!
       .start({ session: "s6", cwd: tmp, permission: "safe", env: { SESSIONPIPE_ASKED_BY: "codex:a1", HOME: "/x" } })
       .close();
-    expect(seen.options[5].env).toEqual({
+    expect(seen.options[5]!.env).toEqual({
       HOME: "/x",
       SESSIONPIPE_AGENT_SDK: sdkFile,
       SESSIONPIPE_ASKED_BY: "codex:a1",
