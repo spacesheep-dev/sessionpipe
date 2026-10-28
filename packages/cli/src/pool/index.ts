@@ -90,6 +90,10 @@ export type * from "./types.js";
 export const POLL_MS = 5 * 60_000;
 /** The hello lists at most this many (core's hello schema). */
 export const ACCOUNTS_MAX = 20;
+/** How long the listener trusts its copy of the bearer before asking the store again. */
+export const BEARER_CACHE_MS = 5_000;
+/** How long state.json may lag the pins and holds in memory. */
+export const PERSIST_MS = 1_000;
 
 export interface PoolDeps {
   /** core's `claudePool` unless a test says otherwise (types.ts says what of it is used). */
@@ -233,16 +237,31 @@ export function openPool(deps: PoolDeps): Pool {
     if (s !== "file") cfg.secrets_in = s;
   };
 
-  /** The bearer Claude Code presents: minted once per machine. */
-  const token = (): string => {
-    const have = secrets.get(cfg, TOKEN_NAME);
-    if (have) return have;
+  /** The bearer Claude Code presents. `pool on` mints a new one every time (an old copy
+   *  in a backup dies with it); the listener reads it through `bearer()`, which asks the
+   *  store again at most every few seconds, so a rotation by the CLI reaches a running
+   *  daemon without a restart. */
+  const mint = (): string => {
     placeSecrets();
     const t = randomBytes(32).toString("base64url");
     if (!secrets.set(cfg, TOKEN_NAME, t)) throw new PoolError("pool", "the secrets store refused the pool's token");
     saveConfig();
+    cached = { token: t, at: now() };
     return t;
   };
+  let cached: { token: string; at: number } | null = null;
+  const bearer = (): string => {
+    if (cached && now() - cached.at < BEARER_CACHE_MS) return cached.token;
+    const t = secrets.get(cfg, TOKEN_NAME) ?? "";
+    cached = { token: t, at: now() };
+    return t;
+  };
+  const ours = (token: string, lastToken?: string) => ({
+    port: cfg.port,
+    token,
+    lastPort: cfg.last_port,
+    lastToken,
+  });
 
   /** The policy's row for a config record, kept across re-syncs. */
   const resync = () => {
@@ -292,6 +311,8 @@ export function openPool(deps: PoolDeps): Pool {
     return true;
   };
   const pollIdle = async () => {
+    // Off means off: no credential is used until the person turns the pool on again.
+    if (!cfg.on) return;
     const t = now();
     const every = deps.pollMs ?? POLL_MS;
     for (const a of policy.accounts)
@@ -309,7 +330,23 @@ export function openPool(deps: PoolDeps): Pool {
       });
     });
 
-  const install = (): InstallReport[] => installPoolEnv(dirs(), { port: cfg.port, token: token() });
+  const install = (lastToken?: string): InstallReport[] => installPoolEnv(dirs(), ours(bearer(), lastToken));
+
+  /** state.json is written at most once a second while requests flow, and on stop. */
+  let dirty: NodeJS.Timeout | null = null;
+  const persistSoon = () => {
+    if (dirty) return;
+    dirty = setTimeout(() => {
+      dirty = null;
+      saveState();
+    }, PERSIST_MS);
+    dirty.unref();
+  };
+  const flush = () => {
+    if (dirty) clearTimeout(dirty);
+    dirty = null;
+    saveState();
+  };
 
   /** A login's account uuid and email, from its .claude.json or else the profile endpoint
    *  (refreshing first when the copy has no live access token). Null: unreadable. */
@@ -359,18 +396,19 @@ export function openPool(deps: PoolDeps): Pool {
         now,
         log,
         port: cfg.port,
-        token: token(),
+        token: bearer,
         on: () => cfg.on,
         state: policy,
         accountUuid: uuidOf,
         credentials,
-        persist: saveState,
+        persist: persistSoon,
         onLimits: (id, session, limits) => deps.onLimits?.(uuidOf(id), session, limits),
         onStanding: changed,
         ...(deps.upstream ? { upstream: deps.upstream } : {}),
       });
       const moved = server.port !== cfg.port;
       if (moved) {
+        if (cfg.port) cfg.last_port = cfg.port;
         cfg.port = server.port;
         saveConfig();
         if (cfg.on) {
@@ -391,7 +429,7 @@ export function openPool(deps: PoolDeps): Pool {
       const s = server;
       server = null;
       if (s) await s.close();
-      saveState();
+      flush();
     },
 
     async setOn(on) {
@@ -400,7 +438,10 @@ export function openPool(deps: PoolDeps): Pool {
           cfg.port = server?.port ?? (await freePort());
           saveConfig();
         }
-        const reports = install();
+        // A fresh bearer every time: the old one, wherever it was copied, stops working.
+        const before = bearer();
+        mint();
+        const reports = install(before || undefined);
         const created = new Set(cfg.created ?? []);
         for (const r of reports) if (r.created) created.add(r.file);
         cfg.on = true;
@@ -409,7 +450,7 @@ export function openPool(deps: PoolDeps): Pool {
         changed();
         return reports;
       }
-      const reports = uninstallPoolEnv(dirs(), { created: cfg.created ?? [] });
+      const reports = uninstallPoolEnv(dirs(), { ...ours(bearer()), created: cfg.created ?? [] });
       cfg.on = false;
       delete cfg.created;
       saveConfig();
@@ -539,9 +580,7 @@ export function openPool(deps: PoolDeps): Pool {
         port: cfg.port,
         listening: server !== null,
         in_flight: server?.stats.in_flight ?? 0,
-        settings: cfg.port
-          ? installedPoolEnv(dirs(), { port: cfg.port, token: secrets.get(cfg, TOKEN_NAME) ?? "" })
-          : [],
+        settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer())) : [],
         accounts: cfg.accounts.map((a, i) => {
           const limits = policy.accounts[i]?.limits;
           return { ...a, ...(sums[i] as AccountSummary), ...(limits ? { limits } : {}) };

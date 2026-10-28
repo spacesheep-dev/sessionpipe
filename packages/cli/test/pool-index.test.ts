@@ -262,8 +262,11 @@ describe("adding accounts", () => {
     expect((await pool.setOn(false)).every((r) => !r.changed)).toBe(true);
     await pool.setOn(true);
     expect(() => pool.requireOn()).not.toThrow();
-    // A token the store can't give back right now: the settings read as stale, not current.
+    // A token the store can't give back right now: once the listener's copy has aged
+    // out, the settings read as stale, not current.
     rmSync(poolSecretsFile(env));
+    expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
+    now += 6_000;
     expect(pool.status().settings.map((s) => s.state)).toEqual(["stale", "stale"]);
   });
   it("runs with the defaults: core's adapter, this process's env and clock, no log", async () => {
@@ -271,8 +274,8 @@ describe("adding accounts", () => {
     pools.push(pool);
     expect(pool.helloPool()).toEqual({ on: false, harness: "claude-code", accounts: [] });
     expect(pool.beginLogin().url).toMatch(/^https:\/\/claude\.com\//);
-    const { port } = await pool.start();
     await pool.setOn(true);
+    const { port } = await pool.start();
     const file = path.join(process.env.CLAUDE_CONFIG_DIR as string, "settings.json");
     expect(JSON.parse(readFileSync(file, "utf8")).env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${port}`);
     await pool.setOn(false);
@@ -411,8 +414,11 @@ describe("on and off", () => {
     expect(readPool(env)).toMatchObject({ on: true, port, created: [settings(0)] });
     expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
     expect(pool.helloPool().on).toBe(true);
-    // On again: the same port and token, nothing created twice.
-    expect((await pool.setOn(true)).every((r) => !r.changed)).toBe(true);
+    // On again: the same port, a fresh bearer (SECURITY H1), nothing created twice.
+    expect((await pool.setOn(true)).every((r) => r.changed)).toBe(true);
+    const token2 = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    expect(token2).not.toBe(token);
+    expect(JSON.parse(readFileSync(settings(1), "utf8")).env.ANTHROPIC_AUTH_TOKEN).toBe(token2);
     expect(readPool(env)).toMatchObject({ port, created: [settings(0)] });
     expect(await pool.setOn(false)).toEqual([
       { file: settings(0), changed: true, note: "removed (sessionpipe created it)" },
@@ -464,18 +470,36 @@ describe("the listener", () => {
         body: body("aaaaaaaa-0000-4000-8000-000000000001"),
       });
       expect(r.status).toBe(200);
-      expect(seen).toEqual(["Bearer access-one"]);
+      // A second request inside the same second rides on the pending write.
+      expect(
+        (
+          await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: body("aaaaaaaa-0000-4000-8000-000000000002"),
+          })
+        ).status,
+      ).toBe(200);
+      expect(seen).toEqual(["Bearer access-one", "Bearer access-one"]);
       expect(limits.at(-1)).toEqual({
         uuid: uuidOf("one"),
         session: "aaaaaaaa-0000-4000-8000-000000000001",
         limits: { status: "allowed", windows: [{ id: "five_hour", used_percent: 25 }], observed_at: T0 },
       });
-      expect(readPoolState(env).pins).toEqual({
-        "aaaaaaaa-0000-4000-8000-000000000001": { account: one.id, used: T0 },
+      // state.json lags the pin by a second at most, and never past stop() (SECURITY M4).
+      expect(readPoolState(env).pins).toEqual({});
+      await new Promise((r) => setTimeout(r, 1_100));
+      expect(Object.keys(readPoolState(env).pins).length).toBe(2);
+      // A third one, then stop() before the second has passed: flushed, not lost.
+      await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: body("aaaaaaaa-0000-4000-8000-000000000003"),
       });
       const health = (await (await fetch(`http://127.0.0.1:${port}/health`)).json()) as { accounts_with_room: number };
       expect(health.accounts_with_room).toBe(1);
       await pool.stop();
+      expect(Object.keys(readPoolState(env).pins).length).toBe(3);
       expect(pool.status().listening).toBe(false);
       // The port is taken when the next daemon starts: it moves and settings follow.
       const squatter = net.createServer();
@@ -485,7 +509,7 @@ describe("the listener", () => {
         const second = await p2.start();
         expect(second.moved).toBe(true);
         expect(second.port).not.toBe(port);
-        expect(readPool(env).port).toBe(second.port);
+        expect(readPool(env)).toMatchObject({ port: second.port, last_port: port });
         expect(JSON.parse(readFileSync(settings(0), "utf8")).env.ANTHROPIC_BASE_URL).toBe(
           `http://127.0.0.1:${second.port}`,
         );
@@ -498,20 +522,28 @@ describe("the listener", () => {
       await up.close();
     }
   });
-  it("with the pool off a moved port rewrites nothing", async () => {
-    const pool = open();
+  it("with the pool off a moved port rewrites nothing, and nothing is polled (SECURITY M2)", async () => {
+    const pool = open({ pollMs: 20 });
+    await signIn(pool, "one");
+    const n = adapter.calls.usage;
     const { moved } = await pool.start();
     expect(moved).toBe(true);
     expect(existsSync(settings(0))).toBe(false);
     expect(logs.some((l) => /settings\.json rewritten/.test(l))).toBe(false);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(adapter.calls.usage).toBe(n);
     await pool.setOn(true);
     expect(readPool(env).port).toBe((await pool.start()).port);
+    now = T0 + 60_000;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(adapter.calls.usage).toBeGreaterThan(n);
   });
   it("polls idle accounts on the interval, not the ones with fresh numbers, and drops stale pins", async () => {
     const pool = open({ pollMs: 25 });
     const one = await signIn(pool, "one");
     const two = await signIn(pool, "two");
     pool.disable(two.id);
+    await pool.setOn(true);
     const n = adapter.calls.usage;
     adapter.usage = async () => usage(50);
     await pool.stop();
@@ -520,6 +552,7 @@ describe("the listener", () => {
       JSON.stringify({ ...readPoolState(env), pins: { s1: { account: one.id, used: T0 - 29 * 60_000 } } }),
     );
     const p2 = open({ pollMs: 25 });
+    await p2.setOn(true);
     await p2.start();
     await new Promise((r) => setTimeout(r, 40));
     expect(adapter.calls.usage).toBe(n + 1);

@@ -183,6 +183,16 @@ describe("withAccount: the account part rewritten in place", () => {
     onlyUuidMoved(BODIES.user_id_twice!, out);
     expect(out.toString()).toContain('{\\"user_id\\":\\"x\\"}');
   });
+  it("a twin user_id literal earlier in the body (a tool's schema) never takes metadata's place", () => {
+    const id = `user_h_account_${ACCOUNT}_session_11111111-2222-4333-8444-555555555555`;
+    const twin = `{"tools":[{"input_schema":{"user_id":"${id}"}}],"metadata":{"user_id":"${id}"}}`;
+    const out = JSON.parse(withAccount(Buffer.from(twin), OTHER).toString()) as {
+      tools: { input_schema: { user_id: string } }[];
+      metadata: { user_id: string };
+    };
+    expect(parseUserId(Buffer.from(JSON.stringify(out)))!.account).toBe(OTHER);
+    expect(out.tools[0]!.input_schema.user_id).toBe(id);
+  });
   it("returns the same bytes when there is nothing to do", () => {
     const same = (text: string, to = OTHER) => {
       const b = Buffer.from(text);

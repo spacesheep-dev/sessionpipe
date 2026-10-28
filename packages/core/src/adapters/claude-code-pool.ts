@@ -272,10 +272,19 @@ export function withAccount(body: Buffer, accountUuid: string): Buffer {
   // The literal as JSON.stringify writes it; a body that escaped it another way
   // (`\u005f` for an underscore) is left alone rather than guessed at.
   const literal = JSON.stringify(id).slice(1, -1);
-  const m = [...text.matchAll(/"user_id"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].find((x) => x[1] === literal);
-  if (!m) return body;
-  const start = m.index + m[0].length - 1 - literal.length + literal.indexOf(current);
-  return Buffer.from(text.slice(0, start) + accountUuid + text.slice(start + current.length), "utf8");
+  const ms = [...text.matchAll(/"user_id"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].filter((x) => x[1] === literal);
+  if (!ms.length) return body;
+  if (ms.length === 1) {
+    const m = ms[0] as RegExpExecArray;
+    const start = m.index + m[0].length - 1 - literal.length + literal.indexOf(current);
+    return Buffer.from(text.slice(0, start) + accountUuid + text.slice(start + current.length), "utf8");
+  }
+  // The same literal under another `user_id` key too (a tool's input schema): rewrite
+  // the one in `metadata` structurally rather than guess which literal is it. A round
+  // trip costs the byte-stable cache key, not correctness.
+  const j = JSON.parse(text) as { metadata: { user_id: string } };
+  j.metadata.user_id = id.replace(current, accountUuid);
+  return Buffer.from(JSON.stringify(j), "utf8");
 }
 
 // --- headers upstream -----------------------------------------------------------------

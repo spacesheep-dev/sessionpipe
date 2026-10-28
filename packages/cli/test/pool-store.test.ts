@@ -42,7 +42,7 @@ describe("pool.json", () => {
   it("lives beside control.json, is 0600, and round-trips", () => {
     expect(poolFile(env)).toBe(path.join(tmp, "config", "pool.json"));
     expect(poolStateFile(env)).toBe(path.join(tmp, "state", "pool", "state.json"));
-    const c = cfg({ secrets_in: "keychain", created: [path.join(tmp, "s.json")] });
+    const c = cfg({ secrets_in: "keychain", created: [path.join(tmp, "s.json")], last_port: 4554 });
     c.accounts[0]!.label = "Work";
     writePool(c, env);
     if (process.platform !== "win32") expect(statSync(poolFile(env)).mode & 0o777).toBe(0o600);
@@ -94,7 +94,7 @@ describe("pool.json", () => {
         },
       ],
     });
-    writeFileSync(poolFile(env), JSON.stringify({ accounts: "none", port: 80 }));
+    writeFileSync(poolFile(env), JSON.stringify({ accounts: "none", port: 80, last_port: "x" }));
     expect(readPool(env)).toEqual({ on: false, port: 80, accounts: [] });
   });
 });

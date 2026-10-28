@@ -40,6 +40,8 @@ export interface PoolConfig {
   on: boolean;
   /** 0 until the listener first picks one. */
   port: number;
+  /** The port before the last move: a settings.json still naming it is still ours. */
+  last_port?: number;
   /** Where the secrets live; absent: pool.secrets.json. */
   secrets_in?: SecretStore;
   accounts: PoolAccount[];
@@ -100,11 +102,14 @@ export function readPool(env: NodeJS.ProcessEnv = process.env): PoolConfig {
       added_at: typeof a.added_at === "string" ? a.added_at : new Date(0).toISOString(),
     });
   }
-  const port =
-    Number.isInteger(j.port) && (j.port as number) > 0 && (j.port as number) < 65536 ? (j.port as number) : 0;
+  const portOf = (v: unknown): number =>
+    Number.isInteger(v) && (v as number) > 0 && (v as number) < 65536 ? (v as number) : 0;
+  const port = portOf(j.port);
+  const last = portOf(j.last_port);
   return {
     on: j.on === true,
     port,
+    ...(last ? { last_port: last } : {}),
     ...(j.secrets_in === "keychain" || j.secrets_in === "secret-service" ? { secrets_in: j.secrets_in } : {}),
     accounts,
     ...(Array.isArray(j.created) ? { created: j.created.filter((f): f is string => typeof f === "string") } : {}),

@@ -9,8 +9,10 @@ import {
   expirePins,
   HOLD_MS,
   hasRoom,
+  MAX_HOLD_MS,
   observe,
   PIN_IDLE_MS,
+  PINS_MAX,
   type PolicyState,
   pin,
   REJECTED_MS,
@@ -162,12 +164,30 @@ describe("choose", () => {
 });
 
 describe("pins", () => {
-  it("pin records the session; no session, no pin", () => {
+  it("pin records a uuid-shaped session; no session, or a caller's string, no pin (SECURITY M4)", () => {
     const s = st([acct("a")]);
     pin(s, undefined, "a", T0);
-    expect(s.pins).toEqual({});
     pin(s, "s1", "a", T0);
-    expect(s.pins).toEqual({ s1: { account: "a", used: T0 } });
+    pin(s, "x".repeat(4000), "a", T0);
+    pin(s, "aaaaaaaa-0000-4000-8000-00000000000g", "a", T0);
+    expect(s.pins).toEqual({});
+    pin(s, "aaaaaaaa-0000-4000-8000-000000000001", "a", T0);
+    pin(s, "AAAAAAAA-0000-4000-8000-000000000001", "a", T0 + 1);
+    expect(Object.keys(s.pins).length).toBe(2);
+  });
+  it("pins are capped; the one used longest ago goes first (SECURITY M4)", () => {
+    const s = st([acct("a")]);
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    for (let n = 0; n < PINS_MAX; n++) pin(s, id(n), "a", T0 + n);
+    expect(Object.keys(s.pins).length).toBe(PINS_MAX);
+    pin(s, id(7), "a", T0 + PINS_MAX); // used again: now the freshest, not a new pin
+    pin(s, id(0), "a", T0 + PINS_MAX); // the first inserted is no longer the oldest
+    pin(s, id(PINS_MAX), "a", T0 + PINS_MAX + 1);
+    expect(Object.keys(s.pins).length).toBe(PINS_MAX);
+    expect(s.pins[id(1)]).toBeUndefined();
+    expect(s.pins[id(0)]).toBeDefined();
+    expect(s.pins[id(7)]).toBeDefined();
+    expect(s.pins[id(PINS_MAX)]).toBeDefined();
   });
   it("expire drops pins idle for 30 minutes and pins to accounts that left", () => {
     const s = st([acct("a")], {
@@ -245,6 +265,9 @@ describe("observe", () => {
     expect(s.accounts[2]?.hold_until).toBe(T0 + HOLD_MS);
     observe(s, "d", { status: 429, retryAfterMs: 1 }, T0);
     expect(s.accounts[3]?.hold_until).toBe(T0 + 99_000);
+    // A Retry-After of a year is believed for an hour (SECURITY L3).
+    observe(s, "c", { status: 429, retryAfterMs: 365 * 24 * 3_600_000 }, T0 + 1);
+    expect(s.accounts[2]?.hold_until).toBe(T0 + 1 + MAX_HOLD_MS);
   });
   it("a 5xx rests the account a minute", () => {
     const s = st([acct("a")]);

@@ -10,6 +10,13 @@
 // the first byte nothing is retried. With no account left the upstream's own answer
 // passes through unchanged, so Claude Code shows its own message. The listener is
 // thin: the policy decides, the adapter knows the vendor.
+//
+// What it refuses before any account is touched: a Host that isn't this loopback (a page
+// that rebinds its name to 127.0.0.1 would otherwise read /health), a request-target
+// that isn't a plain path under /v1/ or /api/ (the URL is built here, never from the
+// target's own shape, so `..`, an absolute form and `*` go nowhere and rest nobody), the
+// endpoints that mint keys or touch billing (the pool bearer must never become a
+// permanent API key), and everything while the pool is off.
 import { createHash, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { retryAfterMs } from "../http-sink.js";
@@ -27,8 +34,9 @@ export interface PoolServerDeps {
   log: (line: string) => void;
   /** The port pool.json remembers; 0 or taken: a free one is picked. */
   port: number;
-  /** The bearer Claude Code presents (settings.json). */
-  token: string;
+  /** The bearer Claude Code presents (settings.json); read on every request, since
+   *  `pool on` mints a new one in another process. */
+  token: () => string;
   on: () => boolean;
   /** Shared with the façade and mutated here through choose/observe/pin. */
   state: PolicyState;
@@ -80,6 +88,36 @@ const HOP = new Set([
   "proxy-authenticate",
   "proxy-authorization",
 ]);
+
+/** Paths proxied at all: Claude Code's own API and the OAuth reads its footer needs. */
+const ALLOW_PATH = /^\/(v1|api)\//;
+/** Never proxied: anything that mints a credential or touches money. A loopback bearer
+ *  must not become a permanent key for every pooled account. */
+const DENY_PATH = [
+  /^\/api\/oauth\/claude_cli\/create_api_key$/,
+  /create_api_key/,
+  /^\/v1\/oauth\//,
+  /^\/api\/oauth\/organizations\/[^/]+\/(payment_method|billing|prepaid|overage|setup_overage_billing|admin_requests)/,
+];
+
+/** The upstream URL for a request-target, or why not. Built from the parsed path, so
+ *  dot segments are already folded and cannot leave the two prefixes. */
+export function upstreamUrl(target: string, base: string): { url: string } | { status: 400 | 403; why: string } {
+  if (!target.startsWith("/")) return { status: 400, why: "sessionpipe pool: bad request path" };
+  // A path against a fixed base always parses (odd bytes are percent-encoded).
+  const u = new URL(target, base);
+  if (u.origin !== new URL(base).origin || !ALLOW_PATH.test(u.pathname))
+    return { status: 400, why: "sessionpipe pool: path not proxied" };
+  if (DENY_PATH.some((re) => re.test(u.pathname)))
+    return { status: 403, why: "sessionpipe pool: that endpoint is not proxied" };
+  return { url: `${u.origin}${u.pathname}${u.search}` };
+}
+
+/** The Host this loopback answers to: itself, by address or name, with its own port. */
+export function hostOk(host: string | undefined, port: number): boolean {
+  const m = /^(127\.0\.0\.1|localhost)(?::(\d{1,5}))?$/i.exec(host ?? "");
+  return m !== null && (m[2] === undefined || Number(m[2]) === port);
+}
 
 /** A bearer compared in constant time, whatever its length: both sides are hashed first. */
 export function bearerOk(header: string | undefined, token: string): boolean {
@@ -151,7 +189,12 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
     });
   };
 
-  async function forward(req: http.IncomingMessage, res: http.ServerResponse, body: Buffer): Promise<void> {
+  async function forward(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    body: Buffer,
+    url: string,
+  ): Promise<void> {
     const session = deps.adapter.parseUserId(body)?.session;
     const tried = new Set<string>();
     const started = deps.now();
@@ -195,7 +238,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       let up: Response;
       try {
         stats.upstream++;
-        up = await deps.fetch(`${base}${req.url}`, init);
+        up = await deps.fetch(url, init);
       } catch (e) {
         if (ctl.signal.aborted) return;
         observe(deps.state, a.id, { upstream5xx: true }, deps.now());
@@ -284,6 +327,10 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
 
   const server = http.createServer((req, res) => {
     stats.requests++;
+    if (!hostOk(req.headers.host, (server.address() as { port: number }).port)) {
+      sendJson(res, 421, errorBody("invalid_request_error", "sessionpipe pool: not this host"));
+      return;
+    }
     const pathname = (req.url as string).split("?")[0];
     if (req.method === "GET" && pathname === "/health") {
       sendJson(
@@ -293,8 +340,24 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       );
       return;
     }
-    if (!bearerOk(req.headers.authorization, deps.token)) {
+    if (!bearerOk(req.headers.authorization, deps.token())) {
       sendJson(res, 401, errorBody("authentication_error", "sessionpipe pool: unknown bearer"));
+      return;
+    }
+    if (!deps.on()) {
+      // Off means off: no pooled credential is used, whatever a stale settings.json says.
+      sendJson(res, 503, errorBody("api_error", "sessionpipe pool: the pool is off (sessionpipe pool on)"), {
+        "retry-after": "60",
+      });
+      return;
+    }
+    const where = upstreamUrl(req.url as string, base);
+    if ("status" in where) {
+      sendJson(
+        res,
+        where.status,
+        errorBody(where.status === 403 ? "permission_error" : "invalid_request_error", where.why),
+      );
       return;
     }
     stats.in_flight++;
@@ -302,7 +365,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
     void readBody(req, res, cap).then(async (body) => {
       if (body === null) return;
       try {
-        await forward(req, res, body);
+        await forward(req, res, body, where.url);
       } catch (e) {
         // Nothing throws once the answer is being written (the stream has its own
         // catch), so this is always before headers.

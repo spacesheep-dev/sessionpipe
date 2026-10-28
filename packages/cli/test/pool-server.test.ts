@@ -10,7 +10,15 @@ import type net from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Credentials } from "../src/pool/credentials.js";
 import { type AccountState, HOLD_MS, type PolicyState } from "../src/pool/policy.js";
-import { BODY_CAP, bearerOk, type PoolServer, type PoolServerDeps, startPoolServer } from "../src/pool/server.js";
+import {
+  BODY_CAP,
+  bearerOk,
+  hostOk,
+  type PoolServer,
+  type PoolServerDeps,
+  startPoolServer,
+  upstreamUrl,
+} from "../src/pool/server.js";
 import type { PoolCredential, PoolLimits } from "../src/pool/types.js";
 import { body, credential, FakeAuthError, fakeAdapter, uuidOf } from "./helpers/pool-fake.js";
 
@@ -93,7 +101,7 @@ async function start(over: Partial<PoolServerDeps> = {}): Promise<PoolServer> {
     now: () => now,
     log: (l) => logs.push(l),
     port: 0,
-    token: TOKEN,
+    token: () => TOKEN,
     on: () => on,
     state,
     accountUuid: (id) => (id === "noid" ? null : uuidOf(id)),
@@ -116,6 +124,33 @@ const send = (path: string, init: RequestInit & { token?: string | null } = {}) 
       ...(init.headers as Record<string, string>),
     },
     ...(init.body !== undefined ? { body: init.body } : {}),
+  });
+
+/** A request-target or Host sent as written, which fetch would never do. */
+const raw = (o: { path: string; method?: string; host?: string; token?: string | null }) =>
+  new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port: srv!.port,
+        method: o.method ?? "POST",
+        path: o.path,
+        headers: {
+          ...(o.host !== undefined ? { host: o.host } : {}),
+          ...(o.token === null ? {} : { authorization: `Bearer ${o.token ?? TOKEN}` }),
+          "content-type": "application/json",
+        },
+      },
+      (res) => {
+        let text = "";
+        res.on("data", (c) => {
+          text += c;
+        });
+        res.on("end", () => resolve({ status: res.statusCode as number, body: text }));
+      },
+    );
+    req.on("error", reject);
+    req.end(o.method === "GET" ? undefined : body(S1));
   });
 
 beforeEach(async () => {
@@ -484,7 +519,7 @@ describe("streaming", () => {
       req.end(body(S1));
     });
     await closed;
-    await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 50 && !up.seen[0]!.closed; i++) await new Promise((r) => setTimeout(r, 20));
     expect(srv!.stats.aborted).toBe(1);
     expect(up.seen[0]!.closed).toBe(true);
   });
@@ -659,7 +694,7 @@ describe("the port", () => {
       now: () => now,
       log: (l) => logs.push(l),
       port: taken,
-      token: TOKEN,
+      token: () => TOKEN,
       on: () => on,
       state,
       accountUuid: () => null,
@@ -677,5 +712,91 @@ describe("the port", () => {
     expect(third).toMatchObject({ port: taken, moved: false });
     await expect(start({ port: 1 })).rejects.toThrow(/EACCES|EADDRINUSE|listen/);
     srv = third;
+  });
+});
+
+describe("the security review's findings", () => {
+  it("H2/M5: only plain paths under /v1/ and /api/ are proxied; the rest is refused and rests nobody", async () => {
+    await start();
+    for (const [path, status] of [
+      ["/api/oauth/claude_cli/create_api_key", 403],
+      ["/api/oauth/organizations/org_1/payment_method", 403],
+      ["/api/oauth/organizations/org_1/billing/x", 403],
+      ["/v1/oauth/token", 403],
+      ["/v1/messages/../../api/oauth/claude_cli/create_api_key", 403],
+      ["/v2/messages", 400],
+      ["/", 400],
+      ["/v1", 400],
+      ["/v1/messages/../../etc/passwd", 400],
+      ["http://evil.example/steal", 400],
+      ["//evil.example/v1/messages", 400],
+      ["*", 400],
+    ] as const) {
+      const r = await raw({ path, method: path === "*" ? "OPTIONS" : "POST" });
+      expect([path, r.status]).toEqual([path, status]);
+      expect(JSON.parse(r.body)).toMatchObject({
+        type: "error",
+        error: { type: status === 403 ? "permission_error" : "invalid_request_error" },
+      });
+    }
+    expect(up.seen).toEqual([]);
+    expect(srv!.stats.upstream).toBe(0);
+    expect(state.accounts.every((a) => a.hold_until === undefined)).toBe(true);
+    expect(logs.some((l) => /unreachable/.test(l))).toBe(false);
+    // The reads Claude Code's own footer makes stay proxied; dot segments are folded first.
+    expect((await send("/api/oauth/usage", { method: "GET" })).status).toBe(200);
+    expect((await send("/v1/messages/../models?x=1", { method: "GET" })).status).toBe(200);
+    expect(up.seen.map((x) => x.url)).toEqual(["/api/oauth/usage", "/v1/models?x=1"]);
+    expect(upstreamUrl("/v1/messages?beta=1", "https://api.anthropic.com")).toEqual({
+      url: "https://api.anthropic.com/v1/messages?beta=1",
+    });
+    expect(upstreamUrl("/v1/messages#frag", "https://api.anthropic.com")).toEqual({
+      url: "https://api.anthropic.com/v1/messages",
+    });
+  });
+  it("L4: a Host that isn't this loopback is turned away before anything else, /health included", async () => {
+    await start();
+    const r = await raw({ path: "/health", method: "GET", host: "evil.example", token: null });
+    expect(r.status).toBe(421);
+    expect(JSON.parse(r.body)).toMatchObject({ error: { type: "invalid_request_error" } });
+    for (const host of [`localhost:${srv!.port}`, `127.0.0.1:${srv!.port}`, "localhost", "127.0.0.1"])
+      expect((await raw({ path: "/health", method: "GET", host, token: null })).status).toBe(200);
+    for (const host of [`127.0.0.1:${srv!.port + 1}`, "127.0.0.1.evil.example", "evil.example:1"])
+      expect((await raw({ path: "/health", method: "GET", host, token: null })).status).toBe(421);
+    expect((await raw({ path: "/v1/messages", host: "evil.example" })).status).toBe(421);
+    expect(up.seen).toEqual([]);
+    expect(hostOk(undefined, 1)).toBe(false);
+    expect(hostOk("LOCALHOST:1", 1)).toBe(true);
+  });
+  it("M2: while the pool is off no request is served and no credential is touched; /health still answers", async () => {
+    await start();
+    on = false;
+    const r = await send("/v1/messages", { body: body(S1) });
+    expect(r.status).toBe(503);
+    expect(r.headers.get("retry-after")).toBe("60");
+    expect(await r.json()).toMatchObject({ error: { type: "api_error", message: /pool is off/ } });
+    expect(up.seen).toEqual([]);
+    expect(srv!.stats.upstream).toBe(0);
+    expect((await send("/health", { method: "GET", token: null })).status).toBe(200);
+    on = true;
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
+  });
+  it("H1: the bearer is read on every request, so one minted by `pool on` elsewhere works at once", async () => {
+    let current = TOKEN;
+    await start({ token: () => current });
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
+    current = "rotated-bearer";
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(401);
+    expect((await send("/v1/messages", { body: body(S1), token: "rotated-bearer" })).status).toBe(200);
+  });
+  it("M4: pins are kept only for uuid-shaped sessions", async () => {
+    await start();
+    const odd = JSON.stringify({
+      metadata: { user_id: '{"account_uuid":"' + uuidOf("own") + '","session_id":"not a uuid at all"}' },
+    });
+    expect(adapter.parseUserId(Buffer.from(odd))).toBeNull();
+    await send("/v1/messages", { body: body(S1) });
+    await send("/v1/messages", { body: body("anything-goes") });
+    expect(Object.keys(state.pins)).toEqual([S1]);
   });
 });

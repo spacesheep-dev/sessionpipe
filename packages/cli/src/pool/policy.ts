@@ -16,6 +16,12 @@ export const PIN_IDLE_MS = 30 * 60_000;
 export const HOLD_MS = 60_000;
 /** A `rejected` status with no window naming a reset is believed this long. */
 export const REJECTED_MS = 5 * 60_000;
+/** The longest a Retry-After is believed: a vendor's typo must not park an account for a year. */
+export const MAX_HOLD_MS = 60 * 60_000;
+/** Pins kept at most; the oldest go first. A caller inventing session ids fills nothing
+ *  but this. */
+export const PINS_MAX = 4096;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AccountState {
   id: string;
@@ -111,9 +117,17 @@ export function choose(
   return { account: a, reason: pin ? "moved" : "first-with-room" };
 }
 
-/** Record that `session` was just served by `account`. */
+/** Record that `session` was just served by `account`. Only a uuid-shaped session id
+ *  (Claude Code's) is pinned: anything else is a caller's string, not a session. */
 export function pin(state: PolicyState, session: string | undefined, account: string, now: number): void {
-  if (session) state.pins[session] = { account, used: now };
+  if (!session || !UUID_RE.test(session)) return;
+  const had = session in state.pins;
+  state.pins[session] = { account, used: now };
+  if (had) return;
+  const keys = Object.keys(state.pins);
+  if (keys.length <= PINS_MAX) return;
+  const oldest = keys.reduce((a, b) => ((state.pins[a] as Pin).used <= (state.pins[b] as Pin).used ? a : b));
+  delete state.pins[oldest];
 }
 
 /** Forget pins idle for PIN_IDLE_MS and pins to accounts no longer in the pool. */
@@ -162,9 +176,9 @@ export function observe(state: PolicyState, accountId: string, what: Observation
     else a.error = what.error;
     return false;
   }
-  // A 429: out until the reset it named; with none, until the freshest numbers'
-  // nearest future reset; with none of those either, HOLD_MS.
-  let until = what.retryAfterMs !== undefined ? now + what.retryAfterMs : null;
+  // A 429: out until the reset it named (an hour at most); with none, until the
+  // freshest numbers' nearest future reset; with none of those either, HOLD_MS.
+  let until = what.retryAfterMs !== undefined ? now + Math.min(what.retryAfterMs, MAX_HOLD_MS) : null;
   if (until === null) {
     const resets = (a.limits?.windows ?? [])
       .map((w) => ms(w.resets_at))

@@ -7,9 +7,26 @@
 // claude-shaped.ts's: a file that isn't plain JSON is skipped and the report says why;
 // a file is written back in its own indent, line ending and final newline; off removes
 // exactly our keys and an `env` object that is empty without them, and deletes a file
-// we created once it is empty; a value we did not write is never touched — a base URL
-// someone else set (bb's pool, a gateway) means that file is skipped and reported.
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+// we created once it is empty.
+//
+// "Ours" means our port or our token, never any loopback address: claude-code-router,
+// LiteLLM and bb's pooler all live on 127.0.0.1 too, and a value we did not write is
+// never overwritten or deleted; that file is skipped and reported. The bearer in this
+// file is worth every pooled account on the machine, so the file is made 0600 once it
+// carries one (Claude Code itself creates it 0644), a symlinked settings.json is
+// followed to its target and the report names where the token went, and a config dir
+// anyone else can write to is skipped.
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import type { InstallReport } from "@sessionpipe/core";
 
@@ -30,8 +47,28 @@ export function poolEnv(port: number, token: string): Record<(typeof POOL_ENV_KE
   };
 }
 
-/** A base URL of ours: the loopback, any port (a port that moved is still ours). */
-const OURS_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/?$/;
+/** What identifies a block as ours: this listener, or the one it moved from, or this
+ *  token, or the one before it while a rotation is under way. */
+export interface Ours {
+  port: number;
+  token: string;
+  /** The port before the listener moved (pool.json's `last_port`). */
+  lastPort?: number | undefined;
+  /** The bearer before `pool on` minted this one. */
+  lastToken?: string | undefined;
+}
+
+const isOurs = (env: Record<string, unknown>, o: Ours): boolean => {
+  const base = env.ANTHROPIC_BASE_URL;
+  const tok = env.ANTHROPIC_AUTH_TOKEN;
+  return (
+    base === poolBaseUrl(o.port) ||
+    (o.lastPort !== undefined && base === poolBaseUrl(o.lastPort)) ||
+    (typeof tok === "string" && tok.length > 0 && (tok === o.token || tok === o.lastToken))
+  );
+};
+/** Any of the three keys set at all, by anyone. */
+const anySet = (env: Record<string, unknown>): boolean => POOL_ENV_KEYS.some((k) => env[k] !== undefined);
 
 type Shape = { indent: string; eol: string; finalNewline: boolean };
 type JsonFile =
@@ -76,48 +113,78 @@ const envOf = (settings: Record<string, unknown>): Record<string, unknown> | nul
     ? (settings.env as Record<string, unknown>)
     : null;
 
+/** The file to read and write: a symlink's target, so the chmod reaches the real file
+ *  and the report names where the token went. */
+const target = (file: string): { file: string; linked: boolean } => {
+  try {
+    if (!lstatSync(file).isSymbolicLink()) return { file, linked: false };
+    return { file: realpathSync(file), linked: true };
+  } catch {
+    return { file, linked: false };
+  }
+};
+
+/** A config dir another user could write to: a token written there is theirs too. */
+const looseDir = (dir: string): boolean => {
+  try {
+    return process.platform !== "win32" && (statSync(dir).mode & 0o022) !== 0;
+  } catch {
+    return false;
+  }
+};
+
 /** Write the block into each config dir's settings.json. */
-export function installPoolEnv(dirs: readonly string[], o: { port: number; token: string }): InstallReport[] {
+export function installPoolEnv(dirs: readonly string[], o: Ours): InstallReport[] {
   const want = poolEnv(o.port, o.token);
   return dirs.map((dir) => {
-    const file = settingsIn(dir);
+    const link = settingsIn(dir);
+    if (looseDir(dir))
+      return { file: link, changed: false, skipped: true, note: "skipped: the config dir is group/world-writable" };
+    const { file, linked } = target(link);
     const f = readJsonFile(file);
     if (!f.ok) return { file, changed: false, skipped: true, note: `${f.reason}; not touched` };
     const settings = f.value;
     if (settings.env !== undefined && !envOf(settings))
       return { file, changed: false, skipped: true, note: "env is not an object; not touched" };
     const env = envOf(settings) ?? {};
-    const base = env.ANTHROPIC_BASE_URL;
-    if (typeof base === "string" && !OURS_URL.test(base))
-      return { file, changed: false, skipped: true, note: `skipped: ANTHROPIC_BASE_URL already set (${base})` };
-    if (base !== undefined && typeof base !== "string")
-      return { file, changed: false, skipped: true, note: "skipped: ANTHROPIC_BASE_URL already set" };
+    if (anySet(env) && !isOurs(env, o))
+      return {
+        file,
+        changed: false,
+        skipped: true,
+        note: `skipped: already set by someone else (${POOL_ENV_KEYS.filter((k) => env[k] !== undefined).join(", ")})`,
+      };
     let changed = false;
     for (const k of POOL_ENV_KEYS)
       if (env[k] !== want[k]) {
         env[k] = want[k];
         changed = true;
       }
-    if (!changed) return { file, changed: false };
+    const note = linked ? { note: `a symlink; the token is in ${file}` } : {};
+    if (!changed) return { file, changed: false, ...note };
     settings.env = env;
-    mkdirSync(path.dirname(file), { recursive: true });
+    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, formatJson(settings, f.shape));
-    return { file, changed: true, created: !f.existed };
+    // Claude Code's own file is 0644; with our bearer in it, it is ours to tighten.
+    try {
+      chmodSync(file, 0o600);
+    } catch {}
+    return { file, changed: true, created: !f.existed, ...note };
   });
 }
 
 /** Remove exactly what we wrote. `created` names the files `pool on` made, deleted
  *  again once nothing else is in them. */
-export function uninstallPoolEnv(dirs: readonly string[], o: { created?: readonly string[] } = {}): InstallReport[] {
+export function uninstallPoolEnv(dirs: readonly string[], o: Ours & { created?: readonly string[] }): InstallReport[] {
   return dirs.map((dir) => {
-    const file = settingsIn(dir);
+    const { file } = target(settingsIn(dir));
     if (!existsSync(file)) return { file, changed: false };
     const f = readJsonFile(file);
     if (!f.ok) return { file, changed: false, skipped: true, note: `${f.reason}; not touched` };
     const settings = f.value;
     const env = envOf(settings);
-    if (!env || typeof env.ANTHROPIC_BASE_URL !== "string" || !OURS_URL.test(env.ANTHROPIC_BASE_URL))
-      return { file, changed: false };
+    if (!env || !anySet(env)) return { file, changed: false };
+    if (!isOurs(env, o)) return { file, changed: false, skipped: true, note: "left alone: set by someone else" };
     for (const k of POOL_ENV_KEYS) delete env[k];
     if (!Object.keys(env).length) delete settings.env;
     if (o.created?.includes(file) && !Object.keys(settings).length) {
@@ -135,26 +202,29 @@ export type PoolEnvState =
   /** Our block, but another port or token: `pool on` again rewrites it. */
   | "stale"
   | "missing"
-  /** Someone else's base URL: that config dir does not go through the pool. */
+  /** Someone else's base URL or token: that config dir does not go through the pool. */
   | "other"
+  /** A config dir anyone else can write to: `pool on` won't put a token there. */
+  | "unsafe"
   | "unreadable";
 
 /** Per settings.json: does Claude Code there go through this listener? */
 export function installedPoolEnv(
   dirs: readonly string[],
-  o: { port: number; token: string },
+  o: Ours,
 ): { file: string; state: PoolEnvState; note?: string }[] {
   const want = poolEnv(o.port, o.token);
   return dirs.map((dir) => {
-    const file = settingsIn(dir);
+    const link = settingsIn(dir);
+    if (looseDir(dir)) return { file: link, state: "unsafe", note: "the config dir is group/world-writable" };
+    const { file } = target(link);
     const f = readJsonFile(file);
     if (!f.ok) return { file, state: "unreadable", note: f.reason };
     const env = envOf(f.value);
-    const base = env?.ANTHROPIC_BASE_URL;
-    if (base === undefined) return { file, state: "missing" };
-    if (typeof base !== "string" || !OURS_URL.test(base))
-      return { file, state: "other", note: `ANTHROPIC_BASE_URL is ${String(base)}` };
-    return { file, state: POOL_ENV_KEYS.every((k) => env?.[k] === want[k]) ? "current" : "stale" };
+    if (!env || !anySet(env)) return { file, state: "missing" };
+    if (!isOurs(env, o))
+      return { file, state: "other", note: `ANTHROPIC_BASE_URL is ${String(env.ANTHROPIC_BASE_URL ?? "unset")}` };
+    return { file, state: POOL_ENV_KEYS.every((k) => env[k] === want[k]) ? "current" : "stale" };
   });
 }
 
