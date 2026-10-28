@@ -234,6 +234,48 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
       expect(text).toContain("sessionpipe control pair <receiver>");
     }
     expect(controlMain).not.toHaveBeenCalled();
+    expect((await run("help")).text).toContain("sessionpipe pool [--json]");
+    expect((await run("pool", "add", "--help")).text).toMatch(/^Usage: sessionpipe pool add --import \| --login/);
+  });
+
+  it("pool: the family runs in this process when no daemon answers; status and uninstall know about it", async () => {
+    put(path.join(home, ".claude", "settings.json"), {});
+    expect((await run("pool")).lines[0]).toBe("  pool:     off · 0 accounts");
+    expect((await run("status")).text).not.toContain("pool:");
+    const on = await run("pool", "on");
+    expect(on.lines[0]).toMatch(/^ {2}✓ .*settings\.json: env block written/);
+    expect(on.lines).toContain("  New Claude Code sessions use the pool; running ones from their next start.");
+    expect(on.lines.some((l) => l.startsWith("  Daemon: "))).toBe(true);
+    expect((await run("status")).text).toMatch(
+      / {2}pool: {5}on · 0 accounts · 127\.0\.0\.1:\d+ \(`sessionpipe pool` has the room each has left\)/,
+    );
+    expect(JSON.parse((await run("status", "--json")).lines.join("\n")).pool).toMatchObject({ on: true, accounts: 0 });
+    // uninstall: the pool's env block goes first, then the hooks.
+    await run("install", "--claude-code", "--backfill", "0");
+    const { lines } = await run("uninstall");
+    expect(lines[0]).toMatch(/^ {2}✓ .*settings\.json: the pool's env block is gone$/);
+    expect(lines.findIndex((l) => /✓ claude-code: /.test(l))).toBeGreaterThan(
+      lines.findIndex((l) => /accounts stay pooled/.test(l)),
+    );
+    expect(JSON.parse(readFileSync(path.join(home, ".claude", "settings.json"), "utf8"))).toEqual({});
+    expect((await run("uninstall")).lines[0]).not.toContain("env block");
+    // One account, off: the line is still there, singular.
+    put(path.join(tmp, "config", "pool.json"), {
+      on: false,
+      port: 0,
+      accounts: [
+        {
+          id: "0a1b2c3d",
+          email: "a@x.y",
+          account_uuid: "0a1b2c3d-0000-4000-8000-000000000000",
+          enabled: true,
+          added_at: "2026-10-29T10:00:00.000Z",
+        },
+      ],
+    });
+    expect((await run("status")).text).toContain(
+      "  pool:     off · 1 account (`sessionpipe pool` has the room each has left)",
+    );
   });
 
   it("the version, the hook note, and the control and wait dispatch", async () => {

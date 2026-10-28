@@ -49,6 +49,8 @@ import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
+import { POOL_HELP, poolMain, poolOffForUninstall } from "./pool/cli.js";
+import { readPool } from "./pool/index.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
 import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
@@ -166,6 +168,8 @@ async function command(cmd: string): Promise<void> {
       return workerFromArgv();
     case "control":
       return controlMain(args, out, distDir);
+    case "pool":
+      return poolMain(args, out, distDir);
     case "wait":
       return waitMain(args, out);
     case "hook":
@@ -198,6 +202,7 @@ Usage:
   sessionpipe update [off|on]       (install the latest now; off/on: the daemon's daily update)
   sessionpipe titles [on|off|refresh] (on: name Claude Code sessions as claude.ai does; off by default)
 ${CONTROL_HELP}
+${POOL_HELP}
 
 Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
 }
@@ -560,7 +565,7 @@ function unisolated(): string[] {
   }).map((a) => a.name);
 }
 
-function uninstall(): void {
+async function uninstall(): Promise<void> {
   // `install` has had a per-harness selector all along; uninstall taking every harness
   // with no way to say otherwise is how one harness's test strips the other four.
   const named = ADAPTERS.filter((a) => has(`--${a.name}`));
@@ -577,6 +582,9 @@ function uninstall(): void {
       return;
     }
   }
+  // The pool's env block goes first (DESIGN §2.4): Claude Code must not be left pointed
+  // at a daemon this uninstall is about to take away.
+  if (all || named.some((a) => a.name === "claude-code")) await poolOffForUninstall(out);
   const cfg = readConfig();
   for (const a of all ? ADAPTERS : named) {
     const created = cfg.harnesses[a.name]?.created ?? [];
@@ -937,6 +945,16 @@ async function status(): Promise<void> {
   }
   const control = await controlHealth();
   if (!json) controlLines(control);
+  // The account pool, from its file alone (`sessionpipe pool` asks the daemon for the rest).
+  const poolCfg = readPool();
+  const pool =
+    poolCfg.on || poolCfg.accounts.length
+      ? { on: poolCfg.on, port: poolCfg.port, accounts: poolCfg.accounts.length }
+      : null;
+  if (!json && pool)
+    out(
+      `  pool:     ${pool.on ? "on" : "off"} · ${pool.accounts} account${pool.accounts === 1 ? "" : "s"}${pool.on ? ` · 127.0.0.1:${pool.port}` : ""} (\`sessionpipe pool\` has the room each has left)`,
+    );
   const update = updateState(cfg);
   if (!json) out(`  update:   ${updateLine(update, Date.now())}`);
   const t = timing();
@@ -960,6 +978,7 @@ async function status(): Promise<void> {
           sinks,
           timing: t,
           control,
+          pool,
           update,
           jobs,
         },
