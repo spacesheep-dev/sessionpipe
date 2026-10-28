@@ -191,7 +191,7 @@ const who = (a: { label?: string; email: string; id: string }) =>
 const settingsLine = (s: PoolStatus["settings"][number]) =>
   `${tilde(s.file)}: ${
     s.state === "current"
-      ? "env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and two Claude Code flags)"
+      ? "env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and the flag that keeps its first-party features on)"
       : s.state === "missing"
         ? "no env block"
         : s.state === "stale"

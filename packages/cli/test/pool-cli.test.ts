@@ -327,7 +327,7 @@ describe("sessionpipe pool, with no daemon running", () => {
   it("on: writes the env block, says what Claude Code does, installs the service, and warns when there is no account", async () => {
     await run(["on"]);
     expect(lines).toEqual([
-      `  ✓ ${settings().replace(os.homedir(), "~")}: env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and two Claude Code flags)`,
+      `  ✓ ${settings().replace(os.homedir(), "~")}: env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and the flag that keeps its first-party features on)`,
       "  New Claude Code sessions use the pool; running ones from their next start.",
       "  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.",
       "  Daemon: launchd agent org.sessionpipe.control (log: /x/daemon.log)",

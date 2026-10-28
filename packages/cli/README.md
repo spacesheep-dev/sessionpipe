@@ -137,8 +137,8 @@ at the terminal: an agent that wants it says so in the reply.
 Claude Code can't change account mid-session, but its requests can. `sessionpipe pool`
 keeps several Claude accounts behind one loopback listener the control daemon runs on
 this machine; Claude Code is pointed at it through the `env` block of its
-`settings.json` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and the two flags that
-keep its first-party features on). Each request goes to the first account in your order
+`settings.json` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and the one flag that
+keeps its first-party features on). Each request goes to the first account in your order
 that has room, a session stays on its account while that account has room, and when the
 account's 5-hour or weekly window is used up the next request simply goes to the next
 account: the session notices nothing. The numbers each account reports arrive as
