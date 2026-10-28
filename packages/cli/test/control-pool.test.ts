@@ -355,7 +355,12 @@ describe.skipIf(process.platform === "win32")("the `pool` command (CONTROL.md §
     expect(pool.listening).toBe(false);
   });
 
-  it("enable, disable, remove, order and refresh, each acked with the pool as it now stands", async () => {
+  // Several commands in one test: after each ack the daemon's next poll sees the same
+  // message until the receiver has taken the ack in, and pauses two seconds for it, so
+  // a round trip can cost ~2 s (as the daemon suite's multi-command tests allow for).
+  it("enable, disable, remove, order and refresh, each acked with the pool as it now stands", {
+    timeout: 30_000,
+  }, async () => {
     const pool = new FakePool();
     pool.on = true;
     three(pool);
@@ -402,7 +407,9 @@ describe.skipIf(process.platform === "win32")("the `pool` command (CONTROL.md §
     });
   });
 
-  it("refused: pool_account, pool_order, pool_off; failed: login; and the detail never carries the code", async () => {
+  it("refused: pool_account, pool_order, pool_off; failed: login; and the detail never carries the code", {
+    timeout: 30_000,
+  }, async () => {
     const pool = new FakePool();
     three(pool);
     await startDaemon(pool);
@@ -432,7 +439,9 @@ describe.skipIf(process.platform === "win32")("the `pool` command (CONTROL.md §
     });
   });
 
-  it("on, off, remove, order, disable and login.complete need a fresh confirm: a day grant is refused confirm_required", async () => {
+  it("on, off, remove, order, disable and login.complete need a fresh confirm: a day grant is refused confirm_required", {
+    timeout: 30_000,
+  }, async () => {
     const pool = new FakePool();
     pool.on = true;
     three(pool);
