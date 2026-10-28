@@ -66,7 +66,13 @@ export interface ControlConfig {
    *  LIMITS): new sessions running at once and per hour, headless Claude Code runs
    *  at once. */
   limits?: { start_concurrent?: number; start_per_hour?: number; headless?: number };
+  /** Whether a session here may ask another agent through the daemon (CONTROL.md §13).
+   *  On unless `sessionpipe ask off` set it false; the daemon says which in its hello. */
+  ask?: boolean;
 }
+
+/** `ask` as the config means it: on when unsaid. */
+export const askOn = (c: Pick<ControlConfig, "ask">): boolean => c.ask !== false;
 
 export const controlFile = (env: NodeJS.ProcessEnv = process.env) =>
   path.join(path.dirname(configFile(env)), "control.json");
@@ -94,6 +100,7 @@ export function readControl(env: NodeJS.ProcessEnv = process.env, run: Runner = 
         r.token_in ? { ...r, token: secretGet(r.token_in, controlAccount(r.machine), run) ?? "" } : r,
       ),
       ...(j.limits ? { limits: j.limits } : {}),
+      ...(typeof j.ask === "boolean" ? { ask: j.ask } : {}),
     };
   } catch {
     return null;

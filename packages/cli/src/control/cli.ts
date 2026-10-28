@@ -30,7 +30,7 @@ import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { loadSdk } from "./sdk.js";
-import { type ControlMode, controlFile, controlState, parseMode, readControl, writeControl } from "./store.js";
+import { askOn, type ControlMode, controlFile, controlState, parseMode, readControl, writeControl } from "./store.js";
 import { waitForMessage, waitSession } from "./wait.js";
 
 export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]
@@ -305,8 +305,14 @@ export function enabledHarnesses(harnesses: Record<string, { enabled?: boolean }
 
 async function runDaemon(out: (s?: string) => void, distDir: string): Promise<void> {
   const cfg = readControl();
-  if (!cfg?.receivers.length) {
-    out("control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)");
+  // With no receiver the daemon still serves `sessionpipe ask` on the local socket
+  // (CONTROL.md §13); only with asking off too is there nothing for it to do.
+  if (!cfg || (!cfg.receivers.length && !askOn(cfg))) {
+    out(
+      cfg
+        ? "control isn't paired on this machine and asking is off; nothing to do (`sessionpipe control pair <receiver>` or `sessionpipe ask on`)"
+        : "control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)",
+    );
     return;
   }
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
