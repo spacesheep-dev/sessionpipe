@@ -276,7 +276,7 @@ Adopting 0.10.0 while machines still run 0.9.0:
   `delegated_by`, read by the hook like `launched_by`. Hello and pairing request gain
   `ask` and `handoff`. Schemas: `control-command` gains `reply_to`, `control-hello` and
   `control-pair` gain `ask` and `handoff`, `event` gains `session.delegated_by`,
-  `event-data` the two types. Five new control vectors (`137`–`141`).
+  `event-data` the two types. Five new control vectors (`165`–`169`).
 - Control: **device keys** (CONTROL.md §2, §3.2, §5, §11; HTTP.md §1; still Draft). An
   app whose web view can't run WebAuthn (a desktop or phone app) signs with a P-256
   key held in hardware and verified each use: `{id, alg: -7, spki, type: "device",

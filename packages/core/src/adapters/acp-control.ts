@@ -201,7 +201,7 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
       cwd: o.cwd,
       // The caller's env as given (the daemon's is jobEnv's already, with the ask's
       // lineage on top), marked as a control job.
-      env: { ...(o.env ?? process.env), SESSIONPIPE_CONTROL_JOB: "1" },
+      env: { ...o.env, SESSIONPIPE_CONTROL_JOB: "1" },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true,

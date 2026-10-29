@@ -413,6 +413,8 @@ describe("ask setup", () => {
   const claude = () => path.join(home, ".claude", "CLAUDE.md");
   const codex = () => path.join(home, ".codex", "AGENTS.md");
   const section = () => askSection(agents);
+  /** As the CLI prints a path under home: `~` and the platform's own separators. */
+  const shown = (p: string) => `~${p.slice(home.length)}`;
 
   it("writes the section where a harness is, creates the file when its dir is there, skips a harness that isn't", async () => {
     mkdirSync(path.join(home, ".claude"));
@@ -420,13 +422,13 @@ describe("ask setup", () => {
     expect(r.code).toBe(0);
     expect(readFileSync(claude(), "utf8")).toBe(`${section()}\n`);
     expect(existsSync(codex())).toBe(false);
-    expect(r.out).toContain("✓ wrote the section into ~/.claude/CLAUDE.md");
-    expect(r.out).toContain("· not here: ~/.codex/AGENTS.md");
+    expect(r.out).toContain(`✓ wrote the section into ${shown(claude())}`);
+    expect(r.out).toContain(`· not here: ${shown(codex())}`);
     expect(r.out).toContain("A session reads it when it starts");
     // Again: nothing changes. The agents change: the section follows.
-    expect((await run(["setup"])).out).toContain("· already current: ~/.claude/CLAUDE.md");
+    expect((await run(["setup"])).out).toContain(`· already current: ${shown(claude())}`);
     agents = ["codex"];
-    expect((await run(["setup"])).out).toContain("✓ brought the section up to date in ~/.claude/CLAUDE.md");
+    expect((await run(["setup"])).out).toContain(`✓ brought the section up to date in ${shown(claude())}`);
     expect(readFileSync(claude(), "utf8")).toBe(`${askSection(["codex"])}\n`);
     expect(readFileSync(claude(), "utf8")).toContain("Agents here: codex.");
     // --remove takes it out; a file that is then empty was ours and goes.
@@ -469,7 +471,7 @@ describe("ask setup", () => {
     const r = await run(["setup"], { env: { ...env, HOME: "", CODEX_HOME: codexHome } });
     expect(r.code).toBe(0);
     expect(r.out).toContain(`✓ wrote the section into ${path.join(codexHome, "AGENTS.md")}`);
-    expect(r.out).toContain("· not here: ~/.claude/CLAUDE.md");
+    expect(r.out).toContain(`· not here: ${shown(claude())}`);
   });
 
   it("every Claude Code config dir, and Codex's home from CODEX_HOME", () => {
