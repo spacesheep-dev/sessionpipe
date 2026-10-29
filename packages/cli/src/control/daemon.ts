@@ -2084,6 +2084,13 @@ export class ControlDaemon {
       return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
     const signedOut = await this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
+    // The flags this level needs, checked once more before anything is taken: a run with
+    // no permission flag at all is never the fallback (#152).
+    if (claude) {
+      const mf = claudeControl.modeFlags(o.permission, claude.caps);
+      /* v8 ignore next 2 -- startChoice() offered this level from these same caps */
+      if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
+    }
     this.recordStart(ref.id, o);
     this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
     const text = await this.attached(r, id, cmd, ref, cwd);
