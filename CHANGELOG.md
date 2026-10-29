@@ -5,7 +5,123 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
-### For receivers (0.10.0)
+### For receivers (0.11.0)
+
+What a 0.11.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
+some machines still run 0.10.0 (a hello says which). Everything is additive on protocol 1:
+one new event type, one new hello object, one new command kind.
+
+- **`limits.observed`** (PROTOCOL.md §4; PRIVACY.md §1; `schemas/v1/event-data.json`): a
+  new tier-1 event, OPTIONAL for senders, carrying the account's usage limits as the
+  harness last reported them. `windows[]` (1–8), each `id` the harness's own name for the
+  window, passed through as it spells it (`five_hour`, `seven_day`, `primary` …),
+  `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?` and
+  `window_minutes?` (only where the harness or its documentation says the length); `plan?`;
+  and `account_id?`, the account the numbers belong to, spelled as `session.account_id` is.
+  Each event is the whole set: a window it leaves out is not reported (Claude Code drops
+  one once it resets), and a window whose `resets_at` has passed has reset, so a receiver
+  SHOULD NOT show its last `used_percent` as current. The numbers belong to the account,
+  not the session: a receiver SHOULD keep the newest per (harness, `data.account_id`, else
+  `session.account_id`), or per machine when there is neither. A sender MUST set
+  `account_id` when the numbers belong to another account than the session's own (a
+  pooled session served by a second account) and MAY set it otherwise; absent, they are
+  the session's account's. Three sources (ADAPTERS.md, the *Limits* rows): Codex's rollout
+  after a turn (`primary`, `secondary`; only the account's own `codex` bucket), Claude
+  Code's status line where the person opted in with `install --status-line`
+  (`five_hour`, `seven_day`, `spend_limit`; `window_minutes` 300 and 10 080 for the first
+  two), and the machine's account pool reading the vendor's rate-limit headers for a
+  request it served. `pii@1` drops `data.account_id` as it drops `session.account_id`
+  (PRIVACY.md §2). There is no recorded fixture for it yet; the schema is the contract.
+- **A hello MAY carry `pool`** (CONTROL.md §2; `schemas/v1/control-hello.json`;
+  conformance `delivery/24`): the machine's account pool, several accounts of one
+  harness behind the daemon so a session keeps going when one account's limit is
+  reached. `on`, `harness`, and `accounts` (at most 20) in the machine's order, each with
+  `id` (the same string `session.account_id` and `limits.observed.account_id` carry for
+  it, so a receiver joins the three without a map), `email` or `label` where known (they
+  travel only here), `enabled`, a `status` — `ready`, `limited` (with `until` where the
+  machine knows when), `error` (sign in again), `disabled` — `current: true` on the one
+  serving new sessions now, and optionally `windows`, the account's freshest numbers in
+  the shape of `limits.observed.windows` (from the idle usage poll, since an idle
+  account's numbers ride on no session), and `limited_by` when the status is `limited`
+  or `error`: the window's id (`seven_day`), or `rejected` or `error` for the causes that
+  are no window. A daemon that knows the pool sends `pool` in **every** hello, `on: false`
+  and `accounts: []` when nothing is set up, so a receiver tells "no pool" from "an old
+  daemon"; it sends a hello at once when the pool changes, as it does for its folders. A
+  receiver reads `windows` as it reads `limits.observed` and MUST NOT send it on as an
+  event; it is a hello's reading, for the receiver's own page. **A hello without `pool`
+  is a daemon that predates the pool: a receiver MUST NOT offer pool controls for it.**
+- **The `pool` command** (CONTROL.md §3.1, §5, §6 `pool`;
+  `schemas/v1/control-command.json`; vectors `137`–`164`): a new signed kind on the
+  pseudo-session `sessionpipe:pool`, the only kind besides `key.add` that names no coding
+  session. A receiver can only **ask**;
+  the machine decides, acts and acks, and no command changes which account serves a
+  request (the first in the person's order that has room; a session stays on its account
+  while that account has room). `pool_action` is required and closed — `on`, `off`,
+  `enable`, `disable`, `remove`, `order`, `refresh`, `login.begin`, `login.complete`; any
+  other value is `bad_fields` — and each action takes exactly its own fields:
+  `pool_account` (an id as the hello lists it, or a pending sign-in's,
+  `[A-Za-z0-9._:-]{1,128}`) is required by `enable`, `disable`, `remove` and
+  `login.complete` and optional on `refresh`; `pool_order` (1–20 ids, no repeats, every
+  account of the pool once) belongs to `order` alone; `pool_code` (one line, ≤ 512
+  characters) to `login.complete` alone. A `pool_*` field on any other kind, or on a `pool`
+  whose action doesn't take it, is `bad_fields`. **Fresh confirm:** `on`, `off`, `remove`,
+  `order`, `disable` and `login.complete` are verified by a fresh confirm (§3.2) or not at
+  all; one that arrives on a day grant alone is refused `confirm_required` by the machine
+  (vector `164` is the confirmed form). `enable`, `refresh` and `login.begin` take a grant,
+  as a prompt does. A receiver MUST ask for the confirm where the machine will want it,
+  and MUST show which machine it is for. **Acks:** `delivered` with no `mode` and `detail`
+  = the machine's one-line summary of the pool, or for `login.begin` the pending login id,
+  one space, and the URL to open; the daemon also sends a hello at once, which is the
+  state a receiver shows. `refused` `pool_account` (an account or pending login the
+  machine does not hold), `pool_order` (an order that does not name every account exactly
+  once), `pool_off` (`refresh`, `login.begin` or `login.complete` while the pool is off).
+  `failed` with `code` `login` (the vendor would not take the code) or `pool` (the vendor
+  call a `refresh` or `login.complete` needs did not go through); `detail` says what,
+  never a token. `unsupported` when the daemon knows the kind but this machine cannot
+  pool. A daemon that **predates** the kind refuses it `unknown_kind` at the verifier.
+  No command adds a credential from the receiver's side: `login.complete` carries a
+  one-time code the vendor issued to the person, and the exchange happens on the machine.
+- **The privacy contract has two opt-in exceptions now** (PRIVACY.md §3; ADAPTERS.md),
+  both off until the person turns them on at the machine, and neither puts a token in an
+  event, an ack, a log or a receiver. With `sessionpipe titles on` (`remote_titles`), the
+  Claude Code adapter asks claude.ai for a session's name, the one fact claude.ai never
+  writes to the machine; with `pool on` or `pool add`, the daemon holds the credentials of
+  the accounts the person added and sends each one only to that vendor's own endpoints,
+  for the person's own requests. A receiver learns the pool's accounts (ids, labels,
+  emails) only in the hello, and their usage only as `limits.observed`.
+- **Session names from claude.ai** (PROTOCOL.md, the `session.backfill` row; ADAPTERS.md
+  Claude Code *Facts*; PRIVACY.md §3): with `remote_titles` on, a Claude Code session
+  with a claude.ai link arrives as `session.title` with `title_source: "harness"`, a
+  `custom` title still winning, and a session already sent under another name is sent
+  **again as `session.backfill`** with the session's next `seq`; a receiver applies its
+  session block as it does any event's. No new field; the recorded answers are in
+  `conformance/remote/claude-code/` (`session-named.json`, `invalid-id.json`), fixtures
+  for the adapter, not the receiver.
+- The rest of 0.11.0 (sink tier rehooks, `tail`'s Windows path, Codex `config.toml` line
+  ends, Gemini CLI's version on Windows, hook files with a byte-order mark) changes
+  nothing a receiver reads, except that a BOM-marked `settings.json` on a home on another
+  API now yields its `api-<16 hex>` `session.account_id` where it reported none.
+
+Adopting 0.11.0 while machines still run 0.10.0:
+
+- Keep `limits.observed` as the account's, not the session's: the newest per (harness,
+  `data.account_id`, else `session.account_id`), per machine when there is neither, and
+  read a window whose `resets_at` has passed as reset. A 0.10.0 machine never sends it.
+- Show a pool only from the latest hello that carries `pool`, never from a guess, and
+  show nothing for a hello without it. Keep `email` and `label` from the hello; no event
+  carries them.
+- Never send `pool` to a machine whose last hello had no `pool`: an older daemon refuses
+  it `unknown_kind`, and nothing happens. Gate per machine on its latest hello.
+- Ask for a fresh confirm before `on`, `off`, `remove`, `order`, `disable` and
+  `login.complete`, and name the machine it is for; a day grant alone is refused
+  `confirm_required`.
+- Take `confirm_required`, `pool_account`, `pool_order`, `pool_off`, and `failed` `login`
+  and `pool`, as codes you may not have seen, and show `detail`; an unknown code is still
+  a refusal or a failure, never success.
+- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.11.0's
+  `sessionpipe-core/control` and its vectors (`137`–`164` are new).
+
+## 0.10.0 — 2026-10-26
 
 What a 0.10.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
 some machines still run 0.9.0 (a hello says which). Everything is additive on protocol 1
