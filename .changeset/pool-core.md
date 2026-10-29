@@ -1,5 +1,0 @@
----
-"sessionpipe-core": minor
----
-
-The account pool's contract (CONTROL.md §2 `pool`, §6 `pool`; PRIVACY.md §3): a hello MAY carry `pool` (`on`, `harness`, `accounts` in the machine's order with `status`, `current`, `until`, `limited_by` and the idle poll's `windows`; present in every hello of a daemon that knows the pool, `on: false` and no accounts when nothing is set up), and a new signed kind `pool` on the pseudo-session `sessionpipe:pool` (`pool_action`: on, off, enable, disable, remove, order, refresh, login.begin, login.complete; `pool_account`, `pool_order` of at most 20, `pool_code` of one line ≤ 512 characters), verified like `key.add`: each action takes exactly its own fields (`poolProblem`, `POOL_SESSION`, `POOL_ACTIONS`). `limits.observed` gains `account_id`, the account the numbers belong to when a pooled session was served by another than its own; tier 1 carries it and `pii@1` drops it as it drops `session.account_id`. Schemas: `control-command`, `control-hello`, `event-data`; control vectors 137–164.
