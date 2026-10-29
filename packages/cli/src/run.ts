@@ -256,10 +256,11 @@ export function openTurn(
 }
 const MAX_TURN_SIDE = 20_000;
 /** What session.attended is read from, the desktop app's link included, and session.launched_by
- *  (hook.ts picks all four): the job's own, never the worker's. */
+ *  and delegated_by (hook.ts picks all five): the job's own, never the worker's. */
 const JOB_OWN_ENV = [
   "CLAUDE_CODE_SESSION_ATTENDED",
   "CLAUDE_CODE_HOST_SESSION_ID",
+  "SESSIONPIPE_ASKED_BY",
   "SESSIONPIPE_CONTROL_JOB",
   "SESSIONPIPE_LAUNCHED_BY",
 ];
@@ -387,6 +388,7 @@ export async function runJob(
       ...(cwdRaw ? { cwd: tilde(cwdRaw) } : {}),
       ...(r.session.model ? { model: r.session.model } : {}),
       ...(r.session.launched_by ? { launched_by: r.session.launched_by } : {}),
+      ...(r.session.delegated_by ? { delegated_by: r.session.delegated_by } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
     for (const a of r.events) {

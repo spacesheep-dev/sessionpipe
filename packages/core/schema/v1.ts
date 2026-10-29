@@ -30,6 +30,8 @@ export const KNOWN_TYPES = [
   "subagent.started",
   "subagent.ended",
   "context.compacted",
+  "delegation.started",
+  "delegation.ended",
   "native",
 ] as const;
 
@@ -52,6 +54,8 @@ export const TYPE_TIER: Record<(typeof KNOWN_TYPES)[number], 0 | 1 | 2 | 3> = {
   "subagent.started": 1,
   "subagent.ended": 1,
   "context.compacted": 1,
+  "delegation.started": 0,
+  "delegation.ended": 0,
   native: 3,
 };
 
@@ -109,6 +113,14 @@ export const Session = z.object({
    *  `claude -p` for it), from the launcher's environment. Absent for a subagent, whose
    *  launcher is its parent, and when nothing says. */
   launched_by: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+    .optional(),
+  /** `<harness>:<id>` of the session this one answers: the machine's daemon started or
+   *  resumed it for that session's ask, or for a handoff (CONTROL.md §6, §13), and the
+   *  child's environment says so. On every event of the child. Lineage across
+   *  harnesses, as `parent_id` is within one; never authority, never a subagent. */
+  delegated_by: z
     .string()
     .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
     .optional(),
@@ -216,6 +228,38 @@ export const EventData = z.object({
   "subagent.started": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
   "subagent.ended": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
   "context.compacted": Loose.extend({ trigger: z.enum(["manual", "auto"]) }),
+  /** The daemon on this machine took an ask from this session (CONTROL.md §13), or a
+   *  command with `reply_to` naming it (§6). On the asking session, with its own seq. */
+  "delegation.started": Loose.extend({
+    ask_id: Ulid,
+    via: z.enum(["ask", "handoff"]),
+    /** The agent asked. */
+    harness: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+    /** The session that answers, once known: at once for a handoff or an ask to an
+     *  existing session; for a new session, when the harness reveals its id. */
+    to: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+      .optional(),
+    /** Tier 1: what was asked, cut to 200 characters, redacted. */
+    text: z.string().max(200).optional(),
+  }),
+  /** The asked agent's turn ended, or the ask failed before one. */
+  "delegation.ended": Loose.extend({
+    ask_id: Ulid,
+    to: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+      .optional(),
+    ok: z.boolean(),
+    ms: z.int().min(0),
+    /** When not ok: why, in at most 200 characters. */
+    error: z.string().max(200).optional(),
+    /** A handoff only: whether the answer reached `reply_to`. */
+    relayed: z.enum(["delivered", "unsupported", "failed"]).optional(),
+    /** Tier 2: the answer, redacted. */
+    reply: z.string().max(20_000).optional(),
+  }),
   native: Loose,
 });
 
@@ -327,6 +371,10 @@ export const ControlCommand = z.object({
   permission: StartPermission.optional(),
   /** start only: the model the harness runs. As `permission`: only when advertised. */
   model: ModelId.optional(),
+  /** start, prompt: a session on the same machine that gets the answer as a message
+   *  once the command's turn ends (CONTROL.md §6, a handoff). Never the command's own
+   *  session. Send it only to a machine whose hello says `handoff`. */
+  reply_to: SessionRef.optional(),
   /** At least 16 random bytes, base64url. */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/),
   /** Epoch ms, the signing device's clock. */
@@ -493,6 +541,12 @@ export const ControlPairStart = z.object({
   /** The kinds of key this machine takes (unique; absent means `["passkey"]`). A
    *  client offers a device key only to a machine that lists `device`. */
   key_types: KeyTypes.optional(),
+  /** Sessions on this machine may ask another agent through its daemon (CONTROL.md
+   *  §13). Informational: a receiver can neither start an ask nor switch it. */
+  ask: z.boolean().optional(),
+  /** The machine takes `reply_to` on a prompt or a start (CONTROL.md §6). One that
+   *  doesn't say so refuses it: a receiver SHOULD NOT send it one. */
+  handoff: z.boolean().optional(),
 });
 
 /** The receiver's answer: where the person confirms, and the digits both screens show. */
@@ -566,6 +620,10 @@ export const ControlHello = z.object({
     .optional(),
   /** As in control-pair.json. */
   key_types: KeyTypes.optional(),
+  /** As in control-pair.json; read again for every hello, so `sessionpipe ask off` shows. */
+  ask: z.boolean().optional(),
+  /** As in control-pair.json. */
+  handoff: z.boolean().optional(),
 });
 
 export const WellKnown = z.object({

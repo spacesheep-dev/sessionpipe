@@ -199,7 +199,7 @@ describe("parseCommand", () => {
     expect(code({ kind: "start", cwd: "rel" })).toMatch(/^bad_fields: .*absolute folder/);
     expect(code({ kind: "start" })).toMatch(/^bad_fields: .*absolute folder/);
     expect(code({ kind: "start", cwd: "/x", for: "a" })).toBe(
-      "bad_fields: a start carries text, cwd, files, a permission and a model",
+      "bad_fields: a start carries text, cwd, files, a permission, a model and a reply_to",
     );
   });
   it("permission.answer: for and decision, no text", () => {
@@ -273,7 +273,11 @@ describe("parseCommand", () => {
   const KINDS: Record<string, { base: Record<string, unknown>; own: Record<string, unknown> }> = {
     prompt: {
       base: {},
-      own: { text: "hi", files: [{ name: "a.png", type: "image/png", size: 1, sha256: "A".repeat(43) }] },
+      own: {
+        text: "hi",
+        files: [{ name: "a.png", type: "image/png", size: 1, sha256: "A".repeat(43) }],
+        reply_to: "codex:0199a",
+      },
     },
     "permission.answer": {
       base: { text: undefined, for: "a", decision: "deny" },
@@ -288,6 +292,7 @@ describe("parseCommand", () => {
         files: [{ name: "a.png", type: "image/png", size: 1, sha256: "A".repeat(43) }],
         permission: "read",
         model: "sonnet",
+        reply_to: "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e",
       },
     },
     "key.add": {
@@ -295,7 +300,15 @@ describe("parseCommand", () => {
       own: { name: "iPhone" },
     },
   };
-  const OPTIONAL_ELSEWHERE = { files: [], permission: "safe", model: "sonnet", key: {}, name: "x", cwd: "/w" };
+  const OPTIONAL_ELSEWHERE = {
+    files: [],
+    permission: "safe",
+    model: "sonnet",
+    key: {},
+    name: "x",
+    cwd: "/w",
+    reply_to: "codex:0199a",
+  };
   it("each kind carries its own fields, the common ones and nothing else", () => {
     for (const [kind, { base, own }] of Object.entries(KINDS)) {
       expect(code({ kind, ...base, ...own, note: "why" }), kind).toBe("ok");
@@ -318,6 +331,27 @@ describe("parseCommand", () => {
     expect(code({ kind: "cancel", text: undefined, model: "sonnet" })).toBe(
       "bad_fields: only a start carries a model or a permission",
     );
+  });
+
+  // A handoff (CONTROL.md §6): the answer goes to another session on the same machine.
+  it("reply_to: a session ref by the adapter's rule, on a prompt or a start, never the command's own session", () => {
+    const A = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"; // commandStr's own session
+    expect(code({ reply_to: "codex:0199a" })).toBe("ok");
+    expect(code({ ...START, reply_to: A })).toBe("ok");
+    for (const bad of ["", "0199a", "claude-code:not-a-uuid", "Codex:0199a", ":0199a", "codex:", 5, null, [A]])
+      expect(code({ reply_to: bad }), JSON.stringify(bad)).toBe(
+        "bad_fields: a reply_to names a session on this machine, <harness>:<id>",
+      );
+    expect(code({ reply_to: A })).toBe("bad_fields: a reply_to can't name the command's own session");
+    expect(code({ ...START, reply_to: START.session })).toBe(
+      "bad_fields: a reply_to can't name the command's own session",
+    );
+    expect(code({ kind: "cancel", text: undefined, reply_to: "codex:0199a" })).toBe(
+      "bad_fields: only a start or a prompt carries a reply_to",
+    );
+    expect(
+      code({ kind: "permission.answer", text: undefined, for: "a", decision: "deny", reply_to: "codex:0199a" }),
+    ).toBe("bad_fields: only a start or a prompt carries a reply_to");
   });
 });
 

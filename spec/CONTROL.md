@@ -93,6 +93,15 @@ session without them, so a receiver SHOULD NOT send it a `start` with `files`; o
 does not say `prompt_files: true` refuses a `prompt` with `files` (`bad_fields`), so a
 receiver SHOULD NOT send it one.
 
+They MAY also carry `handoff: true`, when the machine takes `reply_to` on a `prompt` or a
+`start` (§6, *Handoff*), and `ask`, whether sessions on this machine may ask another
+agent through its daemon (§13). Both are informational. A machine that does not say
+`handoff: true` predates it and refuses a command with `reply_to` (`bad_fields`), so a
+receiver MUST NOT send it one. `ask` is the person's switch at the machine
+(`sessionpipe ask on|off`); a receiver can neither start an ask nor change it, and only
+shows what the machine said. A receiver that sees neither field treats the machine as
+one that predates both.
+
 And they MAY carry `start`: for each harness in `harnesses` that takes options on a
 `start`, what it takes ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):
 
@@ -226,14 +235,15 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `files` | `start` and `prompt`, optional (absent = no files; `null` or an empty list is malformed): 1 – **10** files the session should see, each `{"name","type","size","sha256"}` (below). |
 | `permission` | `start` only, optional: `read`, `safe`, `edits` or `auto` (below). Any other value is `bad_fields`. |
 | `model` | `start` only, optional: the model the harness should run, 1 – **100** characters matching `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]*$` (never a leading `-`). The harness's own name for it; the machine passes it as one argument, never through a shell. |
+| `reply_to` | `start` and `prompt`, optional: `<harness>:<id>` of a session on the same machine that gets the answer as a message once the command's turn ends (§6, *Handoff*). The id follows its adapter's rule, as `session` does. Never the command's own `session`. Anything else is `bad_fields`. |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
 | `iat` | Epoch milliseconds on the signing device's clock, an integer. |
 
 Each kind carries the fields of this table that name it, and `v`, `t`, `machine`, `kind`,
 `session`, `nonce`, `iat` and `note`; any other field (one this table doesn't list
-included) makes the command malformed (`bad_fields`): `files` on any kind but `start`
-and `prompt`, and `permission` or `model` on any kind but `start`, included. The whole
-string is at most **48 000** characters (the text, JSON-escaped, and the rest).
+included) makes the command malformed (`bad_fields`): `files` or `reply_to` on any kind
+but `start` and `prompt`, and `permission` or `model` on any kind but `start`, included.
+The whole string is at most **48 000** characters (the text, JSON-escaped, and the rest).
 
 **Permission levels.** A `start` MAY say how much the new session may do without anyone
 approving it:
@@ -561,6 +571,46 @@ short, has another hash, or cannot be written, the command is acked `failed` wit
 code `file` and a `detail` naming the file and the reason, nothing that was written
 for it is kept, and **no session starts**.
 
+### Handoff (`reply_to`)
+
+A `prompt` or a `start` MAY name `reply_to` (§3.1): a session on the same machine
+that gets the answer. "Ask Codex for a second opinion and bring it back here" is one
+command. The command runs exactly as it would without the field, and its acks are
+unchanged: exactly one final ack, with the reply where this section puts it. After
+that final `delivered` ack the daemon delivers the reply into `reply_to` as a
+message, through the modes above (the first that fits; `reply_to`'s folder on the
+allowlist, §5 step 6; never a resume of a session a live process holds), framed:
+
+```
+Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>):
+
+<reply>
+```
+
+`<short id>` is the answering session's short id (PROTOCOL.md §3) and `<receiver host>`
+the host of the receiver that carried the command. The machine places `reply_to` when
+the command arrives, as it places the session of any `prompt` (§5 step 6): a session it
+does not know, or one in a folder its allowlist excludes, makes the command no handoff
+at all — it runs and is acked as usual, nothing is relayed, and no event is written on
+that session, since a signer's say-so is no reason to write to a session the machine
+does not have or will not touch. The relay is not a command: it is
+not acked, it is never relayed further, and `reply_to` is read from the signed bytes
+and nowhere else. Its fate lives in the events (PROTOCOL.md §4): when the daemon
+takes the command it emits on `reply_to` a `delegation.started` with `via: "handoff"`
+and `to` the command's session, and when it is done a `delegation.ended` whose
+`relayed` says `delivered`, `unsupported` (no mode fits `reply_to`, or its folder is
+no longer allowed) or `failed`; `delegation.started` is emitted only for a `reply_to`
+the machine placed. A command whose final ack is not `delivered` relays nothing;
+its `delegation.ended` has `ok: false`, the ack's `code` or `detail` as `error`, and no
+`relayed`. The session that answers carries `delegated_by: <reply_to>` on its events
+(PROTOCOL.md §3), so a receiver can draw the lineage.
+
+`cancel` and `permission.answer` never carry `reply_to`. A machine says it takes the
+field with `handoff: true` in its hello (§2); a receiver MUST NOT send `reply_to` to a
+machine that does not, and such a machine refuses the command `bad_fields`. The
+machine MUST deliver the relay at the mode its rules give `reply_to` and never wider:
+a handoff moves an answer, not a permission.
+
 ## 7. Attention lifecycle
 
 `attention.needed` (kind `permission`) → optional verified `permission.answer` →
@@ -623,11 +673,12 @@ send → delivered time.
   every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
   `start`'s `files` (§3.1); `91`–`106` are a `start`'s options and the closed field
   set, `107`–`108` a `start` in a folder under `~` (§3.1), `109`–`110` `files` on a
-  `prompt`, and `111`–`136` device keys (§2, §3.2): signatures for each purpose,
+  `prompt`, `111`–`136` device keys (§2, §3.2): signatures for each purpose,
   purposes and rp ids swapped, WebAuthn fields where they don't belong, a device key
   a machine stored as a passkey, and `key.add` and enrollment of device keys, valid
-  and broken. The reference verifier and every receiver that pre-checks MUST agree
-  with all of them.
+  and broken, and `137`–`141` a handoff's `reply_to` (§3.1, §6): valid on a `prompt`
+  and a `start`, on a `cancel`, malformed, and naming the command's own session. The
+  reference verifier and every receiver that pre-checks MUST agree with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
@@ -644,3 +695,83 @@ lists `control` in its capabilities only when it serves this whole document —
 pairing, the per-machine poll and acks — and declares `control.signing`. The draft this
 replaces (a per-session poll trusting the bearer token) was never implemented by any
 sender or receiver.
+
+## 13. Asking another agent (`sessionpipe ask`)
+
+A session MAY hand a task to another agent on the same machine and get the answer
+back: `sessionpipe ask <harness|session> "<text>"`. Claude Code can ask Codex for a
+review, Codex can ask Gemini, any harness with a shell can ask any other. The daemon
+runs it, caps it, and the whole thing is visible as events.
+
+**Local only.** The request reaches the daemon on its **local socket** (§8: a Unix
+socket in the state directory, mode `0600`; a named pipe on Windows), never through a
+receiver. The trust boundary is the waiter's and the hooks': a process of the
+person's own user on this machine. No command carries an ask, and nothing a receiver
+sends can start one. A receiver learns only that asking is on (`ask` in the hello, §2).
+The wire between the command and the daemon, like the waiter's, is the daemon's
+business and not part of this protocol.
+
+**The request** names the agent to ask — a `harness` this machine can run headlessly
+(§6 `start`), or an existing `<harness>:<id>` to continue — and carries the text
+(1 – **20 000** characters, not all whitespace, as §3.1), the folder it runs in
+(absolute; the caller's by default), the asking session as `<harness>:<id>` when the
+caller knows it (Claude Code and Codex put their session id in a session's
+environment), and its chain: every session that asked on the way here, outermost
+first, from the caller's own environment (below). It MAY name `permission` (`read` or
+`safe`) and `model`, as a `start` does.
+
+**The daemon checks, in order**, and refuses with a code:
+
+| Code | When |
+|------|------|
+| `ask_off` | Asking is off on this machine. It is on by default; `sessionpipe ask off` turns it off and `on` back on. |
+| `harness` | The harness is not one this machine can run headlessly, or the session is not one it can deliver a prompt to. |
+| `folder` | The folder is not on the machine's allowlist (§5 step 6). |
+| `depth` | The chain already has two sessions: A may ask B, B may ask C, C MUST NOT ask. The daemon counts for itself as well, from the asks it has in hand (the one waiting on the asker, the one waiting on that one's asker), so a session that cleared its environment is no shallower. |
+| `loop` | The target session is the asker, one of the sessions in its chain, or a session that is itself waiting on an ask the daemon has in hand (its turn ends only when that answer is back). Counted under the names the daemon knows the sessions by: a Codex session asked under its start's name and asking under its own id is one session. |
+| `start_limit` | The machine's caps on starts (§6 `start`) are reached — they count an ask's start as a receiver's, and the headless slot is the same slot — or the asker, or the session asked, already has three asks in hand. |
+| `bad_fields` | Anything else out of shape. |
+
+**The child** runs at `safe`, or at `read` when the ask names it, and never wider than
+the machine's `mode`: an ask is a model's doing, not the person's, so a machine the
+person put in `edits` or `auto` for their receivers runs an asked agent at `safe` all
+the same, and an ask can no more turn approval off than a command can (§3.1). An
+existing session runs the ask under the same cap, narrower than its own level and
+never wider; an ACP agent, which takes no level (§6), runs as the machine's mode says.
+A new session is started as a `start` would be, an existing one gets the text
+as a `prompt` would (§6, the first mode that fits), with one more paragraph framing it,
+so the model knows where the task came from and that its answer goes back by itself:
+
+```
+<text>
+
+(Asked by <harness>:<id> on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)
+```
+
+The child's environment carries `SESSIONPIPE_ASKED_BY=<harness>:<id>` (the asker) and
+`SESSIONPIPE_ASK_CHAIN=<chain…,asker>` (comma-joined). Its hooks read the first and
+stamp `delegated_by` on every event of the child (PROTOCOL.md §3); a nested ask reads
+the second and carries the chain, which is how `depth` and `loop` are counted. Both
+are inherited like any environment, so a session that is not the child itself MUST
+reset them, as it resets `SESSIONPIPE_LAUNCHED_BY`.
+
+**The answer** is the child's reply, as a `delivered` ack would carry it (§10), written
+to the caller when the turn ends; the daemon MAY hand over progress before that, as
+`progress` acks do. A refusal names its code; a failure says what went wrong. The ask
+is visible on the asking session, when it is known, as `delegation.started` with
+`via: "ask"` and `delegation.ended` (PROTOCOL.md §4), emitted by the daemon through
+the session's own outbox and sinks, with its own `seq`, so a receiver shows which
+session asked which, how long it took and (at tier 2) what came back.
+
+**At the terminal**, `sessionpipe ask` keeps the two streams apart so a model can read
+the answer and nothing else: the child's id and any progress go to **stderr**, the
+answer alone to **stdout**, exit `0`; a refusal or a failure goes to stderr with exit
+`1`; a usage error exits `2`, as `sessionpipe wait` does. `--json` prints
+`{ask_id, session, reply, ms}` instead. With no daemon answering on the socket it says
+what to run (`sessionpipe ask on`) and exits `1`.
+
+**How a session learns the command.** `sessionpipe ask setup` writes a short section
+into the harness's own instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
+saying the command exists, which agents are installed, and that a session MUST NOT use
+it to send its own reply. That is the person's file and the person's choice; the hook
+path still never injects anything (§9, SECURITY.md).

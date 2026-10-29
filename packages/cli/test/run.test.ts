@@ -53,6 +53,14 @@ describe("runJob", () => {
     const { events } = await runJob(started, { state: tmp });
     expect(events[0]?.session.launched_by).toBe(launcher);
   });
+  it("a job whose environment names an asker writes delegated_by; the worker's own environment never does", async () => {
+    const asker = "codex:0199a8c0-1111-7000-8000-000000000001";
+    const asked = { ...job("SessionStart", { source: "startup" }), env: { SESSIONPIPE_ASKED_BY: asker } };
+    expect((await runJob(asked, { state: tmp })).events[0]?.session.delegated_by).toBe(asker);
+    vi.stubEnv("SESSIONPIPE_ASKED_BY", asker);
+    const own = await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
+    expect(own.events[0]?.session.delegated_by).toBeUndefined();
+  });
   it("stores tool input redacted at rest, in 0600 files under 0700 dirs", async () => {
     await runJob(
       job("PostToolUse", {

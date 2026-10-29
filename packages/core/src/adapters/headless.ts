@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
+import { withoutLineage } from "../launched-by.js";
 
 /** A headless turn still running after this is stopped. */
 export const JOB_TIMEOUT_MS = 30 * 60_000;
@@ -46,9 +47,11 @@ export function findBinary(o: {
 
 /** The env every headless turn runs with: SESSIONPIPE_CONTROL_JOB tells the turn's own
  *  hooks that the daemon runs it, so its Stop hook never takes a message meant for a
- *  person's session (cli/src/hook.ts). */
+ *  person's session (cli/src/hook.ts); and none of the lineage this process inherited
+ *  (a daemon started from inside an asked session), so a child carries only what its
+ *  caller adds after this (CONTROL.md §13). */
 export function jobEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...env, SESSIONPIPE_CONTROL_JOB: "1" };
+  return { ...withoutLineage(env), SESSIONPIPE_CONTROL_JOB: "1" };
 }
 
 /** Whether a harness is signed in, in its own words. `loggedIn: null` means it can't

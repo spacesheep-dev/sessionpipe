@@ -13,7 +13,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { deniedNote, findBinary, JOB_TIMEOUT_MS, jobEnv, type Mode } from "./headless.js";
+import { deniedNote, findBinary, JOB_TIMEOUT_MS, type Mode } from "./headless.js";
 
 export interface AcpAgent {
   /** sessionpipe's harness name (ADAPTERS.md): the registry's id unless a hook adapter already named it. */
@@ -199,7 +199,9 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
   try {
     child = spawn(o.bin, o.args, {
       cwd: o.cwd,
-      env: jobEnv(o.env),
+      // The caller's env as given (the daemon's is jobEnv's already, with the ask's
+      // lineage on top), marked as a control job.
+      env: { ...(o.env ?? process.env), SESSIONPIPE_CONTROL_JOB: "1" },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true,

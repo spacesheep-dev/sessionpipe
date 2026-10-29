@@ -103,6 +103,12 @@
           "device"
         ]
       }
+    },
+    "ask": {
+      "type": "boolean"
+    },
+    "handoff": {
+      "type": "boolean"
     }
   },
   "required": [

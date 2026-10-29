@@ -1,0 +1,31 @@
+{
+  "name": "reply-to-own-session",
+  "description": "A reply_to naming the command's own session: an answer is never handed back to the session that gave it.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"Hv597IC-Pt8Nu5unjShPvA\",\"iat\":1790800000000,\"reply_to\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\"}",
+      "csig": "blEhgGC0e7lrq-L6b1uADq7ZvaUeVSBMZru5b59Gjp1D3_XMTi3kIRws81Emzf5W9TplumQo87S9krigHIH1lA",
+      "grant": {
+        "cred": "PXrKf2olTTYHaAjjfbpFR5W3b85yvNbS",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiMkRLMVAyZjRsWXIwdFFudXB0b2ZpSnpMbXhLaWU2dm5ONmhfZ3lwM1l1MCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEYCIQDF1nDNA1GZHE11OVyqz26bwoyHHz50-BnoQ5s2SgVlMgIhAPwa1qSyVRRfjSNui0cVVsYc_bqrGZOt2crIo7xCld-R",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE77U_4NBTqB3alaYznnf-uFBxGb1b8gueNPIX0m4X6EEyFbpKgNzTf8pYiZnViJQSYuHiewsBm5V5AMlxfi3wmQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "PXrKf2olTTYHaAjjfbpFR5W3b85yvNbS",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEpfq1r3uuhDWKA8NIrwozdvAnF8vevnmSZf68GvZoFxFO0tFfYoFdLzJOXa8AWqloJGNhtOI_taoF9CY7RO4Utw"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}
