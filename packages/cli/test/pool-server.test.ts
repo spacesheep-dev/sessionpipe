@@ -14,6 +14,7 @@ import {
   BODY_CAP,
   bearerOk,
   hostOk,
+  normalPath,
   type PoolServer,
   type PoolServerDeps,
   startPoolServer,
@@ -784,6 +785,43 @@ describe("the security review's findings", () => {
     expect(upstreamUrl("/v1/messages#frag", "https://api.anthropic.com")).toEqual({
       url: "https://api.anthropic.com/v1/messages",
     });
+  });
+  it("H2 again: the deny list reads the path the upstream will read (percent-encoding, case, doubled slashes)", async () => {
+    await start();
+    const cases: [string, number][] = [
+      ["/api/oauth/claude_cli/create%5Fapi%5Fkey", 403],
+      ["/api/oauth/claude%5Fcli/create_api_key", 403],
+      ["/v1/%6fauth/token", 403],
+      ["/API/OAUTH/CLAUDE_CLI/CREATE_API_KEY", 403],
+      ["/api/oauth/organizations/org%5F1/Billing/x", 403],
+      ["/api//oauth/organizations/X/billing", 400],
+      // The URL parser folds encoded dot segments before the list sees them: denied.
+      ["/v1/messages/%2e%2e/%2e%2e/api/oauth/claude_cli/create_api_key", 403],
+      ["/v1/%2525", 400],
+      ["/v1/mess%20ages", 400],
+      ["/v1/mes%2Fsages", 400],
+      ["/v1/mes%5Csages", 400],
+      ["/v1/mes%00sages", 400],
+      ["/v1/m%C3%A9ssages", 400],
+      ["/v1/%zz", 400],
+      ["/v1/messages/", 400],
+    ];
+    for (const [path, status] of cases) {
+      const r = await raw({ path });
+      expect([path, r.status]).toEqual([path, status]);
+    }
+    expect(up.seen).toEqual([]);
+    // What was checked is what is sent: an encoded letter arrives plain, the query kept.
+    expect((await send("/v1/m%65ssages?beta=1", { body: body(S1) })).status).toBe(200);
+    expect((await send("/v1/messages/%2e/x", { body: body(S1) })).status).toBe(200);
+    expect(up.seen.map((x) => x.url)).toEqual(["/v1/messages?beta=1", "/v1/messages/x"]);
+    expect(upstreamUrl("/v1/messages/count_tokens", "https://api.anthropic.com")).toEqual({
+      url: "https://api.anthropic.com/v1/messages/count_tokens",
+    });
+    expect(upstreamUrl("/v1/a%3Fb", "https://api.anthropic.com")).toEqual({
+      url: "https://api.anthropic.com/v1/a%3Fb",
+    });
+    expect(normalPath("/")).toBeNull();
   });
   it("L4: a Host that isn't this loopback is turned away before anything else, /health included", async () => {
     await start();

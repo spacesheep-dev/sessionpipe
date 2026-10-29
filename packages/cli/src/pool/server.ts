@@ -101,17 +101,43 @@ const DENY_PATH = [
   /^\/api\/oauth\/organizations\/[^/]+\/(payment_method|billing|prepaid|overage|setup_overage_billing|admin_requests)/,
 ];
 
-/** The upstream URL for a request-target, or why not. Built from the parsed path, so
- *  dot segments are already folded and cannot leave the two prefixes. */
+/** The path as the upstream will read it, or null for one it must never see: each
+ *  segment percent-decoded once (an upstream router decodes before it routes, so the
+ *  deny list has to read what the router reads), then refused if anything is still
+ *  encoded (`%` left over: a double encoding), if a decoded byte is a slash, a
+ *  backslash, whitespace or a control character (an encoded separator or an odd byte
+ *  Claude Code never sends), if a segment is empty or a dot segment (`//`, `%2e%2e`),
+ *  or if a segment does not decode at all. What comes back is re-encoded per segment,
+ *  so what was checked is what is sent. */
+export function normalPath(pathname: string): string | null {
+  const segments = pathname.slice(1).split("/");
+  const out: string[] = [];
+  for (const seg of segments) {
+    let d: string;
+    try {
+      d = decodeURIComponent(seg);
+    } catch {
+      return null;
+    }
+    if (!d || d === "." || d === ".." || /[%/\\\s\u0000-\u001f\u007f-\uffff]/.test(d)) return null;
+    out.push(encodeURIComponent(d));
+  }
+  return `/${out.join("/")}`;
+}
+
+/** The upstream URL for a request-target, or why not. Built from the parsed, then
+ *  normalised path (normalPath), compared lower-cased: the upstream's routes are not
+ *  case-sensitive in any way the pool should bet on. */
 export function upstreamUrl(target: string, base: string): { url: string } | { status: 400 | 403; why: string } {
   if (!target.startsWith("/")) return { status: 400, why: "sessionpipe pool: bad request path" };
   // A path against a fixed base always parses (odd bytes are percent-encoded).
   const u = new URL(target, base);
-  if (u.origin !== new URL(base).origin || !ALLOW_PATH.test(u.pathname))
+  const pathname = u.origin === new URL(base).origin ? normalPath(u.pathname) : null;
+  if (pathname === null || !ALLOW_PATH.test(pathname.toLowerCase()))
     return { status: 400, why: "sessionpipe pool: path not proxied" };
-  if (DENY_PATH.some((re) => re.test(u.pathname)))
+  if (DENY_PATH.some((re) => re.test(pathname.toLowerCase())))
     return { status: 403, why: "sessionpipe pool: that endpoint is not proxied" };
-  return { url: `${u.origin}${u.pathname}${u.search}` };
+  return { url: `${u.origin}${pathname}${u.search}` };
 }
 
 /** The Host this loopback answers to: itself, by address or name, with its own port. */
