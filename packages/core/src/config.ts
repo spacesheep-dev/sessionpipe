@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // ~/.config/sessionpipe/config.json, mode 0600: the machine's name, the sinks with
-// their tier and token, per-harness switches, the update check.
+// their tier and token, per-harness switches, the update check, remote titles.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { configFile } from "./paths.js";
@@ -33,6 +33,10 @@ export interface Config {
   harnesses: Record<string, { enabled?: boolean; created?: string[] }>;
   update_check?: boolean;
   keep_days?: number;
+  /** Ask a harness's own service for a session's name (an adapter's `remoteFacts`):
+   *  claude.ai's, for Claude Code. Off unless the person turns it on (`sessionpipe
+   *  titles on`): it means reading the harness's sign-in token on this machine. */
+  remote_titles?: boolean;
 }
 
 export const DEFAULT_CONFIG: Config = { sinks: [], harnesses: {}, update_check: true, keep_days: 30 };

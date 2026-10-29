@@ -1,0 +1,6 @@
+---
+"sessionpipe-core": minor
+"sessionpipe": minor
+---
+
+Session names from claude.ai, off until the person turns them on (`sessionpipe titles on`, config.json `remote_titles`). claude.ai names a session the Claude app starts seconds after its first message and never writes that name to the machine, so until now such a session went out under its first prompt cut to 50 characters while the Claude app showed another name. With it on, the worker asks claude.ai for the name of each Claude Code session with a claude.ai link (`GET https://api.anthropic.com/v1/code/sessions/<session_…>`, as Claude Code reads a session), a minute apart until it has one, then every half hour, and sends it as `session.title` with `title_source: "harness"`; a `custom` title still wins. It bears the sign-in Claude Code keeps for that config dir (the macOS keychain item, else `.credentials.json`), sends it to `api.anthropic.com` alone, refuses redirects, never refreshes an expiring token and keeps it nowhere. Adapters gain an optional `remoteFacts`, which the worker calls only when the switch is on; `Config` gains `remote_titles`. spec/ADAPTERS.md and spec/PRIVACY.md §3 state the exception.

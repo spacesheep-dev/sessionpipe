@@ -87,6 +87,12 @@ token beside it). It never reads a credential file, never calls a vendor API, an
 never sends a token of the harness's anywhere. [ADAPTERS.md](ADAPTERS.md) states this
 per harness with the documentation URL.
 
+One exception is the person's own to make, and off until they do: with `remote_titles`
+on (`sessionpipe titles on`), the Claude Code adapter reads Claude Code's sign-in on this
+machine to ask claude.ai for a session's name, the one fact claude.ai never writes to the
+machine. The token goes to `api.anthropic.com` alone, for that read; it is never stored,
+logged, put in an event, or sent to a sink. Only the name comes back, as `session.title`.
+
 ## 4. For receivers
 
 *This section is guidance, not legal advice.*

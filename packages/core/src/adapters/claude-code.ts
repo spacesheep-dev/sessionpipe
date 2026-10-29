@@ -5,11 +5,14 @@
 // hook's stdin, the transcript it names, the per-pid session registry and the config
 // dir's .claude.json account (its id; its email only for control's pair and hello) —
 // or, with no login there, the API its settings.json names (that one key, no token).
+// The one exception is the person's to make: with `remote_titles` on, the sign-in
+// token is read to ask claude.ai for a session's name, and sent nowhere else.
 // Ported from spacesheep-cli lib/sessions.js.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
@@ -312,6 +315,9 @@ export const claudeCode: Adapter = {
     if (typeof hints.attended === "boolean") out.attended = hints.attended || !!out.url;
     return out;
   },
+
+  remoteFacts: (session, local, transcript, state, env = process.env) =>
+    claudeRemoteFacts(session.id, local, transcript, state, env),
 
   backfill(sinceMs, env = process.env): BackfillRow[] {
     const rows: BackfillRow[] = [];
@@ -729,6 +735,127 @@ export function claudeFacts(
     if (typeof withCwd.gitBranch === "string" && withCwd.gitBranch !== "HEAD") out.branch = withCwd.gitBranch;
   }
   return out;
+}
+
+// --- claude.ai's name for a session, only when the person turned it on ------------------
+
+/** claude.ai names a Remote Control session itself, seconds after its first message, and
+ *  never tells the machine: no file here holds that name, so the Claude app shows one
+ *  and every local reader another. With `remote_titles` on, the worker asks claude.ai the
+ *  way Claude Code reads a session. Again after a minute while it has no name yet, then
+ *  every half hour: a rename in the Claude app reaches the transcript as a custom-title,
+ *  which outranks this anyway. */
+const REMOTE_RETRY_MS = 60_000;
+const REMOTE_REFRESH_MS = 30 * 60_000;
+const CLAUDE_API = "https://api.anthropic.com";
+const KEYCHAIN = "Claude Code-credentials";
+
+/** claude.ai's name for a session with a claude.ai link, unless the person named it
+ *  here: `{title, title_source: "harness"}`, or nothing. */
+export async function claudeRemoteFacts(
+  id: string,
+  local: SessionFacts,
+  transcript: string | undefined,
+  state: FactsState,
+  env: NodeJS.ProcessEnv,
+  now = Date.now(),
+): Promise<Partial<SessionFacts>> {
+  if (!transcript || !local.url || !LINK_RE.test(local.url) || local.title_source === "custom") return {};
+  const mem = state.get(NAME, id);
+  let title = typeof mem.remote_title === "string" ? mem.remote_title : null;
+  if (now - (Number(mem.remote_at) || 0) >= (title ? REMOTE_REFRESH_MS : REMOTE_RETRY_MS)) {
+    // Marked before the call: a claude.ai that doesn't answer isn't asked on every hook.
+    state.save(NAME, id, { remote_at: now });
+    const token = claudeAiToken(configDirOf(transcript), env, now);
+    const got = token ? await claudeAiTitle(local.url.slice(local.url.lastIndexOf("/") + 1), token) : undefined;
+    if (got !== undefined) {
+      title = got;
+      state.save(NAME, id, { remote_title: got });
+    }
+  }
+  return title ? { title: title.slice(0, 120), title_source: "harness" } : {};
+}
+
+/** The keychain items Claude Code keeps a config dir's sign-in under: `Claude
+ *  Code-credentials`, and for a CLAUDE_CONFIG_DIR, `-` and 8 hex of the SHA-256 of that
+ *  path as it was set (tried as the hook's env names it, then as the dir itself). */
+function keychainServices(dir: string, env: NodeJS.ProcessEnv): string[] {
+  const named = (p: string) =>
+    `${KEYCHAIN}-${createHash("sha256").update(p.normalize("NFC")).digest("hex").slice(0, 8)}`;
+  const out = new Set<string>();
+  if (env.CLAUDE_CONFIG_DIR && path.resolve(env.CLAUDE_CONFIG_DIR) === dir) out.add(named(env.CLAUDE_CONFIG_DIR));
+  if (dir === path.join(env.HOME || homeDir(), ".claude")) out.add(KEYCHAIN);
+  out.add(named(dir));
+  return [...out];
+}
+
+/** The access token Claude Code signed in to `dir` with, for one request: from the
+ *  macOS keychain, else from `<dir>/.credentials.json`. Kept nowhere, never logged. One
+ *  that has expired is not refreshed, since that would rotate Claude Code's own login:
+ *  the lookup waits for Claude Code to refresh it. */
+export function claudeAiToken(dir: string, env: NodeJS.ProcessEnv, now: number): string | null {
+  const raw: string[] = [];
+  if (process.platform === "darwin")
+    for (const service of keychainServices(dir, env)) {
+      try {
+        const user = env.USER || userInfo().username;
+        const account = /^[\w.-]+$/.test(user) ? user : "claude-code-user";
+        raw.push(
+          execFileSync("security", ["find-generic-password", "-a", account, "-w", "-s", service], {
+            encoding: "utf8",
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "ignore"],
+          }),
+        );
+        break;
+      } catch {}
+    }
+  try {
+    raw.push(readFileSync(path.join(dir, ".credentials.json"), "utf8"));
+  } catch {}
+  for (const r of raw) {
+    try {
+      // Claude Code writes the item as hex (`-X`); `security -w` prints it back as text,
+      // or as that hex where it isn't printable.
+      const t = r.trim();
+      const o = (
+        JSON.parse(/^(?:[0-9a-f]{2})+$/i.test(t) ? Buffer.from(t, "hex").toString("utf8") : t) as {
+          claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown };
+        }
+      ).claudeAiOauth;
+      if (typeof o?.accessToken !== "string" || !o.accessToken) continue;
+      if (typeof o.expiresAt !== "number" || o.expiresAt > now + 60_000) return o.accessToken;
+    } catch {}
+  }
+  return null;
+}
+
+interface RemoteSession {
+  id?: unknown;
+  title?: unknown;
+}
+/** claude.ai's name for the session `bridge` (`session_…`), from the endpoint Claude Code
+ *  reads a session from: a string, null when it has none yet, undefined when it couldn't
+ *  be asked or wouldn't say (offline, a 401 or 404, an answer about another session), so
+ *  the last answer stands. The token goes to api.anthropic.com alone: a redirect is
+ *  refused, never followed. */
+export async function claudeAiTitle(bridge: string, token: string): Promise<string | null | undefined> {
+  try {
+    const r = await fetch(`${CLAUDE_API}/v1/code/sessions/${bridge}`, {
+      headers: { Authorization: `Bearer ${token}`, "anthropic-version": "2023-06-01", "User-Agent": "sessionpipe" },
+      redirect: "error",
+      signal: AbortSignal.timeout(4000),
+    });
+    if (r.status !== 200) return undefined;
+    // Claude Code reads the session from `response_shape` or `session`; bare is taken too.
+    const j = (await r.json()) as (RemoteSession & { response_shape?: RemoteSession; session?: RemoteSession }) | null;
+    const s = j?.response_shape ?? j?.session ?? j;
+    const bare = (x: string) => x.replace(/^(?:session|cse)_/, "");
+    if (typeof s?.id !== "string" || bare(s.id) !== bare(bridge)) return undefined;
+    return (typeof s.title === "string" && s.title.replace(/\s+/g, " ").trim()) || null;
+  } catch {
+    return undefined;
+  }
 }
 
 /** For tests: each hook runs in a fresh process; a test that edits the registry mid-run clears the cache. */

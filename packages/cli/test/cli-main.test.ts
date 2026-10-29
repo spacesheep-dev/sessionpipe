@@ -1279,6 +1279,22 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
   });
 });
 
+describe("titles", () => {
+  it("on and off set remote_titles; with no word it says which holds", async () => {
+    expect((await run("titles")).lines).toEqual([
+      "  Session names come from this machine's files only, and no sign-in token is read. A session the Claude app started has a name there that never reaches this machine; `sessionpipe titles on` asks claude.ai for it.",
+    ]);
+    expect(cfg().remote_titles).toBeUndefined();
+    expect((await run("titles", "on")).text).toContain(
+      "✓ Claude Code sessions with a claude.ai link take claude.ai's name, as the Claude app shows it, unless you named them here. To ask, sessionpipe reads Claude Code's sign-in token on this machine and sends it to api.anthropic.com only",
+    );
+    expect(cfg().remote_titles).toBe(true);
+    expect((await run("titles")).text).toMatch(/^ {2}Claude Code sessions with a claude\.ai link/);
+    expect((await run("titles", "off")).text).toContain("✓ Session names come from this machine's files only");
+    expect(cfg().remote_titles).toBe(false);
+  });
+});
+
 describe.skipIf(process.platform === "win32")("update", () => {
   it("off and on set the daemon's daily check", async () => {
     expect((await run("update", "off")).text).toContain("✓ The control daemon no longer checks npm");

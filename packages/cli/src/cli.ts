@@ -158,6 +158,8 @@ async function command(cmd: string): Promise<void> {
       return replay();
     case "update":
       return update();
+    case "titles":
+      return titles();
     case "worker":
       return workerFromArgv();
     case "control":
@@ -192,6 +194,7 @@ Usage:
   sessionpipe tail [--session ID] [--tier N] [--harness NAME]
   sessionpipe backfill [--days 30] | forget <harness> <session> | replay --sink NAME
   sessionpipe update [off|on]       (install the latest now; off/on: the daemon's daily update)
+  sessionpipe titles [on|off]       (on: name Claude Code sessions as claude.ai does; off by default)
 ${CONTROL_HELP}
 
 Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
@@ -1247,6 +1250,26 @@ async function update(): Promise<void> {
             : "stop `sessionpipe control run` and start it again"
       } moves it (a run in progress stops).`,
     );
+}
+
+/** `sessionpipe titles [on|off]`: whether the worker asks a harness's own service for a
+ *  session's name (config.json `remote_titles`, off by default). For Claude Code that is
+ *  claude.ai, which names the sessions the Claude app starts and never tells the machine;
+ *  asking means reading the sign-in token Claude Code keeps here. */
+function titles(): void {
+  const sub = args[1];
+  const set = sub === "on" || sub === "off";
+  const cfg = readConfig();
+  if (set) {
+    cfg.remote_titles = sub === "on";
+    writeConfig(cfg);
+  }
+  const done = set ? "✓ " : "";
+  out(
+    cfg.remote_titles
+      ? `  ${done}Claude Code sessions with a claude.ai link take claude.ai's name, as the Claude app shows it, unless you named them here. To ask, sessionpipe reads Claude Code's sign-in token on this machine and sends it to api.anthropic.com only; it never stores or forwards it. \`sessionpipe titles off\` stops this.`
+      : `  ${done}Session names come from this machine's files only, and no sign-in token is read. A session the Claude app started has a name there that never reaches this machine; \`sessionpipe titles on\` asks claude.ai for it.`,
+  );
 }
 
 // The process entrypoint (`node dist/cli.js`, or npm's bin link to it) runs the command;

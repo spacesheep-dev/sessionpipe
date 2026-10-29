@@ -248,6 +248,73 @@ describe("runJob", () => {
     expect(r.events[0]?.session.account_id).toBe("org-from-the-job");
     expect(r.events[0]?.session.cwd).toBe(tmp);
   });
+  it("takes claude.ai's name for a session only once the person turned remote_titles on", async () => {
+    const home = path.join(tmp, "rc-home");
+    const config = path.join(home, ".claude-rc");
+    const id = "44444444-4444-4444-8444-444444444444";
+    mkdirSync(path.join(config, "projects", "-w"), { recursive: true });
+    const transcript = path.join(config, "projects", "-w", `${id}.jsonl`);
+    writeFileSync(
+      transcript,
+      `${[
+        JSON.stringify({ type: "bridge-session", sessionId: id, bridgeSessionId: "cse_01Remote" }),
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-10-28T10:00:00.000Z",
+          cwd: tmp,
+          message: { content: "fleet?" },
+        }),
+      ].join("\n")}\n`,
+    );
+    writeFileSync(path.join(config, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
+    const f = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ session: { id: "session_01Remote", title: "test_claude_fleet health check" } }), {
+          status: 200,
+        }),
+    );
+    vi.stubGlobal("fetch", f);
+    const real = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true }); // no keychain
+    const state = path.join(tmp, "remote");
+    const stop = () =>
+      runJob(
+        {
+          harness: "claude-code",
+          event: "Stop",
+          argv: ["claude-code", "Stop"],
+          stdin: JSON.stringify({ session_id: id, transcript_path: transcript, cwd: tmp, hook_event_name: "Stop" }),
+          cwd: tmp,
+          env: { HOME: home, CLAUDE_CONFIG_DIR: config },
+          at: Date.now(),
+        },
+        { state },
+      );
+    const titles = (on: boolean) =>
+      writeFileSync(
+        process.env.SESSIONPIPE_CONFIG as string,
+        JSON.stringify({ sinks: [], harnesses: {}, remote_titles: on }),
+      );
+    try {
+      titles(false);
+      expect((await stop()).events[0]?.session).toMatchObject({ title: "fleet?", title_source: "first-ask" });
+      expect(f).not.toHaveBeenCalled();
+      titles(true);
+      expect((await stop()).events[0]?.session).toMatchObject({
+        title: "test_claude_fleet health check",
+        title_source: "harness",
+        url: "https://claude.ai/code/session_01Remote",
+      });
+      expect(f).toHaveBeenCalledTimes(1);
+      // A harness with no service to ask is left as it was.
+      expect((await runJob(job("Stop"), { state })).events).toHaveLength(1);
+      expect(f).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(process, "platform", real);
+      vi.unstubAllGlobals();
+      titles(false);
+    }
+  });
   it("session.attended comes from the job's environment, never the worker's", async () => {
     const run = (id: string, env: Record<string, string>) =>
       runJob(

@@ -5,6 +5,7 @@
 // account, a file too big to read whole), the per-pid registry and backfill. All of it
 // in a temp home; the real ~/.claude is never read for a fact or written at all.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,24 +14,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetClaudeCaches,
   appTitle,
+  claudeAiTitle,
+  claudeAiToken,
   claudeCode,
   claudeDirs,
   claudeFacts,
   claudePid,
+  claudeRemoteFacts,
 } from "../src/adapters/claude-code.js";
 import type { FactsState } from "../src/adapters/types.js";
 
 // Every hook that is not a tool event walks the process tree through `ps` for the
 // registry file: ~100 ms a call. Stubbed here, except in the test about that walk.
+// The keychain is always stood in for: no test reads the real one.
 let realPs = false;
+const keychain = vi.hoisted(() => ({
+  find: (_args: string[]): string => {
+    throw new Error("The specified item could not be found in the keychain.");
+  },
+}));
 vi.mock("node:child_process", async (original) => {
   const m = await original<typeof import("node:child_process")>();
   return {
     ...m,
     execFileSync: ((file: string, ...rest: unknown[]) =>
-      file === "ps" && !realPs
-        ? ""
-        : (m.execFileSync as (...a: unknown[]) => unknown)(file, ...rest)) as typeof m.execFileSync,
+      file === "security"
+        ? keychain.find(rest[0] as string[])
+        : file === "ps" && !realPs
+          ? ""
+          : (m.execFileSync as (...a: unknown[]) => unknown)(file, ...rest)) as typeof m.execFileSync,
   };
 });
 
@@ -616,5 +628,193 @@ describe("claude-code: a payload another harness ran", () => {
         f,
       ).not.toBeNull();
     }
+  });
+});
+
+describe("claude-code: claude.ai's name, when the person turned it on", () => {
+  const LINK = "https://claude.ai/code/session_01Remote";
+  const NOW = Date.parse("2026-10-28T12:00:00Z");
+  const sha8 = (p: string) => createHash("sha256").update(p).digest("hex").slice(0, 8);
+  const oauth = (o: Record<string, unknown>) => JSON.stringify({ claudeAiOauth: o });
+  const creds = (o: Record<string, unknown>) => writeFileSync(path.join(dir, ".credentials.json"), oauth(o));
+  const answer = (status: number, body: unknown) =>
+    vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status }));
+  const service = (a: string[]) => a[a.indexOf("-s") + 1];
+  const realPlatform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+  const as = (value: string) => Object.defineProperty(process, "platform", { value, configurable: true });
+  let asked: string[][];
+  beforeEach(() => {
+    asked = [];
+    keychain.find = (a) => {
+      asked.push(a);
+      throw new Error("The specified item could not be found in the keychain.");
+    };
+    as("linux");
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", realPlatform);
+    vi.unstubAllGlobals();
+  });
+
+  it("asks claude.ai, with the sign-in Claude Code keeps, for a session with a claude.ai link", async () => {
+    creds({ accessToken: "sk-ant-oat01-test", expiresAt: NOW + 3_600_000 });
+    const f = answer(200, {
+      session: { id: "session_01Remote", title: " test_claude_fleet \n health check failures " },
+    });
+    vi.stubGlobal("fetch", f);
+    const state = memState();
+    const file = transcript([user("the ask")]);
+    const local = { url: LINK, title: "the ask", title_source: "first-ask" as const };
+    expect(await claudeRemoteFacts(SID, local, file, state, env, NOW)).toEqual({
+      title: "test_claude_fleet health check failures",
+      title_source: "harness",
+    });
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.anthropic.com/v1/code/sessions/session_01Remote");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer sk-ant-oat01-test",
+      "anthropic-version": "2023-06-01",
+    });
+    expect(init.redirect).toBe("error");
+    expect(state.mem).toEqual({ remote_at: NOW, remote_title: "test_claude_fleet health check failures" });
+    // Within half an hour the remembered name stands and claude.ai isn't asked; then it is.
+    expect(await claudeRemoteFacts(SID, local, file, state, env, NOW + 29 * 60_000)).toMatchObject({
+      title: "test_claude_fleet health check failures",
+    });
+    expect(f).toHaveBeenCalledTimes(1);
+    vi.stubGlobal("fetch", answer(200, { session: { id: "session_01Remote", title: "Renamed by claude.ai" } }));
+    expect(await claudeRemoteFacts(SID, local, file, state, env, NOW + 30 * 60_000)).toMatchObject({
+      title: "Renamed by claude.ai",
+    });
+  });
+
+  it("leaves the name alone where the person named it here, or there is no claude.ai link", async () => {
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+    creds({ accessToken: "tok" });
+    const state = memState();
+    const file = transcript([user("a")]);
+    expect(
+      await claudeRemoteFacts(SID, { url: LINK, title: "Mine", title_source: "custom" }, file, state, env),
+    ).toEqual({});
+    expect(await claudeRemoteFacts(SID, { url: "claude://code/continue/local_abc" }, file, state, env)).toEqual({});
+    expect(await claudeRemoteFacts(SID, {}, file, state, env)).toEqual({});
+    expect(await claudeRemoteFacts(SID, { url: LINK }, undefined, state, env)).toEqual({});
+    // Through the adapter, in the worker's own environment.
+    expect(await claudeCode.remoteFacts?.({ id: SID }, { url: LINK }, undefined, state)).toEqual({});
+    expect(f).not.toHaveBeenCalled();
+    expect(state.mem).toEqual({});
+  });
+
+  it("with no name yet asks again after a minute; one it can't ask leaves the name it had", async () => {
+    creds({ accessToken: "tok" });
+    const state = memState();
+    const file = transcript([user("a")]);
+    const local = { url: LINK };
+    vi.stubGlobal("fetch", answer(200, { session: { id: "session_01Remote", title: null } }));
+    expect(await claudeRemoteFacts(SID, local, file, state, env, NOW)).toEqual({});
+    expect(state.mem).toEqual({ remote_at: NOW, remote_title: null });
+    const named = answer(200, { session: { id: "cse_01Remote", title: "Named now" } });
+    vi.stubGlobal("fetch", named);
+    expect(await claudeRemoteFacts(SID, local, file, state, env, NOW + 59_000)).toEqual({});
+    expect(named).not.toHaveBeenCalled();
+    let at = NOW + 60_000;
+    expect(await claudeRemoteFacts(SID, local, file, state, env, at)).toEqual({
+      title: "Named now",
+      title_source: "harness",
+    });
+    // A 401 leaves the name it had.
+    vi.stubGlobal("fetch", answer(401, { error: { message: "expired" } }));
+    at += 30 * 60_000;
+    expect(await claudeRemoteFacts(SID, local, file, state, env, at)).toMatchObject({ title: "Named now" });
+    // So does a machine with no sign-in to read, and claude.ai isn't asked at all.
+    rmSync(path.join(dir, ".credentials.json"));
+    const none = vi.fn();
+    vi.stubGlobal("fetch", none);
+    at += 30 * 60_000;
+    expect(await claudeRemoteFacts(SID, local, file, state, env, at)).toMatchObject({ title: "Named now" });
+    expect(none).not.toHaveBeenCalled();
+    expect(state.mem.remote_at).toBe(at);
+    // A name longer than a title may be is cut, as every title is.
+    state.mem.remote_title = "x".repeat(200);
+    expect((await claudeRemoteFacts(SID, local, file, state, env, at)).title).toHaveLength(120);
+  });
+
+  it("reads the sign-in from .credentials.json off macOS, and never one about to expire", () => {
+    const token = () => claudeAiToken(dir, env, NOW);
+    expect(token()).toBeNull();
+    writeFileSync(path.join(dir, ".credentials.json"), "{ not json");
+    expect(token()).toBeNull();
+    writeFileSync(path.join(dir, ".credentials.json"), JSON.stringify({ primaryApiKey: "x" }));
+    expect(token()).toBeNull();
+    creds({ accessToken: "" });
+    expect(token()).toBeNull();
+    creds({ accessToken: "tok", expiresAt: NOW + 30_000 });
+    expect(token()).toBeNull();
+    creds({ accessToken: "tok", expiresAt: NOW + 120_000 });
+    expect(token()).toBe("tok");
+    expect(asked).toEqual([]);
+  });
+
+  it("on macOS reads the keychain item Claude Code writes for the config dir, before the file", () => {
+    as("darwin");
+    creds({ accessToken: "from-file" });
+    const me = { HOME: home, USER: "misha" };
+    // No item: every name it may have is tried, then the file.
+    expect(claudeAiToken(dir, me, NOW)).toBe("from-file");
+    expect(asked).toEqual([
+      ["find-generic-password", "-a", "misha", "-w", "-s", "Claude Code-credentials"],
+      ["find-generic-password", "-a", "misha", "-w", "-s", `Claude Code-credentials-${sha8(dir)}`],
+    ]);
+    // A CLAUDE_CONFIG_DIR is hashed as it was set, and tried first.
+    asked = [];
+    claudeAiToken(dir, { ...me, CLAUDE_CONFIG_DIR: `${dir}/` }, NOW);
+    expect(asked.map(service)).toEqual([
+      `Claude Code-credentials-${sha8(`${dir}/`)}`,
+      "Claude Code-credentials",
+      `Claude Code-credentials-${sha8(dir)}`,
+    ]);
+    // Another config dir has only its own hashed name; one the env names elsewhere changes nothing.
+    const other = path.join(home, ".claude-work");
+    asked = [];
+    claudeAiToken(other, { ...me, CLAUDE_CONFIG_DIR: dir }, NOW);
+    expect(asked.map(service)).toEqual([`Claude Code-credentials-${sha8(other)}`]);
+    // A user name the keychain can't take is Claude Code's own stand-in; no USER is the OS user.
+    asked = [];
+    claudeAiToken(other, { HOME: home, USER: "has space" }, NOW);
+    expect(asked[0]?.[2]).toBe("claude-code-user");
+    asked = [];
+    claudeAiToken(other, {}, NOW);
+    const osUser = os.userInfo().username;
+    expect(asked[0]?.[2]).toBe(/^[\w.-]+$/.test(osUser) ? osUser : "claude-code-user");
+    // The item wins over the file, printed as text or as hex; an expired one falls through.
+    keychain.find = () => `${oauth({ accessToken: "from-keychain" })}\n`;
+    expect(claudeAiToken(dir, me, NOW)).toBe("from-keychain");
+    keychain.find = () => Buffer.from(oauth({ accessToken: "from-hex" })).toString("hex");
+    expect(claudeAiToken(dir, me, NOW)).toBe("from-hex");
+    keychain.find = () => oauth({ accessToken: "stale", expiresAt: NOW - 1 });
+    expect(claudeAiToken(dir, me, NOW)).toBe("from-file");
+  });
+
+  it("takes claude.ai's answer only about the session it asked for", async () => {
+    const ask = async (status: number, body: unknown) => {
+      vi.stubGlobal("fetch", answer(status, body));
+      return claudeAiTitle("session_01Remote", "tok");
+    };
+    expect(await ask(200, { response_shape: { id: "cse_01Remote", title: "Shaped" } })).toBe("Shaped");
+    expect(await ask(200, { id: "session_01Remote", title: "Bare" })).toBe("Bare");
+    expect(await ask(200, { session: { id: "session_01Remote", title: "  " } })).toBeNull();
+    expect(await ask(200, { session: { id: "session_01Remote", title: 7 } })).toBeNull();
+    expect(await ask(200, { session: { id: "session_01Other", title: "Not ours" } })).toBeUndefined();
+    expect(await ask(200, { session: { title: "No id" } })).toBeUndefined();
+    expect(await ask(200, null)).toBeUndefined();
+    expect(await ask(404, { error: { type: "not_found_error" } })).toBeUndefined();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    expect(await claudeAiTitle("session_01Remote", "tok")).toBeUndefined();
   });
 });
