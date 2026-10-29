@@ -278,6 +278,48 @@ describe("readClaude: the person's mid-turn messages", () => {
   });
 });
 
+// A message from a channel (Claude Code `--channels`: the Telegram plugin, `sessionpipe
+// channel`) is a meta `user` record with `origin.kind: "channel"`, its words wrapped in a
+// `<channel source="…">` tag (recorded on 2.1.312, 2026-10-28). The words are the
+// person's, sent from elsewhere: a reader that drops meta records loses the turn's ask,
+// and the board shows a turn with nothing asked.
+const CHANNEL = readFileSync(
+  new URL("../../../conformance/transcripts/claude-code/channel-message.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n");
+
+describe("readClaude: messages from a channel", () => {
+  it("a channel's message is its turn's ask, out of its tag; the turn before it is untouched", () => {
+    const r = readClaude(CHANNEL, 0);
+    expect(r.turns.map((t) => [t.user, t.assistant])).toEqual([
+      ["check the deploy", "The deploy is green."],
+      ["and the staging one?", "Staging is green too."],
+      ["yes, correct it", "Corrected."],
+    ]);
+    expect(r.turns[1]?.at).toBe(Date.parse("2026-10-28T22:01:00.500Z"));
+    expect(r.line).toBe(6);
+  });
+  it("a channel record that isn't a tag around words asks nothing; other meta records still don't", () => {
+    const ch = (content: unknown) => user("", { isMeta: true, origin: { kind: "channel" }, message: { content } });
+    const r = readClaude(
+      [
+        ch('<channel source="x">\n   \n</channel>'),
+        ch("no tag around these words"),
+        ch('<channel source="x">unclosed'),
+        ch([{ type: "image" }]),
+        user("meta", { isMeta: true }),
+        user('<channel source="x">typed, not from a channel</channel>'),
+        user("the ask"),
+        assistant("the answer"),
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([{ user: "the ask", assistant: "the answer", at: at(T0), endLine: 7 }]);
+  });
+});
+
 describe("readCodex", () => {
   const item = (role: string, kind: string, text: unknown, extra: Record<string, unknown> = {}) =>
     JSON.stringify({

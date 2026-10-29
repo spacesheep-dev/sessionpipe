@@ -83,6 +83,20 @@ background command with the longest timeout it can (Claude Code: raise
 sessionpipe wait            # Claude Code: the session id comes from CLAUDE_CODE_SESSION_ID
 ```
 
+Or let Claude Code keep the waiter for you, the way its Telegram plugin reaches a
+session: `sessionpipe channel` is a Claude Code channel (an MCP server that pushes
+messages in). It parks for its session the whole time the session runs, and each message
+arrives in the session's own thread, in the terminal and in the Claude app, as a
+message from `sessionpipe`, in the session's own permission mode. Channels are a
+research preview: a channel that isn't on Anthropic's allowlist loads only with
+`--dangerously-load-development-channels`, which asks once at startup, and a session the
+Claude app starts through `claude remote-control` can't be given one yet.
+
+```sh
+claude mcp add --scope user sessionpipe -- sessionpipe channel
+claude --dangerously-load-development-channels server:sessionpipe
+```
+
 The waiter and next-Stop modes work in any Claude Code session that runs your hooks,
 the Claude desktop app's included, and need nothing else. The Agent SDK, resume and fork
 modes run the `claude` command, which has its own login (`claude auth login`); the
