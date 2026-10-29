@@ -16,6 +16,7 @@ import {
   JOB_TIMEOUT_MS,
   type Login,
   type Mode,
+  probe,
   type RunOptions,
   type RunResult,
   runHeadless,
@@ -236,11 +237,14 @@ export function parseAuthStatus(stdout: string | null | undefined): Login {
  *  service on a Mac nobody is logged in to, or from an ssh shell, so a headless turn
  *  started there dies with "please run /login". */
 export function claudeLogin(bin: string, configDir?: string, env: NodeJS.ProcessEnv = process.env): Promise<Login> {
+  // Through `probe`: a .cmd shim (an npm install on Windows) can't be spawned bare, and
+  // execFile's synchronous throw would reject this promise and take doctor down with it.
+  const c = probe(bin, ["auth", "status", "--json"]);
   return new Promise((resolve) => {
     execFile(
-      bin,
-      ["auth", "status", "--json"],
-      { encoding: "utf8", timeout: 20_000, env: claudeEnv(configDir, env), maxBuffer: 256 * 1024 },
+      c.file,
+      c.args,
+      { encoding: "utf8", timeout: 20_000, env: claudeEnv(configDir, env), maxBuffer: 256 * 1024, shell: c.shell },
       // `auth status` may exit non-zero when signed out; its JSON still says so.
       (_err, stdout) => resolve(parseAuthStatus(stdout)),
     );
@@ -265,13 +269,15 @@ export function loginHint(configDir: string | undefined, platform: NodeJS.Platfo
 
 export function detectCaps(bin: string): Caps {
   let help = "";
+  const c = probe(bin, ["--help"]);
   try {
-    help = execFileSync(bin, ["--help"], {
+    help = execFileSync(c.file, c.args, {
       encoding: "utf8",
       timeout: 30_000,
       env: claudeEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 4 * 1024 * 1024,
+      shell: c.shell,
     });
   } catch (e) {
     help = String((e as { stdout?: string })?.stdout || "");

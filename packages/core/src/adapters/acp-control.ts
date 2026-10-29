@@ -13,7 +13,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { deniedNote, findBinary, JOB_TIMEOUT_MS, jobEnv, type Mode } from "./headless.js";
+import { deniedNote, findBinary, JOB_TIMEOUT_MS, jobEnv, type Mode, shimNote, spawnable } from "./headless.js";
 
 export interface AcpAgent {
   /** sessionpipe's harness name (ADAPTERS.md): the registry's id unless a hook adapter already named it. */
@@ -196,8 +196,10 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
   const log = o.log ?? (() => {});
   const label = o.label;
   let child: ChildProcess;
+  const c = spawnable(o.bin, o.args);
+  if (!c) return Promise.resolve({ failed: `couldn't start ${label}: ${shimNote(o.bin)}` });
   try {
-    child = spawn(o.bin, o.args, {
+    child = spawn(c.file, c.args, {
       cwd: o.cwd,
       env: jobEnv(o.env),
       stdio: ["pipe", "pipe", "pipe"],

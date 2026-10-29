@@ -4,7 +4,7 @@
 // its own output takes. Which binary, which flags and how the answer is read are the
 // harness's own (`<harness>-control.ts`); what is the same for all of them is here.
 import { spawn } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 /** A headless turn still running after this is stopped. */
@@ -42,6 +42,49 @@ export function findBinary(o: {
   }
   for (const d of o.dirs) for (const n of o.names) if (isExe(path.join(d, n))) return path.join(d, n);
   return null;
+}
+
+/** The script an npm-style `.cmd` shim runs: the one `"%dp0%\\…"` or `"%~dp0\\…"` word
+ *  before `%*` (npm's cmd-shim, old and new; pnpm's is the same shape), beside the shim.
+ *  Null when the file is no such shim, or names nothing that is there. */
+export function shimTarget(shim: string): string | null {
+  let text = "";
+  try {
+    text = readFileSync(shim, "utf8");
+  } catch {
+    return null;
+  }
+  const m = /"%(?:~dp0|dp0%)\\([^"]+)"\s+%\*/.exec(text);
+  if (!m) return null;
+  const target = path.resolve(path.dirname(shim), (m[1] as string).split("\\").join(path.sep));
+  try {
+    return statSync(target).isFile() ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `bin` and `args` as spawn takes them with no shell. Node refuses to spawn a `.cmd` or
+ *  `.bat` without one (CVE-2024-27980, since 20.12), and on Windows an `npm install -g`
+ *  leaves exactly such a shim (`claude.cmd`, `codex.cmd`); a shell would hand a prompt's
+ *  every character to cmd.exe, so the shim's own script runs under this node instead.
+ *  Null for a launcher script that names no script to run (issue #165). */
+export function spawnable(bin: string, args: string[]): { file: string; args: string[] } | null {
+  if (!/\.(cmd|bat)$/i.test(bin)) return { file: bin, args };
+  const target = shimTarget(bin);
+  return target ? { file: process.execPath, args: [target, ...args] } : null;
+}
+
+/** Why a launcher script can't be run, for the person. */
+export const shimNote = (bin: string) =>
+  `${path.basename(bin)} is a launcher script that names no program to run; point the harness's override (SESSIONPIPE_CLAUDE, SESSIONPIPE_CODEX, …) at the program itself`;
+
+/** As `spawnable`, for a probe whose arguments are fixed words (`--help`, `auth status`):
+ *  a launcher script that can't be read runs through a shell, as one quoted command
+ *  (arguments beside `shell: true` are deprecated from node 24, DEP0190). */
+export function probe(bin: string, args: string[]): { file: string; args: string[]; shell: boolean } {
+  const s = spawnable(bin, args);
+  return s ? { ...s, shell: false } : { file: [`"${bin}"`, ...args].join(" "), args: [], shell: true };
 }
 
 /** The env every headless turn runs with: SESSIONPIPE_CONTROL_JOB tells the turn's own
@@ -91,8 +134,13 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
     let timedOut = false;
     let settled = false;
     let child: import("node:child_process").ChildProcess;
+    const c = spawnable(bin, args);
+    if (!c) {
+      resolve({ error: shimNote(bin) });
+      return;
+    }
     try {
-      child = spawn(bin, args, {
+      child = spawn(c.file, c.args, {
         cwd: o.cwd,
         env: o.env,
         stdio: ["ignore", "pipe", "pipe"],

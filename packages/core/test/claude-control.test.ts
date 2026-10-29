@@ -280,3 +280,37 @@ describe("the result line", () => {
     expect(all.stdout).toBe('{"type":"result","result":"ok"}');
   });
 });
+
+describe("an npm claude.cmd shim (#165)", () => {
+  // What `npm install -g @anthropic-ai/claude-code` leaves on Windows: a .cmd that node
+  // refuses to spawn without a shell. Its script is run under this node instead.
+  const dir = path.join(tmp, "npm-shim");
+  const cli = path.join(dir, "node_modules", "@anthropic-ai", "claude-code", "cli.js");
+  mkdirSync(path.dirname(cli), { recursive: true });
+  writeFileSync(
+    cli,
+    `const a = process.argv.slice(2).join(" ");
+if (a === "--help") process.stdout.write(${JSON.stringify(HELP)});
+else if (a === "auth status --json") process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai"}');
+else process.exit(9);
+`,
+  );
+  const shim = path.join(dir, "claude.cmd");
+  writeFileSync(
+    shim,
+    `@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\n"%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n`,
+  );
+  it("detectCaps reads its --help, and claudeLogin its auth status, with no shell", async () => {
+    expect(detectCaps(shim)).toMatchObject({ hasMode: true, fork: true, modes: expect.arrayContaining(["auto"]) });
+    expect(await claudeLogin(shim, undefined, { PATH: process.env.PATH })).toEqual({
+      loggedIn: true,
+      method: "claude.ai",
+    });
+  });
+  it("a .cmd that names no script is asked through a shell, and a failed answer is no login", async () => {
+    const bare = path.join(dir, "bare.cmd");
+    writeFileSync(bare, "exit 1\r\n");
+    expect(detectCaps(bare)).toMatchObject({ hasMode: false });
+    expect(await claudeLogin(bare, undefined, { PATH: process.env.PATH })).toEqual({ loggedIn: null });
+  });
+});
