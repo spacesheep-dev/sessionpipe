@@ -146,6 +146,13 @@ async function handle(m) {
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "first\\n" } });
       update({ sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "second" } });
       return done("end_turn");
+    case "blank": {
+      // One write: a message, an empty line, a line of spaces, a message. The reader
+      // must drop the two blanks and deliver both (the blank-line branch, on purpose).
+      const line = (text, messageId) => JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text }, ...(messageId ? { messageId } : {}) } } });
+      raw(line("one\\n") + "\\n\\n   \\n" + line("two", "m-blank") + "\\n");
+      return done("end_turn");
+    }
     // Past 4 MB by more than one 64 KB pipe read: the read that crosses 4 MB can never also
     // hold the newline, however far behind the reader is (a 20 kB margin flaked under load).
     case "bigline": raw("x".repeat(4 * 1024 * 1024 + 256 * 1024)); setTimeout(() => { raw("y".repeat(10)); setTimeout(() => { raw("\\n"); chunk("after"); done("end_turn"); }, 50); }, 50); return;
@@ -366,6 +373,7 @@ describe("one agent, driven", () => {
   it("lines that aren't the protocol's are skipped, a line over 4 MB is dropped, titles are kept for 200 tool calls", async () => {
     const h = await open();
     expect(await h.send("junk")).toEqual({ reply: "first\n\nsecond" });
+    expect(await h.send("blank")).toEqual({ reply: "one\n\ntwo" });
     expect(await h.send("bigline")).toEqual({ reply: "after" });
     expect(await h.send("titles")).toEqual({ reply: "titled" });
   }, 20_000);
