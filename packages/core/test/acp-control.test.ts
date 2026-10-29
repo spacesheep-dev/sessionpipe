@@ -146,7 +146,9 @@ async function handle(m) {
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "first\\n" } });
       update({ sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "second" } });
       return done("end_turn");
-    case "bigline": raw("x".repeat(4 * 1024 * 1024 + 20_000)); setTimeout(() => { raw("y".repeat(10)); setTimeout(() => { raw("\\n"); chunk("after"); done("end_turn"); }, 50); }, 50); return;
+    // Past 4 MB by more than one 64 KB pipe read: the read that crosses 4 MB can never also
+    // hold the newline, however far behind the reader is (a 20 kB margin flaked under load).
+    case "bigline": raw("x".repeat(4 * 1024 * 1024 + 256 * 1024)); setTimeout(() => { raw("y".repeat(10)); setTimeout(() => { raw("\\n"); chunk("after"); done("end_turn"); }, 50); }, 50); return;
     case "titles": { for (let i = 0; i < 201; i++) update({ sessionUpdate: "tool_call", toolCallId: "t" + i, title: "tool " + i }); chunk("titled"); return done("end_turn"); }
     default: return done("end_turn");
   }
