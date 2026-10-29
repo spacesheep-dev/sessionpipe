@@ -488,3 +488,15 @@ describe("the readers on lines they were not measured on", () => {
     expect(Array.isArray(drivableHarnesses())).toBe(true);
   });
 });
+
+describe("an npm codex.cmd shim (#165)", () => {
+  it("codexLogin asks the shim's own script under this node, with no shell", async () => {
+    const dir = path.join(tmp, "codex-shim");
+    const cli = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    writeFileSync(cli, `process.exit(process.argv.slice(2).join(" ") === "login status" ? 1 : 9);\n`);
+    const shim = path.join(dir, "codex.cmd");
+    writeFileSync(shim, `@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
+    expect(await codexLogin(shim, { PATH: process.env.PATH })).toEqual({ loggedIn: false });
+  });
+});

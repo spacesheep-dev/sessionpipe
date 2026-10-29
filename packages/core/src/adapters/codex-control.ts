@@ -16,6 +16,7 @@ import {
   jobEnv,
   type Login,
   type Mode,
+  probe,
   type Reading,
   type RunResult,
   runFailure,
@@ -129,11 +130,12 @@ export const LOGIN_HINT = "Codex isn't signed in on this machine: run `codex log
  *  it didn't run, it timed out — is null, never a reason to refuse. */
 export function codexLogin(bin: string, env: NodeJS.ProcessEnv = process.env): Promise<Login> {
   if (env.CODEX_API_KEY) return Promise.resolve({ loggedIn: true, method: "api key" });
+  const c = probe(bin, ["login", "status"]); // a codex.cmd shim can't be spawned bare (#165)
   return new Promise((resolve) => {
     execFile(
-      bin,
-      ["login", "status"],
-      { encoding: "utf8", timeout: 20_000, env: codexEnv(env), maxBuffer: 256 * 1024 },
+      c.file,
+      c.args,
+      { encoding: "utf8", timeout: 20_000, env: codexEnv(env), maxBuffer: 256 * 1024, shell: c.shell },
       (err) => {
         if (!err) return resolve({ loggedIn: true });
         const code = (err as { code?: unknown }).code;
