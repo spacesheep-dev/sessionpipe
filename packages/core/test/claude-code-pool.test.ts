@@ -558,10 +558,19 @@ describe("importableLogins: Claude Code's own logins on this machine", () => {
     expect(asked[0]).toContain("claude-code-user");
   });
   it("keychainService: bare for the default dir, sha256-suffixed for any other", () => {
-    expect(keychainService("/Users/x/.claude", "/Users/x")).toBe("Claude Code-credentials");
-    expect(keychainService("/Users/x/.claude-work", "/Users/x")).toBe(
+    expect(keychainService("/Users/x/.claude", "/Users/x", "darwin")).toBe("Claude Code-credentials");
+    expect(keychainService("/Users/x/.claude/", "/Users/x", "darwin")).toBe("Claude Code-credentials");
+    expect(keychainService("/Users/x/.claude-work", "/Users/x", "darwin")).toBe(
       `Claude Code-credentials-${createHash("sha256").update("/Users/x/.claude-work").digest("hex").slice(0, 8)}`,
     );
+    // Case matters on a Unix; on Windows the same folder may arrive in either case.
+    expect(keychainService("/Users/X/.claude", "/Users/x", "linux")).not.toBe("Claude Code-credentials");
+    expect(keychainService("C:\\Users\\X\\.claude", "c:\\users\\x", "win32")).toBe("Claude Code-credentials");
+    expect(keychainService("C:\\Users\\x\\.claude-work", "C:\\Users\\x", "win32")).toBe(
+      `Claude Code-credentials-${createHash("sha256").update("C:\\Users\\x\\.claude-work").digest("hex").slice(0, 8)}`,
+    );
+    // The default platform is this one.
+    expect(keychainService(path.join(os.homedir(), ".claude"), os.homedir())).toBe("Claude Code-credentials");
   });
 });
 

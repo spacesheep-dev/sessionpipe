@@ -7,7 +7,7 @@
 // that is taken, and logs with no secret in them.
 import http from "node:http";
 import type net from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Credentials } from "../src/pool/credentials.js";
 import { type AccountState, HOLD_MS, type PolicyState } from "../src/pool/policy.js";
 import {
@@ -721,8 +721,28 @@ describe("the port", () => {
     srv = null;
     const third = await start({ port: taken });
     expect(third).toMatchObject({ port: taken, moved: false });
-    await expect(start({ port: 1 })).rejects.toThrow(/EACCES|EADDRINUSE|listen/);
-    srv = third;
+    await third.close();
+    srv = null;
+    // A bind that fails for any reason but "taken" is the caller's to see. Port 1 is
+    // privileged on a Unix and free for anyone on Windows, so the failure is faked at
+    // the one builtin: a server whose listen reports EPERM.
+    const real = http.createServer;
+    const spy = vi.spyOn(http, "createServer").mockImplementation((...a: Parameters<typeof http.createServer>) => {
+      const s = real.apply(http, a);
+      s.listen = (() => {
+        process.nextTick(() =>
+          s.emit("error", Object.assign(new Error("listen EPERM 127.0.0.1:1"), { code: "EPERM" })),
+        );
+        return s;
+      }) as typeof s.listen;
+      return s;
+    });
+    try {
+      await expect(start({ port: 1 })).rejects.toThrow(/EPERM/);
+    } finally {
+      spy.mockRestore();
+    }
+    srv = null;
   });
 });
 
