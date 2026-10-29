@@ -98,6 +98,28 @@ sink's cursor first, so everything in the outbox goes again.
 Asks every sink to delete one session (a `session.forgotten` event), then removes it from the
 local outbox.
 
+### Session names
+
+{{usage titles}}
+
+Which one holds. A session the Claude app starts here is named by claude.ai a few seconds
+after its first message, and that name never reaches the machine; out of the box sessionpipe
+reads local files only, so such a session goes out under your first prompt.
+
+{{usage titles on}}
+
+Claude Code sessions with a claude.ai link take claude.ai's name, read with the sign-in Claude
+Code keeps and sent to `api.anthropic.com` alone. It also asks about the last N days' sessions
+and renames the ones a receiver already has. A name you gave the session (`/rename`) still wins.
+
+{{usage titles refresh}}
+
+Asks again about the last N days' sessions.
+
+{{usage titles off}}
+
+Local files only again (the default).
+
 ### Messages to your sessions
 
 {{usage control pair}}
@@ -154,6 +176,10 @@ The daemon's daily update check, off or back on.
 ## Updates
 
 {{include packages/cli/README.md#Updates}}
+
+## Session names from claude.ai
+
+{{include packages/cli/README.md#Session names from claude.ai}}
 
 ## Status JSON {#status-json}
 
