@@ -244,13 +244,7 @@ export const claudeCode: Adapter = {
         // In-flight background work (shell commands, monitors, subagents, workflows)
         // that will wake the session when it finishes: a paused session, not a done one
         // (Claude Code's `background_tasks`, in every Stop recorded since 2.1.258). A count, never what they run.
-        events.push(
-          ev("turn.ended", {
-            turn_id,
-            reason: "stop",
-            background: Array.isArray(s.background_tasks) ? s.background_tasks.length : undefined,
-          }),
-        );
+        events.push(ev("turn.ended", { turn_id, reason: "stop", background: backgroundCount(s.background_tasks) }));
         break;
       case "StopFailure":
         // The turn ended on an API error (rate_limit, overloaded, authentication_failed,
@@ -272,10 +266,13 @@ export const claudeCode: Adapter = {
         );
         break;
       case "SubagentStop":
+        // The same list, with this subagent still in it: the count once it is out, so a
+        // receiver holding the session as waiting on its work sees the count fall (#153).
         events.push(
           ev("subagent.ended", {
             agent_id: String(s.agent_id ?? ""),
             agent_type: typeof s.agent_type === "string" ? s.agent_type : undefined,
+            background: backgroundCount(s.background_tasks, String(s.agent_id ?? "")),
           }),
         );
         break;
@@ -366,6 +363,25 @@ export const claudeCode: Adapter = {
     return rows;
   },
 };
+
+/** sessionpipe's own waiter (CONTROL.md §8), which a session runs as a background command
+ *  to stay reachable: it ends only when a message arrives, so it is not work the session
+ *  waits on. Matched by its command, whatever path or shim runs it. */
+const WAITER_RE = /(?:^|[\s"'`/\\])sessionpipe(?:\.\w+)?["']?\s+wait(?:\s|$)/;
+
+/** How much background work Claude Code lists that will wake the session when it ends
+ *  (`background_tasks`, in every Stop and SubagentStop since 2.1.258): a count, never what
+ *  it runs. Not counted: sessionpipe's own waiter, and the subagent whose own stop this is,
+ *  which Claude Code still lists as running (issue #153). Undefined when the harness
+ *  doesn't say. */
+export function backgroundCount(tasks: unknown, ending?: string): number | undefined {
+  if (!Array.isArray(tasks)) return undefined;
+  return tasks.filter((t) => {
+    const task = t as { id?: unknown; command?: unknown } | null;
+    if (ending !== undefined && task?.id === ending) return false;
+    return !(typeof task?.command === "string" && WAITER_RE.test(task.command));
+  }).length;
+}
 
 /** Claude Code runs a status line only on events (a new assistant message, a window's
  *  reset), and the hook sends at most one change a minute, so a turn's last numbers
