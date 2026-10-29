@@ -197,20 +197,24 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
   }
   const refuse = (res: http.ServerResponse, skipped: Skipped): void => {
     stats.refused++;
-    if (skipped.unreadable)
-      return sendJson(
+    if (skipped.unreadable) {
+      sendJson(
         res,
         503,
         errorBody("api_error", "sessionpipe pool: the pool's secrets can't be read right now (retrying every 30 s)"),
         { "retry-after": "30" },
       );
-    if (skipped.upstream !== null)
-      return sendJson(
+      return;
+    }
+    if (skipped.upstream !== null) {
+      sendJson(
         res,
         503,
         errorBody("api_error", `sessionpipe pool: Anthropic's token endpoint is not answering (${skipped.upstream})`),
         { "retry-after": "30" },
       );
+      return;
+    }
     const now = deps.now();
     const ats = deps.state.accounts.map((a) => roomAt(a, now)).filter((t): t is number => t !== null);
     const at = ats.length ? Math.min(...ats) : null;
