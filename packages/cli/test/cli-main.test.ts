@@ -244,7 +244,9 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     expect((await run("status")).text).not.toContain("pool:");
     const on = await run("pool", "on");
     expect(on.lines[0]).toMatch(/^ {2}✓ .*settings\.json: env block written/);
-    expect(on.lines).toContain("  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.");
+    expect(on.lines).toContain(
+      "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
+    );
     expect(on.lines.some((l) => l.startsWith("  Daemon: "))).toBe(true);
     expect((await run("status")).text).toMatch(
       / {2}pool: {5}on · 0 accounts · 127\.0\.0\.1:\d+ \(`sessionpipe pool` has the room each has left\)/,
