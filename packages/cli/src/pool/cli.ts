@@ -104,7 +104,7 @@ export async function poolMain(
     case "on": {
       const r = await request({ action: "on" });
       for (const s of r.status.settings) out(`  ${s.state === "current" ? "✓" : "!"} ${settingsLine(s)}`);
-      out("  New Claude Code sessions use the pool; running ones from their next start.");
+      out("  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.");
       if (!r.status.accounts.length)
         out("  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.");
       if (r.daemon)

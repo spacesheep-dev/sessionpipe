@@ -102,7 +102,7 @@ async function start(over: Partial<PoolServerDeps> = {}): Promise<PoolServer> {
     now: () => now,
     log: (l) => logs.push(l),
     port: 0,
-    token: () => TOKEN,
+    token: () => [TOKEN],
     on: () => on,
     state,
     accountUuid: (id) => (id === "noid" ? null : uuidOf(id)),
@@ -706,7 +706,7 @@ describe("the port", () => {
       now: () => now,
       log: (l) => logs.push(l),
       port: taken,
-      token: () => TOKEN,
+      token: () => [TOKEN],
       on: () => on,
       state,
       accountUuid: () => null,
@@ -851,12 +851,16 @@ describe("the security review's findings", () => {
     expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
   });
   it("H1: the bearer is read on every request, so one minted by `pool on` elsewhere works at once", async () => {
-    let current = TOKEN;
+    let current: string[] = [TOKEN];
     await start({ token: () => current });
     expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
-    current = "rotated-bearer";
-    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(401);
+    current = ["rotated-bearer", TOKEN]; // the grace: both are good
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
     expect((await send("/v1/messages", { body: body(S1), token: "rotated-bearer" })).status).toBe(200);
+    current = ["rotated-bearer"];
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(401);
+    current = [];
+    expect((await send("/v1/messages", { body: body(S1), token: "rotated-bearer" })).status).toBe(401);
   });
   it("M4: pins are kept only for uuid-shaped sessions", async () => {
     await start();
@@ -942,7 +946,7 @@ describe("what the soak found", () => {
     expect(state.accounts.every((a) => a.error === undefined)).toBe(true);
   });
   it("F10: while the secrets store can't be read the answer is a 503 that says so, never an unknown bearer", async () => {
-    let token: string | null = TOKEN;
+    let token: string[] | null = [TOKEN];
     await start({ token: () => token });
     token = null;
     const r = await send("/v1/messages", { body: body(S1) });
@@ -951,7 +955,7 @@ describe("what the soak found", () => {
     expect(await r.json()).toMatchObject({ error: { type: "api_error", message: /secrets can't be read right now/ } });
     expect((await send("/v1/messages", { body: body(S1), token: "anything" })).status).toBe(503);
     expect((await send("/health", { method: "GET", token: null })).status).toBe(200);
-    token = TOKEN;
+    token = [TOKEN];
     expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
   });
   it("F8: a body over the cap gets the 413 itself, three times out of three, not a closed socket", async () => {

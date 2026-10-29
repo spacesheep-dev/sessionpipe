@@ -328,7 +328,7 @@ describe("sessionpipe pool, with no daemon running", () => {
     await run(["on"]);
     expect(lines).toEqual([
       `  ✓ ${settings().replace(os.homedir(), "~")}: env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and the flag that keeps its first-party features on)`,
-      "  New Claude Code sessions use the pool; running ones from their next start.",
+      "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
       "  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.",
       "  Daemon: launchd agent org.sessionpipe.control (log: /x/daemon.log)",
       "  pool:     on · 0 accounts",
@@ -557,7 +557,7 @@ describe("sessionpipe pool, with the daemon running", () => {
       "  ! /h/.claude-a/settings.json: no env block",
       "  ! /h/.claude-b/settings.json: left alone — ANTHROPIC_BASE_URL is https://p",
       "  ! /h/.claude-c/settings.json: not touched — not JSON",
-      "  New Claude Code sessions use the pool; running ones from their next start.",
+      "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
     ]);
     expect(lines).toContain("  Daemon: running");
     lines = [];

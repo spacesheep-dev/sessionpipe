@@ -332,7 +332,10 @@ describe("adding accounts", () => {
     expect(desk.moveSecrets("keychain")).toEqual({ moved: [], kept: [] });
     // A store that refuses: nothing moves, nothing is lost.
     reachable = false;
-    expect(desk.moveSecrets("file")).toEqual({ moved: [], kept: ["pool:token", `pool:${one.id}`] }); // unreadable: stays
+    expect(desk.moveSecrets("file")).toEqual({
+      moved: [],
+      kept: ["pool:token", "pool:token.previous", `pool:${one.id}`],
+    }); // unreadable: stays
     expect(readPool(env).secrets_in).toBe("keychain");
     reachable = true;
     const refusing: Runner = (c, args, input) => (args[0] === "-i" ? { status: 0, stdout: "" } : run(c, args, input));
@@ -343,6 +346,7 @@ describe("adding accounts", () => {
       run: (_c, args) => (args[0] === "find-generic-password" ? { status: 44, stdout: "" } : { status: 0, stdout: "" }),
     });
     expect(back.moveSecrets("keychain")).toEqual({ moved: [], kept: ["pool:token", `pool:${one.id}`] });
+    expect(readPool(env).secrets_in).toBe("file");
     expect(readPool(env).secrets_in).toBe("file");
     expect(Object.keys(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))).length).toBe(2);
     // A record whose credential is gone moves nothing for it and is not a failure.
@@ -499,19 +503,29 @@ describe("on and off", () => {
     expect(readPool(env)).toMatchObject({ on: true, port, created: [settings(0)] });
     expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
     expect(pool.helloPool().on).toBe(true);
-    // On again: the same port, a fresh bearer (SECURITY H1), nothing created twice.
+    // On again: the same port, a fresh bearer (SECURITY H1), nothing created twice; the
+    // old bearer is kept for the grace and the rotation is on record.
+    expect(readPool(env).rotated_at).toBeUndefined();
     expect((await pool.setOn(true)).every((r) => r.changed)).toBe(true);
     const token2 = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
     expect(token2).not.toBe(token);
+    expect(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token.previous"]).toBe(token);
     expect(JSON.parse(readFileSync(settings(1), "utf8")).env.ANTHROPIC_AUTH_TOKEN).toBe(token2);
-    expect(readPool(env)).toMatchObject({ port, created: [settings(0)] });
+    expect(readPool(env)).toMatchObject({ port, created: [settings(0)], rotated_at: new Date(T0).toISOString() });
+    expect(pool.status().rotated_at).toBe(new Date(T0).toISOString());
     expect(await pool.setOn(false)).toEqual([
       { file: settings(0), changed: true, note: "removed (sessionpipe created it)" },
       { file: settings(1), changed: true },
     ]);
     expect(existsSync(settings(0))).toBe(false);
     expect(readFileSync(settings(1), "utf8")).toBe('{\n\t"model": "opus"\n}\n');
-    expect(readPool(env)).toEqual({ on: false, port, secrets_in: "file", accounts: [] });
+    expect(readPool(env)).toEqual({
+      on: false,
+      port,
+      secrets_in: "file",
+      accounts: [],
+      rotated_at: new Date(T0).toISOString(),
+    });
     expect(pool.status().settings.map((s) => s.state)).toEqual(["missing", "missing"]);
     expect(changes).toBe(3);
   });
@@ -669,6 +683,50 @@ describe("the listener", () => {
       liar.closeAllConnections();
       await new Promise<void>((r) => liar.close(() => r()));
     }
+  });
+  it("a rotation keeps the old bearer good for 10 minutes, so running sessions go on; rotate() is the same act", async () => {
+    const pool = open();
+    await signIn(pool, "one");
+    await pool.setOn(true);
+    const { port } = await pool.start();
+    const first = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    const ask = (token: string) =>
+      fetch(`http://127.0.0.1:${port}/v1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: body("aaaaaaaa-0000-4000-8000-000000000001"),
+      }).then((r) => r.status);
+    now += 60_000;
+    const reports = pool.rotate();
+    expect(reports.some((r) => r.changed)).toBe(true);
+    const second = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    expect(second).not.toBe(first);
+    expect(JSON.parse(readFileSync(settings(0), "utf8")).env.ANTHROPIC_AUTH_TOKEN).toBe(second);
+    // Both work through the grace (the listener's 5 s cache aged out by the clock).
+    now += 6_000;
+    expect(await ask(second)).not.toBe(401);
+    expect(await ask(first)).not.toBe(401);
+    expect(pool.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
+    now += 9 * 60_000;
+    expect(await ask(first)).not.toBe(401);
+    now += 61_000;
+    expect(await ask(first)).toBe(401);
+    expect(await ask(second)).not.toBe(401);
+    // A second rotation inside a grace: the newest previous replaces the older one.
+    pool.rotate();
+    now += 6_000;
+    const third = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    expect(await ask(second)).not.toBe(401);
+    expect(await ask(first)).toBe(401);
+    expect(await ask(third)).not.toBe(401);
+    // Off while a grace is running: the block written with the newest token is ours.
+    expect((await pool.setOn(false)).filter((r) => r.changed).length).toBe(2);
+    // rotate() while off: a new bearer, nothing to install.
+    expect(pool.rotate()).toEqual([]);
+    // moveSecrets carries the previous bearer along.
+    const moved = pool.moveSecrets("file");
+    expect(moved).toEqual({ moved: [], kept: [] });
+    await pool.stop();
   });
   it("F10: while the secrets file can't be read the listener says so with a 503, and status reads unreadable, not stale", async () => {
     if (process.platform === "win32") return;

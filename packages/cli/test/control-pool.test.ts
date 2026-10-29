@@ -80,6 +80,9 @@ class FakePool implements Pool {
   moveSecrets(_to: StoreName) {
     return { moved: [], kept: [] };
   }
+  rotate() {
+    return [];
+  }
   requireOn() {
     if (!this.on) throw new PoolError("pool_off", "the pool is off on this machine");
   }

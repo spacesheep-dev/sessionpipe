@@ -34,10 +34,12 @@ export interface PoolServerDeps {
   log: (line: string) => void;
   /** The port pool.json remembers; 0 or taken: a free one is picked. */
   port: number;
-  /** The bearer Claude Code presents (settings.json); read on every request, since
-   *  `pool on` mints a new one in another process. Null: the secrets store can't be
-   *  read right now, which is a 503, not an unknown bearer. */
-  token: () => string | null;
+  /** The bearers Claude Code may present: the current one (settings.json) and, for a
+   *  while after a rotation, the one before it, so a session that started with the old
+   *  token keeps working. Read on every request, since `pool on` mints in another
+   *  process. Null: the secrets store can't be read right now, which is a 503, not an
+   *  unknown bearer. */
+  token: () => readonly string[] | null;
   on: () => boolean;
   /** Shared with the façade and mutated here through choose/observe/pin. */
   state: PolicyState;
@@ -405,14 +407,14 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       );
       return;
     }
-    const token = deps.token();
-    if (token === null) {
+    const tokens = deps.token();
+    if (tokens === null) {
       sendJson(res, 503, errorBody("api_error", "sessionpipe pool: the pool's secrets can't be read right now"), {
         "retry-after": "30",
       });
       return;
     }
-    if (!bearerOk(req.headers.authorization, token)) {
+    if (!tokens.some((t) => bearerOk(req.headers.authorization, t))) {
       sendJson(res, 401, errorBody("authentication_error", "sessionpipe pool: unknown bearer"));
       return;
     }

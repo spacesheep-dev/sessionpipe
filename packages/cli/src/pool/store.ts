@@ -50,6 +50,9 @@ export interface PoolConfig {
   accounts: PoolAccount[];
   /** settings.json files `pool on` created, so `pool off` can delete them again. */
   created?: string[];
+  /** When the bearer was last rotated (`pool on` again, `rotate`): the one before it is
+   *  still accepted for a while after, for sessions that started with it. */
+  rotated_at?: string;
 }
 
 export interface PoolStateAccount {
@@ -120,6 +123,9 @@ export function readPool(env: NodeJS.ProcessEnv = process.env): PoolConfig {
       : {}),
     accounts,
     ...(Array.isArray(j.created) ? { created: j.created.filter((f): f is string => typeof f === "string") } : {}),
+    ...(typeof j.rotated_at === "string" && Number.isFinite(Date.parse(j.rotated_at))
+      ? { rotated_at: j.rotated_at }
+      : {}),
   };
 }
 
@@ -175,6 +181,8 @@ export function keepStanding(st: PoolState, accounts: AccountState[]): void {
 }
 
 export const TOKEN_NAME = "pool:token";
+/** The bearer before the last rotation, kept for the grace period. */
+export const PREVIOUS_TOKEN_NAME = "pool:token.previous";
 export const credentialName = (id: string): string => `pool:${id}`;
 
 /** The pool's secrets, wherever they live. `secrets_in` picks the keychain or the

@@ -38,6 +38,8 @@
 //
 //   pool.moveSecrets(to)                 the bearer and every credential into `file` | `keychain` |
 //                                         `secret-service`, pinned there; {moved, kept}
+//   pool.rotate() → InstallReport[]      a new bearer now; the one before stays good for 10 minutes
+//                                         (ROTATION_GRACE_MS), as after `pool on` while already on
 //   pool.requireOn()                     throws PoolError `pool_off` when the pool is off: what the
 //                                         daemon calls before refresh / login.begin / login.complete
 //                                         (CONTROL.md §6); the CLI doesn't, `pool add` works off.
@@ -67,6 +69,7 @@ import {
   type PoolConfig,
   PoolSecrets,
   type PoolState,
+  PREVIOUS_TOKEN_NAME,
   policyAccounts,
   poolSecretsFile,
   readPool,
@@ -104,6 +107,9 @@ export const ACCOUNTS_MAX = 20;
 export const BEARER_CACHE_MS = 5_000;
 /** How long state.json may lag the pins and holds in memory. */
 export const PERSIST_MS = 1_000;
+/** After a rotation the bearer before it is still accepted this long: a Claude Code
+ *  session keeps the token it read at its start (bb gives the same grace). */
+export const ROTATION_GRACE_MS = 10 * 60_000;
 
 export interface PoolDeps {
   /** core's `claudePool` unless a test says otherwise (types.ts says what of it is used). */
@@ -161,6 +167,8 @@ export interface PoolStatus {
   listening: boolean;
   /** Another daemon answers on pool.json's port; this process stood down (start()). */
   another_daemon?: true;
+  /** The last bearer rotation; the one before is accepted until ROTATION_GRACE_MS after. */
+  rotated_at?: string;
   /** Requests it is answering right now (0 when it isn't up). */
   in_flight: number;
   settings: { file: string; state: PoolEnvState; note?: string }[];
@@ -187,6 +195,9 @@ export interface Pool {
   helloPool(): HelloPool;
   /** Move the bearer and every credential into another store and pin it there. */
   moveSecrets(to: StoreName): { moved: string[]; kept: string[] };
+  /** A new bearer now (settings rewritten while on); the old one is good for
+   *  ROTATION_GRACE_MS more. */
+  rotate(): InstallReport[];
   readonly config: PoolConfig;
 }
 
@@ -295,16 +306,19 @@ export function openPool(deps: PoolDeps): Pool {
     const moved: string[] = [];
     const kept: string[] = [];
     if (secrets.store(from) === to) return { moved, kept };
-    const names = [TOKEN_NAME, ...cfg.accounts.map((a) => credentialName(a.id))];
+    const names = [TOKEN_NAME, PREVIOUS_TOKEN_NAME, ...cfg.accounts.map((a) => credentialName(a.id))];
+    // A store that can't be read right now keeps its secrets: nothing is pinned
+    // elsewhere on the strength of an empty read. Asked once, through the bearer: a
+    // missing optional item must not be mistaken for a locked store.
+    if (secrets.read(from, TOKEN_NAME).unreadable) return { moved, kept: names };
     for (const name of names) {
-      // A store that can't be read right now keeps its secrets: nothing is pinned
-      // elsewhere on the strength of an empty read.
-      const r = secrets.read(from, name);
-      if (r.unreadable || (r.value && !secrets.set(target, name, r.value))) {
+      const v = secrets.get(from, name);
+      if (!v) continue;
+      if (!secrets.set(target, name, v)) {
         kept.push(name);
         continue;
       }
-      if (r.value) moved.push(name);
+      moved.push(name);
     }
     if (kept.length) {
       for (const name of moved) secrets.del(target, name);
@@ -318,26 +332,38 @@ export function openPool(deps: PoolDeps): Pool {
   };
 
   /** The bearer Claude Code presents. `pool on` mints a new one every time (an old copy
-   *  in a backup dies with it); the listener reads it through `bearer()`, which asks the
-   *  store again at most every few seconds, so a rotation by the CLI reaches a running
-   *  daemon without a restart. */
+   *  in a backup dies with it); the one before is kept for ROTATION_GRACE_MS so sessions
+   *  already running, which hold the token they read at their start, go on. The
+   *  listener reads both through `bearers()`, which asks the store again at most every
+   *  few seconds, so a rotation by the CLI reaches a running daemon without a restart. */
   const mint = (): string => {
     placeSecrets();
+    const before = secrets.get(cfg, TOKEN_NAME);
     const t = randomBytes(32).toString("base64url");
     if (!secrets.set(cfg, TOKEN_NAME, t)) throw new PoolError("pool", "the secrets store refused the pool's token");
+    if (before && secrets.set(cfg, PREVIOUS_TOKEN_NAME, before)) cfg.rotated_at = new Date(now()).toISOString();
     saveConfig();
-    cached = { token: t, at: now() };
+    cached = null;
     return t;
   };
-  let cached: { token: string | null; at: number } | null = null;
-  /** The bearer; null while the store can't be read (the listener says so, 503), ""
-   *  when there is none yet. */
-  const bearer = (): string | null => {
-    if (cached && now() - cached.at < BEARER_CACHE_MS) return cached.token;
+  let cached: { token: string | null; previous: string | null; at: number } | null = null;
+  const read = () => {
+    if (cached && now() - cached.at < BEARER_CACHE_MS) return cached;
     const r = secrets.read(cfg, TOKEN_NAME);
     const t = r.unreadable ? null : (r.value ?? "");
-    cached = { token: t, at: now() };
-    return t;
+    const inGrace = cfg.rotated_at !== undefined && now() - Date.parse(cfg.rotated_at) < ROTATION_GRACE_MS;
+    const previous = t !== null && inGrace ? secrets.get(cfg, PREVIOUS_TOKEN_NAME) : null;
+    cached = { token: t, previous, at: now() };
+    return cached;
+  };
+  /** The bearer; null while the store can't be read (the listener says so, 503), ""
+   *  when there is none yet. */
+  const bearer = (): string | null => read().token;
+  /** What the listener accepts: the bearer, and the one before it inside the grace. */
+  const bearers = (): readonly string[] | null => {
+    const c = read();
+    if (c.token === null) return null;
+    return c.previous ? [c.token, c.previous] : [c.token];
   };
   const ours = (token: string | null, lastToken?: string) => ({
     port: cfg.port,
@@ -439,7 +465,7 @@ export function openPool(deps: PoolDeps): Pool {
       });
     });
 
-  const install = (lastToken?: string): InstallReport[] => installPoolEnv(dirs(), ours(bearer(), lastToken));
+  const install = (): InstallReport[] => installPoolEnv(dirs(), ours(bearer(), read().previous ?? undefined));
 
   /** state.json is written at most once a second while requests flow, and on stop. */
   let dirty: NodeJS.Timeout | null = null;
@@ -511,7 +537,7 @@ export function openPool(deps: PoolDeps): Pool {
         now,
         log,
         port: cfg.port,
-        token: bearer,
+        token: bearers,
         on: () => cfg.on,
         state: policy,
         accountUuid: uuidOf,
@@ -553,10 +579,10 @@ export function openPool(deps: PoolDeps): Pool {
           cfg.port = server?.port ?? (await freePort());
           saveConfig();
         }
-        // A fresh bearer every time: the old one, wherever it was copied, stops working.
-        const before = bearer();
+        // A fresh bearer every time: the old one, wherever it was copied, stops working
+        // once the grace for running sessions is over.
         mint();
-        const reports = install(before || undefined);
+        const reports = install();
         const created = new Set(cfg.created ?? []);
         for (const r of reports) if (r.created) created.add(r.file);
         cfg.on = true;
@@ -565,7 +591,10 @@ export function openPool(deps: PoolDeps): Pool {
         changed();
         return reports;
       }
-      const reports = uninstallPoolEnv(dirs(), { ...ours(bearer()), created: cfg.created ?? [] });
+      const reports = uninstallPoolEnv(dirs(), {
+        ...ours(bearer(), read().previous ?? undefined),
+        created: cfg.created ?? [],
+      });
       cfg.on = false;
       delete cfg.created;
       saveConfig();
@@ -574,6 +603,13 @@ export function openPool(deps: PoolDeps): Pool {
     },
 
     moveSecrets,
+
+    rotate() {
+      mint();
+      const reports = cfg.on ? install() : [];
+      changed();
+      return reports;
+    },
 
     requireOn() {
       if (!cfg.on) throw new PoolError("pool_off", "the pool is off on this machine");
@@ -696,9 +732,10 @@ export function openPool(deps: PoolDeps): Pool {
         on: cfg.on,
         port: cfg.port,
         listening: server !== null,
+        ...(cfg.rotated_at ? { rotated_at: cfg.rotated_at } : {}),
         ...(other ? { another_daemon: true } : {}),
         in_flight: server?.stats.in_flight ?? 0,
-        settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer())) : [],
+        settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer(), read().previous ?? undefined)) : [],
         accounts: cfg.accounts.map((a, i) => {
           const limits = policy.accounts[i]?.limits;
           return { ...a, ...(sums[i] as AccountSummary), ...(limits ? { limits } : {}) };
