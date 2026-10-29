@@ -516,12 +516,12 @@ const SERVICE = "Claude Code-credentials";
 /** The keychain service Claude Code keeps a config dir's login under: bare for the
  *  default dir, suffixed with 8 hex of sha256(dir) when CLAUDE_CONFIG_DIR names one. */
 export function keychainService(dir: string, home: string, platform: NodeJS.Platform = process.platform): string {
-  // "The default dir" is a comparison of resolved paths, case-blind on Windows, where
-  // the same folder arrives as `C:\Users\…` from one place and `c:\users\…` from another.
+  // "The default dir" is a comparison of resolved paths (this process's own path
+  // module: what the file system here uses), case-blind on Windows, where the same
+  // folder arrives as `C:\Users\…` from one place and `c:\users\…` from another.
   // The suffix stays a hash of the dir as given: it names an item Claude Code wrote.
-  const p = platform === "win32" ? path.win32 : path.posix;
-  const norm = (x: string) => (platform === "win32" ? p.resolve(x).toLowerCase() : p.resolve(x));
-  if (norm(dir) === norm(p.join(home, ".claude"))) return SERVICE;
+  const norm = (x: string) => (platform === "win32" ? path.resolve(x).toLowerCase() : path.resolve(x));
+  if (norm(dir) === norm(path.join(home, ".claude"))) return SERVICE;
   return `${SERVICE}-${createHash("sha256").update(dir).digest("hex").slice(0, 8)}`;
 }
 /** The keychain item's account: the login user, as Claude Code names it. */
