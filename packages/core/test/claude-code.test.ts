@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetClaudeCaches,
   appTitle,
+  backgroundCount,
   claudeAiTitle,
   claudeAiToken,
   claudeCode,
@@ -305,6 +306,40 @@ describe("claude-code fromHook", () => {
       prompt_chars: [...peer].length,
       injected: true,
     });
+  });
+});
+
+describe("background work a Stop lists (#153)", () => {
+  const waiter = { id: "w", type: "shell", status: "running", command: "sessionpipe wait --session claude-code:x" };
+  const sleep = { id: "s", type: "shell", status: "running", command: "sleep 40" };
+  const agent = { id: "adae41131ac7691bb", type: "subagent", status: "running", agent_type: "Explore" };
+  it("counts what will wake the session, never sessionpipe's own waiter, however it is run", () => {
+    expect(backgroundCount(undefined)).toBeUndefined();
+    expect(backgroundCount("3")).toBeUndefined();
+    expect(backgroundCount([])).toBe(0);
+    expect(backgroundCount([sleep, agent, null, {}])).toBe(4);
+    expect(backgroundCount([waiter, sleep])).toBe(1);
+    for (const command of [
+      "/Users/me/.local/bin/sessionpipe wait",
+      "npx sessionpipe wait --session claude-code:x",
+      '"C:\\tools\\node\\sessionpipe.cmd" wait',
+      "BASH_MAX_TIMEOUT_MS=7200000 sessionpipe wait",
+      "sessionpipe wait 2>/dev/null",
+    ])
+      expect(backgroundCount([{ ...waiter, command }])).toBe(0);
+    // Something else that merely says the words is work.
+    for (const command of [
+      "sessionpipe waiter",
+      "mysessionpipe wait",
+      "sessionpipe doctor && wait",
+      "echo sessionpipe-wait",
+    ])
+      expect(backgroundCount([{ ...waiter, command }])).toBe(1);
+  });
+  it("at a SubagentStop, the stopping subagent is out of the count, though still listed as running", () => {
+    expect(backgroundCount([agent], agent.id)).toBe(0);
+    expect(backgroundCount([agent, sleep, waiter], agent.id)).toBe(1);
+    expect(backgroundCount([agent, sleep], "other")).toBe(2);
   });
 });
 

@@ -225,7 +225,12 @@ export const EventData = z.object({
     how: z.enum(["answered", "cancelled", "timeout", "unknown"]),
   }),
   "subagent.started": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
-  "subagent.ended": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
+  "subagent.ended": Loose.extend({
+    agent_id: z.string().max(128),
+    agent_type: z.string().max(128).optional(),
+    /** Background work still in flight once this subagent is out of it, counted as `turn.ended.background` is. Absent when the harness doesn't say. */
+    background: z.int().min(0).optional(),
+  }),
   "context.compacted": Loose.extend({ trigger: z.enum(["manual", "auto"]) }),
   /** The account's usage limits as the harness last reported them: one per window. */
   "limits.observed": Loose.extend({

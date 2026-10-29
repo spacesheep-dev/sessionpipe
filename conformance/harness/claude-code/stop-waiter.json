@@ -1,0 +1,43 @@
+{
+  "harness": "claude-code",
+  "event": "Stop",
+  "recorded": {
+    "at": "2026-10-29T23:48:33.854Z",
+    "harness_version": "2.1.312",
+    "how": "claude -p --allowedTools 'Bash(sessionpipe wait:*)' with the installed hooks recording each payload (SESSIONPIPE_STATE=<dir> SESSIONPIPE_NO_WORKER=1); the prompt asked for `sessionpipe wait --session claude-code:<id>` with run_in_background and a one-word reply, so the Stop came with sessionpipe's own waiter (CONTROL.md §8) still parked, which is not work the session waits on"
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "Stop"
+    ],
+    "stdin": "{\"session_id\":\"03334c75-6849-4e22-a66d-39bc9147bd57\",\"transcript_path\":\"/Users/me/.claude/projects/-Users-me-rec-ws/03334c75-6849-4e22-a66d-39bc9147bd57.jsonl\",\"cwd\":\"/Users/me/rec/ws\",\"prompt_id\":\"6d978276-280d-4832-b204-31d222d67117\",\"permission_mode\":\"bypassPermissions\",\"effort\":{\"level\":\"high\"},\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"parked\",\"background_tasks\":[{\"id\":\"bm6n91fns\",\"type\":\"shell\",\"status\":\"running\",\"description\":\"Wait on session pipe in background\",\"command\":\"sessionpipe wait --session claude-code:03334c75-6849-4e22-a66d-39bc9147bd57\"}],\"session_crons\":[]}\n",
+    "env": {
+      "CLAUDE_CODE_SESSION_ATTENDED": "0",
+      "CLAUDE_PROJECT_DIR": "/Users/me/rec/ws"
+    },
+    "cwd": "/Users/me/rec/ws"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "claude-code",
+        "event": "Stop"
+      },
+      "session": {
+        "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+        "cwd": "/Users/me/rec/ws",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+        "reason": "stop",
+        "background": 0
+      }
+    }
+  ]
+}
