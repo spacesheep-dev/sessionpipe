@@ -24,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterByName, makeEvent, Outbox, readConfig, writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { controlMain, waitMain } from "../src/control/cli.js";
+import { channelIo, channelMain, controlMain, waitMain } from "../src/control/cli.js";
 import { moveControlSecrets } from "../src/control/store.js";
 import { HttpSink } from "../src/http-sink.js";
 import { VERSION } from "../src/run.js";
@@ -84,6 +84,7 @@ vi.mock("../src/control/cli.js", async (original) => ({
   ...(await original<typeof import("../src/control/cli.js")>()),
   controlMain: vi.fn(async () => {}),
   waitMain: vi.fn(async () => {}),
+  channelMain: vi.fn(async () => {}),
 }));
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -235,13 +236,15 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     expect(controlMain).not.toHaveBeenCalled();
   });
 
-  it("the version, the hook note, and the control and wait dispatch", async () => {
+  it("the version, the hook note, and the control, wait and channel dispatch", async () => {
     for (const v of ["version", "--version", "-v"]) expect((await run(v)).lines).toEqual([VERSION]);
     expect((await run("hook")).lines).toEqual(["sessionpipe hook is dist/hook.js; harnesses run it directly"]);
     await run("control", "status");
     expect(controlMain).toHaveBeenCalledWith(["control", "status"], expect.any(Function), realDist);
     await run("wait", "--session", "claude-code:x");
     expect(waitMain).toHaveBeenCalledWith(["wait", "--session", "claude-code:x"], expect.any(Function));
+    await run("channel");
+    expect(channelMain).toHaveBeenCalledWith(["channel"], channelIo);
   });
 
   it("a failing command says why on stderr and exits 1", async () => {

@@ -26,6 +26,7 @@ import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
+import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
 import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
@@ -37,7 +38,8 @@ export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR
   sessionpipe control mode auto|safe|inherit        (how sessions run when you message them)
   sessionpipe control folders [add|remove DIR…]     (where sessions you message may run)
   sessionpipe control status | keys [remove <id>] | off [<receiver>] | run
-  sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)`;
+  sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)
+  sessionpipe channel [--session claude-code:<id>] [--name N]  (Claude Code runs this as a channel)`;
 
 const MODE_TEXT = `  auto    Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's
           own safety check stops what looks dangerous. Pick this to get work done from your phone.
@@ -422,6 +424,39 @@ export async function waitMain(argv: string[], out: (s?: string) => void): Promi
     return;
   }
   out(await waitForMessage(session));
+}
+
+/** The process as `sessionpipe channel` uses it. Stdout is the MCP connection, so
+ *  anything said to the person goes to stderr. */
+export const channelIo = {
+  input: (): NodeJS.ReadableStream => process.stdin,
+  write: (s: string): void => void process.stdout.write(s),
+  err: (s: string): void => void process.stderr.write(s),
+  exit: (code: number): void => process.exit(code),
+};
+
+/** `sessionpipe channel`. `--name` is the name the server was added under, if not
+ *  `sessionpipe`: the session's `--channels` list names it so. It ends when Claude Code
+ *  closes the server, whether or not a wait is parked on the daemon. */
+export async function channelMain(
+  argv: string[],
+  io: typeof channelIo,
+  parent: () => string[] = parentArgv,
+): Promise<void> {
+  const i = argv.indexOf("--session");
+  const session = waitSession(i >= 0 ? argv[i + 1] : undefined);
+  if (!session) {
+    io.err("sessionpipe channel: which session? Claude Code sets CLAUDE_CODE_SESSION_ID for the servers it runs.\n");
+    return io.exit(2);
+  }
+  const n = argv.indexOf("--name");
+  const name = (n >= 0 && argv[n + 1]) || "sessionpipe";
+  await runChannel(session, io.input(), io.write, {
+    version: VERSION,
+    registered: () => namedAsChannel(parent(), name),
+    log: (line) => io.err(`${line}\n`),
+  });
+  io.exit(0);
 }
 
 /** Give a sink the key a receiver handed over at pairing. A sink for the receiver that

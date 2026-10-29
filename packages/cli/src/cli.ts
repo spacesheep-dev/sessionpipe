@@ -41,7 +41,7 @@ import {
 } from "@sessionpipe/core";
 import { connectFolders, connectTier } from "./connect.js";
 import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
-import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
+import { CONTROL_HELP, channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
@@ -164,6 +164,8 @@ async function command(cmd: string): Promise<void> {
       return controlMain(args, out, distDir);
     case "wait":
       return waitMain(args, out);
+    case "channel":
+      return channelMain(args, channelIo);
     case "hook":
       out("sessionpipe hook is dist/hook.js; harnesses run it directly");
       return;

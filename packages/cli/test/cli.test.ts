@@ -167,6 +167,7 @@ const commands: [string, ...string[]][] = [
   ["control", "off"],
   ["control", "run"],
   ["wait", "--session", "claude-code:session"],
+  ["channel", "--session", "claude-code:session"],
   ["worker", "JOB"],
   ["hook"],
   ["version"],

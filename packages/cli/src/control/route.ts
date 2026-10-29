@@ -88,6 +88,14 @@ export function frame(text: string, receiver: string): string {
   return `Message via ${host} (sessionpipe control, signed on the sender's device):\n\n${text}`;
 }
 
+/** frame() undone: the person's words, and the host they were sent from. A channel shows
+ *  the words as the message and says where they came from beside it. Text that frame()
+ *  didn't make comes back whole, from nowhere. */
+export function unframe(text: string): { text: string; via: string | null } {
+  const m = /^Message via (\S+) \(sessionpipe control, signed on the sender's device\):\n\n/.exec(text);
+  return m ? { text: text.slice(m[0].length), via: m[1] as string } : { text, via: null };
+}
+
 /** A new session's first message: the person's words first, where they come from after.
  *  Claude Code names a session from the start of its first message, so a header in front
  *  named every started session "Message via spacesheep.dev (sessionpipe control, s…"
