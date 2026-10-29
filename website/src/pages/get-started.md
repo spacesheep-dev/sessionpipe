@@ -1,14 +1,12 @@
 # Get started
 
-> **Pre-release.** The packages publish to npm at v0.1.0; until then, the commands below describe the client as specified and built in the repository. Follow the [roadmap](https://github.com/spacesheep-dev/sessionpipe/blob/main/ROADMAP.md).
-
 ## To a receiver, in one command
 
 ```sh
 npx sessionpipe connect your-receiver.example
 ```
 
-Run it on each machine your agents run on: a laptop, a lab workstation over ssh, a cloud box. It shows six digits; open the receiver's pairing page on any device where you're signed in, type them and approve with that device's passkey. That approval hands the machine both its control token and its sessions key, so there is nothing to copy. Then, without asking:
+Run it on each machine your agents run on: a laptop, a lab workstation over ssh, a cloud box. It prints a link and six digits. Open the link on any device where you're signed in to the receiver, check that its page shows the same digits, and approve with that device's passkey. The link is what pairs the machine, so open it yourself and don't paste it anywhere; the digits are only a check that the page belongs to this terminal. That approval hands the machine both its control token and its sessions key, so there is nothing to copy. Then, without asking:
 
 - **Hooks** for every harness here, and every Claude Code account (`~/.claude`, `~/.claude-*`). Hooks run `~/.local/share/sessionpipe/sessionpipe-hook`, which outlives a Node upgrade or `nvm uninstall`.
 - **A sink at tier 2** (prompts and answers, secrets removed; `--tier` to change it), capped at the receiver's `max_tier`.
