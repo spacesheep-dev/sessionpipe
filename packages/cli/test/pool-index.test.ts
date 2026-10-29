@@ -342,10 +342,12 @@ describe("adding accounts", () => {
     const d2 = open({ run: refusing });
     expect(d2.moveSecrets("file").moved).toEqual(["pool:token", `pool:${one.id}`]);
     expect(readPool(env).secrets_in).toBe("file");
-    const back = open({
-      run: (_c, args) => (args[0] === "find-generic-password" ? { status: 44, stdout: "" } : { status: 0, stdout: "" }),
-    });
-    expect(back.moveSecrets("keychain")).toEqual({ moved: [], kept: ["pool:token", `pool:${one.id}`] });
+    // A target that takes the bearer but refuses the credential: the bearer is put back.
+    const half: Runner = (c, args, input) =>
+      args[0] === "-i" && (input ?? "").includes(`"pool:${one.id}"`) ? { status: 0, stdout: "" } : run(c, args, input);
+    const back = open({ run: half });
+    expect(back.moveSecrets("keychain")).toEqual({ moved: [], kept: [`pool:${one.id}`] });
+    expect(items.size).toBe(0);
     expect(readPool(env).secrets_in).toBe("file");
     expect(readPool(env).secrets_in).toBe("file");
     expect(Object.keys(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))).length).toBe(2);
@@ -556,7 +558,7 @@ describe("the listener", () => {
       res.end('{"id":"msg"}');
     });
     try {
-      const pool = open({ upstream: up.url });
+      const pool = open({ upstream: up.url, persistMs: 20 });
       const one = await signIn(pool, "one");
       await pool.setOn(true);
       const port = readPool(env).port;
@@ -587,9 +589,10 @@ describe("the listener", () => {
         session: "aaaaaaaa-0000-4000-8000-000000000001",
         limits: { status: "allowed", windows: [{ id: "five_hour", used_percent: 25 }], observed_at: T0 },
       });
-      // state.json lags the pin by a second at most, and never past stop() (SECURITY M4).
+      // state.json lags the pin by a persist period at most, and never past stop() (SECURITY M4).
       expect(readPoolState(env).pins).toEqual({});
-      await new Promise((r) => setTimeout(r, 1_100));
+      for (let i = 0; i < 100 && !Object.keys(readPoolState(env).pins).length; i++)
+        await new Promise((r) => setTimeout(r, 10));
       expect(Object.keys(readPoolState(env).pins).length).toBe(2);
       // A third one, then stop() before the second has passed: flushed, not lost.
       await fetch(`http://127.0.0.1:${port}/v1/messages`, {

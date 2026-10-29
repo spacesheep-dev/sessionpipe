@@ -130,6 +130,8 @@ export interface PoolDeps {
   /** Where requests go (tests: the fake upstream). */
   upstream?: string;
   pollMs?: number;
+  /** How long state.json may lag memory (tests shorten it). */
+  persistMs?: number;
 }
 
 export type PoolErrorCode = "pool_account" | "pool_order" | "pool_off" | "login" | "pool";
@@ -474,7 +476,7 @@ export function openPool(deps: PoolDeps): Pool {
     dirty = setTimeout(() => {
       dirty = null;
       saveState();
-    }, PERSIST_MS);
+    }, deps.persistMs ?? PERSIST_MS);
     dirty.unref();
   };
   const flush = () => {
