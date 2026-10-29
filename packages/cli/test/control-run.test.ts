@@ -223,6 +223,37 @@ describe("control run", () => {
     expect(out.at(-1)).toBeUndefined();
   });
 
+  it("asks a claude --help that couldn't be read again a minute later, and says so (#152)", async () => {
+    paired();
+    const claude = path.join(tmp, "claude");
+    writeFileSync(claude, "");
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const unread = {
+      hasMode: false,
+      modes: [],
+      promptsNone: false,
+      fork: false,
+      unread: "`claude --help` timed out after 30 s",
+    };
+    core.findClaude.mockReturnValue(claude);
+    core.detectCaps.mockReturnValueOnce(unread);
+    await run();
+    const { deps } = daemon();
+    expect(deps.claude()?.caps).toEqual(unread);
+    expect(out).toEqual([expect.stringMatching(/ `claude --help` timed out after 30 s; asking again in a minute$/)]);
+    now += 59_999;
+    expect(deps.claude()?.caps).toEqual(unread);
+    expect(core.detectCaps).toHaveBeenCalledTimes(1);
+    // A minute on, it is read again; one that answered is kept, however long it stands.
+    now += 1;
+    expect(deps.claude()?.caps.modes).toEqual(["dontAsk"]);
+    now += 3_600_000;
+    expect(deps.claude()?.caps.modes).toEqual(["dontAsk"]);
+    expect(core.detectCaps).toHaveBeenCalledTimes(2);
+    expect(out).toHaveLength(1);
+  });
+
   it("the updater is given this copy's opt-out, the registry, the copy on disk and the installer", async () => {
     paired();
     vi.stubEnv("SESSIONPIPE_NO_UPDATE_CHECK", "1");

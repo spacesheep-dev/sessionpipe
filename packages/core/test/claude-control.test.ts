@@ -129,11 +129,52 @@ describe("capabilities and mode flags", () => {
     () => {
       const ok = script(path.join(tmp, "caps-ok"), `printf '%s' '${HELP.replace(/'/g, "")}'`);
       expect(detectCaps(ok).fork).toBe(true);
+      expect(detectCaps(ok)).not.toHaveProperty("unread");
       const bad = script(path.join(tmp, "caps-bad"), "echo '  --fork-session  x'\nexit 1");
       expect(detectCaps(bad)).toMatchObject({ fork: true, hasMode: false });
       expect(detectCaps(path.join(tmp, "caps-none")).fork).toBe(false);
+      // A failing run that still printed its modes is a read.
+      const printed = script(path.join(tmp, "caps-printed"), `printf '%s' '${HELP.replace(/'/g, "")}'\nexit 1`);
+      expect(detectCaps(printed)).toMatchObject({ hasMode: true, modes: expect.arrayContaining(["auto", "dontAsk"]) });
+      expect(detectCaps(printed)).not.toHaveProperty("unread");
     },
   );
+  it.runIf(process.platform !== "win32")(
+    "a --help that times out, or fails before it lists its modes, is unread, never a claude with no modes (#152)",
+    () => {
+      // The Intel's daemon started 82 s after a reboot, beside 28 other Claude Code
+      // processes: its --help took longer than the timeout, and nothing was printed.
+      const slow = script(path.join(tmp, "caps-slow"), "exec sleep 5");
+      expect(detectCaps(slow, 200)).toEqual({
+        hasMode: false,
+        modes: [],
+        promptsNone: false,
+        fork: false,
+        stream: false,
+        unread: "`caps-slow --help` timed out after 0.2 s",
+      });
+      const failed = script(path.join(tmp, "caps-failed"), "echo '  --fork-session  x'\nexit 1");
+      expect(detectCaps(failed)).toMatchObject({ fork: true, unread: "`caps-failed --help` failed" });
+      expect(detectCaps(path.join(tmp, "caps-missing")).unread).toBe("`caps-missing --help` failed");
+    },
+  );
+  it("caps whose --help couldn't be read refuse every level but inherit, and say why", () => {
+    const unread = {
+      hasMode: false,
+      modes: [],
+      promptsNone: false,
+      fork: false,
+      unread: "`claude --help` timed out after 30 s",
+    };
+    // Auto was refused as a mode this Claude Code lacks, and safe ran with no flag at all,
+    // so the settings' defaultMode decided.
+    for (const level of ["read", "safe", "edits", "auto"] as const)
+      expect(modeFlags(level, unread)).toEqual({
+        error:
+          "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute",
+      });
+    expect(modeFlags("inherit", unread)).toEqual({ args: [] });
+  });
 });
 
 describe("env, login and hints", () => {
