@@ -252,16 +252,20 @@ describe("a start's options are checked before anything is taken", { timeout: 30
       fork: false,
       unread: "`claude --help` timed out after 30 s",
     };
-    await startDaemon({ mode: "auto", extra: { claude: () => ({ bin: "claude", caps }) } });
-    // Safe too: with no mode to name, it used to run with no permission flag at all.
-    for (const permission of ["auto", "safe"] as const) {
-      const q = await start(`claude-code:${NEW}`, { permission });
-      expect(await rx.waitAck(q.id)).toMatchObject({
-        outcome: "refused",
-        code: "permission",
-        detail:
-          "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute",
-      });
+    const detail =
+      "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute";
+    // On an auto machine and on a safe one alike, and asked for or defaulted to: a safe
+    // start used to be offered, taken, and then run with no permission flag at all.
+    for (const mode of ["auto", "safe"] as const) {
+      await d?.stop();
+      rx.hellos.length = 0;
+      await startDaemon({ mode, extra: { claude: () => ({ bin: "claude", caps }) } });
+      expect((await lastHello()).start).not.toHaveProperty("claude-code");
+      for (const permission of [mode, "safe", undefined] as const) {
+        const q = await start(`claude-code:${NEW}`, permission ? { permission } : {});
+        expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "permission", detail });
+        expect(outcomes(q.id)).toHaveLength(1);
+      }
     }
     expect(runs).toEqual([]);
   });

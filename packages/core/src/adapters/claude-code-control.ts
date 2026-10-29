@@ -148,8 +148,11 @@ export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { e
 export const ceilingLevel = (mode: Mode): StartPermission => (mode === "inherit" ? "safe" : mode);
 
 /** The levels a start may ask Claude Code for on a machine in `mode`: never above its
- *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always). */
+ *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always).
+ *  None while that --help couldn't be read: an offered safe would be taken and then run
+ *  with no permission flag at all. */
 export function offeredLevels(mode: Mode, caps: Caps): StartPermission[] {
+  if (caps.unread) return [];
   return START_PERMISSIONS.filter(
     (l) => levelRank(l) <= levelRank(ceilingLevel(mode)) && (l === "safe" || caps.modes.includes(LEVEL_MODE[l])),
   );

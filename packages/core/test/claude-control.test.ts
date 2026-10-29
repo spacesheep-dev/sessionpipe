@@ -19,6 +19,7 @@ import {
   loginCommand,
   loginHint,
   modeFlags,
+  offeredLevels,
   parseAuthStatus,
   parseCaps,
   parseResult,
@@ -174,6 +175,8 @@ describe("capabilities and mode flags", () => {
           "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute",
       });
     expect(modeFlags("inherit", unread)).toEqual({ args: [] });
+    // And no start is offered: an offered safe would be taken and run with no flag.
+    for (const mode of ["safe", "auto", "inherit"] as const) expect(offeredLevels(mode, unread)).toEqual([]);
   });
 });
 
