@@ -15,6 +15,11 @@ swap moves no line. `src/og/og.html` is the source of `og.png`.
 is `gui` at the top of `build.mjs`; `home.html` and `get-started.md` read it through
 `{{gui:…}}`, so a new release is one edit there. `public/copy.js` puts the visitor's system
 first (macOS without JS). The home page shows `public/gui/board-{light,dark}-<width>.webp`:
-real screenshots of demo data, the same scene in each scheme, 960 and 1440 wide (the
-`phone-*` files are kept for a /gui/ page). Without them the section lays out without a
-picture, so the page never shows an older GUI than the one it offers.
+a recording of demo data, `showcase-{light,dark}.mp4` (1200 × 750 at 2×, H.264, about 20 s, a
+loop that `public/showcase.js` plays only on screen and never with reduced motion), each with a
+poster of its first frame (`showcase-{light,dark}-<width>.webp`); real screenshots of demo data,
+the same scene in each scheme, 1200 and 2400 wide (`board`, and for /gui/'s tour `session`,
+`search-palette`, `inbox`, `new-session`); and on a phone `phone-{board,session}-{light,dark}`
+(390 and 780 wide) in their place. All were made from sessionpipe-gui's `--demo` with its
+`docs/screenshots` setup. Without them the
+section lays out without a picture, so the page never shows an older GUI than the one it offers.

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // How it works, in motion (home page only). One event at a time leaves a harness, goes through
 // the core's five stages in order, leaves by the bar and the dot and reaches the receivers; now
-// and then a message or a permission answer comes back the other way. Only transform, opacity
-// and stroke-dashoffset move. Nothing runs off-screen, in a hidden tab, or when reduced motion
-// is asked for; without the script the figure is the same, standing still.
+// and then one needs you, goes through in orange, and the answer comes back the other way.
+// Only transform, opacity and stroke-dashoffset move. One round plays each time the figure
+// comes into view, then it rests; it holds while the pointer is on it. Nothing runs off-screen,
+// in a hidden tab, or when reduced motion is asked for; without the script the figure is the
+// same, standing still.
 const fig = document.querySelector(".home .pipe");
 
 if (fig?.getAnimations && "IntersectionObserver" in window) {
@@ -34,11 +36,12 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
   const into = "cubic-bezier(0.4, 0, 1, 1)";
   // a dash runs the wire's length; on the fan-out it stays hidden on the stretch the five wires
   // share and fades in as it splits off
-  const along = (path, delay, ms, back, easing, fan) => {
+  const along = (path, delay, ms, back, easing, fan, hot = false) => {
     const dash = narrow.matches ? 16 : 12;
     const len = path.getTotalLength();
     const [from, to] = back ? [-len, dash] : [dash, -len];
     path.classList.toggle("back", back);
+    path.classList.toggle("hot", hot);
     path.style.strokeDasharray = `${dash} ${len + dash}`;
     // (offsets are of the dash's way along, so they hold whatever the easing)
     const show = fan
@@ -57,8 +60,9 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
       { duration: ms, delay, easing },
     );
   };
-  const tick = (li, delay) =>
-    li.lastChild.animate(
+  const tick = (li, delay, hot = false) => {
+    li.lastChild.classList.toggle("hot", hot);
+    return li.lastChild.animate(
       [
         { transform: "scaleX(0)", opacity: 1, easing: ease },
         { transform: "scaleX(1)", opacity: 1, offset: 0.4 },
@@ -66,6 +70,7 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
       ],
       { duration: 600, delay },
     );
+  };
   const stage = (li, delay) =>
     li.firstChild.animate(
       [{ opacity: 0.66 }, { opacity: 1, offset: 0.16 }, { opacity: 1, offset: 0.4 }, { opacity: 0.66 }],
@@ -77,23 +82,28 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
     );
 
   // an event: harness row → its wire → adapt … outbox → the dot → every receiver, in about 1.2 s;
-  // it speeds into the core and slows into the receivers
-  const send = (h) => {
+  // it speeds into the core and slows into the receivers. One that needs you (attention.needed)
+  // is drawn in orange and the dot beats harder for it.
+  const send = (h, hot = false) => {
     const n = narrow.matches;
     const w = n ? tall : wide;
     const t = n ? [300, 320] : [360, 380];
-    tick(harnesses[h], 0);
-    along(w.in[n ? 1 : h], 80, t[0], false, into);
+    tick(harnesses[h], 0, hot);
+    along(w.in[n ? 1 : h], 80, t[0], false, into, false, hot);
     const core = 80 + t[0];
     for (const [k, li] of stages.entries()) stage(li, core + k * 70);
     const dot = core + 4 * 70 + 80;
-    w.dot.animate([{ transform: "scale(1)" }, { transform: "scale(1.12)", offset: 0.3 }, { transform: "scale(1)" }], {
-      duration: 320,
-      delay: dot,
-      easing: ease,
-    });
-    for (const path of w.out) along(path, dot + 20, t[1], false, ease, true);
-    for (const [k, li] of receivers.entries()) tick(li, dot + 20 + t[1] - 60 + (n ? k * 60 : 0));
+    const beat = hot ? 1.3 : 1.12;
+    w.dot.animate(
+      [{ transform: "scale(1)" }, { transform: `scale(${beat})`, offset: 0.3 }, { transform: "scale(1)" }],
+      {
+        duration: hot ? 420 : 320,
+        delay: dot,
+        easing: ease,
+      },
+    );
+    for (const path of w.out) along(path, dot + 20, t[1], false, ease, true, hot);
+    for (const [k, li] of receivers.entries()) tick(li, dot + 20 + t[1] - 60 + (n ? k * 60 : 0), hot);
   };
   // control: receiver row → the dot → the core → the harness's wire → the harness row
   const answer = (r, h) => {
@@ -106,22 +116,32 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
     tick(harnesses[h], back + 360 - 80);
   };
 
-  // a fixed round that reads as a live machine: Claude Code busiest, Antigravity least; the
-  // answers come from receivers that carry control, to harnesses that take it (ADAPTERS.md)
-  const round = [[0], [2], [1], [0], [4], [0, 0], [3], [0], [1], [2], [1, 1], [4], [0], [2]];
+  // a fixed round that reads as a live machine: Claude Code busiest, Antigravity least. [h] is
+  // an event from harness h; [h, "!"] one that needs you; [r, h] the answer, from a receiver that
+  // carries control to the harness that asked (ADAPTERS.md)
+  const round = [[0], [2], [1], [4], [0, "!"], [0, 0], [3], [0], [2], [1, "!"], [1, 1], [4], [0], [2]];
   let step = 0;
   let timer = 0;
   let due = 0;
   let left = 600;
   let on = false;
+  let rested = false;
+  let held = false;
   const next = () => {
-    const [a, b] = round[step % round.length];
-    if (b === undefined) send(a);
+    const [a, b] = round[step];
+    if (b === undefined || b === "!") send(a, b === "!");
     else answer(a, b);
-    step++;
-    // one event at a time: the next leaves only after this one has landed
-    const coming = round[step % round.length];
-    schedule(b !== undefined ? 2600 : coming.length > 1 ? 2400 : 2200 + ((step * 7) % 5) * 120);
+    step = (step + 1) % round.length;
+    // the round is over: rest until the figure has left the view and come back
+    if (step === 0) {
+      rested = true;
+      on = false;
+      left = 600;
+      return;
+    }
+    // one event at a time: the next leaves only after this one has landed; an answer follows
+    // the event that asked for it a moment after it lands
+    schedule(b === "!" ? 1900 : b !== undefined ? 2600 : 2200 + ((step * 7) % 5) * 120);
   };
   const schedule = (ms) => {
     due = performance.now() + ms;
@@ -149,16 +169,25 @@ if (fig?.getAnimations && "IntersectionObserver" in window) {
       for (const a of fig.getAnimations({ subtree: true })) a.cancel();
       return;
     }
-    run(seen && !document.hidden);
+    run(seen && !document.hidden && !rested && !held);
   };
   // start once a good part of the figure is in view, not when its edge peeks in
   new IntersectionObserver(
     ([entry]) => {
       seen = entry.intersectionRatio >= 0.35;
+      if (!entry.isIntersecting) rested = false;
       update();
     },
-    { threshold: 0.35 },
+    { threshold: [0, 0.35] },
   ).observe(fig);
+  fig.addEventListener("pointerenter", () => {
+    held = true;
+    update();
+  });
+  fig.addEventListener("pointerleave", () => {
+    held = false;
+    update();
+  });
   document.addEventListener("visibilitychange", update);
   still.addEventListener("change", update);
 }

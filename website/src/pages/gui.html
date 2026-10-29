@@ -1,0 +1,88 @@
+<div class="home guip">
+<section class="hero" aria-labelledby="gui-title">
+<p class="status"><a href="{{gui:releases}}"><b>sessionpipe-gui {{gui:version}}</b><span>macOS · Linux · any browser</span><span>Apache-2.0</span><span class="go">every release</span></a></p>
+<h1 id="gui-title">The control room for the agents you already run.</h1>
+<div class="intro">
+<p class="lead">Every coding-agent session on your machines on one live board, and every one you ever ran a keystroke away. Answer, steer and start them from your laptop or your phone. No account, no cloud, no telemetry.</p>
+<div class="gui-get">
+{{downloads}}
+</div>
+</div>
+<div class="shot-hero">{{showcase}}</div>
+</section>
+<script src="/showcase.js" defer></script>
+
+<section class="sec" id="what" aria-labelledby="what-h">
+<h2 class="sh" id="what-h" data-reveal>What it does</h2>
+<ul class="feats" data-reveal="kids">
+<li>{{mark:board}}<h3>One live board</h3><p>Every session, grouped in the order you would look: needs you, working, stale, idle, done. One mark says the state, and only <em>needs you</em> gets the colour.</p></li>
+<li>{{mark:chat}}<h3>Answer in place</h3><p>A session reads as a chat. Allow or deny the open prompt, send the next message, attach images, stop a turn.</p></li>
+<li>{{mark:inbox}}<h3>One inbox</h3><p>Every open permission, question and error from every machine, newest first, with Allow and Deny on the ones a signed answer can reach.</p></li>
+<li>{{mark:search}}<h3>Search all of it</h3><p><kbd>⌘K</kbd> across every session and this machine's own agent history, sessions from before sessionpipe included, in milliseconds, with the network down.</p></li>
+<li>{{mark:plus}}<h3>Start a session anywhere</h3><p>Pick the machine, the agent and the folder. That machine's own sessionpipe starts it and checks everything again; the GUI runs nothing.</p></li>
+<li>{{mark:key}}<h3>Signed by you</h3><p>Every command is signed by your passkey and checked on the machine that runs the agent. The GUI carries commands; it cannot forge one.</p></li>
+</ul>
+</section>
+
+{{tour}}
+
+<section class="sec stage" id="desktop" aria-labelledby="desktop-h" data-reveal>
+<div class="gui">
+<div><h2 class="kick" id="desktop-h">Desktop apps</h2><h3>A small app, on macOS and Linux.</h3></div>
+<div class="gui-get">
+<p>The same UI in a <a href="https://tauri.app">Tauri&nbsp;2</a> app on the system's own web view, not Electron. It connects to the receiver on this machine, and on first run it can start one for you as a service (that needs Node 20 or newer).</p>
+<ul class="ticks">
+<li>{{mark:bell}}<span>A menu bar item and a Dock badge that count what needs you, and a notification when something does.</span></li>
+<li>{{mark:fingerprint}}<span>On a Mac it sends too: prompts, new sessions and permission answers, signed with a key in the Secure Enclave and unlocked with Touch ID.</span></li>
+<li>{{mark:refresh}}<span>It updates itself, and launches at login if you like.</span></li>
+</ul>
+<dl class="platforms">
+<div><dt>macOS 13 or newer</dt><dd>Apple silicon and Intel · <a href="{{gui:dmg}}">.dmg</a>, signed and notarized</dd></div>
+<div><dt>Linux, x86-64</dt><dd><a href="{{gui:deb}}">.deb</a> · <a href="{{gui:appimage}}">AppImage</a>, for any distribution</dd></div>
+<div><dt>Anything with Node 20</dt><dd>Windows included: <a href="#npm">install with npm</a> and open it in a browser</dd></div>
+</dl>
+</div>
+</div>
+</section>
+
+<section class="sec" id="phone" aria-labelledby="phone-h">
+<div class="phone-row">
+<div>
+<h2 class="sh" id="phone-h" data-reveal>On your phone</h2>
+<p class="sub" data-reveal>The same app at phone size: a tab bar, sheets, a two-line banner when something needs you. It is a page your computer serves, so there is nothing to install from a store.</p>
+<ul class="ticks" data-reveal="kids">
+<li>{{mark:phone}}<span>Scan the QR code sessionpipe-gui prints and the board is there; the key in the link signs the phone in.</span></li>
+<li>{{mark:wifi}}<span>Sending needs https and a passkey: the same Wi-Fi with the GUI's own certificate (<code>--tls</code>), or Tailscale from anywhere.</span></li>
+<li>{{mark:home}}<span>Add it to your home screen and it opens like an app.</span></li>
+</ul>
+<p class="note">A native iPhone build runs in the simulator; it isn't released yet.</p>
+</div>
+<div class="phones" data-reveal="kids">{{phones}}</div>
+</div>
+</section>
+
+<section class="sec" id="npm" aria-labelledby="npm-h">
+<h2 class="sh" id="npm-h" data-reveal>Or install it with npm</h2>
+<p class="sub" data-reveal>On any system with Node 20 or newer, Windows included. Then run <code>npx sessionpipe install</code> on each machine whose sessions you want on the board; search of this machine's own history works without it.</p>
+<div class="cmds" data-reveal>
+<p class="cmd"><span class="p" aria-hidden="true">$</span><code>npx github:spacesheep-dev/sessionpipe-gui</code><button type="button" class="copy" data-text="npx github:spacesheep-dev/sessionpipe-gui" hidden>Copy</button></p>
+<p class="cmd"><span class="p" aria-hidden="true">$</span><code>npm i -g {{gui:tgz}}</code><button type="button" class="copy" data-text="npm i -g {{gui:tgz}}" hidden>Copy</button></p>
+</div>
+<p class="note">The first tries it straight from GitHub; the second keeps <code>sessionpipe-gui</code> on your PATH. It runs on port 7373 and prints a QR code for your phone. No agent handy? <code>sessionpipe-gui --demo</code> fills the board with a synthetic team.</p>
+</section>
+
+<section class="sec closer" aria-labelledby="closer-h" data-reveal>
+<div class="card">
+<div>
+<h2 id="closer-h">Your agents, on one board.</h2>
+<p>A separate open-source project that speaks the sessionpipe protocol: plain files on your disk, no database, no account, no service of ours in between.</p>
+</div>
+<div class="go">
+<a class="btn primary" href="{{gui:dmg}}">Download for macOS</a>
+<p class="links"><a href="{{gui:releases}}">All releases</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui">Source on GitHub</a></p>
+</div>
+<p class="card-foot">{{team}}</p>
+</div>
+</section>
+</div>
+<script src="/reveal.js" defer></script>

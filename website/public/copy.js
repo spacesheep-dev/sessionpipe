@@ -2,9 +2,48 @@
 // The site's one script: copy buttons, the GUI's download for this system, and the docs'
 // contents marking the section being read. Each button copies the Markdown file its
 // data-copy names, or the command its data-text holds. Without it the buttons stay hidden
-// and the link or the command beside each one does the same job.
+// and the link or the command beside each one does the same job. The label and its answer
+// share one cell (site.css), so saying "Copied" never moves the line; a file that can't be
+// copied gives way to the link beside its button (data-gone).
+const check =
+  '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2.5 6.4 4.9 8.7 9.5 3.6"/></svg>';
+// Every code block in a page's prose gets a Copy button in its corner, as the home page's
+// commands have, wired by the loop below with the rest.
+for (const pre of document.querySelectorAll(".prose pre")) {
+  const wrap = document.createElement("div");
+  wrap.className = "code";
+  pre.before(wrap);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.dataset.text = pre.textContent.replace(/\n$/, "");
+  button.textContent = "Copy";
+  button.hidden = true;
+  wrap.append(pre, button);
+}
 for (const button of document.querySelectorAll("button[data-copy], button[data-text]")) {
-  const label = button.textContent;
+  const idle = document.createElement("span");
+  idle.dataset.idle = "";
+  idle.textContent = button.textContent;
+  const answer = document.createElement("span");
+  answer.dataset.done = "";
+  answer.setAttribute("aria-hidden", "true");
+  // filled from the start, so the cell is as wide as the answer before it is given
+  answer.innerHTML = `${check}Copied`;
+  button.replaceChildren(idle, answer);
+  let timer = 0;
+  const say = (state, text) => {
+    clearTimeout(timer);
+    answer.innerHTML = state === "done" ? `${check}${text}` : text;
+    button.dataset.state = state;
+    idle.setAttribute("aria-hidden", "true");
+    answer.removeAttribute("aria-hidden");
+    timer = setTimeout(() => {
+      delete button.dataset.state;
+      idle.removeAttribute("aria-hidden");
+      answer.setAttribute("aria-hidden", "true");
+    }, 1600);
+  };
   button.hidden = false;
   button.addEventListener("click", async () => {
     const literal = button.dataset.text;
@@ -23,13 +62,11 @@ for (const button of document.querySelectorAll("button[data-copy], button[data-t
       } else {
         await navigator.clipboard.writeText(await text);
       }
-      button.textContent = "Copied";
+      say("done", "Copied");
     } catch {
-      button.textContent = literal !== undefined ? "Couldn't copy" : "Couldn't copy: open the link";
+      if (literal !== undefined) say("failed", "Couldn't copy");
+      else button.dataset.gone = "";
     }
-    setTimeout(() => {
-      button.textContent = label;
-    }, 2000);
   });
 }
 

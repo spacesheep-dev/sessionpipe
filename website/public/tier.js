@@ -1,22 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 // The home page's stream, as a sink at each tier receives it. The checked radio is the
 // state and site.css draws it with :has(), so the control works without this file. This
-// file walks the tiers once (1, 0, 1, 2, 3, back to 1) the first time the figure is in
-// view, and says what a tier carries when someone picks one. Touching the control ends the
-// walk. Off screen or in a hidden tab the walk waits; with reduced motion there is none.
+// file slides one thumb along the control to the tier in force, walks the tiers once (1, 0,
+// 1, 2, 3, back to 1) the first time the figure is in view, and says what a tier carries
+// when someone picks one. Touching the control, focusing it or pointing at it ends the walk.
+// Off screen or in a hidden tab the walk waits; with reduced motion there is none.
 const group = document.querySelector(".term .tiers");
 if (group) {
   const fig = group.closest(".term");
   const radios = [...group.querySelectorAll("input")];
   const notes = [...fig.querySelectorAll(".carries [data-n]")].map((n) => n.textContent);
   const live = fig.querySelector("[aria-live]");
+
+  // the thumb: under the checked segment, moved to it with transform and width only
+  const thumb = document.createElement("i");
+  thumb.className = "thumb";
+  thumb.setAttribute("aria-hidden", "true");
+  group.prepend(thumb);
+  const place = () => {
+    const label = radios.find((r) => r.checked)?.closest("label");
+    if (!label) return;
+    // measured on screen to the sub-pixel, then divided by the plate's own scale (it rises in
+    // from 0.985), so the thumb lands on the segment's layout box
+    const [g, l] = [group.getBoundingClientRect(), label.getBoundingClientRect()];
+    const k = g.width / group.offsetWidth || 1;
+    group.style.setProperty("--x", `${(l.left - g.left) / k - group.clientLeft}px`);
+    group.style.setProperty("--w", `${l.width / k}px`);
+  };
+  place();
+  // in place before it may move, so the first paint doesn't slide in from the left
+  requestAnimationFrame(() => requestAnimationFrame(() => group.classList.add("slide")));
+  new ResizeObserver(place).observe(group);
+  for (const r of radios) new ResizeObserver(place).observe(r.closest("label"));
+  document.fonts?.ready.then(place);
+
   const show = (tier) => {
     radios[tier].checked = true;
+    place();
   };
 
   // [tier, ms it stays]: the first hold lets the rows arrive.
   const walk = [
-    [1, 2600],
+    [1, 3600],
     [0, 2600],
     [1, 2000],
     [2, 3000],
@@ -64,10 +89,10 @@ if (group) {
     document.addEventListener("visibilitychange", wake);
   }
 
-  group.addEventListener("pointerdown", stop);
-  group.addEventListener("keydown", stop);
+  for (const type of ["pointerdown", "pointerenter", "keydown", "focusin"]) group.addEventListener(type, stop);
   group.addEventListener("change", (e) => {
     stop();
+    place();
     live.textContent = notes[Number(e.target.value)];
   });
 }
