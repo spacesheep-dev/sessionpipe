@@ -11,10 +11,21 @@ interface Msg {
   text: string;
   at: number;
   line: number;
+  /** This ask reached the session from somewhere other than its own keyboard: another
+   *  local session handed it over, which is how a control daemon reaches a session in
+   *  place (spec/CONTROL.md §6.3). The words are the person's; the arrival was not. */
+  injected?: true;
 }
 
 export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
-  const turns: { user: string; assistant: string; at: number; startLine: number; endLine: number }[] = [];
+  const turns: {
+    user: string;
+    assistant: string;
+    at: number;
+    startLine: number;
+    endLine: number;
+    injected?: true;
+  }[] = [];
   let cur: (typeof turns)[number] | null = null;
   for (const m of msgs) {
     if (m.role === "user") {
@@ -25,7 +36,14 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
         continue;
       }
       if (cur) turns.push(cur);
-      cur = { user: m.text, assistant: "", at: m.at, startLine: m.line, endLine: m.line };
+      cur = {
+        user: m.text,
+        assistant: "",
+        at: m.at,
+        startLine: m.line,
+        endLine: m.line,
+        ...(m.injected ? { injected: true as const } : {}),
+      };
     } else {
       if (!cur) cur = { user: "", assistant: "", at: m.at, startLine: m.line, endLine: m.line };
       cur.assistant += (cur.assistant ? "\n\n" : "") + m.text;
@@ -36,10 +54,17 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
   // A user message with no reply yet stays unsent: the cursor stops before it.
   const line = cur && !cur.assistant ? cur.startLine : endLine;
   const out: TranscriptRead = {
-    turns: turns.map((t) => ({ user: t.user, assistant: t.assistant, at: t.at, endLine: t.endLine })),
+    turns: turns.map((t) => ({
+      user: t.user,
+      assistant: t.assistant,
+      at: t.at,
+      endLine: t.endLine,
+      ...(t.injected ? { injected: true as const } : {}),
+    })),
     line,
   };
-  if (cur && !cur.assistant && cur.user) out.open = { user: cur.user, at: cur.at };
+  if (cur && !cur.assistant && cur.user)
+    out.open = { user: cur.user, at: cur.at, ...(cur.injected ? { injected: true as const } : {}) };
   return out;
 }
 
@@ -81,17 +106,52 @@ const textParts = (c: unknown, kinds: string[]): string => {
     .join("\n");
 };
 
-/** A message the person sent while a turn was running, absorbed by that turn. Claude Code
- *  writes it as an attachment, never as a `user` record: {type:"attachment",
+/** An origin whose message is somebody's words rather than the harness talking to
+ *  itself: `human` is the person at the keyboard, `peer` is a message another local
+ *  session handed this one — which is how a control daemon reaches a session in place,
+ *  so the words in it are the person's too (spec/CONTROL.md §6.3). Older versions wrote
+ *  no origin at all, which also means the person. */
+const SPOKEN = new Set(["human", "peer"]);
+
+/** Claude Code's own preamble around a message from another session: a first line
+ *  introducing it, and a closing paragraph telling the model what a peer message is and
+ *  isn't. Neither is anything the person typed. */
+const PEER_INTRO = /sent a message[^\n]*:$/;
+const PEER_OUTRO = "\n\nThis came from another ";
+/** The envelope the sender wraps its text in (cli control/inbox.ts). */
+const ENVELOPE = /^<cross-session-message\b[^>]*>\n([\s\S]*)\n<\/cross-session-message>$/;
+
+/** What the person actually typed, out of a peer row. Claude Code records the parsed
+ *  body on the origin when the sender declared its permission class; otherwise the row
+ *  holds the preamble and the message together, and the preamble is cut off here. A row
+ *  read without this is a turn whose ask is the harness's own words. */
+export function peerAsk(origin: unknown, text: string): string {
+  const body = (origin as { body?: unknown } | undefined)?.body;
+  let t = typeof body === "string" && body.trim() ? body : text;
+  if (t !== body) {
+    const nl = t.indexOf("\n");
+    if (nl > 0 && PEER_INTRO.test(t.slice(0, nl))) t = t.slice(nl + 1);
+    const outro = t.indexOf(PEER_OUTRO);
+    if (outro > 0) t = t.slice(0, outro);
+  }
+  return (ENVELOPE.exec(t.trim())?.[1] ?? t).trim();
+}
+
+/** A message sent while a turn was running, absorbed by that turn. Claude Code writes it
+ *  as an attachment, never as a `user` record: {type:"attachment",
  *  attachment:{type:"queued_command", prompt, commandMode:"prompt", origin:{kind:"human"}}}.
- *  Task notifications and other sessions' messages share the record with another
- *  `commandMode` or `origin.kind`; older versions wrote no origin. */
+ *  A message from another session is the same record with `origin.kind: "peer"` and the
+ *  text already on its own; a task notification shares it with another `commandMode`.
+ *  Older versions wrote no origin. */
 const queuedPrompt = (a: unknown): string => {
   if (!a || typeof a !== "object") return "";
   const q = a as { type?: unknown; commandMode?: unknown; origin?: { kind?: string }; prompt?: unknown };
   if (q.type !== "queued_command" || (q.commandMode ?? "prompt") !== "prompt") return "";
-  if (q.origin?.kind && q.origin.kind !== "human") return "";
-  return textParts(q.prompt, ["text"]).trim();
+  // Older versions wrote no origin at all, which means the person at the keyboard.
+  const kind = q.origin?.kind ?? "human";
+  if (!SPOKEN.has(kind)) return "";
+  const text = textParts(q.prompt, ["text"]).trim();
+  return kind === "peer" ? peerAsk(q.origin, text) : text;
 };
 
 /** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},
@@ -102,17 +162,23 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j || j.isSidechain) continue;
     const origin = j.origin as { kind?: string } | undefined;
-    if (
-      j.type === "user" &&
-      (j.isMeta || j.isCompactSummary || j.repeatsCompactSummary || (origin?.kind && origin.kind !== "human"))
-    )
-      continue;
+    // A message another session handed this one is the person's words reaching a session
+    // in place, so it is a turn's ask. Claude Code marks the row `isMeta` because the
+    // preamble around it is the harness's; the ask inside it is not.
+    const peer = origin?.kind === "peer";
+    if (j.type === "user" && (j.isCompactSummary || j.repeatsCompactSummary)) continue;
+    if (j.type === "user" && !peer && (j.isMeta || (origin?.kind && origin.kind !== "human"))) continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const c = (j.message as { content?: unknown } | undefined)?.content;
     if (j.type === "user") {
-      const text = textParts(c, ["text"]).trim();
+      const raw = textParts(c, ["text"]).trim();
+      const text = peer ? peerAsk(origin, raw) : raw;
+      // The tag test applies to a peer row like any other. `peerAsk` has taken the
+      // envelope off already, so what is left is the message itself — and any local
+      // program of this uid can write one, so a body shaped like harness markup must not
+      // become a turn whose ask is that markup, published as something the person typed.
       if (!text || isInjected(text)) continue;
-      msgs.push({ role: "user", text, at, line: i });
+      msgs.push({ role: "user", text, at, line: i, ...(peer ? { injected: true as const } : {}) });
     } else if (j.type === "assistant" && Array.isArray(c)) {
       const text = textParts(c, ["text"]).trim();
       if (text) msgs.push({ role: "assistant", text, at, line: i });

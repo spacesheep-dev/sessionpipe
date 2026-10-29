@@ -156,7 +156,9 @@ export const EventData = z.object({
       .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/, "a bare word, at most 40 characters")
       .optional(),
     /** True when the prompt text is a block the harness wrote rather than words a person
-     *  typed; never a claim that no person caused the turn. */
+     *  typed; never a claim that no person caused the turn. `injected` on
+     *  turn.transcript says the same of a turn's ask, for the other way an ask arrives
+     *  from somewhere other than this session's own keyboard (CONTROL.md §6.3). */
     injected: z.boolean().optional(),
   }),
   "turn.ended": Loose.extend({
@@ -173,6 +175,12 @@ export const EventData = z.object({
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),
     at: Rfc3339,
+    /** The ask reached the session from somewhere other than its own keyboard: another
+     *  local session handed it over, which is how a control daemon reaches a session in
+     *  place (CONTROL.md §6.3). The words are the person's; the arrival was not. Absent
+     *  means a turn asked for where the session runs. Like turn.started's `injected`,
+     *  and never a claim that no person is behind the ask. */
+    injected: z.literal(true).optional(),
   }),
   /** The turn still running: its prompt and what the assistant has said so far. A
    *  later turn.progress for the same turn replaces it; the turn.transcript with the
@@ -182,6 +190,10 @@ export const EventData = z.object({
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),
     at: Rfc3339,
+    /** As on turn.transcript: the ask reached the session from somewhere other than its
+     *  own keyboard. A running turn says it too, or a board would show the person's
+     *  relayed words as typed there until the turn ends. */
+    injected: z.literal(true).optional(),
   }),
   "tool.started": Loose.extend({
     tool: ToolName,
@@ -250,7 +262,7 @@ export const KeyTypes = z
   .array(z.enum(["passkey", "device"]))
   .min(1)
   .max(2);
-export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
 /** How much a started session may do without anyone approving it (CONTROL.md §3.1),
  *  narrowest first. Closed: nothing is wider than `auto`. */
 export const StartPermission = z.enum(["read", "safe", "edits", "auto"]);
@@ -430,9 +442,14 @@ export const ControlAck = z.object({
         mode: DeliveryMode.optional(),
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
-        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`);
+        /** The answer came from a COPY of the session the command named, which this
+         *  names: the person is owed the fact that their words went somewhere else. */
+        copy_of: SessionRef.optional(),
+        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`,
+         *  `ambiguous_home` when one session id is filed in several of the harness's accounts);
          *  failed: `file` when a start's attachment couldn't be fetched, checked or written,
-         *  `model` when the harness wouldn't run the start's model. */
+         *  `model` when the harness wouldn't run the start's model, `held` when a message was
+         *  written into a live session's own inbox and that session didn't take it (§6.3). */
         code: z
           .string()
           .regex(/^[a-z_]{1,40}$/)

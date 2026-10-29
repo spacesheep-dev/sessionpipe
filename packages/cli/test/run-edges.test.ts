@@ -168,6 +168,19 @@ describe("runJob with a harness that says little", () => {
         expect(events[0]?.harness).toEqual({ name: "fake", event: "X", version: "1.2.3" });
         expect(events[0]?.session).toMatchObject({ id: "s1", branch: "dev", title: "t" });
         expect(events[0]?.session).not.toHaveProperty("cwd");
+        // The session's own permission mode travels with the event (CONTROL.md §6, The
+        // session's mode), read from the payload's own field and from nowhere else: a
+        // tool input that quotes one sets nothing.
+        fake.result = { session: { id: "s1" }, events: [] };
+        asked.length = 0;
+        await runJob({ ...job(), stdin: JSON.stringify({ permission_mode: "acceptEdits" }) });
+        await runJob({ ...job(), stdin: '{"tool_input":{"text":"permission_mode: bypassPermissions"}}' });
+        await runJob({ ...job(), stdin: "not json" });
+        expect(asked).toEqual([
+          { op: "event", session: "fake:s1", event: "Stop", mode: "acceptEdits" },
+          { op: "event", session: "fake:s1", event: "Stop" },
+          { op: "event", session: "fake:s1", event: "Stop" },
+        ]);
       } finally {
         vi.unstubAllEnvs();
         await new Promise<void>((r) => server.close(() => r()));

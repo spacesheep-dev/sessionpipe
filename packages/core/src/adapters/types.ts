@@ -37,6 +37,10 @@ export interface Turn {
   assistant: string;
   at: number;
   endLine: number;
+  /** The ask reached the session from somewhere other than its own keyboard — another
+   *  local session handed it over, which is how a control daemon reaches a session in
+   *  place (spec/CONTROL.md §6.3). The words are the person's; the arrival was not. */
+  injected?: true;
 }
 
 export interface TranscriptRead {
@@ -44,7 +48,7 @@ export interface TranscriptRead {
   /** The line the cursor may advance to once every turn is delivered. */
   line: number;
   /** A prompt after the last turn with no reply yet (a turn that just began). */
-  open?: { user: string; at: number };
+  open?: { user: string; at: number; injected?: true };
 }
 
 export interface SessionFacts extends Partial<Session> {
