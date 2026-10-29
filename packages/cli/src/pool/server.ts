@@ -103,6 +103,15 @@ const DENY_PATH = [
   /^\/api\/oauth\/organizations\/[^/]+\/(payment_method|billing|prepaid|overage|setup_overage_billing|admin_requests)/,
 ];
 
+/** Printable ASCII only: a control byte or anything past 0x7e has no place in a path we forward. */
+const plainAscii = (s: string): boolean => {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c > 0x7e) return false;
+  }
+  return true;
+};
+
 /** The path as the upstream will read it, or null for one it must never see: each
  *  segment percent-decoded once (an upstream router decodes before it routes, so the
  *  deny list has to read what the router reads), then refused if anything is still
@@ -121,7 +130,7 @@ export function normalPath(pathname: string): string | null {
     } catch {
       return null;
     }
-    if (!d || d === "." || d === ".." || /[%/\\\s\u0000-\u001f\u007f-\uffff]/.test(d)) return null;
+    if (!d || d === "." || d === ".." || /[%/\\\s]/.test(d) || !plainAscii(d)) return null;
     out.push(encodeURIComponent(d));
   }
   return `/${out.join("/")}`;
