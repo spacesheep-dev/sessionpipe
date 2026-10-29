@@ -335,6 +335,7 @@ export const claudeCode: Adapter = {
         session: { id, ...rest, ...gitFacts(cwd), ...(rest.branch ? { branch: rest.branch } : {}) },
         started_at,
         last_at,
+        transcript: f,
       });
     }
     return rows;
@@ -749,6 +750,18 @@ const REMOTE_RETRY_MS = 60_000;
 const REMOTE_REFRESH_MS = 30 * 60_000;
 const CLAUDE_API = "https://api.anthropic.com";
 const KEYCHAIN = "Claude Code-credentials";
+/** The worker holds the session's lock while it asks, and a sibling hook waits 6 s for it. */
+const REMOTE_TIMEOUT_MS = 3000;
+const KEYCHAIN_TIMEOUT_MS = 2000;
+/** A session is a few kB; anything past this is not one. */
+const REMOTE_MAX_BYTES = 1 << 20;
+/** A name as Claude Code itself cleans one: control and bidirectional characters become
+ *  spaces, runs of space one, the ends trimmed. */
+const cleanName = (s: string) =>
+  s
+    .replace(/[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
 /** claude.ai's name for a session with a claude.ai link, unless the person named it
  *  here: `{title, title_source: "harness"}`, or nothing. */
@@ -769,8 +782,8 @@ export async function claudeRemoteFacts(
     const token = claudeAiToken(configDirOf(transcript), env, now);
     const got = token ? await claudeAiTitle(local.url.slice(local.url.lastIndexOf("/") + 1), token) : undefined;
     if (got !== undefined) {
-      title = got;
-      state.save(NAME, id, { remote_title: got });
+      title = got?.slice(0, 200) ?? null;
+      state.save(NAME, id, { remote_title: title });
     }
   }
   return title ? { title: title.slice(0, 120), title_source: "harness" } : {};
@@ -789,11 +802,17 @@ function keychainServices(dir: string, env: NodeJS.ProcessEnv): string[] {
   return [...out];
 }
 
-/** The access token Claude Code signed in to `dir` with, for one request: from the
- *  macOS keychain, else from `<dir>/.credentials.json`. Kept nowhere, never logged. One
- *  that has expired is not refreshed, since that would rotate Claude Code's own login:
- *  the lookup waits for Claude Code to refresh it. */
+/** A token this process already read, by config dir, until a minute before it expires:
+ *  `sessionpipe titles on` asks about every recent session, one `security` each would be
+ *  slow. In memory only, for the life of the process. */
+const tokenCache = new Map<string, { token: string; expires: number }>();
+/** The access token Claude Code signed in to `dir` with: from the macOS keychain, else
+ *  from `<dir>/.credentials.json`. Never written anywhere, never logged. One that has
+ *  expired is not refreshed, since that would rotate Claude Code's own login: the lookup
+ *  waits for Claude Code to refresh it. */
 export function claudeAiToken(dir: string, env: NodeJS.ProcessEnv, now: number): string | null {
+  const hit = tokenCache.get(dir);
+  if (hit && hit.expires > now + 60_000) return hit.token;
   const raw: string[] = [];
   if (process.platform === "darwin")
     for (const service of keychainServices(dir, env)) {
@@ -803,7 +822,7 @@ export function claudeAiToken(dir: string, env: NodeJS.ProcessEnv, now: number):
         raw.push(
           execFileSync("security", ["find-generic-password", "-a", account, "-w", "-s", service], {
             encoding: "utf8",
-            timeout: 3000,
+            timeout: KEYCHAIN_TIMEOUT_MS,
             stdio: ["ignore", "pipe", "ignore"],
           }),
         );
@@ -824,7 +843,10 @@ export function claudeAiToken(dir: string, env: NodeJS.ProcessEnv, now: number):
         }
       ).claudeAiOauth;
       if (typeof o?.accessToken !== "string" || !o.accessToken) continue;
-      if (typeof o.expiresAt !== "number" || o.expiresAt > now + 60_000) return o.accessToken;
+      const expires = typeof o.expiresAt === "number" ? o.expiresAt : Number.POSITIVE_INFINITY;
+      if (expires <= now + 60_000) continue;
+      tokenCache.set(dir, { token: o.accessToken, expires });
+      return o.accessToken;
     } catch {}
   }
   return null;
@@ -844,15 +866,19 @@ export async function claudeAiTitle(bridge: string, token: string): Promise<stri
     const r = await fetch(`${CLAUDE_API}/v1/code/sessions/${bridge}`, {
       headers: { Authorization: `Bearer ${token}`, "anthropic-version": "2023-06-01", "User-Agent": "sessionpipe" },
       redirect: "error",
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
     });
-    if (r.status !== 200) return undefined;
-    // Claude Code reads the session from `response_shape` or `session`; bare is taken too.
-    const j = (await r.json()) as (RemoteSession & { response_shape?: RemoteSession; session?: RemoteSession }) | null;
+    if (r.status !== 200 || Number(r.headers.get("content-length")) > REMOTE_MAX_BYTES) return undefined;
+    const text = await r.text();
+    if (text.length > REMOTE_MAX_BYTES) return undefined;
+    // claude.ai answers `{response_shape: {…}}` (conformance/remote/claude-code); Claude Code
+    // also reads `session`, and a bare session is taken too. Asked as `session_…`, it names
+    // the session `cse_…`: the same one.
+    const j = JSON.parse(text) as (RemoteSession & { response_shape?: RemoteSession; session?: RemoteSession }) | null;
     const s = j?.response_shape ?? j?.session ?? j;
     const bare = (x: string) => x.replace(/^(?:session|cse)_/, "");
     if (typeof s?.id !== "string" || bare(s.id) !== bare(bridge)) return undefined;
-    return (typeof s.title === "string" && s.title.replace(/\s+/g, " ").trim()) || null;
+    return (typeof s.title === "string" && cleanName(s.title)) || null;
   } catch {
     return undefined;
   }
@@ -862,4 +888,5 @@ export async function claudeAiTitle(bridge: string, token: string): Promise<stri
 export const _resetClaudeCaches = (): void => {
   liveCache.clear();
   accountCache.clear();
+  tokenCache.clear();
 };

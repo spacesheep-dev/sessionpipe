@@ -27,7 +27,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { controlMain, waitMain } from "../src/control/cli.js";
 import { moveControlSecrets } from "../src/control/store.js";
 import { HttpSink } from "../src/http-sink.js";
-import { VERSION } from "../src/run.js";
+import { factsState, VERSION } from "../src/run.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
 import { bestStore, dropSinkSecrets, moveSinkSecrets, sinkWithSecrets } from "../src/secrets.js";
 import { globalPrefix, installVersion, latestVersion } from "../src/update.js";
@@ -1292,6 +1292,67 @@ describe("titles", () => {
     expect((await run("titles")).text).toMatch(/^ {2}Claude Code sessions with a claude\.ai link/);
     expect((await run("titles", "off")).text).toContain("✓ Session names come from this machine's files only");
     expect(cfg().remote_titles).toBe(false);
+  });
+
+  it("on and refresh send again, under claude.ai's name, each session already sent under another", async () => {
+    const id = (n: number) => `bbbbbbbb-0000-4000-8000-00000000000${n}`;
+    const row = (n: number, transcript = `/t/${n}.jsonl`) => ({
+      session: { id: id(n), title: "the first ask", title_source: "first-ask" as const },
+      started_at: Date.now() - 1000,
+      last_at: Date.now(),
+      ...(transcript ? { transcript } : {}),
+    });
+    // 1 was backfilled and 6 sent live under the first ask; 2 went live under the name claude.ai
+    // has; 3 was never sent; claude.ai has no name for 4; 5 has no transcript to ask about.
+    vi.spyOn(claudeCode, "backfill").mockImplementation(() => [row(1), row(2), row(3), row(4), row(5, ""), row(6)]);
+    vi.spyOn(claudeCode, "detect").mockReturnValue(true);
+    const remote = vi
+      .spyOn(claudeCode as Required<typeof claudeCode>, "remoteFacts")
+      .mockImplementation(async (s) =>
+        s.id === id(4) ? {} : { title: `claude.ai ${s.id.slice(-1)}`, title_source: "harness" as const },
+      );
+    const facts = factsState(state);
+    facts.save("claude-code", id(1), { backfilled: true });
+    facts.save("claude-code", id(2), { session: { title: "claude.ai 2", title_source: "harness" } });
+    facts.save("claude-code", id(6), { session: { title: "the first ask", cwd: "/w" } });
+    expect((await run("titles", "on")).lines[1]).toBe(
+      "  Asked claude.ai about the last 30 days' sessions: 4 named there, 2 sent again under that name.",
+    );
+    expect(remote).toHaveBeenCalledTimes(5);
+    const sent = (n: number) => new Outbox(state).read({ harness: "claude-code", session: id(n) }, 0).events;
+    expect(sent(1)).toMatchObject([
+      { type: "session.backfill", session: { title: "claude.ai 1", title_source: "harness" } },
+    ]);
+    expect(sent(6)).toMatchObject([{ type: "session.backfill", session: { title: "claude.ai 6" } }]);
+    for (const n of [2, 3, 4, 5]) expect(sent(n)).toEqual([]);
+    expect(facts.get("claude-code", id(6))).toMatchObject({
+      backfilled: true,
+      sent_title: "claude.ai 6",
+      session: { title: "claude.ai 6", title_source: "harness", cwd: "/w" },
+    });
+    // Again: nothing new to send. Asking which holds asks claude.ai nothing.
+    expect((await run("titles", "refresh", "--days", "7")).lines[1]).toBe(
+      "  Asked claude.ai about the last 7 days' sessions: 4 named there, 0 sent again under that name.",
+    );
+    await run("titles");
+    expect(remote).toHaveBeenCalledTimes(10);
+    // A backfill takes claude.ai's names too; a harness with nothing to ask is left alone.
+    vi.mocked(claudeCode.backfill).mockImplementation(() => [row(7)]);
+    vi.spyOn(codex, "backfill").mockReturnValue([{ ...row(8), session: { id: "codex-8", title: "local" } }]);
+    await run("backfill", "--claude-code", "--codex");
+    expect(sent(7)).toMatchObject([{ type: "session.backfill", session: { title: "claude.ai 7" } }]);
+    expect(new Outbox(state).read({ harness: "codex", session: "codex-8" }, 0).events).toMatchObject([
+      { session: { title: "local" } },
+    ]);
+    // Off: nothing is asked, refresh or not.
+    await run("titles", "off");
+    await run("titles", "refresh");
+    expect(remote).toHaveBeenCalledTimes(11);
+    // On, with nothing it could name.
+    vi.mocked(claudeCode.detect).mockReturnValue(false);
+    expect((await run("titles", "on")).lines[1]).toMatch(
+      /^ {2}None of the last 30 days' sessions has a name on claude\.ai that could be read here/,
+    );
   });
 });
 

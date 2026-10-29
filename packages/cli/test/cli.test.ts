@@ -158,6 +158,7 @@ const commands: [string, ...string[]][] = [
   ["titles"],
   ["titles", "on"],
   ["titles", "off"],
+  ["titles", "refresh"],
   ["control"],
   ["control", "pair", "https://receiver.invalid", "--mode", "safe", "--no-service"],
   ["control", "mode", "auto"],

@@ -59,6 +59,8 @@ export interface BackfillRow {
   started_at: number;
   last_at: number;
   turns?: number;
+  /** The file the row was read from, for what `remoteFacts` asks about it. Never sent. */
+  transcript?: string;
 }
 
 /** The command a hook entry runs: absolute node, absolute script, then args. */

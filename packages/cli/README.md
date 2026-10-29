@@ -185,6 +185,7 @@ your first prompt cut to 50 characters while the Claude app shows another name.
 
 ```sh
 sessionpipe titles on       # Claude Code sessions with a claude.ai link take claude.ai's name
+sessionpipe titles refresh  # ask again about the last 30 days' sessions (--days N)
 sessionpipe titles off      # local files only again (the default)
 sessionpipe titles          # which one holds
 ```
@@ -196,8 +197,12 @@ Claude Code writes, else `.credentials.json` in the config dir). It sends that t
 `api.anthropic.com` alone and keeps it nowhere: not in a file, an event, a log or a
 sink. A token about to expire is skipped, never refreshed, so Claude Code's own login is
 never touched. A name you gave the session here (`/rename`) still wins, and so does a
-rename in the Claude app, which reaches the transcript without any of this. A session
-already on a receiver takes the new name with its next event.
+rename in the Claude app, which reaches the transcript without any of this.
+
+`titles on` (and `titles refresh`) also asks about every session of the last 30 days
+and sends each one a receiver already has under another name again, as
+`session.backfill` with claude.ai's name, so finished sessions are renamed too, not only
+the ones that run again. It prints how many it found named and how many it sent.
 
 ## Help and status JSON
 

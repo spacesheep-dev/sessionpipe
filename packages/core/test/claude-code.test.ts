@@ -574,6 +574,7 @@ describe("claude-code transcript and backfill", () => {
     expect(rows[0]).toMatchObject({
       session: { id: SID, cwd: "/w/app", branch: "main", title: "ask", title_source: "first-ask" },
       started_at: Date.parse("2026-10-05T10:00:00.000Z"),
+      transcript: file,
     });
     expect(rows[0]?.session).not.toHaveProperty("first_ask");
     expect(rows[0]?.session).not.toHaveProperty("harness_version");
@@ -727,8 +728,10 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
     vi.stubGlobal("fetch", answer(401, { error: { message: "expired" } }));
     at += 30 * 60_000;
     expect(await claudeRemoteFacts(SID, local, file, state, env, at)).toMatchObject({ title: "Named now" });
-    // So does a machine with no sign-in to read, and claude.ai isn't asked at all.
+    // So does a machine with no sign-in to read (a fresh worker has no token in memory),
+    // and claude.ai isn't asked at all.
     rmSync(path.join(dir, ".credentials.json"));
+    _resetClaudeCaches();
     const none = vi.fn();
     vi.stubGlobal("fetch", none);
     at += 30 * 60_000;
@@ -768,6 +771,7 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
     ]);
     // A CLAUDE_CONFIG_DIR is hashed as it was set, and tried first.
     asked = [];
+    _resetClaudeCaches();
     claudeAiToken(dir, { ...me, CLAUDE_CONFIG_DIR: `${dir}/` }, NOW);
     expect(asked.map(service)).toEqual([
       `Claude Code-credentials-${sha8(`${dir}/`)}`,
@@ -788,12 +792,16 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
     const osUser = os.userInfo().username;
     expect(asked[0]?.[2]).toBe(/^[\w.-]+$/.test(osUser) ? osUser : "claude-code-user");
     // The item wins over the file, printed as text or as hex; an expired one falls through.
+    const fresh = () => {
+      _resetClaudeCaches();
+      return claudeAiToken(dir, me, NOW);
+    };
     keychain.find = () => `${oauth({ accessToken: "from-keychain" })}\n`;
-    expect(claudeAiToken(dir, me, NOW)).toBe("from-keychain");
+    expect(fresh()).toBe("from-keychain");
     keychain.find = () => Buffer.from(oauth({ accessToken: "from-hex" })).toString("hex");
-    expect(claudeAiToken(dir, me, NOW)).toBe("from-hex");
+    expect(fresh()).toBe("from-hex");
     keychain.find = () => oauth({ accessToken: "stale", expiresAt: NOW - 1 });
-    expect(claudeAiToken(dir, me, NOW)).toBe("from-file");
+    expect(fresh()).toBe("from-file");
   });
 
   it("takes claude.ai's answer only about the session it asked for", async () => {
@@ -816,5 +824,62 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
       }),
     );
     expect(await claudeAiTitle("session_01Remote", "tok")).toBeUndefined();
+  });
+
+  it("reads each answer recorded from claude.ai as a reader must (conformance/remote/claude-code)", async () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const fixtures = path.resolve(here, "../../../conformance/remote/claude-code");
+    const files = readdirSync(fixtures).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBeGreaterThanOrEqual(2);
+    for (const f of files) {
+      const fx = JSON.parse(readFileSync(path.join(fixtures, f), "utf8")) as {
+        request: { path: string; bridge: string };
+        response: { status: number; body: unknown };
+        expect: { title: string | null };
+      };
+      const got = answer(fx.response.status, fx.response.body);
+      vi.stubGlobal("fetch", got);
+      const title = await claudeAiTitle(fx.request.bridge, "tok");
+      expect(got.mock.calls[0]?.[0], f).toBe(`https://api.anthropic.com${fx.request.path}`);
+      expect(title ?? null, f).toBe(fx.expect.title);
+    }
+  });
+
+  it("cleans a name as Claude Code does, and won't read an answer too big to be a session", async () => {
+    vi.stubGlobal("fetch", answer(200, { response_shape: { id: "cse_01Remote", title: "a\u0007b\u202Ec \n\t d" } }));
+    expect(await claudeAiTitle("session_01Remote", "tok")).toBe("a b c d");
+    const big = { response_shape: { id: "cse_01Remote", title: "x", pad: "y".repeat(1 << 20) } };
+    vi.stubGlobal("fetch", answer(200, big));
+    expect(await claudeAiTitle("session_01Remote", "tok")).toBeUndefined();
+    // One that says so up front isn't read at all.
+    const said = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ response_shape: { id: "cse_01Remote", title: "x" } }), {
+          status: 200,
+          headers: { "content-length": String(2 << 20) },
+        }),
+    );
+    vi.stubGlobal("fetch", said);
+    expect(await claudeAiTitle("session_01Remote", "tok")).toBeUndefined();
+  });
+
+  it("keeps a token it read for the life of the process, until a minute before it expires", () => {
+    creds({ accessToken: "first", expiresAt: NOW + 10 * 60_000 });
+    expect(claudeAiToken(dir, env, NOW)).toBe("first");
+    creds({ accessToken: "second" });
+    expect(claudeAiToken(dir, env, NOW + 60_000)).toBe("first");
+    expect(claudeAiToken(dir, env, NOW + 9 * 60_000)).toBe("second");
+    _resetClaudeCaches();
+    creds({ accessToken: "third" });
+    expect(claudeAiToken(dir, env, NOW)).toBe("third");
+  });
+
+  it("remembers at most 200 characters of a name, and sends 120", async () => {
+    creds({ accessToken: "tok" });
+    vi.stubGlobal("fetch", answer(200, { response_shape: { id: "cse_01Remote", title: "n".repeat(300) } }));
+    const state = memState();
+    const got = await claudeRemoteFacts(SID, { url: LINK }, transcript([user("a")]), state, env, NOW);
+    expect(got.title).toHaveLength(120);
+    expect(state.mem.remote_title).toHaveLength(200);
   });
 });
