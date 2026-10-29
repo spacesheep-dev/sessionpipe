@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { Session } from "../schema/v1.js";
+import { jobEnv } from "../src/adapters/headless.js";
 import type { Adapter, HookInput } from "../src/adapters/types.js";
-import { LAUNCHED_BY_ENV, launchedBy, readHook } from "../src/launched-by.js";
+import {
+  ASK_CHAIN_ENV,
+  DELEGATED_BY_ENV,
+  LAUNCHED_BY_ENV,
+  LINEAGE_ENV,
+  launchedBy,
+  readHook,
+  withoutLineage,
+} from "../src/launched-by.js";
 
 const LAUNCHER = "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc";
 const input = (env: Record<string, string> = {}): HookInput => ({ argv: ["x", "Start"], stdin: "{}", env, cwd: "/" });
@@ -11,6 +20,21 @@ const adapter = (session: Record<string, unknown> | null): Adapter =>
     name: "x",
     fromHook: () => (session ? { session: { id: "s", ...session }, events: [] } : null),
   }) as unknown as Adapter;
+
+describe("the lineage is reset by whatever starts a further session (PROTOCOL.md §3, CONTROL.md §13)", () => {
+  it("withoutLineage drops the three variables and nothing else; jobEnv is that plus the control mark", () => {
+    const env = {
+      PATH: "/bin",
+      [LAUNCHED_BY_ENV]: "codex:a",
+      [DELEGATED_BY_ENV]: "codex:b",
+      [ASK_CHAIN_ENV]: "codex:a,codex:b",
+    };
+    expect(LINEAGE_ENV).toEqual(["SESSIONPIPE_LAUNCHED_BY", "SESSIONPIPE_ASKED_BY", "SESSIONPIPE_ASK_CHAIN"]);
+    expect(withoutLineage(env)).toEqual({ PATH: "/bin" });
+    expect(env[DELEGATED_BY_ENV]).toBe("codex:b");
+    expect(jobEnv(env)).toEqual({ PATH: "/bin", SESSIONPIPE_CONTROL_JOB: "1" });
+  });
+});
 
 describe("launchedBy (PROTOCOL.md §3)", () => {
   it("reads <harness>:<id> from the launcher's variable", () => {

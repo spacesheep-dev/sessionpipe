@@ -8,9 +8,17 @@
 // headlessly, and so can any agent that speaks ACP (held like an SDK session, `api`
 // mode); the Agent SDK, waiters, Stop blocks and forks are Claude Code's.
 //
+// The same runs serve a session here that asks another agent (`sessionpipe ask`, on the
+// local socket, §13) and a handoff whose reply goes into another session (`reply_to`,
+// §6): the start, prompt and headless paths ack to a Caller, which is a paired receiver
+// or a sink of the daemon's own, and what those runs did goes out as events on the
+// asking session, the way a hook's do.
+//
 // A receiver can queue a message; it can never make this process run one.
+import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import {
   acpControl,
@@ -18,40 +26,66 @@ import {
   claudeAccounts,
   claudeControl,
   codexControl,
+  configFile,
+  DELEGATED_BY_ENV,
   deniedNote,
   type HarnessAccount,
   HELLO_HARNESSES_MAX,
   JOB_TIMEOUT_MS,
   jobEnv,
   type Login,
+  machineName,
+  makeEvent,
+  Outbox,
   type Reading,
   type RunOptions,
   type RunResult,
+  readConfig,
+  redactDeep,
   redactSecrets,
+  type Session,
   safeId,
   shortId,
+  takeLock,
+  tilde,
+  ulid,
   untilde,
 } from "@sessionpipe/core";
 import {
   type ControlCommand,
   KEY_TYPES,
   levelRank,
+  MODEL_MAX,
+  MODEL_RE,
   narrower,
   parseSessionRef,
   type RunLevel,
   type StartPermission,
+  TEXT_MAX,
   verifyCommand,
 } from "@sessionpipe/core/control";
 import type { Pool } from "../pool/index.js";
+import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
-import { ask, type LocalReply, type LocalRequest } from "./local.js";
+import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./local.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { awaitAnswer, transcriptEnd } from "./reply.js";
-import { type DeliveryMode, frame, frameStart, IN_PLACE_ANSWER, kindPath, routePrompt } from "./route.js";
+import {
+  type DeliveryMode,
+  frame,
+  frameAsk,
+  frameHandoff,
+  frameStart,
+  HEADLESS,
+  IN_PLACE_ANSWER,
+  kindPath,
+  routePrompt,
+} from "./route.js";
 import {
   type Ack,
   AckOutbox,
+  askOn,
   type ControlConfig,
   type ControlMode,
   type DaemonState,
@@ -203,8 +237,95 @@ export interface SdkHost {
     model?: string;
     configDir?: string;
     allowedTools?: string[];
+    /** Over the process's own: an ask's lineage for the session's hooks (CONTROL.md §13). */
+    env?: Record<string, string>;
   }): SdkSession;
 }
+
+/** Where a command's acks go, besides a paired receiver (store.ts PairedReceiver: the ack
+ *  outbox, then `POST /ack`): an asker on the local socket (CONTROL.md §13) or a handoff's
+ *  relay (§6 `reply_to`), each a sink of the daemon's own. The start, prompt and headless
+ *  paths are written once, against a Caller, so a run acks the same way wherever it came
+ *  from and there is no second copy of any of them. */
+export interface AckSink {
+  /** Names it in the log and the acks' `receiver`. */
+  label: string;
+  /** The text as the session gets it: a new session's first message, or a later one. */
+  frame(text: string, first: boolean): string;
+  /** What a child the run starts gets in its environment, over the job's own. */
+  env?: Record<string, string>;
+  /** The answer so far (§10 `progress`), redacted and capped like an ack's reply. */
+  progress(text: string, seq: number): void;
+  /** `taken`, then exactly one final outcome: the acks a receiver would get. */
+  ack(a: Omit<Ack, "receiver">): void;
+  /** False when the message reaching the session is the whole job and its reply isn't
+   *  waited for (a relay). */
+  wantsReply: boolean;
+}
+type Caller = PairedReceiver | AckSink;
+const isSink = (r: Caller): r is AckSink => "ack" in r;
+
+/** A command that carried `reply_to` (CONTROL.md §6, a handoff): remembered until its
+ *  final ack, when the reply goes into that session. */
+interface Handoff {
+  receiver: PairedReceiver;
+  askId: string;
+  to: { harness: string; id: string };
+  /** The session the command named (the ack may name the copy it ran in). */
+  from: string;
+  sent: number;
+}
+
+/** How deep an ask may already be: A asks B, B may ask C, C may not ask (§13). */
+const ASK_DEPTH = 2;
+const ASK_CHAIN_MAX = 8;
+/** Asks one session may have in hand at once, as the asker or as the session asked
+ *  (§13 `start_limit`): an ask into a session that already exists takes no start, so
+ *  nothing else bounds how many a looping model queues on one. */
+const ASKS_IN_HAND = 3;
+const ASK_HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
+
+/** An ask's fields as the wire has them (local.ts), checked before any rule: what is
+ *  wrong, in words, or null. The CLI builds them, but the socket takes any process of
+ *  the person's own, so nothing here is trusted by shape. */
+export function askProblem(req: AskRequest): string | null {
+  const r = req as Partial<AskRequest>;
+  if (typeof r.harness !== "string" || !ASK_HARNESS_RE.test(r.harness)) return "which agent?";
+  if (r.session !== undefined) {
+    const ref = parseSessionRef(r.session);
+    if (!ref) return "a session is <harness>:<id>";
+    if (ref.harness !== r.harness) return `${r.session.slice(0, 24)} isn't a ${r.harness} session`;
+  }
+  if (r.from !== undefined && !parseSessionRef(r.from)) return "from is the asking session, <harness>:<id>";
+  if (typeof r.text !== "string" || !r.text.trim() || r.text.length > TEXT_MAX)
+    return `an ask needs text, at most ${TEXT_MAX} characters`;
+  if (typeof r.cwd !== "string" || !path.isAbsolute(r.cwd) || r.cwd.length > 1024) return "cwd is an absolute folder";
+  if (!Array.isArray(r.chain) || r.chain.length > ASK_CHAIN_MAX || r.chain.some((c) => !parseSessionRef(c)))
+    return "chain is a list of sessions, <harness>:<id>, outermost first: the asks this one is nested in";
+  if (r.permission !== undefined && r.permission !== "read" && r.permission !== "safe")
+    return "a permission is read or safe: an ask runs narrower than the machine's mode, never wider";
+  if (r.model !== undefined && (typeof r.model !== "string" || r.model.length > MODEL_MAX || !MODEL_RE.test(r.model)))
+    return `a model is 1 to ${MODEL_MAX} letters, digits and ._:/@[]-, not starting with a dash`;
+  if (r.pid !== undefined && !Number.isInteger(r.pid)) return "pid is a number";
+  return null;
+}
+
+/** A run's refusal (CONTROL.md §5, §6) in the ask's own words (§13): a session the daemon
+ *  can't deliver to falls under the `harness` rule, a level or model it won't run with is
+ *  the request's own fault; the start caps keep their name. */
+export const askCode = (code: string | undefined): string =>
+  code === "no_session" || code === "bad_session"
+    ? "harness"
+    : code === "permission" || code === "model"
+      ? "bad_fields"
+      : (code ?? "failed");
+
+/** A session place() refused, as the ack says it. */
+const refusal = (p: { refused: string; why: string }): Omit<Ack, "receiver" | "id" | "at"> => ({
+  outcome: "refused",
+  code: p.refused,
+  detail: p.why,
+});
 
 export interface DaemonDeps {
   now: () => number;
@@ -269,7 +390,7 @@ export class DaemonRunning extends Error {
 }
 
 interface TurnPending {
-  receiver: PairedReceiver;
+  receiver: Caller;
   msgId: string;
   text: string;
   session: string;
@@ -322,6 +443,8 @@ export interface Status {
   delivered: Record<string, number>;
   /** What a start may carry per harness, as the last hello said (CONTROL.md §2). */
   start: Record<string, StartEntry>;
+  /** Whether a session here may ask another agent, and which agents (CONTROL.md §13). */
+  ask: { on: boolean; harnesses: string[] };
   /** Null when the daemon could restart now (nothing in hand); otherwise what it holds. */
   busy: string | null;
   update?: unknown;
@@ -401,6 +524,14 @@ export class ControlDaemon {
    *  for that session that came in the same poll waits for its start rather than
    *  finding no session (2026-10-04: a start and a prompt queued back to back). */
   private readonly startsPending = new Map<string, Promise<void>>();
+  /** Commands with `reply_to` in hand, by message id: their reply follows into that
+   *  session after their own final ack (CONTROL.md §6). */
+  private readonly handoffs = new Map<string, Handoff>();
+  /** Asks in hand, by ask id: who asked whom. The depth and loop rules (§13) count from
+   *  here as well as from the chain the caller reports, which is the caller's own to
+   *  clear: B, asked by A, can't ask A back from a clean environment, and C, asked by B
+   *  under A, can't ask on by forgetting its chain. */
+  private readonly asks = new Map<string, { from: string | null; to: string }>();
 
   constructor(
     private cfg: ControlConfig,
@@ -568,12 +699,12 @@ export class ControlDaemon {
 
   reload(cfg: ControlConfig): void {
     const known = new Set(this.cfg.receivers.map((r) => r.control + r.machine));
-    const told = JSON.stringify([this.cfg.folders, this.cfg.mode, this.cfg.name]);
+    const told = JSON.stringify([this.cfg.folders, this.cfg.mode, this.cfg.name, askOn(this.cfg)]);
     this.cfg = cfg;
     for (const r of cfg.receivers) if (!known.has(r.control + r.machine)) void this.pollLoop(r);
-    // `control folders`, `control mode` or a `--rename-machine` changed what a hello says:
-    // say it now, so the receiver doesn't wait up to ten minutes for the next one.
-    if (this.running && JSON.stringify([cfg.folders, cfg.mode, cfg.name]) !== told) void this.helloAll();
+    // `control folders`, `control mode`, `ask on|off` or a `--rename-machine` changed what a
+    // hello says: say it now, so the receiver doesn't wait up to ten minutes for the next one.
+    if (this.running && JSON.stringify([cfg.folders, cfg.mode, cfg.name, askOn(cfg)]) !== told) void this.helloAll();
   }
 
   status(): Status {
@@ -601,6 +732,7 @@ export class ControlDaemon {
       acks_pending: this.acks.all().length,
       delivered: { ...this.delivered },
       start: this.startOptions(),
+      ask: { on: askOn(this.cfg), harnesses: this.askable() },
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
       ...(this.deps.pool ? { pool: this.poolSummary() } : {}),
@@ -721,10 +853,19 @@ export class ControlDaemon {
         }
         l.continued = true;
         const from = this.answerFrom(req.session);
-        this.reply(s, { op: "block", reason: `${frame(p.text, p.receiver.url)}\n\n${IN_PLACE_ANSWER}`, id: p.msgId });
+        // An ask's framing says how the answer travels already; a receiver's gets the note.
+        const body = this.framed(p.receiver, p.text, false);
+        this.reply(s, {
+          op: "block",
+          reason: isSink(p.receiver) ? body : `${body}\n\n${IN_PLACE_ANSWER}`,
+          id: p.msgId,
+        });
         this.followAnswer(p.receiver, p.msgId, "turn", req.session, from, p.queuedAt);
         return;
       }
+      case "ask":
+        void this.onAsk(req, s);
+        return;
       case "permission": {
         const l = this.liveOf(req.session);
         const prev = l.attentions.get(req.attention);
@@ -981,8 +1122,9 @@ export class ControlDaemon {
     }
   }
 
-  private allowedFor(r: PairedReceiver): string[] {
-    return this.sessionTools.get(r.control + r.machine) ?? [];
+  /** A receiver's own MCP servers; an ask or a relay brings none. */
+  private allowedFor(r: Caller): string[] {
+    return isSink(r) ? [] : (this.sessionTools.get(r.control + r.machine) ?? []);
   }
 
   private async helloAll(): Promise<void> {
@@ -1020,6 +1162,10 @@ export class ControlDaemon {
         key_types: [...KEY_TYPES],
         // The account pool, in every hello of a daemon that has one (§2 `pool`).
         ...(this.deps.pool ? { pool: this.deps.pool.helloPool() } : {}),
+        // Whether sessions here may ask each other (§13), and that a start or a prompt may
+        // carry `reply_to` (§6): a receiver that sees neither treats this daemon as 0.10.
+        ask: askOn(this.cfg),
+        handoff: true,
       };
       const res = await this.post(r, "/hello", body).catch(() => null);
       const st = this.polling.get(r.control + r.machine);
@@ -1050,20 +1196,34 @@ export class ControlDaemon {
 
   // --- acks -----------------------------------------------------------------------
 
-  private finish(r: PairedReceiver, id: string, a: Omit<Ack, "receiver" | "id" | "at">, since?: number): void {
-    const ack: Ack = { receiver: r.control + r.machine, id, at: new Date(this.deps.now()).toISOString(), ...a };
+  private finish(r: Caller, id: string, a: Omit<Ack, "receiver" | "id" | "at">, since?: number): void {
+    const receiver = isSink(r) ? r.label : r.control + r.machine;
+    const ack: Ack = { receiver, id, at: new Date(this.deps.now()).toISOString(), ...a };
     if (ack.reply) ack.reply = redactSecrets(ack.reply).slice(0, MAX_REPLY);
     if (ack.detail) ack.detail = redactSecrets(ack.detail).slice(0, 500);
     if (a.outcome !== "taken") {
       this.inflight.delete(id);
-      this.recentAcks.set(id, { ack, at: this.deps.now() });
+      // A receiver may hand the message over again: it gets this ack back. A sink never does.
+      if (!isSink(r)) this.recentAcks.set(id, { ack, at: this.deps.now() });
       this.delivered[a.mode ?? a.outcome] = (this.delivered[a.mode ?? a.outcome] ?? 0) + 1;
       this.deps.log(
         `ack ${id.slice(-8)} ${a.outcome}${a.mode ? ` via ${a.mode}` : ""}${a.code ? ` (${a.code})` : ""}${since ? ` send→${a.outcome} ${this.deps.now() - since} ms` : ""}`,
       );
     }
+    if (isSink(r)) {
+      const { receiver: _r, ...own } = ack;
+      r.ack(own);
+      return;
+    }
     this.acks.add(ack);
     void this.flushAcks();
+    // A handoff: this command's own final ack is out, exactly one; the reply follows into
+    // `reply_to` now, and how that goes lives in the events, never in another ack.
+    const h = a.outcome === "taken" ? undefined : this.handoffs.get(id);
+    if (h) {
+      this.handoffs.delete(id);
+      void this.relay(h, ack);
+    }
   }
 
   private flushing = false;
@@ -1177,6 +1337,10 @@ export class ControlDaemon {
     }
     const ref = parseSessionRef(cmd.session)!;
     const kp = kindPath(cmd.kind, ref.harness);
+    // A handoff (CONTROL.md §6): the verifier took `reply_to` on a start or a prompt only,
+    // as a session ref. Remembered now, so whatever this command's final ack is, the
+    // session that asked hears how it went.
+    if (cmd.reply_to) this.handoff(r, m.id, cmd, ref.harness, sent);
     if (typeof kp === "object") return this.finish(r, m.id, { outcome: "unsupported", detail: kp.unsupported });
     try {
       if (kp === "start") return await this.startSession(r, m.id, cmd, sent);
@@ -1589,7 +1753,7 @@ export class ControlDaemon {
     };
   }
 
-  private async prompt(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number): Promise<void> {
+  private async prompt(r: Caller, id: string, cmd: ControlCommand, place: Placed, sent: number): Promise<void> {
     const route = routePrompt(this.view(cmd.session, place));
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
@@ -1602,7 +1766,7 @@ export class ControlDaemon {
         const w = l.waiter!;
         l.waiter = null;
         const from = this.answerFrom(cmd.session);
-        this.reply(w, { op: "message", text: frame(text, r.url), id });
+        this.reply(w, { op: "message", text: this.framed(r, text, false), id });
         this.scheduleHello();
         return this.followAnswer(r, id, "waiter", cmd.session, from, sent);
       }
@@ -1624,7 +1788,7 @@ export class ControlDaemon {
       case "sdk": {
         const s = this.sdkSessions.get(ref.id)!;
         this.finish(r, id, { outcome: "taken" });
-        const out = await this.sendHeld(ref.id, s, frame(text, r.url));
+        const out = await this.sendHeld(ref.id, s, this.framed(r, text, false));
         return this.finish(
           r,
           id,
@@ -1719,7 +1883,7 @@ export class ControlDaemon {
 
   /** A Codex or Antigravity session's next message: a headless turn resumed under the
    *  harness's own id, after any run of the daemon's own that holds it. */
-  private async resumeDriven(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number) {
+  private async resumeDriven(r: Caller, id: string, cmd: ControlCommand, place: Placed, sent: number) {
     const ref = parseSessionRef(cmd.session)!;
     const drv = this.driver(ref.harness)!;
     const ready = await this.drivenProblem(drv);
@@ -1731,16 +1895,29 @@ export class ControlDaemon {
       /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
       const target = alias?.id ?? place.target ?? ref.id;
       const recorded = alias ? startOptionsOf(alias) : null;
-      const o = this.laterOptions(ref.harness, recorded);
+      const o = this.capped(this.laterOptions(ref.harness, recorded), cmd);
       const args = drv.args({
         permission: o.permission,
-        prompt: frame(cmd.text as string, r.url),
+        prompt: this.framed(r, cmd.text as string, false),
         cwd: place.folder,
         resume: target,
         ...(o.model ? { model: o.model } : {}),
       });
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} resume ${target.slice(0, 8)} (${o.permission}) in ${place.folder}`);
-      await this.drive(r, id, ref, drv, ready.bin, args, place.folder, sent, target, o, recorded);
+      await this.drive(
+        r,
+        id,
+        ref,
+        drv,
+        ready.bin,
+        args,
+        place.folder,
+        sent,
+        target,
+        o,
+        recorded,
+        this.childEnv(r, cmd),
+      );
     });
   }
 
@@ -1749,7 +1926,7 @@ export class ControlDaemon {
    *  — a start's new one, or a fresh one for an id it didn't know — the command's id
    *  becomes its alias, so the next message resumes it. */
   private async drive(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     ref: { harness: string; id: string },
     drv: Driver,
@@ -1761,6 +1938,8 @@ export class ControlDaemon {
     o: StartOptions,
     /** What the session's alias records (a start records `o`): kept when it is renamed. */
     record: StartOptions | null,
+    /** The child's lineage, when the run is for another session (childEnv()). */
+    extra: Record<string, string>,
   ): Promise<void> {
     const stream = this.answerStream(r, id);
     const reading = drv.reading();
@@ -1779,7 +1958,7 @@ export class ControlDaemon {
       this.slot(() =>
         this.deps.run(bin, args, {
           cwd,
-          env: jobEnv(this.deps.env),
+          env: { ...jobEnv(this.deps.env), ...extra },
           timeoutMs: JOB_TIMEOUT_MS,
           onLine,
           keep: () => false,
@@ -1812,7 +1991,7 @@ export class ControlDaemon {
   }
 
   private async headless(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     cmd: ControlCommand,
     place: Placed,
@@ -1827,7 +2006,7 @@ export class ControlDaemon {
       return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
     const ref = parseSessionRef(cmd.session)!;
     // The session's own record (its start's level, narrowed to the machine's mode now).
-    const o = this.laterOptions("claude-code", this.state.started[ref.id]);
+    const o = this.capped(this.laterOptions("claude-code", this.state.started[ref.id]), cmd);
     const mf = claudeControl.modeFlags(o.permission, claude.caps);
     if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
     const signedOut = await this.loginProblem(place.transcript?.configDir);
@@ -1838,7 +2017,7 @@ export class ControlDaemon {
       const built = claudeArgs({
         caps: claude.caps,
         level: o.permission,
-        prompt: frame(cmd.text as string, r.url),
+        prompt: this.framed(r, cmd.text as string, false),
         resume: target,
         fork: mode === "fork",
         allowedTools: this.allowedFor(r),
@@ -1854,7 +2033,7 @@ export class ControlDaemon {
         this.slot(() =>
           this.deps.run(claude.bin, args, {
             cwd: place.folder,
-            env: claudeEnv(place.transcript?.configDir, this.deps.env),
+            env: { ...claudeEnv(place.transcript?.configDir, this.deps.env), ...this.childEnv(r, cmd) },
             timeoutMs: JOB_TIMEOUT_MS,
             ...(claude.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
           }),
@@ -1949,7 +2128,7 @@ export class ControlDaemon {
    *  sends back as the final ack's `reply` — so the person sees the answer where they
    *  asked. A turn that doesn't end within ANSWER_WAIT_MS is acked delivered without. */
   private followAnswer(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     mode: "waiter" | "turn",
     session: string,
@@ -1958,6 +2137,11 @@ export class ControlDaemon {
   ): void {
     this.deps.log(`${id.slice(-8)}: in ${session.slice(0, 24)} via ${mode} ${this.deps.now() - sent} ms after send`);
     this.finish(r, id, { outcome: "taken" });
+    // A relay: the message is in the session, which is the whole job; nobody waits on a reply.
+    if (isSink(r) && !r.wantsReply) {
+      this.finish(r, id, { outcome: "delivered", mode }, sent);
+      return;
+    }
     const stream = this.answerStream(r, id);
     void (async () => {
       const answer = from
@@ -1980,18 +2164,12 @@ export class ControlDaemon {
 
   /** The answer so far, sent as a `progress` ack: whole, with a rising seq, at most
    *  one in flight. Fire-and-forget — the final ack carries everything. */
-  private answerStream(r: PairedReceiver, id: string): AnswerStream {
+  private answerStream(r: Caller, id: string): AnswerStream {
     return new AnswerStream(async (text, seq) => {
+      const reply = redactSecrets(text).slice(0, MAX_REPLY);
+      if (isSink(r)) return r.progress(reply, seq);
       await this.post(r, "/ack", {
-        acks: [
-          {
-            id,
-            outcome: "progress",
-            at: new Date(this.deps.now()).toISOString(),
-            seq,
-            reply: redactSecrets(text).slice(0, MAX_REPLY),
-          },
-        ],
+        acks: [{ id, outcome: "progress", at: new Date(this.deps.now()).toISOString(), seq, reply }],
       });
     });
   }
@@ -2031,7 +2209,7 @@ export class ControlDaemon {
     }
   }
 
-  private async startSession(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
+  private async startSession(r: Caller, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const lim = this.limits();
     const now = this.deps.now();
     this.startTimes = this.startTimes.filter((t) => now - t < 3_600_000);
@@ -2055,7 +2233,7 @@ export class ControlDaemon {
     }
   }
 
-  private async startOne(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
+  private async startOne(r: Caller, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const ref = parseSessionRef(cmd.session)!;
     const cwd = this.allowed(cmd.cwd as string);
     if (!cwd)
@@ -2090,6 +2268,7 @@ export class ControlDaemon {
     if (text === null) return;
     if (this.deps.sdk) {
       const sdk = this.deps.sdk;
+      const extra = this.childEnv(r, cmd);
       const out = await this.slot(async () => {
         const s = sdk.start({
           session: ref.id,
@@ -2097,9 +2276,10 @@ export class ControlDaemon {
           permission: o.permission,
           ...(o.model ? { model: o.model } : {}),
           allowedTools: this.allowedFor(r),
+          ...(Object.keys(extra).length ? { env: extra } : {}),
         });
         this.sdkSessions.set(ref.id, s);
-        return s.send(frameStart(text, r.url));
+        return s.send(this.framed(r, text, true));
       });
       return this.finish(
         r,
@@ -2114,7 +2294,7 @@ export class ControlDaemon {
     const built = claudeArgs({
       caps: c.caps,
       level: o.permission,
-      prompt: frameStart(text, r.url),
+      prompt: this.framed(r, text, true),
       session: ref.id,
       allowedTools: this.allowedFor(r),
       ...(o.model ? { model: o.model } : {}),
@@ -2125,7 +2305,7 @@ export class ControlDaemon {
     const res = await this.slot(() =>
       this.deps.run(c.bin, args, {
         cwd,
-        env: claudeEnv(undefined, this.deps.env),
+        env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
         timeoutMs: JOB_TIMEOUT_MS,
         ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
       }),
@@ -2154,7 +2334,7 @@ export class ControlDaemon {
   /** A new Codex or Antigravity session: the harness picks its id, and the start's id
    *  becomes its name (aliases.ts) as soon as the run says what it picked. */
   private async startDriven(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     cmd: ControlCommand,
     ref: { harness: string; id: string },
@@ -2181,14 +2361,14 @@ export class ControlDaemon {
     if (text === null) return;
     const args = drv.args({
       permission: o.permission,
-      prompt: frameStart(text, r.url),
+      prompt: this.framed(r, text, true),
       cwd,
       ...(o.model ? { model: o.model } : {}),
     });
     this.deps.log(
       `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${o.permission}) in ${cwd}`,
     );
-    await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o);
+    await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o, this.childEnv(r, cmd));
   }
 
   /** A new session of an ACP agent (CONTROL.md §6): the agent's CLI as a child the
@@ -2196,7 +2376,7 @@ export class ControlDaemon {
    *  own (aliases.ts), and the first turn through it. Acked `delivered` in `api` mode;
    *  later messages go through the same process while it is held. */
   private async startAcp(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     cmd: ControlCommand,
     ref: { harness: string; id: string },
@@ -2220,13 +2400,13 @@ export class ControlDaemon {
     );
     const stream = this.answerStream(r, id);
     const out = await this.slot(async () => {
-      const opened = await this.openAcp(id, found, cwd, label, stream);
+      const opened = await this.openAcp(id, found, cwd, label, stream, { env: this.childEnv(r, cmd) });
       if ("failed" in opened) return { reply: "", error: opened.failed };
       /* v8 ignore next -- unsupported only comes of a session/load, which a start never asks for */
       if ("unsupported" in opened) return { reply: "", error: opened.unsupported };
       this.sdkSessions.set(ref.id, opened.held);
       this.setAlias(ref.harness, ref.id, opened.held.session, cwd, null);
-      return this.sendHeld(ref.id, opened.held, frameStart(text, r.url));
+      return this.sendHeld(ref.id, opened.held, this.framed(r, text, true));
     });
     stream.close();
     this.finish(
@@ -2240,7 +2420,7 @@ export class ControlDaemon {
   /** The next message for an ACP-driven session no process holds: the agent run again
    *  and the session reopened in it (`session/load`), then held like a new one. Acked
    *  `resume`, as any cold start. An agent that can't reopen one is `unsupported`. */
-  private async resumeAcp(r: PairedReceiver, id: string, cmd: ControlCommand, place: Placed, sent: number) {
+  private async resumeAcp(r: Caller, id: string, cmd: ControlCommand, place: Placed, sent: number) {
     const ref = parseSessionRef(cmd.session)!;
     const label = this.label(ref.harness);
     const found = this.deps.acp?.(ref.harness) ?? null;
@@ -2255,11 +2435,14 @@ export class ControlDaemon {
       const stream = this.answerStream(r, id);
       const out = await this.owning(ref.id, () =>
         this.slot(async () => {
-          const opened = await this.openAcp(id, found, place.folder, label, stream, target);
+          const opened = await this.openAcp(id, found, place.folder, label, stream, {
+            load: target,
+            env: this.childEnv(r, cmd),
+          });
           if ("unsupported" in opened) return { reply: "", unsupported: opened.unsupported };
           if ("failed" in opened) return { reply: "", error: opened.failed };
           this.sdkSessions.set(ref.id, opened.held);
-          return this.sendHeld(ref.id, opened.held, frame(cmd.text as string, r.url));
+          return this.sendHeld(ref.id, opened.held, this.framed(r, cmd.text as string, false));
         }),
       );
       stream.close();
@@ -2281,15 +2464,15 @@ export class ControlDaemon {
     cwd: string,
     label: string,
     stream: AnswerStream,
-    load?: string,
+    o: { load?: string; env?: Record<string, string> } = {},
   ): Promise<acpControl.AcpStart> {
     return acpControl.startAcp({
       ...found,
       cwd,
       mode: this.cfg.mode,
       label,
-      env: this.deps.env ?? process.env,
-      ...(load ? { load } : {}),
+      env: { ...jobEnv(this.deps.env), ...o.env },
+      ...(o.load ? { load: o.load } : {}),
       onText: (t) => stream.set(t),
       log: (l) => this.deps.log(`${id.slice(-8)}: ${l}`),
       now: this.deps.now,
@@ -2303,7 +2486,7 @@ export class ControlDaemon {
    *  is acked `failed` with code `file`, nothing is kept, no session starts and no
    *  message is delivered. */
   private async attached(
-    r: PairedReceiver,
+    r: Caller,
     id: string,
     cmd: ControlCommand,
     ref: { id: string },
@@ -2312,6 +2495,8 @@ export class ControlDaemon {
   ): Promise<string | null> {
     const text = cmd.text as string;
     if (!cmd.files) return text;
+    /* v8 ignore next -- an ask or a relay carries no files; the receiver's token is what fetches them */
+    if (isSink(r)) return text;
     try {
       const got = await fetchFiles(cmd.files, {
         control: r.control,
@@ -2331,6 +2516,414 @@ export class ControlDaemon {
       this.finish(r, id, { outcome: "failed", code: "file", detail });
       return null;
     }
+  }
+
+  // --- callers: receivers, askers and relays ------------------------------------------
+
+  /** The text as the session gets it: a receiver's framing (route.ts), or the sink's own. */
+  private framed(r: Caller, text: string, first: boolean): string {
+    if (isSink(r)) return r.frame(text, first);
+    return first ? frameStart(text, r.url) : frame(text, r.url);
+  }
+
+  /** What a child run gets in its environment beyond the job's: its lineage, for its
+   *  hooks to stamp `delegated_by` (§13). An ask's sink says who asked; a receiver's
+   *  command with `reply_to` was asked, as far as the child knows, by that session (§6). */
+  private childEnv(r: Caller, cmd: ControlCommand): Record<string, string> {
+    if (isSink(r)) return r.env ?? {};
+    return cmd.reply_to ? { [DELEGATED_BY_ENV]: cmd.reply_to, SESSIONPIPE_ASK_CHAIN: cmd.reply_to } : {};
+  }
+
+  /** An ask's `permission` on a prompt (CONTROL.md §13; an ask always names one, safe
+   *  unless it says read) caps the run of the session it names: narrower than the
+   *  session's own level, never wider. A receiver's prompt carries none (the verifier
+   *  refuses it), so this leaves it alone. */
+  private capped(o: StartOptions, cmd: ControlCommand): StartOptions {
+    if (!cmd.permission) return o;
+    return { ...o, permission: o.permission === "inherit" ? cmd.permission : narrower(o.permission, cmd.permission) };
+  }
+
+  /** The agents an ask may start here: the hello's harnesses that run headlessly. */
+  private askable(): string[] {
+    return this.harnesses().filter((h) => HEADLESS.has(h));
+  }
+
+  // --- asking another agent (CONTROL.md §13) ----------------------------------------
+
+  /** A session under the name the daemon itself knows it by: the copy a Claude Code
+   *  session's later runs moved to, the id a driven harness picked behind the daemon's
+   *  alias — so a Codex session asked under its start's name and asking under its own
+   *  rollout id is one session to the depth and loop rules. */
+  private realRef(session: string): string {
+    const ref = parseSessionRef(session);
+    /* v8 ignore next -- every ref here passed askProblem or came from the daemon */
+    if (!ref) return session;
+    if (ref.harness === "claude-code") return `${ref.harness}:${this.state.copies[ref.id] ?? ref.id}`;
+    return `${ref.harness}:${this.aliasOf(ref.harness, ref.id)?.id ?? ref.id}`;
+  }
+
+  /** How many asks in hand `from` is already answering: the ask that targets it, the
+   *  one that targets that ask's asker, and so on up. Nothing for nobody's session. */
+  private askDepth(from: string | null): number {
+    let depth = 0;
+    const seen = new Set<string>();
+    for (let at = from ? this.realRef(from) : null; at && !seen.has(at); ) {
+      seen.add(at);
+      const above = [...this.asks.values()].find((a) => this.realRef(a.to) === at);
+      if (!above) break;
+      depth++;
+      at = above.from ? this.realRef(above.from) : null;
+    }
+    return depth;
+  }
+
+  /** `sessionpipe ask`: a session on this machine hands a task to another agent and gets
+   *  the answer back on this connection. The trust boundary is the socket's, the one
+   *  `wait` and the hooks cross (a process of the person's own user); nothing a receiver
+   *  sends gets here. Every rule in order, each with its own refusal; then the run goes
+   *  down the same start and prompt paths a receiver's command takes, acked to the
+   *  socket, and its events go on the asking session. */
+  private async onAsk(req: AskRequest, s: net.Socket): Promise<void> {
+    const refuse = (code: string, detail: string) => {
+      this.deps.log(`ask refused: ${code} — ${detail}`);
+      this.reply(s, { op: "refused", code, detail });
+    };
+    const bad = askProblem(req);
+    if (bad) return refuse("bad_fields", bad);
+    if (!askOn(this.cfg)) return refuse("ask_off", "asking is off on this machine; `sessionpipe ask on` turns it on");
+    const target = req.session ? parseSessionRef(req.session)! : null;
+    let session: string;
+    let cwd: string;
+    if (target) {
+      // An existing session: one this machine can deliver a prompt to, in an allowed folder.
+      const place = this.place(req.session as string);
+      if ("refused" in place) return refuse(place.refused === "folder" ? "folder" : "harness", place.why);
+      const route = routePrompt(this.view(req.session as string, place));
+      if ("unsupported" in route) return refuse("harness", route.unsupported);
+      /* v8 ignore next -- place() refused a session with no transcript already */
+      if ("refused" in route) return refuse("harness", "no such session on this machine");
+      // An ACP agent runs at the machine's mode, with no level or model of its own (§6).
+      if ((req.permission || req.model) && acpControl.acpAgent(target.harness))
+        return refuse("bad_fields", `${this.label(target.harness)} takes no permission level or model choice here`);
+      session = req.session as string;
+      cwd = place.folder;
+    } else {
+      const askable = this.askable();
+      if (!askable.includes(req.harness))
+        return refuse(
+          "harness",
+          `this machine can't start a ${req.harness} session; it can ask ${askable.join(", ") || "no agent"}`,
+        );
+      const ok = this.allowed(req.cwd);
+      if (!ok) return refuse("folder", `${req.cwd} isn't a folder this machine allows (sessionpipe control folders)`);
+      session = `${req.harness}:${randomUUID()}`;
+      cwd = ok;
+    }
+    // The depth the caller's chain admits, and the one the daemon counts for itself from
+    // the asks it has in hand: a session that cleared its environment is still, to the
+    // daemon, the session some ask is waiting on.
+    const counted = this.askDepth(req.from ?? null);
+    if (req.chain.length >= ASK_DEPTH || counted >= ASK_DEPTH)
+      return refuse(
+        "depth",
+        req.chain.length >= ASK_DEPTH
+          ? `an ask goes ${ASK_DEPTH} deep at most: ${req.chain[0]} asked ${req.chain[1]}, which asked this session, which can't ask on`
+          : `an ask goes ${ASK_DEPTH} deep at most: ${req.from} is answering an ask nested in another one here, so it can't ask on`,
+      );
+    const inHand = [...this.asks.values()];
+    if (target) {
+      const real = this.realRef(session);
+      if ([req.from, ...req.chain].some((a) => a && this.realRef(a) === real))
+        return refuse("loop", `${session.slice(0, 24)} is waiting on this very ask`);
+      // Asked under one name, asking under another, from any environment: a session that
+      // is itself waiting on an ask can't be asked — its turn only ends when that answer
+      // is back, so a message to it waits for the very thing it would be part of.
+      if (inHand.some((a) => a.from && this.realRef(a.from) === real))
+        return refuse(
+          "loop",
+          `${session.slice(0, 24)} is waiting on an ask of its own; it can take this one once that answer is back`,
+        );
+      const asked = inHand.filter((a) => this.realRef(a.to) === real).length;
+      if (asked >= ASKS_IN_HAND)
+        return refuse(
+          "start_limit",
+          `${session.slice(0, 24)} has ${asked} asks waiting on it already; a session takes ${ASKS_IN_HAND} at a time`,
+        );
+    }
+    const asking = req.from ? inHand.filter((a) => a.from === req.from).length : 0;
+    if (asking >= ASKS_IN_HAND)
+      return refuse(
+        "start_limit",
+        `${req.from} has ${asking} asks in hand already; a session asks ${ASKS_IN_HAND} at a time`,
+      );
+    const askId = ulid(this.deps.now());
+    const sent = this.deps.now();
+    const from = req.from ? parseSessionRef(req.from)! : null;
+    const sink = this.askSink(s, req, askId, session, sent, from);
+    this.deps.log(
+      `ask ${askId.slice(-8)}: ${req.from ?? "a session"} asks ${session.slice(0, 24)}${target ? "" : ` (new, in ${cwd})`}`,
+    );
+    if (from)
+      this.emitDelegation(from, "delegation.started", "ask", {
+        ask_id: askId,
+        via: "ask",
+        harness: parseSessionRef(session)!.harness,
+        to: session,
+        text: req.text.slice(0, 200),
+      });
+    this.inflight.add(askId);
+    this.asks.set(askId, { from: req.from ?? null, to: session });
+    // The level the child runs at (§13): read when the ask says so, else safe, and never
+    // wider than the machine's mode. An ask is a model's doing, not the person's, so the
+    // machine's own edits or auto never carry over to it. An ACP agent takes no level
+    // (§6) and runs as the machine's mode says.
+    const level = acpControl.acpAgent(parseSessionRef(session)!.harness)
+      ? {}
+      : { permission: req.permission ?? narrower("safe", claudeControl.ceilingLevel(this.cfg.mode)) };
+    try {
+      if (!target) {
+        const cmd = {
+          kind: "start",
+          session,
+          cwd,
+          text: req.text,
+          ...level,
+          ...(req.model ? { model: req.model } : {}),
+        } as ControlCommand;
+        await this.startSession(sink, askId, cmd, sent);
+      } else {
+        // `permission` on a prompt is the cap a run of the session gets (capped()), safe
+        // unless the ask said read; the session keeps its own model.
+        const cmd = { kind: "prompt", session, text: req.text, ...level } as ControlCommand;
+        await this.serial(`deliver:${session}`, async () => {
+          const now = this.place(session);
+          /* v8 ignore next -- placed a moment ago, before the queue; a session doesn't go between */
+          if ("refused" in now) return this.finish(sink, askId, refusal(now));
+          return this.prompt(sink, askId, cmd, now, sent);
+        });
+      }
+    } catch (e) {
+      this.finish(sink, askId, {
+        outcome: "failed",
+        detail: String(/* v8 ignore next -- the runs reject with Errors */ (e as Error)?.message || e),
+      });
+    }
+  }
+
+  /** The asker's end of an ask: the run's acks as the wire replies (local.ts), in order
+   *  and exactly one final; the child's environment and framing; the events on the
+   *  asking session when it is known. The connection is closed after the final reply. */
+  private askSink(
+    s: net.Socket,
+    req: AskRequest,
+    askId: string,
+    session: string,
+    sent: number,
+    from: { harness: string; id: string } | null,
+  ): AckSink {
+    let asked = false;
+    const say = (r: LocalReply) => {
+      try {
+        s.write(`${JSON.stringify(r)}\n`);
+      } catch {}
+    };
+    const begin = () => {
+      if (asked) return;
+      asked = true;
+      say({ op: "asked", ask_id: askId, session });
+    };
+    // The child's hooks stamp `delegated_by`, and an ask from inside it carries the chain.
+    const chain = [...req.chain, req.from ?? "unknown"].join(",");
+    return {
+      label: `ask ${askId.slice(-8)}`,
+      frame: (text) => frameAsk(text, req.from),
+      env: { SESSIONPIPE_ASK_CHAIN: chain, ...(req.from ? { [DELEGATED_BY_ENV]: req.from } : {}) },
+      wantsReply: true,
+      progress: (text, seq) => {
+        begin();
+        say({ op: "progress", text, seq });
+      },
+      ack: (a) => {
+        if (a.outcome === "taken") return begin();
+        // An answer always follows an `asked`; a run refused before it began sends none.
+        if (a.outcome === "delivered") begin();
+        this.asks.delete(askId);
+        const ms = this.deps.now() - sent;
+        const to = a.session ?? session;
+        const ok = a.outcome === "delivered";
+        /* v8 ignore next -- every refusal and failure finish() sends here names its detail */
+        const detail = a.detail ?? a.outcome;
+        say(
+          ok
+            ? { op: "answer", ask_id: askId, session: to, text: a.reply ?? "", ms }
+            : a.outcome === "refused"
+              ? { op: "refused", code: askCode(a.code), detail }
+              : { op: "failed", detail },
+        );
+        try {
+          s.end();
+        } catch {}
+        if (from)
+          this.emitDelegation(from, "delegation.ended", "ask", {
+            ask_id: askId,
+            to,
+            ok,
+            ms,
+            ...(ok ? { reply: a.reply ?? "" } : { error: detail.slice(0, 200) }),
+          });
+      },
+    };
+  }
+
+  // --- handoffs (CONTROL.md §6 `reply_to`) ------------------------------------------
+
+  /** A command with `reply_to`: remembered until its final ack (finish()), and announced
+   *  on the session that gets the answer, as an ask is on the session that asked. */
+  private handoff(r: PairedReceiver, id: string, cmd: ControlCommand, harness: string, sent: number): void {
+    const to = parseSessionRef(cmd.reply_to)!;
+    // Only a session this machine can place now: one it knows, in a folder it allows.
+    // Anything else is no handoff at all — the command runs and is acked as usual, and
+    // nothing is written on a session the machine doesn't know, or won't touch, on a
+    // signer's say-so (§6): no outbox, no event.
+    const place = this.place(cmd.reply_to as string);
+    if ("refused" in place) {
+      this.deps.log(
+        `${id.slice(-8)}: reply_to ${(cmd.reply_to as string).slice(0, 24)} isn't a session this machine can place (${place.why}); the command runs, nothing is relayed`,
+      );
+      return;
+    }
+    const askId = ulid(this.deps.now());
+    this.handoffs.set(id, { receiver: r, askId, to, from: cmd.session, sent });
+    this.deps.log(`${id.slice(-8)}: a handoff; the reply goes to ${(cmd.reply_to as string).slice(0, 24)}`);
+    this.emitDelegation(to, "delegation.started", "handoff", {
+      ask_id: askId,
+      via: "handoff",
+      harness,
+      to: cmd.session,
+      text: (cmd.text as string).slice(0, 200),
+    });
+  }
+
+  /** The reply into `reply_to`, once the command's own final ack is out: framed as a
+   *  handoff's answer and routed like any message (§6 modes, the folder rule, never a
+   *  resume of a live session), acked to a sink that only notes how it went. Then
+   *  delegation.ended on `reply_to`, `relayed` saying delivered, unsupported or failed. */
+  private async relay(h: Handoff, ack: Ack): Promise<void> {
+    const ok = ack.outcome === "delivered";
+    const ended = (o: { relayed?: "delivered" | "unsupported" | "failed"; error?: string }) => {
+      /* v8 ignore next -- a final ack that isn't delivered names its detail; the one route refusal that wouldn't, prompt() can't reach (place() refused that session already) */
+      const why = ack.detail ?? ack.outcome;
+      const error = o.error ?? (ok ? undefined : why);
+      this.emitDelegation(h.to, "delegation.ended", "handoff", {
+        ask_id: h.askId,
+        to: ack.session ?? h.from,
+        ok,
+        ms: this.deps.now() - h.sent,
+        ...(ok ? { reply: ack.reply ?? "" } : {}),
+        ...(error ? { error: error.slice(0, 200) } : {}),
+        ...(o.relayed ? { relayed: o.relayed } : {}),
+      });
+    };
+    if (!ok) return ended({});
+    if (!ack.reply) return ended({ relayed: "failed", error: "the session finished its turn without a written reply" });
+    const id = `relay:${h.askId}`;
+    const sink: AckSink = {
+      label: `relay ${h.askId.slice(-8)}`,
+      frame: (text) => text,
+      wantsReply: false,
+      progress: () => {},
+      ack: (a) => {
+        if (a.outcome === "taken") return;
+        if (a.outcome === "delivered") return ended({ relayed: "delivered" });
+        // No mode fits, or the folder isn't allowed: unsupported (§6); anything else failed.
+        const unsupported = a.outcome === "unsupported" || (a.outcome === "refused" && a.code === "folder");
+        ended({
+          relayed: unsupported ? "unsupported" : "failed",
+          error: /* v8 ignore next -- as in ended(): every ack here names its detail */ a.detail ?? a.outcome,
+        });
+      },
+    };
+    const session = `${h.to.harness}:${h.to.id}`;
+    const answered = parseSessionRef(ack.session ?? h.from)!;
+    const cmd = {
+      kind: "prompt",
+      session,
+      text: frameHandoff(answered, h.receiver.url, ack.reply),
+    } as ControlCommand;
+    this.inflight.add(id);
+    this.deps.log(`${id.slice(-8)}: the reply of ${ack.id.slice(-8)} goes to ${session.slice(0, 24)}`);
+    try {
+      await this.serial(`deliver:${session}`, async () => {
+        const place = this.place(session);
+        if ("refused" in place) return this.finish(sink, id, refusal(place));
+        return this.prompt(sink, id, cmd, place, this.deps.now());
+      });
+    } catch (e) {
+      this.finish(sink, id, {
+        outcome: "failed",
+        detail: String(/* v8 ignore next -- the runs reject with Errors */ (e as Error)?.message || e),
+      });
+    }
+  }
+
+  // --- events of the daemon's own ---------------------------------------------------
+
+  /** delegation.started / delegation.ended (PROTOCOL.md §4) on a session here, the way a
+   *  hook's events travel (run.ts runJob): the session block the worker last saved, a seq
+   *  of its own from the outbox under the session's lock, redacted at rest, then every
+   *  sink drained from its cursor. Best effort: a lock that stays taken or a disk that
+   *  won't write is logged, never a reason to hold the ask or the relay. */
+  private emitDelegation(
+    on: { harness: string; id: string },
+    type: "delegation.started" | "delegation.ended",
+    via: "ask" | "handoff",
+    data: Record<string, unknown>,
+  ): void {
+    void this.record(on, type, via, data).catch((e) =>
+      this.deps.log(
+        `couldn't record ${type} on ${on.harness}:${on.id.slice(0, 8)}: ${String(/* v8 ignore next -- record() throws Errors (its own, the fs's) */ (e as Error)?.message || e)}`,
+      ),
+    );
+  }
+
+  private async record(
+    on: { harness: string; id: string },
+    type: string,
+    via: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const state = path.dirname(this.dir);
+    const ref = { harness: on.harness, session: on.id };
+    // A worker holds the session's lock for the milliseconds its append takes.
+    let release = takeLock(state, ref);
+    for (let i = 0; !release && i < 40; i++) {
+      await sleep(50);
+      release = takeLock(state, ref);
+    }
+    if (!release) throw new Error("the session's outbox stayed locked");
+    const cfg = readConfig(configFile(this.deps.env));
+    const outbox = new Outbox(state);
+    try {
+      const known = (factsState(state).get(on.harness, on.id).session as Partial<Session> | undefined) ?? {};
+      const e = makeEvent(
+        { type, harnessEvent: via, data },
+        {
+          harness: { name: on.harness },
+          session: {
+            ...known,
+            ...(known.cwd ? { cwd: tilde(known.cwd) } : {}),
+            id: on.id,
+            seq: outbox.nextSeq(ref),
+            machine: machineName(cfg, os.hostname()),
+          },
+          now: this.deps.now(),
+        },
+      );
+      outbox.append(ref, [{ ...e, session: redactDeep(e.session), data: redactDeep(e.data) }]);
+    } finally {
+      release();
+    }
+    await drain(state, cfg.sinks, outbox, ref);
   }
 
   private closeIdleSdk(): void {

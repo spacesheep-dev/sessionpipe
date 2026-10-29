@@ -84,6 +84,7 @@ blanks an earlier full value.
 | `attended` | Whether a person attends the session, as the harness says: `true` when one is at it or drives it from one of its own clients (a terminal, a remote-control link, a desktop app), `false` for a run nobody watches, such as a headless run a script started. Absent when the harness does not say, and a receiver MUST read absent as unknown, never as `false`. A later event may change it (a headless session resumed in a terminal). |
 | `parent_id` | For a subagent's own events: the parent session's id. `null` or absent otherwise. |
 | `launched_by` | The session that started this one, as `<harness>:<id>` (the form [CONTROL.md](CONTROL.md) uses for a command's session): a script that runs `claude -p` for a session sets `SESSIONPIPE_LAUNCHED_BY` in the child's environment, and the hook carries it. It names at most the nearest launcher: environments are inherited, so anything that starts a further session MUST unset or reset it, and a value that names the session itself is ignored. Absent for a subagent, whose launcher is its `parent_id`, and when nothing says. A receiver MAY group on it and MUST NOT read it as a subagent. |
+| `delegated_by` | The session this one answers, as `<harness>:<id>`: the machine's daemon started or resumed this session for that one's ask, or for a handoff with `reply_to` ([CONTROL.md §6, §13](CONTROL.md#13-asking-another-agent-sessionpipe-ask)), and set `SESSIONPIPE_ASKED_BY` in the child's environment; the hook reads it like `launched_by`, with the same rules (the nearest asker, reset by anything that starts a further session, never the session itself). On every event of the child; absent otherwise. A receiver treats it like `parent_id` across harnesses: lineage, never authority. It MUST NOT read it as a subagent, and nothing the child says binds the session that asked. |
 
 **Short id.** Where a session is named to a person (a log line, a notification, a
 search box), senders and receivers use its short id: the first 8 hex digits, lowercase,
@@ -121,6 +122,8 @@ Per-type `data` shapes are normative in
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?` | Subagent hooks; the subagent's own events carry `session.parent_id`. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
 | `limits.observed` | 1 | `windows[]` (1–8): `id` (the harness's own name for the window, passed through as the harness spells it: `five_hour`, `seven_day`, `primary` …), `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?`, `window_minutes?` (only where the harness or its documentation says the length); `plan?`; `account_id?` (the account the numbers belong to, spelled as `session.account_id` is) | The account's usage limits, when the harness reports new numbers: Codex's rollout after a turn, Claude Code's status line where the person made it ours, or the machine's account pool reading the vendor's rate-limit headers for a request it served (ADAPTERS.md). The numbers belong to the account, not the session: a receiver SHOULD keep the newest per (harness, `data.account_id`, else `session.account_id`), or per machine when there is neither. A sender MUST set `account_id` when the numbers belong to another account than the session's own (a pooled session served by a second account, CONTROL.md §6 `pool`) and MAY set it otherwise; absent, the numbers are the session's account's. Each event is the whole set: a window it leaves out is not reported (Claude Code drops one once it resets). A window whose `resets_at` has passed has reset; a receiver SHOULD NOT show its last `used_percent` as current. OPTIONAL for senders. |
+| `delegation.started` | 0 | `ask_id` (ULID), `via`: `ask` · `handoff`, `harness` (the agent asked), `to?` (`<harness>:<id>` of the session that answers, once known); tier 1 adds `text` (what was asked, ≤ 200 chars, redacted) | The machine's daemon took an ask from this session ([CONTROL.md §13](CONTROL.md#13-asking-another-agent-sessionpipe-ask)) or a command with `reply_to` naming it (CONTROL.md §6). Emitted on the asking session, through its own outbox, with its own `seq`. `to` is known at once for a handoff or an ask to an existing session; for a new Codex or ACP session, when the harness reveals its id. |
+| `delegation.ended` | 0 | `ask_id`, `to?`, `ok` (boolean), `ms`, `error?` (≤ 200 chars, when not ok), `relayed?`: `delivered` · `unsupported` · `failed`; tier 2 adds `reply` (≤ 20 000 chars, redacted) | The asked agent's turn ended, or the ask failed before one. `relayed` is a handoff's only: whether the answer reached `reply_to`. The answering session's own events carry `delegated_by`; a receiver joins the two on it and on `to`. |
 | `native` | 3 | the raw hook JSON | Only on the native lane (HTTP.md §6); never emitted by the client. |
 
 Rules for all types:
@@ -169,12 +172,12 @@ What each tier carries. The full rules, the rulesets and guidance are in
 |------|:-:|:-:|:-:|:-:|
 | Session id, state events, timing | ✓ | ✓ | ✓ | ✓ |
 | Machine, cwd, repo, branch, model, title, url, account_id, attended | ✓ | ✓ | ✓ | ✓ |
-| Attention kind | ✓ | ✓ | ✓ | ✓ |
+| Attention kind; who asked whom (`delegated_by`, `delegation.*` without text) | ✓ | ✓ | ✓ | ✓ |
 | Tool names, durations, ok/error | — | ✓ | ✓ | ✓ |
 | File paths touched | — | ✓ | ✓ | ✓ |
-| Attention message, prompt length, subagents, compactions | — | ✓ | ✓ | ✓ |
+| Attention message, prompt length, subagents, compactions, what an ask asked (`text`) | — | ✓ | ✓ | ✓ |
 | The account's usage limits (`limits.observed`) | — | ✓ | ✓ | ✓ |
-| Prompts and assistant text (`turn.transcript`, `turn.progress`) | — | — | ✓ | ✓ |
+| Prompts and assistant text (`turn.transcript`, `turn.progress`, a delegation's `reply`) | — | — | ✓ | ✓ |
 | Tool input and output, thinking, raw lines | — | — | — | ✓ |
 | Secrets ruleset | n/a | always | always | always |
 | PII ruleset | opt-in | opt-in | opt-in | opt-in |

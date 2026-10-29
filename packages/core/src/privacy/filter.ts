@@ -27,6 +27,8 @@ export const TYPE_TIER: Record<string, Tier> = {
   "subagent.ended": 1,
   "context.compacted": 1,
   "limits.observed": 1,
+  "delegation.started": 0,
+  "delegation.ended": 0,
   native: 3,
 };
 
@@ -50,6 +52,8 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
   "context.compacted": { 1: ["trigger"] },
   "limits.observed": { 1: ["windows", "plan", "account_id"] },
+  "delegation.started": { 0: ["ask_id", "via", "harness", "to"], 1: ["text"] },
+  "delegation.ended": { 0: ["ask_id", "to", "ok", "ms", "error", "relayed"], 2: ["reply"] },
 };
 
 const SESSION_ALLOW = [
@@ -67,6 +71,7 @@ const SESSION_ALLOW = [
   "attended",
   "parent_id",
   "launched_by",
+  "delegated_by",
 ];
 const MAX_SIDE = 20_000;
 const MAX_IO = 64 * 1024;
@@ -119,6 +124,10 @@ export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: Filter
   if (data.input !== undefined) data.input = cap(data.input, MAX_IO);
   if (data.output !== undefined) data.output = cap(data.output, MAX_IO);
   if (typeof data.message === "string") data.message = cap(data.message, 200);
+  // What an ask asked, and what came back (PROTOCOL.md §4 delegation.*): the daemon cuts
+  // them too, but the cap is this function's promise.
+  if (event.type === "delegation.started" && typeof data.text === "string") data.text = cap(data.text, 200);
+  if (event.type === "delegation.ended" && typeof data.reply === "string") data.reply = cap(data.reply, MAX_SIDE);
 
   const rulesets: string[] = [];
   let out: Event = { ...event, tier, session: session as Event["session"], data, privacy: { rulesets, pii } };

@@ -5,7 +5,16 @@ export * as claudePool from "./adapters/claude-code-pool.js";
 export * from "./adapters/index.js";
 export { type Config, DEFAULT_CONFIG, machineName, readConfig, type SinkConfig, writeConfig } from "./config.js";
 export { type EventContext, makeEvent } from "./events.js";
-export { LAUNCHED_BY_ENV, launchedBy, readHook } from "./launched-by.js";
+export {
+  ASK_CHAIN_ENV,
+  DELEGATED_BY_ENV,
+  delegatedBy,
+  LAUNCHED_BY_ENV,
+  LINEAGE_ENV,
+  launchedBy,
+  readHook,
+  withoutLineage,
+} from "./launched-by.js";
 export { Cursors, Outbox, type OutboxRef, processAlive, takeLock, takeNamedLock } from "./outbox.js";
 export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.js";
 export * from "./privacy/index.js";

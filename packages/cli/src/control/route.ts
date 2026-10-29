@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The routing rule (spec/CONTROL.md §6): the first delivery mode that fits, top to
 // bottom. Pure, so every branch is a unit test.
-import { acpControl } from "@sessionpipe/core";
+import { acpControl, shortId } from "@sessionpipe/core";
 import type { ControlKind } from "@sessionpipe/core/control";
 
 export type DeliveryMode = "sdk" | "waiter" | "turn" | "api" | "resume" | "fork";
@@ -84,11 +84,7 @@ export const IN_PLACE_ANSWER =
   "Answer it right here, as you would answer the person at the keyboard: your reply is sent back to them automatically. Don't run a command or call a tool just to send it.";
 
 export function frame(text: string, receiver: string): string {
-  let host = receiver;
-  try {
-    host = new URL(receiver).host;
-  } catch {}
-  return `Message via ${host} (sessionpipe control, signed on the sender's device):\n\n${text}`;
+  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device):\n\n${text}`;
 }
 
 /** A new session's first message: the person's words first, where they come from after.
@@ -97,9 +93,26 @@ export function frame(text: string, receiver: string): string {
  *  (2026-10-02). In a new session there is no one else's conversation to tell it apart
  *  from, so the source line can follow the ask. */
 export function frameStart(text: string, receiver: string): string {
-  let host = receiver;
+  return `${text}\n\n(Sent via ${hostOf(receiver)} with sessionpipe control, signed on the sender's device.)`;
+}
+
+/** What a session another session asked receives (CONTROL.md §13), new or not: the task
+ *  first, as frameStart puts it, then who asked and that the answer travels by itself. */
+export function frameAsk(text: string, from: string | undefined): string {
+  return `${text}\n\n(Asked by ${from ?? "another session"} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
+}
+
+/** A handoff's answer as it lands in `reply_to` (CONTROL.md §6): who answered, in the
+ *  short form the receivers label sessions by, and which receiver the person asked through. */
+export function frameHandoff(from: { harness: string; id: string }, receiver: string, reply: string): string {
+  return `Answer from ${from.harness}:${shortId(from.harness, from.id)} (sessionpipe handoff, asked via ${hostOf(receiver)}):\n\n${reply}`;
+}
+
+/** The receiver as the person knows it: its host, or the string as given when it isn't a URL. */
+function hostOf(receiver: string): string {
   try {
-    host = new URL(receiver).host;
-  } catch {}
-  return `${text}\n\n(Sent via ${host} with sessionpipe control, signed on the sender's device.)`;
+    return new URL(receiver).host;
+  } catch {
+    return receiver;
+  }
 }

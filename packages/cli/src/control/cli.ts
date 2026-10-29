@@ -32,6 +32,7 @@ import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { loadSdk } from "./sdk.js";
 import {
+  askOn,
   type ControlConfig,
   type ControlMode,
   controlFile,
@@ -289,10 +290,13 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
     }
     case "off": {
       const c = await off({ out, ...(argv[2] ? { url: argv[2] } : {}) });
-      // The service runs the pool too: while the pool is on, Claude Code here depends on it.
+      // The service runs the pool too (while the pool is on, Claude Code here depends on it),
+      // and asking turned on by hand keeps the daemon for its socket (CONTROL.md §13).
       if (c && !c.receivers.length) {
         if (readPool().on)
           out("  The daemon's service stays: the pool is on (`sessionpipe pool off` first to remove it).");
+        else if (c.ask === true)
+          out("  The daemon stays: sessions here may still ask another agent (`sessionpipe ask off` removes it).");
         else uninstallService();
       }
       return;
@@ -319,6 +323,9 @@ export function enabledHarnesses(harnesses: Record<string, { enabled?: boolean }
 
 async function runDaemon(out: (s?: string) => void, distDir: string): Promise<void> {
   const paired = readControl();
+  // With no receiver the daemon still serves `sessionpipe ask` on the local socket
+  // (CONTROL.md §13), and the pool; only with both off is there nothing for it to do.
+  const asking = !!paired && askOn(paired);
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
   let d: ControlDaemon | null = null;
   const upstream = testUpstream(process.env);
@@ -342,9 +349,13 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     ...(upstream ? { upstream } : {}),
   });
   if (upstream) log(`pool requests go to ${upstream} (SESSIONPIPE_POOL_UPSTREAM, tests only)`);
-  if (!paired?.receivers.length) {
+  if (!paired?.receivers.length && !asking) {
     if (!pool.config.on) {
-      out("control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)");
+      out(
+        paired
+          ? "control isn't paired on this machine and asking is off; nothing to do (`sessionpipe control pair <receiver>` or `sessionpipe ask on`)"
+          : "control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)",
+      );
       return;
     }
     log("the pool is on; control isn't paired (`sessionpipe control pair <receiver>` adds messages)");

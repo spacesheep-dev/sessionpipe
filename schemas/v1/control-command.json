@@ -223,6 +223,10 @@
       "maxLength": 512,
       "pattern": "^[^\\r\\n]+$"
     },
+    "reply_to": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+    },
     "nonce": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{22,64}$"
