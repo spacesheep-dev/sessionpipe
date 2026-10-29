@@ -22,7 +22,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { adapterByName, makeEvent, Outbox, readConfig, writeConfig } from "@sessionpipe/core";
+import { adapterByName, makeEvent, Outbox, readConfig, takeLock, writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlMain, waitMain } from "../src/control/cli.js";
 import { moveControlSecrets } from "../src/control/store.js";
@@ -1304,7 +1304,16 @@ describe("titles", () => {
     });
     // 1 was backfilled and 6 sent live under the first ask; 2 went live under the name claude.ai
     // has; 3 was never sent; claude.ai has no name for 4; 5 has no transcript to ask about.
-    vi.spyOn(claudeCode, "backfill").mockImplementation(() => [row(1), row(2), row(3), row(4), row(5, ""), row(6)]);
+    // 9 was sent before too, but a hook of it holds its lock right now.
+    vi.spyOn(claudeCode, "backfill").mockImplementation(() => [
+      row(1),
+      row(2),
+      row(3),
+      row(4),
+      row(5, ""),
+      row(6),
+      row(9),
+    ]);
     vi.spyOn(claudeCode, "detect").mockReturnValue(true);
     const remote = vi
       .spyOn(claudeCode as Required<typeof claudeCode>, "remoteFacts")
@@ -1315,6 +1324,8 @@ describe("titles", () => {
     facts.save("claude-code", id(1), { backfilled: true });
     facts.save("claude-code", id(2), { session: { title: "claude.ai 2", title_source: "harness" } });
     facts.save("claude-code", id(6), { session: { title: "the first ask", cwd: "/w" } });
+    facts.save("claude-code", id(9), { backfilled: true });
+    const held = takeLock(state, { harness: "claude-code", session: id(9) });
     expect((await run("titles", "on")).lines[1]).toBe(
       "  Asked claude.ai about the last 30 days' sessions: 4 named there, 2 sent again under that name.",
     );
@@ -1324,18 +1335,22 @@ describe("titles", () => {
       { type: "session.backfill", session: { title: "claude.ai 1", title_source: "harness" } },
     ]);
     expect(sent(6)).toMatchObject([{ type: "session.backfill", session: { title: "claude.ai 6" } }]);
-    for (const n of [2, 3, 4, 5]) expect(sent(n)).toEqual([]);
+    for (const n of [2, 3, 4, 5, 9]) expect(sent(n)).toEqual([]);
+    expect(remote.mock.calls.map((c) => c[0].id)).not.toContain(id(9));
+    held?.();
     expect(facts.get("claude-code", id(6))).toMatchObject({
       backfilled: true,
       sent_title: "claude.ai 6",
       session: { title: "claude.ai 6", title_source: "harness", cwd: "/w" },
     });
     // Again: nothing new to send. Asking which holds asks claude.ai nothing.
+    // Again: 9's hook is done now, so it goes; nothing else is new.
     expect((await run("titles", "refresh", "--days", "7")).lines[1]).toBe(
-      "  Asked claude.ai about the last 7 days' sessions: 4 named there, 0 sent again under that name.",
+      "  Asked claude.ai about the last 7 days' sessions: 5 named there, 1 sent again under that name.",
     );
+    expect(sent(9)).toMatchObject([{ type: "session.backfill", session: { title: "claude.ai 9" } }]);
     await run("titles");
-    expect(remote).toHaveBeenCalledTimes(10);
+    expect(remote).toHaveBeenCalledTimes(11);
     // A backfill takes claude.ai's names too; a harness with nothing to ask is left alone.
     vi.mocked(claudeCode.backfill).mockImplementation(() => [row(7)]);
     vi.spyOn(codex, "backfill").mockReturnValue([{ ...row(8), session: { id: "codex-8", title: "local" } }]);
@@ -1347,7 +1362,7 @@ describe("titles", () => {
     // Off: nothing is asked, refresh or not.
     await run("titles", "off");
     await run("titles", "refresh");
-    expect(remote).toHaveBeenCalledTimes(11);
+    expect(remote).toHaveBeenCalledTimes(12);
     // On, with nothing it could name.
     vi.mocked(claudeCode.detect).mockReturnValue(false);
     expect((await run("titles", "on")).lines[1]).toMatch(

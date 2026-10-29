@@ -37,6 +37,7 @@ import {
   type SinkConfig,
   stateDir,
   type Tier,
+  takeLock,
   tilde,
   writeConfig,
 } from "@sessionpipe/core";
@@ -678,82 +679,81 @@ async function backfillRows(adapters: readonly (typeof ADAPTERS)[number][], days
   await queueBackfill(collectRows(adapters, days), days, cfg);
 }
 
-/** With remote titles on, each row takes the name its harness's own service gave the
- *  session (an adapter's remoteFacts: claude.ai's, for Claude Code), four at a time.
- *  The rows that got one. */
-async function remoteTitles(rows: { harness: string; row: BackfillRow }[]): Promise<Set<BackfillRow>> {
-  const facts = factsState(state);
-  const named = new Set<BackfillRow>();
-  const todo: (() => Promise<void>)[] = [];
-  for (const { harness, row } of rows) {
-    const adapter = ADAPTERS.find((a) => a.name === harness);
-    if (!adapter?.remoteFacts || !row.transcript) continue;
-    const ask = adapter.remoteFacts.bind(adapter);
-    todo.push(async () => {
-      const got = await ask(row.session, row.session, row.transcript, facts);
-      if (!got.title) return;
-      Object.assign(row.session, got);
-      named.add(row);
-    });
-  }
-  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map((f) => f()));
-  return named;
-}
-
 /** Queue each row as session.backfill: every session not backfilled before; or, with
  *  `renames` (`sessionpipe titles on`), only each one already sent, live or backfilled,
  *  under another name than its harness's service now gives it, again, with its next seq,
- *  so a receiver shows that name without waiting for the session's next event. */
+ *  so a receiver shows that name without waiting for the session's next event. With
+ *  remote titles on, a row takes that name first (an adapter's remoteFacts: claude.ai's,
+ *  for Claude Code). Four sessions at a time, each under its own lock, as the worker takes
+ *  it: a live session's seq and facts are the worker's too. One a hook holds right now is
+ *  left to its own events, which carry the name as well. */
 async function queueBackfill(
   rows: { harness: string; row: BackfillRow }[],
   days: number,
   cfg: Config,
   renames = false,
 ): Promise<{ named: number; renamed: number }> {
-  const named = cfg.remote_titles ? await remoteTitles(rows) : new Set<BackfillRow>();
   const outbox = new Outbox(state);
-  let n = 0;
-  let renamed = 0;
+  const facts = factsState(state);
   const machine = machineName(cfg, os.hostname());
-  for (const { harness, row } of rows) {
+  let n = 0;
+  let named = 0;
+  let renamed = 0;
+  const one = async ({ harness, row }: { harness: string; row: BackfillRow }): Promise<void> => {
     const ref = { harness, session: row.session.id };
-    const facts = factsState(state).get(harness, row.session.id);
-    const known = facts.session as Partial<Session> | undefined;
-    const rename =
-      (facts.backfilled || known) && named.has(row) && row.session.title !== (known?.title ?? facts.sent_title);
-    if (renames ? !rename : facts.backfilled) continue;
-    const { id, ...rest } = row.session;
-    const e = makeEvent(
-      {
-        type: "session.backfill",
-        harnessEvent: "backfill",
-        data: {
-          started_at: new Date(row.started_at).toISOString(),
-          last_at: new Date(row.last_at).toISOString(),
-          ...(row.turns !== undefined ? { turns: row.turns } : {}),
+    const release = takeLock(state, ref);
+    if (!release) return;
+    try {
+      const adapter = ADAPTERS.find((a) => a.name === harness);
+      let remote = false;
+      if (cfg.remote_titles && adapter?.remoteFacts && row.transcript) {
+        const got = await adapter.remoteFacts(row.session, row.session, row.transcript, facts);
+        if (got.title) {
+          Object.assign(row.session, got);
+          remote = true;
+          named++;
+        }
+      }
+      const mem = facts.get(harness, row.session.id);
+      const known = mem.session as Partial<Session> | undefined;
+      const rename = remote && (mem.backfilled || known) && row.session.title !== (known?.title ?? mem.sent_title);
+      if (renames ? !rename : mem.backfilled) return;
+      const { id, ...rest } = row.session;
+      const e = makeEvent(
+        {
+          type: "session.backfill",
+          harnessEvent: "backfill",
+          data: {
+            started_at: new Date(row.started_at).toISOString(),
+            last_at: new Date(row.last_at).toISOString(),
+            ...(row.turns !== undefined ? { turns: row.turns } : {}),
+          },
         },
-      },
-      {
-        harness: { name: harness },
-        session: { ...rest, id, seq: outbox.nextSeq(ref), machine, ...(rest.cwd ? { cwd: tilde(rest.cwd) } : {}) },
-        now: row.last_at,
-      },
-    );
-    outbox.append(ref, [e]);
-    // What was sent is what a later rename compares with; a live session's next light
-    // event (which reads no facts) carries it too.
-    factsState(state).save(harness, row.session.id, {
-      backfilled: true,
-      sent_title: row.session.title,
-      ...(known ? { session: { ...known, title: row.session.title, title_source: row.session.title_source } } : {}),
-    });
-    if (rename) renamed++;
-    else n++;
-  }
+        {
+          harness: { name: harness },
+          session: { ...rest, id, seq: outbox.nextSeq(ref), machine, ...(rest.cwd ? { cwd: tilde(rest.cwd) } : {}) },
+          now: row.last_at,
+        },
+      );
+      outbox.append(ref, [e]);
+      // What was sent is what a later rename compares with; a live session's next light
+      // event (which reads no facts) carries it too.
+      facts.save(harness, row.session.id, {
+        backfilled: true,
+        sent_title: row.session.title,
+        ...(known ? { session: { ...known, title: row.session.title, title_source: row.session.title_source } } : {}),
+      });
+      if (rename) renamed++;
+      else n++;
+    } finally {
+      release();
+    }
+  };
+  for (let i = 0; i < rows.length; i += 4) await Promise.all(rows.slice(i, i + 4).map(one));
   if (!renames)
     out(`  ✓ Backfill: ${n} session${n === 1 ? "" : "s"} from the last ${days} days queued as session.backfill`);
   void drain(state, cfg.sinks, outbox);
-  return { named: named.size, renamed };
+  return { named, renamed };
 }
 
 function backfill(): Promise<void> {
