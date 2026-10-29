@@ -3,14 +3,14 @@
 // Config: ~/.gemini/settings.json `hooks` key, same array-of-groups shape as Claude
 // Code but timeouts in MILLISECONDS and a `name` per handler. stdout must be JSON or
 // empty. Its own telemetry defaults logPrompts on; the installer says so once.
-import { type ExecFileSyncOptionsWithStringEncoding, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readGemini } from "../readers/transcripts.js";
 import { installClaudeShaped, installedClaudeShaped, readJson, uninstallClaudeShaped } from "./claude-shaped.js";
-import { findBinary } from "./headless.js";
+import { findBinary, probe } from "./headless.js";
 import type { Adapter, HookInput, HookResult, InstallOptions, SessionFacts } from "./types.js";
 
 const NAME = "gemini-cli";
@@ -30,8 +30,9 @@ const settings = (env: NodeJS.ProcessEnv) => path.join(geminiDir(env), "settings
 const validTool = (n: unknown): n is string => typeof n === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(n);
 const eventsFor = (lean?: boolean) => (lean ? GEMINI_EVENTS.filter((e) => e !== "BeforeTool") : [...GEMINI_EVENTS]);
 
-/** `gemini --version`. On Windows the CLI is npm's gemini.cmd shim, which only a shell runs
- *  (node refuses a bare spawn of a .cmd), so there it is looked up on PATH and run through one. */
+/** `gemini --version`. On Windows the CLI is npm's gemini.cmd shim, which node refuses to
+ *  spawn bare, so there it is looked up on PATH and run as `probe` says (the shim's own
+ *  script under this node, else through a shell). */
 export function geminiVersion(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
@@ -41,17 +42,14 @@ export function geminiVersion(
     ? findBinary({ names: ["gemini.exe", "gemini.cmd"], dirs: [path.dirname(process.execPath)], env })
     : "gemini";
   if (!bin) throw new Error("no gemini on PATH");
-  const o: ExecFileSyncOptionsWithStringEncoding = {
+  const c = probe(bin, ["--version"]);
+  return execFileSync(c.file, c.args, {
     encoding: "utf8",
     timeout: 4000,
     stdio: ["ignore", "pipe", "ignore"],
     env,
-  };
-  // One command string under a shell: args beside `shell: true` are deprecated from node 24 (DEP0190).
-  const out = /\.cmd$/i.test(bin)
-    ? execFileSync(`"${bin}" --version`, { ...o, shell: true })
-    : execFileSync(bin, ["--version"], o);
-  return out.trim();
+    shell: c.shell,
+  }).trim();
 }
 
 /** Before 0.46 the hooks system is off unless tools.enableHooks is true (issue #11). */

@@ -241,3 +241,19 @@ describe("gemini-cli transcript and facts", () => {
     expect(long.title?.length).toBeLessThanOrEqual(81);
   });
 });
+
+describe("geminiVersion through an npm shim (#165)", () => {
+  it("runs the shim's own script under this node, so no shell sees it", () => {
+    const bin = mkdtempSync(path.join(os.tmpdir(), "sp-gemini-shim-"));
+    const cli = path.join(bin, "node_modules", "@google", "gemini-cli", "dist", "index.js");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    writeFileSync(cli, `if (process.argv[2] === "--version") process.stdout.write("0.66.0\\n");\n`);
+    writeFileSync(
+      path.join(bin, "gemini.cmd"),
+      `@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@google\\gemini-cli\\dist\\index.js" %*\r\n`,
+    );
+    chmodSync(path.join(bin, "gemini.cmd"), 0o755);
+    expect(geminiVersion("win32", { PATH: bin })).toBe("0.66.0");
+    rmSync(bin, { recursive: true, force: true });
+  });
+});
