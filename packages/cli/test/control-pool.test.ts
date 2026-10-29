@@ -14,6 +14,7 @@ import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import type { ControlConfig } from "../src/control/store.js";
 import { type HelloPool, type Pool, type PoolAccount, PoolError, type PoolStatus } from "../src/pool/index.js";
+import type { StoreName } from "../src/secrets.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const POOL = "sessionpipe:pool";
@@ -75,6 +76,9 @@ class FakePool implements Pool {
     if (code !== "good#state") throw new PoolError("login", "the vendor would not take the code");
     const a = this.add("new", "new@x.y", "New");
     return a;
+  }
+  moveSecrets(_to: StoreName) {
+    return { moved: [], kept: [] };
   }
   requireOn() {
     if (!this.on) throw new PoolError("pool_off", "the pool is off on this machine");

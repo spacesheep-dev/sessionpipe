@@ -43,8 +43,10 @@ export interface PoolConfig {
   port: number;
   /** The port before the last move: a settings.json still naming it is still ours. */
   last_port?: number;
-  /** Where the secrets live; absent: pool.secrets.json. */
-  secrets_in?: SecretStore;
+  /** Where the secrets live, pinned when the first one is written (`file` included, so
+   *  a later terminal with a keychain never picks another store); absent only before
+   *  that, or in a pool.json from before this field, which means the file. */
+  secrets_in?: StoreName;
   accounts: PoolAccount[];
   /** settings.json files `pool on` created, so `pool off` can delete them again. */
   created?: string[];
@@ -113,7 +115,9 @@ export function readPool(env: NodeJS.ProcessEnv = process.env): PoolConfig {
     on: j.on === true,
     port,
     ...(last ? { last_port: last } : {}),
-    ...(j.secrets_in === "keychain" || j.secrets_in === "secret-service" ? { secrets_in: j.secrets_in } : {}),
+    ...(j.secrets_in === "keychain" || j.secrets_in === "secret-service" || j.secrets_in === "file"
+      ? { secrets_in: j.secrets_in }
+      : {}),
     accounts,
     ...(Array.isArray(j.created) ? { created: j.created.filter((f): f is string => typeof f === "string") } : {}),
   };

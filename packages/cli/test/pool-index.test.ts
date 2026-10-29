@@ -289,6 +289,84 @@ describe("adding accounts", () => {
     expect(existsSync(file)).toBe(false);
     await pool.stop();
   });
+  it("the store is pinned at the first secret: on over SSH, then add at the desktop, keeps everything in the file", async () => {
+    // A fake keychain that answers like a locked one at first (over SSH), then works.
+    let reachable = false;
+    const items = new Map<string, string>();
+    const run: Runner = (_c, args, input) => {
+      if (!reachable) return { status: 36, stdout: "" };
+      if (args[0] === "find-generic-password")
+        return items.has(args[4]!) ? { status: 0, stdout: items.get(args[4]!)! } : { status: 44, stdout: "" };
+      if (args[0] === "delete-generic-password") items.delete(args[4]!);
+      if (args[0] === "-i") {
+        const m = /-a "([^"]+)".* -w "([^"]+)"/.exec(input!)!;
+        items.set(m[1]!, m[2]!);
+      }
+      return { status: 0, stdout: "" };
+    };
+    delete env.SESSIONPIPE_SECRETS;
+    const ssh = open({ run });
+    await ssh.setOn(true);
+    expect(readPool(env).secrets_in).toBe("file");
+    const token = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+    reachable = true;
+    const desk = open({ run });
+    const one = await signIn(desk, "one");
+    expect(readPool(env).secrets_in).toBe("file");
+    expect(items.size).toBe(0);
+    expect(Object.keys(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))).sort()).toEqual([
+      `pool:${one.id}`,
+      "pool:token",
+    ]);
+    const { port } = await desk.start();
+    const r = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(r.status).toBe(200);
+    expect(desk.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
+    // Moving to the keychain carries the bearer and the credential, then pins it.
+    expect(desk.moveSecrets("keychain")).toEqual({ moved: ["pool:token", `pool:${one.id}`], kept: [] });
+    expect(readPool(env).secrets_in).toBe("keychain");
+    expect(items.get("pool:token")).toBe(token);
+    expect(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))).toEqual({});
+    now += 6_000;
+    expect(desk.status().settings.map((s) => s.state)).toEqual(["current", "current"]);
+    expect(desk.moveSecrets("keychain")).toEqual({ moved: [], kept: [] });
+    // A store that refuses: nothing moves, nothing is lost.
+    reachable = false;
+    expect(desk.moveSecrets("file")).toEqual({ moved: [], kept: ["pool:token", `pool:${one.id}`] }); // unreadable: stays
+    expect(readPool(env).secrets_in).toBe("keychain");
+    reachable = true;
+    const refusing: Runner = (c, args, input) => (args[0] === "-i" ? { status: 0, stdout: "" } : run(c, args, input));
+    const d2 = open({ run: refusing });
+    expect(d2.moveSecrets("file").moved).toEqual(["pool:token", `pool:${one.id}`]);
+    expect(readPool(env).secrets_in).toBe("file");
+    const back = open({
+      run: (_c, args) => (args[0] === "find-generic-password" ? { status: 44, stdout: "" } : { status: 0, stdout: "" }),
+    });
+    expect(back.moveSecrets("keychain")).toEqual({ moved: [], kept: ["pool:token", `pool:${one.id}`] });
+    expect(readPool(env).secrets_in).toBe("file");
+    expect(Object.keys(JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))).length).toBe(2);
+    // A record whose credential is gone moves nothing for it and is not a failure.
+    const left = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"));
+    delete left[`pool:${one.id}`];
+    writeFileSync(poolSecretsFile(env), JSON.stringify(left));
+    items.clear();
+    expect(open({ run }).moveSecrets("keychain")).toEqual({ moved: ["pool:token"], kept: [] });
+    expect([...items.keys()]).toEqual(["pool:token"]);
+    await desk.stop();
+  });
+  it("a pool.json from before the pin, with secrets in the file, is pinned to the file at the next write", async () => {
+    const pool = open();
+    const one = await signIn(pool, "one");
+    const j = JSON.parse(readFileSync(poolFile(env), "utf8"));
+    delete j.secrets_in;
+    writeFileSync(poolFile(env), JSON.stringify(j));
+    delete env.SESSIONPIPE_SECRETS;
+    const later = open({ run: () => ({ status: 0, stdout: "" }) });
+    expect(later.config.secrets_in).toBeUndefined();
+    await later.setOn(true);
+    expect(readPool(env).secrets_in).toBe("file");
+    expect(later.find(one.id)).not.toBeNull();
+  });
   it("secrets go to the keychain when this machine has one, and pool.json says so", async () => {
     env.SESSIONPIPE_SECRETS = "keychain";
     const items = new Map<string, string>();
@@ -433,7 +511,7 @@ describe("on and off", () => {
     ]);
     expect(existsSync(settings(0))).toBe(false);
     expect(readFileSync(settings(1), "utf8")).toBe('{\n\t"model": "opus"\n}\n');
-    expect(readPool(env)).toEqual({ on: false, port, accounts: [] });
+    expect(readPool(env)).toEqual({ on: false, port, secrets_in: "file", accounts: [] });
     expect(pool.status().settings.map((s) => s.state)).toEqual(["missing", "missing"]);
     expect(changes).toBe(3);
   });

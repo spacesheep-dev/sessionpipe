@@ -36,6 +36,8 @@
 //                                         it for the hello, don't invent a session).
 //   deps.onChange()                       anything the hello carries changed: send one now.
 //
+//   pool.moveSecrets(to)                 the bearer and every credential into `file` | `keychain` |
+//                                         `secret-service`, pinned there; {moved, kept}
 //   pool.requireOn()                     throws PoolError `pool_off` when the pool is off: what the
 //                                         daemon calls before refresh / login.begin / login.complete
 //                                         (CONTROL.md §6); the CLI doesn't, `pool add` works off.
@@ -46,11 +48,12 @@
 // login), `pool_order` (not every account once), `pool_off`; failed `login` (the vendor
 // refused the code, the sign-in ran out) and `pool` (the secrets store refused).
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { claudePool, claudeDirs as coreClaudeDirs, type InstallReport, stateDir } from "@sessionpipe/core";
-import { bestStore, defaultRunner, type Runner } from "../secrets.js";
+import { bestStore, defaultRunner, type Runner, type StoreName } from "../secrets.js";
 import { Credentials } from "./credentials.js";
 import { type Imported, importLogins, type ResolvedLogin } from "./import.js";
 import { installedPoolEnv, installPoolEnv, type PoolEnvState, uninstallPoolEnv } from "./install.js";
@@ -58,12 +61,14 @@ import { beginLogin, completeLogin, pendingLogin } from "./login.js";
 import { type AccountSummary, expirePins, observe, type PolicyState, summary } from "./policy.js";
 import { type PoolServer, startPoolServer } from "./server.js";
 import {
+  credentialName,
   keepStanding,
   type PoolAccount,
   type PoolConfig,
   PoolSecrets,
   type PoolState,
   policyAccounts,
+  poolSecretsFile,
   readPool,
   readPoolState,
   TOKEN_NAME,
@@ -180,6 +185,8 @@ export interface Pool {
   accounts(): PoolAccount[];
   status(): PoolStatus;
   helloPool(): HelloPool;
+  /** Move the bearer and every credential into another store and pin it there. */
+  moveSecrets(to: StoreName): { moved: string[]; kept: string[] };
   readonly config: PoolConfig;
 }
 
@@ -267,11 +274,47 @@ export function openPool(deps: PoolDeps): Pool {
     log,
   });
 
-  /** The secrets store is chosen when the first secret is written, and kept. */
+  /** The secrets store is chosen when the first secret of any kind is written, and
+   *  pinned in pool.json, the file included: `pool on` over SSH (no keychain reachable)
+   *  followed by `pool add` at the desktop must not leave the bearer in the file and
+   *  the accounts in the keychain. A pool from before the pin, with secrets already in
+   *  the file, is pinned to the file. */
   const placeSecrets = () => {
-    if (cfg.secrets_in !== undefined || cfg.accounts.length) return;
-    const s = bestStore(env, process.platform, run);
-    if (s !== "file") cfg.secrets_in = s;
+    if (cfg.secrets_in !== undefined) return;
+    cfg.secrets_in =
+      cfg.accounts.length || existsSync(poolSecretsFile(env)) ? "file" : bestStore(env, process.platform, run);
+    saveConfig();
+  };
+
+  /** Carry every secret (the bearer, each credential) into `to` and pin it. A secret
+   *  the new store refuses stays where it is and is named in `kept`; nothing is deleted
+   *  from the old store before its copy is in the new one. */
+  const moveSecrets = (to: StoreName): { moved: string[]; kept: string[] } => {
+    const from = { ...cfg };
+    const target: PoolConfig = { ...cfg, secrets_in: to };
+    const moved: string[] = [];
+    const kept: string[] = [];
+    if (secrets.store(from) === to) return { moved, kept };
+    const names = [TOKEN_NAME, ...cfg.accounts.map((a) => credentialName(a.id))];
+    for (const name of names) {
+      // A store that can't be read right now keeps its secrets: nothing is pinned
+      // elsewhere on the strength of an empty read.
+      const r = secrets.read(from, name);
+      if (r.unreadable || (r.value && !secrets.set(target, name, r.value))) {
+        kept.push(name);
+        continue;
+      }
+      if (r.value) moved.push(name);
+    }
+    if (kept.length) {
+      for (const name of moved) secrets.del(target, name);
+      return { moved: [], kept };
+    }
+    cfg.secrets_in = to;
+    saveConfig();
+    for (const name of moved) secrets.del(from, name);
+    cached = null;
+    return { moved, kept };
   };
 
   /** The bearer Claude Code presents. `pool on` mints a new one every time (an old copy
@@ -529,6 +572,8 @@ export function openPool(deps: PoolDeps): Pool {
       changed();
       return reports;
     },
+
+    moveSecrets,
 
     requireOn() {
       if (!cfg.on) throw new PoolError("pool_off", "the pool is off on this machine");

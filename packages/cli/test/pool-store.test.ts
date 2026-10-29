@@ -48,6 +48,8 @@ describe("pool.json", () => {
     if (process.platform !== "win32") expect(statSync(poolFile(env)).mode & 0o777).toBe(0o600);
     expect(readPool(env)).toEqual(c);
     expect(readFileSync(poolFile(env), "utf8")).not.toMatch(/access|refresh|token/);
+    writePool(cfg({ secrets_in: "file" }), env);
+    expect(readPool(env).secrets_in).toBe("file");
   });
   it("absent or broken reads as off and empty", () => {
     expect(readPool(env)).toEqual({ on: false, port: 0, accounts: [] });
