@@ -120,6 +120,49 @@ Asks again about the last N days' sessions.
 
 Local files only again (the default).
 
+### Accounts
+
+{{usage pool}}
+
+The account pool: the accounts in order, the room each has left in its 5-hour and weekly
+windows, and when each resets. Nothing here runs until you ask for it; `install` and `connect`
+never touch the pool.
+
+{{usage pool add}}
+
+`--import` copies every Claude Code login on this machine into the pool; `--login` signs in to
+another account (a URL, then the code to `--code -`). Credentials live in sessionpipe's own
+secrets store and never appear on an event or on the terminal.
+
+{{usage pool on}}
+
+Points every Claude Code on this machine at the pool through the `env` block of its
+`settings.json`, and installs the daemon's service if it isn't there. New sessions use the pool
+from the moment it returns; running ones at their next start.
+
+{{usage pool off}}
+
+Removes exactly what `pool on` wrote; the accounts stay.
+
+{{usage pool order}}
+
+The complete order: each request goes to the first account that has room.
+
+{{usage pool enable}}
+
+{{usage pool disable}}
+
+Takes an account out of the rotation, or puts it back, without forgetting it.
+
+{{usage pool remove}}
+
+Forgets the account and its credentials.
+
+{{usage pool refresh}}
+
+Reads usage from the vendor now, for one account or all of them; otherwise the daemon reads it
+every five minutes while the pool is on.
+
 ### Messages to your sessions
 
 {{usage control pair}}
@@ -180,6 +223,10 @@ The daemon's daily update check, off or back on.
 ## Session names from claude.ai
 
 {{include packages/cli/README.md#Session names from claude.ai}}
+
+## The pool
+
+{{include packages/cli/README.md#The pool}}
 
 ## Status JSON {#status-json}
 
