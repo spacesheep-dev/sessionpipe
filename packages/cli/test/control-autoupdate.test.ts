@@ -99,6 +99,12 @@ describe("what status says", () => {
       "last check just now failed: ENOTFOUND",
     );
     expect(updateLine({ ...base, last_check: checked }, NOW)).toContain("latest ?");
+    const byHand = updateSummary({ off: null, paired: true, rec: {}, platform: "win32" });
+    expect(byHand.auto).toBe(false);
+    expect(byHand.off).toBe(
+      "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
+    );
+    expect(updateSummary({ off: null, paired: true, rec: {}, platform: "linux" }).auto).toBe(true);
     const off = updateSummary({ off: "npx", paired: false, rec: {} });
     expect(
       updateLine(
