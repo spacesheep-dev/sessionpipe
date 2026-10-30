@@ -507,9 +507,11 @@ export async function runJob(
   }
   // The session's lock covered the append; the sinks drain without it (the outbox
   // reader leaves a line still being written), so a sibling hook isn't held out for
-  // a round trip.
-  const delivered = (await drain(state, cfg.sinks, outbox, ref)) ?? {};
+  // a round trip. A prune holds the `flush` lock, so it goes first: a worker that
+  // found the lock taken meanwhile left its events and a `flush.more` mark, and this
+  // drain sends them.
   if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
+  const delivered = (await drain(state, cfg.sinks, outbox, ref)) ?? {};
   return { events, delivered };
 }
 

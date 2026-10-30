@@ -233,6 +233,26 @@ describe("runJob with a harness that says little", () => {
     await runJob(job());
     expect(prune).toHaveBeenLastCalledWith(30);
   });
+
+  it("events a worker left while a prune held the flush lock go out with the pruning job", async () => {
+    fake.result = { session: { id: "s5" }, events: [beat] };
+    http.send.mockResolvedValue({ ok: true, acknowledged: 1 });
+    const outbox = new Outbox(tmp);
+    const real = Outbox.prototype.prune;
+    vi.spyOn(Outbox.prototype, "prune").mockImplementation(function (this: Outbox, days: number) {
+      const r = real.call(this, days);
+      // Another hook appended meanwhile; its drain found `flush` taken and left a mark.
+      outbox.append({ harness: "codex", session: "other" }, [ev("other", 0)]);
+      writeFileSync(path.join(tmp, "locks", "flush.more"), "");
+      return r;
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await runJob(job());
+    expect(http.send.mock.calls.flatMap(([, events]) => events.map((e) => e.session.id)).sort()).toEqual([
+      "other",
+      "s5",
+    ]);
+  });
 });
 
 describe("what a receiver may leave out of its answer", () => {
