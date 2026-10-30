@@ -264,11 +264,18 @@ async function install(): Promise<void> {
     out(
       "  No sink above tier 0: hooking one tool event per harness (the heartbeat's). `sink add … --tier 1` or higher hooks the rest.",
     );
-  installHarnesses(adapters, cfg, lean);
+  const skipped = installHarnesses(adapters, cfg, lean);
   writeConfig(cfg);
   const days = Number(flag("--backfill") ?? 30);
   if (days > 0) await backfillRows(adapters, days, cfg);
   out("");
+  // Every harness it worked on was left alone: a script reading the exit code must see that.
+  if (skipped.length === adapters.length) {
+    process.exitCode = 1;
+    return out(
+      `  ✗ Nothing was hooked: ${skipped.join(", ")} ${skipped.length > 1 ? "were" : "was"} left alone, for the reason above. Fix that and run \`sessionpipe install\` again.`,
+    );
+  }
   const live = cfg.sinks.filter((s) => !s.paused);
   if (live.length) out(`  Reporting to ${live.map((s) => `${s.name} (tier ${s.tier})`).join(", ")}.`);
   else
@@ -321,8 +328,10 @@ function rehook(cfg: Config, wasLean: boolean): void {
   writeConfig(cfg);
 }
 
-/** Write the hooks for these harnesses; remember which files sessionpipe created. */
-function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: Config, lean: boolean): void {
+/** Write the hooks for these harnesses; remember which files sessionpipe created. Returns
+ *  the harnesses whose every file was left alone (`skipped`), so nothing of theirs is hooked. */
+function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: Config, lean: boolean): string[] {
+  const skipped: string[] = [];
   if (usesLauncher()) {
     const node = stableNode(process.execPath);
     const l = installLauncher({ distDir, node, version: VERSION });
@@ -358,7 +367,9 @@ function installHarnesses(adapters: readonly (typeof ADAPTERS)[number][], cfg: C
       out(
         "    note: Codex runs non-managed hooks only after you approve them: start `codex` and accept the hook review. The notify fallback reports turn ends meanwhile.",
       );
+    if (reports.every((r) => r.skipped)) skipped.push(a.name);
   }
+  return skipped;
 }
 
 /** `sessionpipe connect <receiver>`: everything a machine needs, in one command and one

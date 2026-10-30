@@ -380,6 +380,23 @@ describe.skipIf(process.platform === "win32")("install", () => {
     const { text } = await run("install", "--claude-code");
     expect(text).toMatch(/! claude-code: .*settings\.json — .*not touched/);
     expect(text).toContain("✓ Backfill: 1 session from the last 30 days");
+    expect(text).toContain("✗ Nothing was hooked: claude-code was left alone");
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("one harness hooked is enough for exit 0, though another was skipped; both skipped is exit 1", async () => {
+    put(path.join(home, ".claude", "settings.json"), "{not json");
+    const devinConfig = path.join(home, ".config", "devin", "config.json");
+    put(devinConfig, {});
+    const { text } = await run("install", "--claude-code", "--devin", "--backfill", "0");
+    expect(text).toMatch(/! claude-code: .*not touched/);
+    expect(text).toMatch(/✓ devin: /);
+    expect(text).not.toContain("Nothing was hooked");
+    expect(process.exitCode).toBeUndefined();
+    put(devinConfig, "{not json");
+    const both = await run("install", "--claude-code", "--devin", "--backfill", "0");
+    expect(both.text).toContain("✗ Nothing was hooked: claude-code, devin were left alone");
+    expect(process.exitCode).toBe(1);
   });
 
   it("--status-line makes ours Claude Code's status line and is remembered; --no-status-line takes it away", async () => {
