@@ -451,7 +451,15 @@ describe.runIf(unix)("a message the session doesn't take", () => {
     expect(written).toHaveLength(1);
     // No second lane: nothing was started and no copy was made.
     expect(() => readFileSync(claudeLog, "utf8")).toThrow();
-    expect(rx.acks.filter((a) => a.id === q.id && a.outcome === "failed")).toHaveLength(1);
+    // The message is never re-delivered: no success ack, written stays 1 (above), and
+    // every failed ack for it is the same `held` ack. The daemon MAY re-send that ack if
+    // a long-poll re-serves the message in the window before the first ack's POST removes
+    // it from the receiver (the `recentAcks` re-send: at-least-once, deduped by id); that
+    // is not a second delivery, and a receiver keyed on the id sees one held.
+    const failed = rx.acks.filter((a) => a.id === q.id && a.outcome === "failed");
+    expect(failed.length).toBeGreaterThanOrEqual(1);
+    for (const a of failed) expect(a).toMatchObject({ outcome: "failed", code: "held" });
+    expect(rx.acks.filter((a) => a.id === q.id && a.outcome === "delivered")).toHaveLength(0);
   });
 
   it("a turn the person began themselves in the same window is not this message's delivery", async () => {
