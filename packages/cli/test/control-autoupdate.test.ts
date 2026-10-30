@@ -87,7 +87,7 @@ describe("what status says", () => {
     expect(ago(new Date(NOW - 4 * 24 * 3600_000).toISOString(), NOW)).toBe("4 days ago");
   });
   it("one line: automatic or why not, the last check, what waits, what failed or was done", () => {
-    const base = updateSummary({ off: null, paired: true, rec: {} });
+    const base = updateSummary({ off: null, paired: true, rec: {}, platform: "linux" });
     expect(updateLine(base, NOW)).toBe(
       "automatic (the control daemon checks npm once a day and installs when idle; `sessionpipe update off` stops it) · not checked yet (a minute after the daemon starts)",
     );
