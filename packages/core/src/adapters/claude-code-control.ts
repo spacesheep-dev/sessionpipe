@@ -11,6 +11,7 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import os from "node:os";
 import path from "node:path";
 import { levelRank, type RunLevel, START_PERMISSIONS, type StartPermission } from "../control/verify.js";
+import { withoutLineage } from "../launched-by.js";
 import {
   isExe,
   JOB_TIMEOUT_MS,
@@ -190,9 +191,10 @@ export function claudeArgs(o: {
 }
 
 /** The env a headless turn runs with: ours, minus the markers that make Claude Code
- *  think it runs inside another session, with CLAUDE_CONFIG_DIR naming the account. */
+ *  think it runs inside another session and minus any lineage this process inherited
+ *  (jobEnv), with CLAUDE_CONFIG_DIR naming the account. */
 export function claudeEnv(configDir?: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const e = { ...env };
+  const e = withoutLineage(env);
   for (const k of [
     "CLAUDECODE",
     "CLAUDE_CODE_SESSION_ID",

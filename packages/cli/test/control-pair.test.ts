@@ -262,7 +262,7 @@ describe("pairing (CONTROL.md §2)", () => {
       },
     ];
     await pair(opts());
-    expect(rx.seen[1]?.body).toMatchObject({ key_types: ["passkey", "device"] });
+    expect(rx.seen[1]?.body).toMatchObject({ key_types: ["passkey", "device"], ask: true, handoff: true });
     expect(readControl(env)?.receivers[0]?.keys[0]).toMatchObject(mac.key);
     expect(said()).toContain("It approved with an app's device key: held in hardware, verified each use.");
   });

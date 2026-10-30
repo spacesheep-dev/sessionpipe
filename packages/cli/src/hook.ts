@@ -114,6 +114,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         // Devin's payload names no folder at all; this is the only thing that does.
         "DEVIN_PROJECT_DIR",
         "GEMINI_CLI_HOME",
+        // The session the control daemon ran this one for (PROTOCOL.md §3 delegated_by).
+        "SESSIONPIPE_ASKED_BY",
         "SESSIONPIPE_CONTROL_JOB",
         // The launcher a script named for a session it starts (PROTOCOL.md §3 launched_by).
         "SESSIONPIPE_LAUNCHED_BY",

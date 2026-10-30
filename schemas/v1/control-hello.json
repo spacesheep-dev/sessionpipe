@@ -272,6 +272,12 @@
         "harness",
         "accounts"
       ]
+    },
+    "ask": {
+      "type": "boolean"
+    },
+    "handoff": {
+      "type": "boolean"
     }
   },
   "required": [
