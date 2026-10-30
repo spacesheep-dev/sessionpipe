@@ -540,7 +540,7 @@ describe("the daemon's auto-update", () => {
   it("status says what it does and what it found", () => {
     const now = Date.parse("2026-10-04T12:00:00Z");
     const rec = { checked_at: new Date(now - 3 * 3600_000).toISOString(), latest: "0.6.0" };
-    const on = updateSummary({ off: null, paired: true, rec });
+    const on = updateSummary({ off: null, paired: true, rec, platform: "linux" });
     expect(on.auto).toBe(true);
     expect(updateLine(on, now)).toMatch(/^automatic .* · last check 3 h ago: latest 0\.6\.0$/);
     const noDaemon = updateSummary({ off: null, paired: false, rec: {} });

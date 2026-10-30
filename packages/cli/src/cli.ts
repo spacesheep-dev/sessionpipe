@@ -53,7 +53,16 @@ import { POOL_HELP, poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
 import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
-import { bestStore, dropSinkSecrets, moveSinkSecrets, type StoreName, sinkWithSecrets, storeLabel } from "./secrets.js";
+import {
+  bestStore,
+  dropSinkSecrets,
+  fileKept,
+  keysFileNote,
+  moveSinkSecrets,
+  type StoreName,
+  sinkWithSecrets,
+  storeLabel,
+} from "./secrets.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 
 const print = (s = ""): void => {
@@ -470,10 +479,7 @@ async function connect(): Promise<void> {
     const b = moveControlSecrets(store);
     const kept = [...a.kept, ...b.kept];
     out(`  ✓ Keys: in ${storeLabel(store)}${kept.length ? ` (left in the file: ${kept.join(", ")})` : ""}`);
-  } else
-    out(
-      `  Keys: in ${tilde(path.dirname(configFile()))} at 0600 — no unlocked keychain in this session${process.env.SSH_CONNECTION ? " (an ssh shell)" : ""}`,
-    );
+  } else out(`  Keys: in ${tilde(path.dirname(configFile()))} ${keysFileNote()}`);
 
   // 5. The last 30 days, now that there is somewhere to send them.
   if (rows.length) queueBackfill(rows, 30, readConfig());
@@ -531,12 +537,12 @@ function secrets(): void {
     s.token_in
       ? `${storeLabel(s.token_in)}${sinkWithSecrets(s) ? "" : " — can't be read from this session (locked?)"}`
       : s.token || s.secret
-        ? `${tilde(configFile())} (0600)`
+        ? `${tilde(configFile())} (${fileKept()})`
         : "no key";
   for (const s of cfg.sinks) out(`  sink ${s.name.padEnd(20)} ${where(s)}`);
   for (const r of readControl()?.receivers ?? [])
     out(
-      `  control ${new URL(r.url).host.padEnd(17)} ${r.token_in ? `${storeLabel(r.token_in)}${r.token ? "" : " — can't be read from this session (locked?)"}` : "control.json (0600)"}`,
+      `  control ${new URL(r.url).host.padEnd(17)} ${r.token_in ? `${storeLabel(r.token_in)}${r.token ? "" : " — can't be read from this session (locked?)"}` : `control.json (${fileKept()})`}`,
     );
   if (!cfg.sinks.length && !readControl()?.receivers.length) out("  no keys on this machine");
   out(`  best store from this session: ${storeLabel(bestStore())}`);

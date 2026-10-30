@@ -100,12 +100,22 @@ export function updateSummary(o: {
   off: string | null;
   paired: boolean;
   rec: UpdateRecord;
+  platform?: NodeJS.Platform;
 }): UpdateSummary {
   const daemonEnv = o.rec.off?.startsWith("SESSIONPIPE_NO_UPDATE_CHECK")
     ? "SESSIONPIPE_NO_UPDATE_CHECK is set in the daemon's environment"
     : null;
+  // No service manager runs the daemon on Windows yet (pair says so): it checks only while
+  // someone keeps `sessionpipe control run` going, which is not "automatic".
+  const byHand =
+    (o.platform ?? process.platform) === "win32"
+      ? "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
+      : null;
   const off =
-    o.off ?? (o.paired ? daemonEnv : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
+    o.off ??
+    (o.paired
+      ? (daemonEnv ?? byHand)
+      : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
   return {
     auto: !off,
     off,

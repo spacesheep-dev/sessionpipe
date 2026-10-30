@@ -12,6 +12,8 @@ import {
   bestStore,
   defaultRunner,
   dropSinkSecrets,
+  fileKept,
+  keysFileNote,
   moveSinkSecrets,
   probe,
   type Runner,
@@ -20,6 +22,7 @@ import {
   secretSet,
   sinkAccount,
   sinkWithSecrets,
+  storeLabel,
 } from "../src/secrets.js";
 
 /** A stand-in for macOS `security`: an item map, or a keychain that is locked. */
@@ -83,6 +86,19 @@ describe("the keychain store", () => {
     expect(bestStore({ DBUS_SESSION_BUS_ADDRESS: "unix:x" }, "linux", k.run)).toBe("file");
     expect(bestStore({ SESSIONPIPE_SECRETS: "file" }, "darwin", k.run)).toBe("file");
     expect(bestStore({}, "win32", k.run)).toBe("file");
+    // Windows has no modes: the words say where the key lives, not "0600".
+    expect(storeLabel("file", "win32")).toBe("a file under your profile");
+    expect(storeLabel("file", "linux")).toBe("a 0600 file");
+    expect(storeLabel("keychain", "win32")).toBe("the macOS Keychain");
+    expect(fileKept("win32")).toBe("your profile's permissions");
+    expect(fileKept("darwin")).toBe("0600");
+    expect(keysFileNote("win32", {})).toBe(
+      "under your profile's permissions (Windows has no keychain sessionpipe uses)",
+    );
+    expect(keysFileNote("linux", { SSH_CONNECTION: "1" })).toBe(
+      "at 0600 — no unlocked keychain in this session (an ssh shell)",
+    );
+    expect(keysFileNote("linux", {})).toBe("at 0600 — no unlocked keychain in this session");
   });
 });
 

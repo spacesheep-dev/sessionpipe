@@ -30,7 +30,7 @@ import { HttpSink } from "../src/http-sink.js";
 import { installLauncher } from "../src/launcher.js";
 import { factsState, VERSION } from "../src/run.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
-import { bestStore, dropSinkSecrets, moveSinkSecrets, sinkWithSecrets } from "../src/secrets.js";
+import { bestStore, dropSinkSecrets, fileKept, moveSinkSecrets, sinkWithSecrets, storeLabel } from "../src/secrets.js";
 import { globalPrefix, installVersion, latestVersion } from "../src/update.js";
 
 type Cli = typeof import("../src/cli.js");
@@ -738,7 +738,7 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
 describe.skipIf(process.platform === "win32")("secrets", () => {
   it("says where each key lives and whether this session can read it", async () => {
     const empty = await run("secrets");
-    expect(empty.lines).toEqual(["  no keys on this machine", "  best store from this session: a 0600 file"]);
+    expect(empty.lines).toEqual(["  no keys on this machine", `  best store from this session: ${storeLabel("file")}`]);
     writeConfig({
       sinks: [
         { name: "kc", url: "https://kc.invalid", tier: 1, token_in: "keychain" },
@@ -772,9 +772,9 @@ describe.skipIf(process.platform === "win32")("secrets", () => {
     expect(text).toContain(
       "sink locked               the Secret Service keyring — can't be read from this session (locked?)",
     );
-    expect(text).toContain(`sink f                    ${config} (0600)`);
+    expect(text).toContain(`sink f                    ${config} (${fileKept()})`);
     expect(text).toContain("sink none                 no key");
-    expect(text).toContain("control a.invalid         control.json (0600)");
+    expect(text).toContain(`control a.invalid         control.json (${fileKept()})`);
     expect(text).toContain("control b.invalid         the macOS Keychain — can't be read from this session (locked?)");
     expect(text).toContain("control c.invalid         the macOS Keychain\n");
   });
@@ -783,7 +783,7 @@ describe.skipIf(process.platform === "win32")("secrets", () => {
     expect((await run("secrets", "move", "vault")).lines).toEqual([
       "usage: sessionpipe secrets move keychain|secret-service|file",
     ]);
-    expect((await run("secrets", "move", "file")).lines).toEqual(["  nothing to move to a 0600 file"]);
+    expect((await run("secrets", "move", "file")).lines).toEqual([`  nothing to move to ${storeLabel("file")}`]);
     vi.mocked(moveSinkSecrets).mockReturnValue({ moved: ["rx"], kept: ["locked"] });
     vi.mocked(moveControlSecrets).mockReturnValue({ moved: ["https://a.invalid"], kept: [] });
     expect((await run("secrets", "move", "keychain")).lines).toEqual([
@@ -1095,7 +1095,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     expect(text).toContain("sink kc               tier 1 PAUSED HTTP 401");
     expect(text).toContain("control:  not paired");
     expect(text).toMatch(/hooks run .*sessionpipe-hook → node /);
-    expect(text).toContain("key  sink rx                      a 0600 file\n");
+    expect(text).toContain(`key  sink rx                      ${storeLabel("file")}\n`);
     expect(text).toContain("key  sink kc                      the macOS Keychain\n");
     expect(text).toMatch(/claude .*\.claude +signed in\n/);
     expect(text).toMatch(/claude .*\.claude-second +NOT signed in from here\n/);
@@ -1158,7 +1158,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
       "! control rx.invalid: its key is in the macOS Keychain, which this session can't read",
     );
     expect(down.text).toContain("key  sink kc                      the macOS Keychain (unreadable here)");
-    expect(down.text).toContain("key  control plain.invalid        a 0600 file\n");
+    expect(down.text).toContain(`key  control plain.invalid        ${storeLabel("file")}\n`);
     expect(down.text).toMatch(/! Claude Code .*\.claude-second isn't signed in from here: `CLAUDE_CONFIG_DIR=/);
     expect(down.text).toMatch(/claude .*\.claude-odd +can't tell/);
     expect(down.text).toContain(

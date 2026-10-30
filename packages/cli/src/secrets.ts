@@ -108,8 +108,28 @@ export function bestStore(
   return "file";
 }
 
-export const storeLabel = (s: StoreName | undefined): string =>
-  s === "keychain" ? "the macOS Keychain" : s === "secret-service" ? "the Secret Service keyring" : "a 0600 file";
+export const storeLabel = (s: StoreName | undefined, platform: NodeJS.Platform = process.platform): string =>
+  s === "keychain"
+    ? "the macOS Keychain"
+    : s === "secret-service"
+      ? "the Secret Service keyring"
+      : platform === "win32"
+        ? "a file under your profile"
+        : "a 0600 file";
+
+/** What keeps a key in the config file private: a mode on POSIX; on Windows, where modes
+ *  mean nothing, the profile folder's own permissions. */
+export const fileKept = (platform: NodeJS.Platform = process.platform): string =>
+  platform === "win32" ? "your profile's permissions" : "0600";
+
+/** `connect`'s line for keys that stay in the file. */
+export function keysFileNote(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform === "win32") return "under your profile's permissions (Windows has no keychain sessionpipe uses)";
+  return `at 0600 — no unlocked keychain in this session${env.SSH_CONNECTION ? " (an ssh shell)" : ""}`;
+}
 
 /** The sink with its token and secret filled in from its store. Null when they live in
  *  a store this process can't read right now (a keychain locked in an ssh session):
