@@ -161,9 +161,10 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       // `spacesheep.dev` is enough: a bare host means https.
       const raw = argv[2];
       if (!raw || raw.startsWith("-")) return out(`usage:\n${CONTROL_HELP}`);
+      // Before the npx hand-off, as install does: the global copy would stop on it anyway.
+      assertConfigWritable();
       if (viaNpx(distDir)) return rerunGlobally(argv, out);
       const url = (/^https?:\/\//.test(raw) ? raw : `https://${raw}`).replace(/\/$/, "");
-      assertConfigWritable();
       const cfg = readConfig();
       const sink = cfg.sinks.find((s) => s.url.replace(/\/$/, "") === url);
       // No token is fine where the receiver offers open pairing: the person approves the

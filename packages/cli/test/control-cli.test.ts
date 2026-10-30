@@ -14,7 +14,12 @@ import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain }
 import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
 import { readPool } from "../src/pool/index.js";
+import { rerunGlobally } from "../src/runtime.js";
 
+vi.mock("../src/runtime.js", async (original) => ({
+  ...(await original<typeof import("../src/runtime.js")>()),
+  rerunGlobally: vi.fn(),
+}));
 vi.mock("../src/pool/index.js", async (original) => ({
   ...(await original<typeof import("../src/pool/index.js")>()),
   readPool: vi.fn(() => ({ on: false, port: 0, accounts: [] })),
@@ -113,6 +118,13 @@ describe("control pair", () => {
     writeFileSync(file, '{ "sinks": [], }');
     await expect(run("pair", "rx.test", "--no-service")).rejects.toThrow("so it was not written over");
     expect(pair).not.toHaveBeenCalled();
+    expect(readFileSync(file, "utf8")).toBe('{ "sinks": [], }');
+    // Run from npx it stops before the global install too, as `install` and `connect` do.
+    const npx = path.join(tmp, ".npm", "_npx", "abc", "node_modules", "sessionpipe", "dist");
+    await expect(
+      controlMain(["control", "pair", "rx.test", "--no-service"], (s) => out.push(s ?? ""), npx),
+    ).rejects.toThrow("so it was not written over");
+    expect(rerunGlobally).not.toHaveBeenCalled();
     expect(readFileSync(file, "utf8")).toBe('{ "sinks": [], }');
   });
 

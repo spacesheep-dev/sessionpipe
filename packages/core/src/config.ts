@@ -63,8 +63,9 @@ function configProblem(file: string): string | undefined {
   try {
     text = readFileSync(file, "utf8");
   } catch (e) {
+    // Every error readFileSync throws carries a Node error code.
     const code = (e as NodeJS.ErrnoException).code;
-    return code === "ENOENT" ? undefined : `could not be read (${code ?? "unknown error"})`;
+    return code === "ENOENT" ? undefined : `could not be read (${code})`;
   }
   if (!text.trim()) return undefined;
   if (text.charCodeAt(0) === 0xfeff) return "starts with a byte-order mark (save it as UTF-8 without one)";
