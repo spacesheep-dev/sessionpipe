@@ -150,32 +150,48 @@ export class Outbox {
    *  so a receiver's (harness, session, seq) dedup doesn't take its new events for
    *  ones it already has, and the sinks read the new file from its start. */
   prune(days: number, now = Date.now()): number {
-    const gone: string[] = [];
+    let n = 0;
     const cutoff = now - days * 86_400_000;
     for (const ref of this.sessions()) {
       const f = this.file(ref);
       try {
         if (statSync(f).mtimeMs < cutoff) {
           unlinkSync(f);
-          gone.push(`${ref.harness}/${ref.session}`);
+          n++;
         }
       } catch {}
     }
-    if (gone.length) {
-      const dir = path.join(this.root, "cursors");
-      let names: string[] = [];
-      try {
-        names = readdirSync(dir).filter((n) => n.endsWith(".json"));
-      } catch {}
-      for (const n of names) {
-        const cursors = new Cursors(this.root, n.slice(0, -5));
-        const c = cursors.read();
-        if (!gone.some((k) => k in c)) continue;
-        for (const k of gone) delete c[k];
-        cursors.write(c);
+    this.dropStaleCursors();
+    return n;
+  }
+
+  /** A sink's cursor into a session file that is gone is removed: pruned now, by an
+   *  earlier prune, or by hand. The edit takes the drain's `flush` lock, since a drain
+   *  holds the whole cursor map and writes it back; while one runs, the keys wait for
+   *  the next prune. */
+  private dropStaleCursors(): void {
+    let names: string[] = [];
+    try {
+      names = readdirSync(path.join(this.root, "cursors")).filter((n) => n.endsWith(".json"));
+    } catch {}
+    const stale = (c: Record<string, number>): string[] =>
+      Object.keys(c).filter((k) => {
+        const i = k.indexOf("/");
+        return !existsSync(this.file({ harness: k.slice(0, i), session: k.slice(i + 1) }));
+      });
+    const sinks = names.map((n) => new Cursors(this.root, n.slice(0, -5))).filter((s) => stale(s.read()).length);
+    if (!sinks.length) return;
+    const release = takeNamedLock(this.root, "flush");
+    if (!release) return;
+    try {
+      for (const s of sinks) {
+        const c = s.read();
+        for (const k of stale(c)) delete c[k];
+        s.write(c);
       }
+    } finally {
+      release();
     }
-    return gone.length;
   }
 
   delete(ref: OutboxRef): void {

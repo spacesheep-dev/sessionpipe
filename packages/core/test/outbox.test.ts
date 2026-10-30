@@ -319,6 +319,23 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(back.map((e) => e.session.seq)).toEqual([3]);
   });
 
+  it("prune: a drain holding the flush lock keeps its cursors, and a later prune drops the keys left behind", () => {
+    const o = new Outbox(tmp);
+    const old = { harness: "codex", session: "old" };
+    o.append(old, [ev(o.nextSeq(old))]);
+    const a = new Cursors(tmp, "a");
+    a.write({ [a.key(old)]: o.read(old, 0).offset, "codex/forgotten": 99 });
+    const t = Date.now() / 1000 - 40 * 86_400;
+    utimesSync(o.file(old), t, t);
+    const drain = takeNamedLock(tmp, "flush");
+    expect(o.prune(30)).toBe(1);
+    expect(Object.keys(a.read())).toEqual([a.key(old), "codex/forgotten"]);
+    drain?.();
+    expect(o.prune(30)).toBe(0);
+    expect(a.read()).toEqual({});
+    expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
+  });
+
   it("delete removes the file and the counter, and is quiet when they are gone", () => {
     const o = new Outbox(tmp);
     o.nextSeq(ref);
