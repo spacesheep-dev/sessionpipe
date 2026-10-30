@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   ADAPTERS,
   adapterByName,
+  assertConfigWritable,
   type BackfillRow,
   type Config,
   Cursors,
@@ -209,6 +210,7 @@ Docs: https://sessionpipe.org · nothing leaves this machine until you add a sin
 
 /** --machine names a first install. A repeat setup must not split sessions from control. */
 function setupConfig(): Config {
+  assertConfigWritable();
   const cfg = readConfig();
   const requested = flag("--machine");
   if ((has("--machine") || has("--rename-machine")) && (!requested || requested.startsWith("-")))
@@ -582,6 +584,8 @@ async function uninstall(): Promise<void> {
       return;
     }
   }
+  // Before any hook comes out: an unreadable config.json can't say which files were ours.
+  assertConfigWritable();
   // The pool's env block goes first (DESIGN §2.4): Claude Code must not be left pointed
   // at a daemon this uninstall is about to take away.
   if (all || named.some((a) => a.name === "claude-code")) await poolOffForUninstall(out);
@@ -664,6 +668,8 @@ async function sink(): Promise<void> {
 }
 
 async function sinkAdd(url: string, cfg: Config): Promise<void> {
+  // Before the receiver is asked anything: its answer could not be saved.
+  assertConfigWritable();
   const tier = Math.max(0, Math.min(3, Number(flag("--tier") ?? 0))) as Tier;
   const name = flag("--name") ?? (url === "stdout" ? "stdout" : url.startsWith("file:") ? "file" : new URL(url).host);
   // Control is not a property of a sink: it is set up per machine, with keys enrolled

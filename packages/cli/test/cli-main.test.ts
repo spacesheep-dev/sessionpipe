@@ -495,6 +495,33 @@ describe.skipIf(process.platform === "win32")("install", () => {
   });
 });
 
+describe("a config.json that does not parse", () => {
+  it("is left byte-identical: a command that saves it stops first, and install and uninstall touch no hook", async () => {
+    const settings = path.join(home, ".claude", "settings.json");
+    put(settings, {});
+    // A hand edit's trailing comma: read as the defaults, this used to be saved over.
+    const text =
+      '{ "machine": "studio", "sinks": [{ "name": "board", "url": "https://b.example", "tier": 1, "token": "t" }], }\n';
+    put(config, text);
+    for (const argv of [
+      ["sink", "add", "stdout"],
+      ["sink", "remove", "board"],
+      ["install", "--claude-code", "--backfill", "0"],
+      ["connect", "rx.invalid"],
+      ["uninstall", "--claude-code"],
+      ["update", "off"],
+      ["titles", "on"],
+    ]) {
+      const r = await run(...argv);
+      expect(r.err).toHaveBeenCalledWith(expect.stringMatching(/is not valid JSON at (line 1 column|position) \d+,/));
+      expect(r.err).toHaveBeenCalledWith(expect.stringContaining("so it was not written over"));
+      expect(r.exit).toHaveBeenCalledWith(1);
+      expect(readFileSync(config, "utf8")).toBe(text);
+    }
+    expect(readFileSync(settings, "utf8")).toBe("{}\n");
+  });
+});
+
 describe.skipIf(process.platform === "win32")("uninstall", () => {
   it("removes what it wrote, the launcher too, and leaves the state", async () => {
     put(path.join(home, ".claude", "settings.json"), {});

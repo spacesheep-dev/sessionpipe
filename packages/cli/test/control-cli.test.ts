@@ -4,7 +4,7 @@
 // a key the receiver hands over at pairing becomes in config.json. The pairing itself
 // and the service writers are stubbed; control.json and config.json are real, in a
 // temp dir.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +14,12 @@ import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain }
 import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
 import { readPool } from "../src/pool/index.js";
+import { rerunGlobally } from "../src/runtime.js";
 
+vi.mock("../src/runtime.js", async (original) => ({
+  ...(await original<typeof import("../src/runtime.js")>()),
+  rerunGlobally: vi.fn(),
+}));
 vi.mock("../src/pool/index.js", async (original) => ({
   ...(await original<typeof import("../src/pool/index.js")>()),
   readPool: vi.fn(() => ({ on: false, port: 0, accounts: [] })),
@@ -105,6 +110,22 @@ describe("control pair", () => {
     await run("pair", "rx.test", "--token", "ss_… paste");
     expect(said()).toContain("a character a key never has");
     expect(pair).not.toHaveBeenCalled();
+  });
+
+  it("a config.json that does not parse stops it before anything runs, and is left as it is", async () => {
+    const file = path.join(tmp, "config", "config.json");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '{ "sinks": [], }');
+    await expect(run("pair", "rx.test", "--no-service")).rejects.toThrow("so it was not written over");
+    expect(pair).not.toHaveBeenCalled();
+    expect(readFileSync(file, "utf8")).toBe('{ "sinks": [], }');
+    // Run from npx it stops before the global install too, as `install` and `connect` do.
+    const npx = path.join(tmp, ".npm", "_npx", "abc", "node_modules", "sessionpipe", "dist");
+    await expect(
+      controlMain(["control", "pair", "rx.test", "--no-service"], (s) => out.push(s ?? ""), npx),
+    ).rejects.toThrow("so it was not written over");
+    expect(rerunGlobally).not.toHaveBeenCalled();
+    expect(readFileSync(file, "utf8")).toBe('{ "sinks": [], }');
   });
 
   it("a bare host is https; the folder it ran in, this machine's name and a safe default when nobody can be asked", async () => {
