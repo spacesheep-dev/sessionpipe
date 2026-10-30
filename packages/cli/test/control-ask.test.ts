@@ -1014,6 +1014,47 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to): the other modes and e
   });
 });
 
+describe("ask coverage: the level a child runs at, and depth from a terminal ask", () => {
+  it("an existing Claude Code session on an inherit machine runs at the ask's cap, not the machine's default", async () => {
+    // laterOptions on an inherit machine with no record is `inherit`; capped() replaces it
+    // with the ask's own level (safe), not the machine's default.
+    await startDaemon({ mode: "inherit" });
+    const { end } = await askIt(
+      req({ harness: "claude-code", session: ASKER, text: "look", permission: "safe", from: "gemini-cli:g1" }),
+    );
+    expect(end?.op).toBe("answer");
+    const run = runs().find((r) => r.argv.includes("--resume"));
+    // safe → the machine's dontAsk mode (the fake caps have default + dontAsk), never the inherit default.
+    expect(run?.argv).toContain("dontAsk");
+  });
+
+  it("asking an existing ACP session with no level reaches it: no level is named, and it is not bad_fields", async () => {
+    await startDaemon();
+    await ask(sock, { op: "event", session: "gemini-cli:g1", event: "SessionStart", cwd: project }, 500);
+    // No permission and no model: it passes the ACP level/model guard and the child's level is {}.
+    const { end } = await askIt(req({ harness: "gemini-cli", session: "gemini-cli:g1", text: "look" }));
+    expect(end?.op).not.toBe(undefined);
+    if (end?.op === "refused") expect(end.code).not.toBe("bad_fields");
+  });
+
+  it("the daemon counts depth from a terminal ask it has in hand (no asker named)", async () => {
+    await startDaemon();
+    // A terminal ask (no `from`) parks on ASKER: in hand with from = null until ASKER answers.
+    const waited = waitForMessage(ASKER, { env });
+    await new Promise((r) => setTimeout(r, 100));
+    const anon = req({ harness: "claude-code", session: ASKER, text: "think" });
+    delete anon.from;
+    const first = askIt(anon);
+    await waited;
+    // From ASKER, a new Codex session: askDepth(ASKER) walks the terminal ask, whose `from`
+    // is null — the branch an ask with a named asker never reaches. Allowed (one deep).
+    const second = askIt(req({ from: ASKER, text: "help", chain: [] }));
+    expect((await second).end?.op).toBe("answer");
+    answer(SID, project, "done");
+    expect((await first).end).toMatchObject({ op: "answer", text: "done" });
+  });
+});
+
 function parseUuid(session: string): boolean {
   return UUID.test(session.slice(session.indexOf(":") + 1));
 }
