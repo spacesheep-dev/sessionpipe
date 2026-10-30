@@ -148,49 +148,70 @@ export class Outbox {
   /** Files older than `days` are pruned, and each sink's cursor into them. The seq
    *  counter stays: a session resumed after the window counts on from where it was,
    *  so a receiver's (harness, session, seq) dedup doesn't take its new events for
-   *  ones it already has, and the sinks read the new file from its start. */
+   *  ones it already has, and the sinks read the new file from its start.
+   *  It all happens under the drain's `flush` lock, since a drain holds the whole
+   *  cursor map and writes it back: a file and its cursor keys go together, so a
+   *  session resumed in between can't keep a key past its new file's end. While a
+   *  drain runs, nothing is pruned (0); the next prune does it. It never throws: it
+   *  is a cleanup, and a hook's drain comes after it. */
   prune(days: number, now = Date.now()): number {
+    let release: (() => void) | null = null;
+    try {
+      release = takeNamedLock(this.root, "flush");
+    } catch {}
+    if (!release) return 0;
     let n = 0;
-    const cutoff = now - days * 86_400_000;
-    for (const ref of this.sessions()) {
-      const f = this.file(ref);
-      try {
-        if (statSync(f).mtimeMs < cutoff) {
-          unlinkSync(f);
-          n++;
+    try {
+      const cutoff = now - days * 86_400_000;
+      const aged = this.sessions().filter((ref) => {
+        try {
+          return statSync(this.file(ref)).mtimeMs < cutoff;
+        } catch {
+          return false;
         }
-      } catch {}
+      });
+      // The keys go first: a worker that dies or fails to write here leaves a file
+      // with no cursor, which a sink sends again (a receiver's dedup takes it), never
+      // a cursor past the end of a file a resume starts. Each file is checked again
+      // right before it goes: one a hook appended to meanwhile stays.
+      this.dropStaleCursors(new Set(aged.map((ref) => `${ref.harness}/${ref.session}`)));
+      for (const ref of aged) {
+        const f = this.file(ref);
+        try {
+          if (statSync(f).mtimeMs < cutoff) {
+            unlinkSync(f);
+            n++;
+          }
+        } catch {}
+      }
+    } catch {
+    } finally {
+      release();
     }
-    this.dropStaleCursors();
     return n;
   }
 
-  /** A sink's cursor into a session file that is gone is removed: pruned now, by an
-   *  earlier prune, or by hand. The edit takes the drain's `flush` lock, since a drain
-   *  holds the whole cursor map and writes it back; while one runs, the keys wait for
-   *  the next prune. */
-  private dropStaleCursors(): void {
+  /** A sink's cursor into a session file about to be pruned (`gone`), or one already
+   *  missing (an earlier prune, an older release, by hand) is removed. The caller
+   *  holds the `flush` lock. */
+  private dropStaleCursors(gone: Set<string>): void {
     let names: string[] = [];
     try {
       names = readdirSync(path.join(this.root, "cursors")).filter((n) => n.endsWith(".json"));
     } catch {}
     const stale = (c: Record<string, number>): string[] =>
       Object.keys(c).filter((k) => {
+        if (gone.has(k)) return true;
         const i = k.indexOf("/");
         return !existsSync(this.file({ harness: k.slice(0, i), session: k.slice(i + 1) }));
       });
-    const sinks = names.map((n) => new Cursors(this.root, n.slice(0, -5))).filter((s) => stale(s.read()).length);
-    if (!sinks.length) return;
-    const release = takeNamedLock(this.root, "flush");
-    if (!release) return;
-    try {
-      for (const s of sinks) {
-        const c = s.read();
-        for (const k of stale(c)) delete c[k];
-        s.write(c);
-      }
-    } finally {
-      release();
+    for (const n of names) {
+      const s = new Cursors(this.root, n.slice(0, -5));
+      const c = s.read();
+      const keys = stale(c);
+      if (!keys.length) continue;
+      for (const k of keys) delete c[k];
+      s.write(c);
     }
   }
 

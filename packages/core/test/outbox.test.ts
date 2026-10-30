@@ -15,7 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Cursors, Outbox, processAlive, takeLock, takeNamedLock } from "../src/outbox.js";
 import type { Event } from "../src/types.js";
 import { isUlid, ulid } from "../src/ulid.js";
@@ -319,7 +319,7 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(back.map((e) => e.session.seq)).toEqual([3]);
   });
 
-  it("prune: a drain holding the flush lock keeps its cursors, and a later prune drops the keys left behind", () => {
+  it("prune: while a drain holds the flush lock nothing goes, so a session resumed meanwhile is read on from its cursor", () => {
     const o = new Outbox(tmp);
     const old = { harness: "codex", session: "old" };
     o.append(old, [ev(o.nextSeq(old))]);
@@ -328,10 +328,72 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     const t = Date.now() / 1000 - 40 * 86_400;
     utimesSync(o.file(old), t, t);
     const drain = takeNamedLock(tmp, "flush");
-    expect(o.prune(30)).toBe(1);
-    expect(Object.keys(a.read())).toEqual([a.key(old), "codex/forgotten"]);
-    drain?.();
     expect(o.prune(30)).toBe(0);
+    expect(existsSync(o.file(old))).toBe(true);
+    expect(Object.keys(a.read())).toEqual([a.key(old), "codex/forgotten"]);
+    o.append(old, [ev(o.nextSeq(old))]);
+    drain?.();
+    // A later prune: the resumed file is fresh, and only the key with no file goes.
+    expect(o.prune(30)).toBe(0);
+    expect(Object.keys(a.read())).toEqual([a.key(old)]);
+    expect(o.read(old, a.read()[a.key(old)] ?? 0).events.map((e) => e.session.seq)).toEqual([1]);
+    expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
+  });
+
+  it("prune: a cursor file it can't write keeps the aged file, and an unreadable outbox doesn't throw", () => {
+    const o = new Outbox(tmp);
+    const old = { harness: "codex", session: "old" };
+    o.append(old, [ev(o.nextSeq(old))]);
+    const a = new Cursors(tmp, "a");
+    a.write({ [a.key(old)]: o.read(old, 0).offset });
+    const t = Date.now() / 1000 - 40 * 86_400;
+    utimesSync(o.file(old), t, t);
+    // The cursor write's temp file can't be made: a directory sits where it goes.
+    mkdirSync(path.join(tmp, "cursors", `a.json.${process.pid}.tmp`));
+    expect(o.prune(30)).toBe(0);
+    expect(existsSync(o.file(old))).toBe(true);
+    expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
+    // A file listed and then gone before its age is read (another prune, by hand).
+    vi.spyOn(o, "sessions").mockReturnValueOnce([{ harness: "codex", session: "gone" }]);
+    expect(o.prune(30)).toBe(0);
+    rmSync(path.join(tmp, "outbox"), { recursive: true });
+    writeFileSync(path.join(tmp, "outbox"), "");
+    expect(o.prune(30)).toBe(0);
+    expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
+  });
+
+  it("prune: a file a hook appends to while its keys go stays, and is read again from the start", () => {
+    const o = new Outbox(tmp);
+    const old = { harness: "codex", session: "old" };
+    o.append(old, [ev(o.nextSeq(old))]);
+    const a = new Cursors(tmp, "a");
+    a.write({ [a.key(old)]: o.read(old, 0).offset });
+    const t = Date.now() / 1000 - 40 * 86_400;
+    utimesSync(o.file(old), t, t);
+    const write = Cursors.prototype.write;
+    const spy = vi.spyOn(Cursors.prototype, "write").mockImplementation(function (this: Cursors, c) {
+      write.call(this, c);
+      o.append(old, [ev(o.nextSeq(old))]);
+    });
+    expect(o.prune(30)).toBe(0);
+    spy.mockRestore();
+    expect(a.read()).toEqual({});
+    expect(o.read(old, 0).events.map((e) => e.session.seq)).toEqual([0, 1]);
+  });
+
+  it("prune: an aged file goes once the flush lock is free, with every sink's key into it", () => {
+    const o = new Outbox(tmp);
+    const old = { harness: "codex", session: "old" };
+    o.append(old, [ev(o.nextSeq(old))]);
+    const a = new Cursors(tmp, "a");
+    a.write({ [a.key(old)]: o.read(old, 0).offset, "codex/forgotten": 99 });
+    const t = Date.now() / 1000 - 40 * 86_400;
+    utimesSync(o.file(old), t, t);
+    const drain = takeNamedLock(tmp, "flush");
+    expect(o.prune(30)).toBe(0);
+    drain?.();
+    expect(o.prune(30)).toBe(1);
+    expect(existsSync(o.file(old))).toBe(false);
     expect(a.read()).toEqual({});
     expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
   });
