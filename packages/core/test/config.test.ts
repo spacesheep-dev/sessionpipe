@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // config.json: every documented field reads back, an unknown one is not fatal, a
-// broken file is the defaults. Where the files live per platform and env. The
+// broken file is the defaults and is never written over. Where the files live per platform and env. The
 // home-as-~ rule, file-safe ids, the event envelope, and the ULID's ordering.
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Config, DEFAULT_CONFIG, machineName, readConfig, writeConfig } from "../src/config.js";
+import {
+  assertConfigWritable,
+  type Config,
+  DEFAULT_CONFIG,
+  machineName,
+  readConfig,
+  writeConfig,
+} from "../src/config.js";
 import { makeEvent } from "../src/events.js";
 import { configFile, homeDir, safeId, stateDir, tilde, untilde } from "../src/paths.js";
 import { isUlid, ulid } from "../src/ulid.js";
@@ -104,6 +111,62 @@ describe("writeConfig", () => {
     expect(text.endsWith("}\n")).toBe(true);
     expect(JSON.parse(text)).toEqual(FULL);
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+  it("never writes over a file readConfig could not read, and says why", () => {
+    const d = fresh();
+    // Node 20 names the position; later releases the line and column too.
+    const unread: Record<string, [string, string | RegExp]> = {
+      "comma.json": ['{ "machine": "studio", "sinks": [], }\n', /is not valid JSON at (line 1 column 37|position 36),/],
+      "cut.json": ['{ "machine": "stu', /is not valid JSON at (line 1 column 18|position 17),/],
+      // A quote dropped by hand: V8's message would quote the token; this names no text.
+      "bare.json": ['{ "sinks": [{ "token": ss_live_Zx81kfjQ02 }] }', "is not valid JSON,"],
+      "bom.json": [`\uFEFF${JSON.stringify(FULL)}\n`, "starts with a byte-order mark"],
+      "list.json": ["[]\n", "is not a JSON object"],
+      "null.json": ["null\n", "is not a JSON object"],
+    };
+    for (const [name, [text, why]] of Object.entries(unread)) {
+      const file = path.join(d, name);
+      writeFileSync(file, text);
+      expect(readConfig(file)).toEqual(DEFAULT_CONFIG);
+      expect(() => writeConfig(FULL, file)).toThrow(why);
+      expect(() => assertConfigWritable(file)).toThrow(`${tilde(file)} `);
+      expect(() => assertConfigWritable(file)).toThrow(why);
+      expect(() => writeConfig(FULL, file)).toThrow(
+        "so it was not written over: that would lose its machine name and sinks",
+      );
+      expect(readFileSync(file, "utf8")).toBe(text);
+      expect(() => writeConfig(FULL, file)).not.toThrow(/Zx81|ss_live/);
+    }
+  });
+  it("writes a missing, blank or readable file", () => {
+    const d = fresh();
+    for (const [name, text] of [
+      ["blank.json", " \n"],
+      ["empty.json", ""],
+      ["ok.json", "{}"],
+    ] as const) {
+      const file = path.join(d, name);
+      writeFileSync(file, text);
+      expect(() => assertConfigWritable(file)).not.toThrow();
+      writeConfig(FULL, file);
+      expect(readConfig(file)).toEqual(FULL);
+    }
+    expect(() => assertConfigWritable(path.join(d, "none.json"))).not.toThrow();
+  });
+  it("a file that is there but can't be read is not written over either", () => {
+    const d = fresh();
+    expect(() => writeConfig(FULL, d)).toThrow(/could not be read \(E[A-Z]+\)/);
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const file = path.join(d, "config.json");
+    writeConfig(FULL, file);
+    chmodSync(file, 0o200);
+    try {
+      expect(readConfig(file)).toEqual(DEFAULT_CONFIG);
+      expect(() => writeConfig({ sinks: [], harnesses: {} }, file)).toThrow("could not be read (EACCES)");
+    } finally {
+      chmodSync(file, 0o600);
+    }
+    expect(readConfig(file)).toEqual(FULL);
   });
   it("does not chmod on Windows", () => {
     const file = path.join(fresh(), "config.json");

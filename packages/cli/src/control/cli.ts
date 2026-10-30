@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   acpControl,
   antigravityControl,
+  assertConfigWritable,
   claudeControl,
   claudeDirs,
   codexControl,
@@ -162,6 +163,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       if (!raw || raw.startsWith("-")) return out(`usage:\n${CONTROL_HELP}`);
       if (viaNpx(distDir)) return rerunGlobally(argv, out);
       const url = (/^https?:\/\//.test(raw) ? raw : `https://${raw}`).replace(/\/$/, "");
+      assertConfigWritable();
       const cfg = readConfig();
       const sink = cfg.sinks.find((s) => s.url.replace(/\/$/, "") === url);
       // No token is fine where the receiver offers open pairing: the person approves the

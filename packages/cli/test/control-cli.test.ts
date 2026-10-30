@@ -4,7 +4,7 @@
 // a key the receiver hands over at pairing becomes in config.json. The pairing itself
 // and the service writers are stubbed; control.json and config.json are real, in a
 // temp dir.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -105,6 +105,15 @@ describe("control pair", () => {
     await run("pair", "rx.test", "--token", "ss_… paste");
     expect(said()).toContain("a character a key never has");
     expect(pair).not.toHaveBeenCalled();
+  });
+
+  it("a config.json that does not parse stops it before anything runs, and is left as it is", async () => {
+    const file = path.join(tmp, "config", "config.json");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '{ "sinks": [], }');
+    await expect(run("pair", "rx.test", "--no-service")).rejects.toThrow("so it was not written over");
+    expect(pair).not.toHaveBeenCalled();
+    expect(readFileSync(file, "utf8")).toBe('{ "sinks": [], }');
   });
 
   it("a bare host is https; the folder it ran in, this machine's name and a safe default when nobody can be asked", async () => {

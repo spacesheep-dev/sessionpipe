@@ -3,7 +3,7 @@
 // their tier and token, per-harness switches, the update check, remote titles.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { configFile } from "./paths.js";
+import { configFile, tilde } from "./paths.js";
 import type { Tier } from "./types.js";
 
 export interface SinkConfig {
@@ -56,7 +56,42 @@ export function readConfig(file: string = configFile()): Config {
   }
 }
 
+/** Why `file` cannot be read as a config, or undefined when it can: missing, blank, or a
+ *  JSON object. readConfig reads such a file as the defaults, so hooks go on. */
+function configProblem(file: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code === "ENOENT" ? undefined : `could not be read (${code ?? "unknown error"})`;
+  }
+  if (!text.trim()) return undefined;
+  if (text.charCodeAt(0) === 0xfeff) return "starts with a byte-order mark (save it as UTF-8 without one)";
+  try {
+    const j: unknown = JSON.parse(text);
+    return j && typeof j === "object" && !Array.isArray(j) ? undefined : "is not a JSON object";
+  } catch (e) {
+    // Where, never V8's excerpt of the text: that can be part of a sink's token.
+    const m = (e as Error).message;
+    const at = (/line \d+ column \d+/.exec(m) ?? /position \d+/.exec(m))?.[0];
+    return `is not valid JSON${at ? ` at ${at}` : ""}`;
+  }
+}
+
+/** Throw if `file` holds something readConfig could not read: writing the defaults over a
+ *  hand edit's typo would lose the machine's name and every sink with its token. A
+ *  command with an effect before its save calls this first, so it stops before any. */
+export function assertConfigWritable(file: string = configFile()): void {
+  const problem = configProblem(file);
+  if (problem)
+    throw new Error(
+      `${tilde(file)} ${problem}, so it was not written over: that would lose its machine name and sinks. Fix it, or move it aside to start again, then run this again.`,
+    );
+}
+
 export function writeConfig(c: Config, file: string = configFile()): void {
+  assertConfigWritable(file);
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, `${JSON.stringify(c, null, 2)}\n`, { mode: 0o600 });
   if (process.platform !== "win32" && existsSync(file)) {
