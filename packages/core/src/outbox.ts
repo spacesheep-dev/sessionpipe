@@ -145,23 +145,37 @@ export class Outbox {
     }
   }
 
-  /** Files older than `days` are pruned; the cursor files with them. */
+  /** Files older than `days` are pruned, and each sink's cursor into them. The seq
+   *  counter stays: a session resumed after the window counts on from where it was,
+   *  so a receiver's (harness, session, seq) dedup doesn't take its new events for
+   *  ones it already has, and the sinks read the new file from its start. */
   prune(days: number, now = Date.now()): number {
-    let n = 0;
+    const gone: string[] = [];
     const cutoff = now - days * 86_400_000;
     for (const ref of this.sessions()) {
       const f = this.file(ref);
       try {
         if (statSync(f).mtimeMs < cutoff) {
           unlinkSync(f);
-          try {
-            unlinkSync(this.seqFile(ref));
-          } catch {}
-          n++;
+          gone.push(`${ref.harness}/${ref.session}`);
         }
       } catch {}
     }
-    return n;
+    if (gone.length) {
+      const dir = path.join(this.root, "cursors");
+      let names: string[] = [];
+      try {
+        names = readdirSync(dir).filter((n) => n.endsWith(".json"));
+      } catch {}
+      for (const n of names) {
+        const cursors = new Cursors(this.root, n.slice(0, -5));
+        const c = cursors.read();
+        if (!gone.some((k) => k in c)) continue;
+        for (const k of gone) delete c[k];
+        cursors.write(c);
+      }
+    }
+    return gone.length;
   }
 
   delete(ref: OutboxRef): void {
