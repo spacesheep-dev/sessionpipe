@@ -5,6 +5,53 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.12.0)
+
+One new delivery mode and what it tells a receiver about a turn it did not start.
+Additive on protocol 1: a receiver that knows none of this keeps working, and a machine
+that has it only ever uses it for a command it has already verified.
+
+- **Delivery mode `inbox`** (CONTROL.md §6, §6.3), between `turn` and `api`. A message
+  for a session a live Claude Code holds open is written into that session's own local
+  inbox, so the turn runs in that process, in the mode the person left it in, in the
+  window or thread they are already looking at — where today it is answered by a copy.
+  A hello lists `inbox` in `modes` where the mode exists; an ack's `mode` is `inbox`
+  where it was used, with the session's own reply. A receiver shows that answer as the
+  session's own, never as a copy's; one that doesn't know the value sees an unknown
+  `mode` on a final ack that carries the reply anyway.
+- **`failed` with `code: "held"`** (CONTROL.md §6.3, §10). The message was written into
+  the session's own inbox and that session did not take it: no turn of its own began, or
+  the turn that began was asked for by something else. Nothing was duplicated and no
+  other mode was tried. **A receiver MUST NOT redeliver it**: the mode stays shut for
+  that session while the message it wrote can still be released, so the same words again
+  would put two copies of them in one place and a released hold would deliver both.
+  Conformance `delivery/25`.
+- **`refused` with `code: "ambiguous_home"`** (CONTROL.md §5, §6.1). One session id is
+  filed in more than one of the harness's accounts on that machine and none — or more
+  than one — holds it open, so the machine cannot tell which account the message is for.
+  `detail` names the accounts by their directory name. Nothing ran.
+- **`refused` with `code: "copy_limit"`** (CONTROL.md §5, §6 `prompt`). The machine has
+  made the copies it makes in a day. A copy replays a whole conversation, so machines cap
+  them; `detail` says so in words, and at a cap of zero says the machine makes none.
+- **Ack `copy_of`** (CONTROL.md §6 `prompt`, §10), a `SessionRef`: this answer came from
+  a **copy** of the session the command named, not from it. A `fork`'s ack carries the
+  copy in `session` and the original here, and its `detail` may name the mode the copy's
+  own turn ran in. A receiver shows whose answer the person is reading. Conformance
+  `delivery/27`.
+- **Event field `injected`** (PROTOCOL.md; optional, tier 2) on `turn.transcript` and
+  `turn.progress`: the turn's ask reached the session from somewhere other than its own
+  keyboard — another session on that computer handed it over, which is how the `inbox`
+  mode reaches a session. The words are the person's; the arrival was not. It says of a
+  turn's ask what `turn.started.injected` says of a prompt, and like it is never a claim
+  that no person is behind the ask. Absent means a turn asked for where the session runs.
+
+- **A channel delivers in place too** (CONTROL.md §8). `sessionpipe channel` is a Claude
+  Code channel (its `--channels` MCP mechanism, the way the Telegram plugin reaches a
+  session) that parks as the session's waiter and pushes each message into the live
+  session, in its own thread and permission mode; the daemon reads the answer back from
+  the transcript as for any waiter. A receiver sees the reply as the session's own, the
+  same as `inbox`; nothing new on the wire.
+
 ### For receivers (0.11.0)
 
 What a 0.11.0 daemon or hook sends, what it accepts, and how a receiver adopts it while

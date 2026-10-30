@@ -64,8 +64,8 @@ export interface ControlConfig {
   receivers: PairedReceiver[];
   /** Caps this machine keeps whatever a receiver sends (defaults in daemon.ts,
    *  LIMITS): new sessions running at once and per hour, headless Claude Code runs
-   *  at once. */
-  limits?: { start_concurrent?: number; start_per_hour?: number; headless?: number };
+   *  at once, copies of sessions made in a day. */
+  limits?: { start_concurrent?: number; start_per_hour?: number; headless?: number; copies_per_day?: number };
 }
 
 export const controlFile = (env: NodeJS.ProcessEnv = process.env) =>
@@ -228,6 +228,10 @@ export interface Ack {
   reply?: string;
   /** A start's taken and delivered: what it ran with (CONTROL.md §6, Options). */
   applied?: StartOptions;
+  /** This answer came from a COPY of the session the command named, not from it: the
+   *  person's words went somewhere other than the conversation they were looking at,
+   *  and they are owed that fact (CONTROL.md §6 `fork`). */
+  copy_of?: string;
 }
 
 /** What a session the daemon started runs with: its level and, when one was asked for,
@@ -276,26 +280,108 @@ export class AckOutbox {
   }
 }
 
+/** A permission mode as a hook payload spells it (core's CLAUDE_MODES is the list the
+ *  daemon acts on; this is only the shape a stored value has to keep). */
+const MODE_SHAPE = /^[A-Za-z]{1,40}$/;
+
+/** How long a message written into a live session's own inbox keeps that lane shut for
+ *  it (CONTROL.md §6.3): Claude Code holds an unmatched message that long before
+ *  dropping it, and a hold can be released, so a second write inside the window would
+ *  mean the person's words arriving twice. It outlives the daemon that wrote it, so a
+ *  restart — an update installs one — cannot turn a resend into a second frame. */
+export const HOLD_TTL_MS = 300_000;
+
+/** A copy the daemon made because it could not reach the original (CONTROL.md §6
+ *  `fork`), and what the person is owed about it: which session it is, when it was made
+ *  and why there is one at all. Daemons up to 0.10.0 wrote the id alone. */
+export interface Copy {
+  id: string;
+  at: string;
+  /** In the machine's own words, for the ack and the board: why a copy, not the session. */
+  reason: string;
+}
+
+/** The id alone, as 0.10.0 and earlier wrote it, reads as a copy with nothing else known. */
+const asCopy = (v: unknown): Copy | null => {
+  if (typeof v === "string" && v) return { id: v, at: "", reason: "" };
+  if (!v || typeof v !== "object") return null;
+  const c = v as { id?: unknown; at?: unknown; reason?: unknown };
+  if (typeof c.id !== "string" || !c.id) return null;
+  return { id: c.id, at: typeof c.at === "string" ? c.at : "", reason: typeof c.reason === "string" ? c.reason : "" };
+};
+
+/** A message written into a session's own inbox that it has not taken yet
+ *  (CONTROL.md §6.3), by the session it was written to. */
+export interface Parked {
+  /** When it was written, ISO-8601. Older than HOLD_TTL_MS is no longer a hold. */
+  at: string;
+  /** The message's id, so a log or a later ack can name the one that is waiting. */
+  id: string;
+}
+
 export interface DaemonState {
-  /** Original session → the fork its messages go to. */
-  copies: Record<string, string>;
+  /** Original session → the copy its messages go to. */
+  copies: Record<string, Copy>;
   /** Claude Code sessions the daemon started → what they run with (Codex and
    *  Antigravity keep theirs in the alias entry, aliases.ts). */
   started: Record<string, StartOptions>;
+  /** Session ref → the permission mode its own hooks last reported (CONTROL.md §6, The
+   *  session's mode). The daemon's own record, in its own state: no Claude Code home is
+   *  written to. Insertion order is the age order, which is how the oldest are dropped. */
+  modes: Record<string, string>;
+  /** Session ref → a message written into its own inbox that it has not taken. Read back
+   *  pruned: only the ones still inside the hold window. */
+  parked: Record<string, Parked>;
 }
 
-export function readState(file: string): DaemonState {
+export function readState(file: string, now: number = Date.now()): DaemonState {
+  const copies: Record<string, Copy> = {};
+  const started: Record<string, StartOptions> = {};
+  const modes: Record<string, string> = {};
+  const parked: Record<string, Parked> = {};
   try {
-    const j = JSON.parse(readFileSync(file, "utf8")) as { copies?: unknown; started?: unknown };
-    const started: Record<string, StartOptions> = {};
+    const j = JSON.parse(readFileSync(file, "utf8")) as {
+      copies?: unknown;
+      copies_v2?: unknown;
+      started?: unknown;
+      modes?: unknown;
+      parked?: unknown;
+    };
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
         const o = startOptionsOf(v);
         if (o) started[k] = o;
       }
-    return { copies: j.copies && typeof j.copies === "object" ? (j.copies as Record<string, string>) : {}, started };
-  } catch {
-    return { copies: {}, started: {} };
-  }
+    if (j.modes && typeof j.modes === "object")
+      for (const [k, v] of Object.entries(j.modes)) if (typeof v === "string" && MODE_SHAPE.test(v)) modes[k] = v;
+    // A hold whose window has closed is not one: the session can no longer be handed
+    // that message, so the lane is open again.
+    if (j.parked && typeof j.parked === "object")
+      for (const [k, v] of Object.entries(j.parked as Record<string, unknown>)) {
+        const p = v as { at?: unknown; id?: unknown };
+        const at = typeof p?.at === "string" ? Date.parse(p.at) : Number.NaN;
+        if (Number.isFinite(at) && now - at <= HOLD_TTL_MS && typeof p.id === "string")
+          parked[k] = { at: p.at as string, id: p.id };
+      }
+    // The richer shape when it is there, the plain id map when it isn't.
+    const from = j.copies_v2 && typeof j.copies_v2 === "object" ? j.copies_v2 : j.copies;
+    if (from && typeof from === "object")
+      for (const [k, v] of Object.entries(from as Record<string, unknown>)) {
+        const c = asCopy(v);
+        if (c) copies[k] = c;
+      }
+  } catch {}
+  return { copies, started, modes, parked };
 }
-export const writeState = (file: string, s: DaemonState) => writePrivate(file, s);
+
+/** Both shapes of `copies`, every time. A daemon up to 0.10.0 reads `copies` as a map of
+ *  plain session ids and uses what it finds there as a `--resume` target, so writing
+ *  only the record would make every message to a session with a copy resume
+ *  `[object Object]` after a rollback — and a fleet keeps the previous build precisely
+ *  so it can roll back. */
+export const writeState = (file: string, s: DaemonState) =>
+  writePrivate(file, {
+    ...s,
+    copies: Object.fromEntries(Object.entries(s.copies).map(([k, c]) => [k, c.id])),
+    copies_v2: s.copies,
+  });
