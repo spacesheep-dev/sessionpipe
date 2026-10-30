@@ -198,6 +198,11 @@ second one finds the first, says so and exits 0.
 Parks in a session's background so a message reaches it in place, in about 60 ms with no
 network. Claude Code's session id comes from `CLAUDE_CODE_SESSION_ID`.
 
+{{usage channel}}
+
+The same reach, as a Claude Code channel: run it with `--channels` and a message arrives in
+the live session's own thread and permission mode, the way the app's other channels do.
+
 ### Self-update
 
 {{usage update}}
