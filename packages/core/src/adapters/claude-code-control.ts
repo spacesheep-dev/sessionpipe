@@ -87,6 +87,10 @@ export interface Caps {
   /** `--output-format stream-json` with `--include-partial-messages`: the answer can be
    *  forwarded as it is written. Optional so older callers' literals still type. */
   stream?: boolean;
+  /** Why `claude --help` couldn't be read, when it couldn't: it timed out (a machine still
+   *  starting up), or failed without listing `--permission-mode`. Such caps say nothing
+   *  about this Claude Code's modes, so they are never read as "it has none". */
+  unread?: string;
 }
 
 export function parseCaps(help: string): Caps {
@@ -113,10 +117,13 @@ const LEVEL_MODE: Record<Exclude<StartPermission, "safe">, string> = {
  *  Auto: Claude Code's own auto mode. Inherit: none, so the turn starts in the mode
  *  Claude Code picks by itself here, its settings' `permissions.defaultMode` (a resume
  *  too: Claude Code never restores a session's earlier mode). A level this Claude Code
- *  has no mode for is a refusal, never another level. Never bypassPermissions — no path
- *  here writes it. */
+ *  has no mode for is a refusal, never another level, and so is every level but inherit
+ *  while its --help can't be read (safe would otherwise run with no flag at all). Never
+ *  bypassPermissions — no path here writes it. */
 export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { error: string } {
   if (level === "inherit") return { args: [] };
+  if (caps.unread)
+    return { error: `this machine couldn't read its Claude Code's options (${caps.unread}); try again in a minute` };
   if (level === "auto" && !caps.modes.includes("auto"))
     return { error: "this machine is in auto mode, but its Claude Code has no auto permission mode" };
   if (level !== "safe") {
@@ -141,8 +148,11 @@ export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { e
 export const ceilingLevel = (mode: Mode): StartPermission => (mode === "inherit" ? "safe" : mode);
 
 /** The levels a start may ask Claude Code for on a machine in `mode`: never above its
- *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always). */
+ *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always).
+ *  None while that --help couldn't be read: an offered safe would be taken and then run
+ *  with no permission flag at all. */
 export function offeredLevels(mode: Mode, caps: Caps): StartPermission[] {
+  if (caps.unread) return [];
   return START_PERMISSIONS.filter(
     (l) => levelRank(l) <= levelRank(ceilingLevel(mode)) && (l === "safe" || caps.modes.includes(LEVEL_MODE[l])),
   );
@@ -263,20 +273,27 @@ export function loginHint(configDir: string | undefined, platform: NodeJS.Platfo
   return `Claude Code (${shown}) isn't signed in on this machine: run ${login} there.`;
 }
 
-export function detectCaps(bin: string): Caps {
-  let help = "";
+/** What `claude --help` lists. A run that fails still counts when it printed its
+ *  `--permission-mode` line; one that didn't (a timeout on a machine still starting up,
+ *  most often) is `unread`, never a Claude Code with no modes. */
+export function detectCaps(bin: string, timeoutMs = 30_000): Caps {
   try {
-    help = execFileSync(bin, ["--help"], {
-      encoding: "utf8",
-      timeout: 30_000,
-      env: claudeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    return parseCaps(
+      execFileSync(bin, ["--help"], {
+        encoding: "utf8",
+        timeout: timeoutMs,
+        env: claudeEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 4 * 1024 * 1024,
+      }),
+    );
   } catch (e) {
-    help = String((e as { stdout?: string })?.stdout || "");
+    const err = e as { stdout?: string; code?: string };
+    const caps = parseCaps(String(err?.stdout || ""));
+    if (caps.hasMode) return caps;
+    const why = err?.code === "ETIMEDOUT" ? `timed out after ${timeoutMs / 1000} s` : "failed";
+    return { ...caps, unread: `\`${path.basename(bin)} --help\` ${why}` };
   }
-  return parseCaps(help);
 }
 
 export interface Transcript {
