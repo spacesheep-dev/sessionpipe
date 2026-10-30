@@ -18,13 +18,13 @@ const read = (p) => readFileSync(path.join(root, p), "utf8");
 const version = JSON.parse(read("packages/core/package.json")).version;
 // The sessionpipe-gui release the home page offers, with each file's size in bytes as the
 // release lists it: the one place to bump. The page prints decimal MB, as Finder does.
-const guiVersion = "0.6.0";
+const guiVersion = "0.6.1";
 const gui = {
   version: guiVersion,
   files: {
-    dmg: [`sessionpipe_${guiVersion}_universal.dmg`, 7616869],
-    deb: [`sessionpipe_${guiVersion}_amd64.deb`, 4115954],
-    appimage: [`sessionpipe_${guiVersion}_amd64.AppImage`, 82749944],
+    dmg: [`sessionpipe_${guiVersion}_universal.dmg`, 7636816],
+    deb: [`sessionpipe_${guiVersion}_amd64.deb`, 4129222],
+    appimage: [`sessionpipe_${guiVersion}_amd64.AppImage`, 82762232],
     tgz: [`sessionpipe-gui-${guiVersion}.tgz`],
   },
 };
