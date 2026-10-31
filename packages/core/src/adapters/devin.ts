@@ -277,12 +277,17 @@ export function splitRef(ref: string | undefined): { db: string; session: string
  *  — the root of a real chain carries a 17 kB system prompt and four more system
  *  blocks, re-read on every event, and past 32 MB the child and CLI engines give up
  *  and return nothing. The cap keeps the NEWEST rows (`DESC`), re-sorted below: an
- *  ascending cap would have kept the oldest and delivered no new turn ever again. */
+ *  ascending cap would have kept the oldest and delivered no new turn ever again.
+ *  `UNION`, not `UNION ALL`: SQLite queues a row only if it has not queued the same row
+ *  before, so a chain that loops back on itself (a node its own parent, two that name
+ *  each other) ends at the first node it reaches twice. Under `UNION ALL` it recursed
+ *  for ever, and on the in-process engine nothing can interrupt that: the worker spins,
+ *  holds the session's lock and delivers nothing. */
 const CHAIN_LIMIT = 4000;
 export const CHAIN_SQL = `WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at) AS (
   SELECT node_id, parent_node_id, chat_message, created_at FROM message_nodes
    WHERE session_id = ? AND node_id = (SELECT main_chain_id FROM sessions WHERE id = ?)
-  UNION ALL
+  UNION
   SELECT m.node_id, m.parent_node_id, m.chat_message, m.created_at FROM message_nodes m
     JOIN chain c ON m.node_id = c.parent_node_id AND m.session_id = ? AND m.node_id >= ?
 )

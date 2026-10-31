@@ -690,6 +690,94 @@ describe.runIf(canMakeDb)("devin: a chain longer than the cap", () => {
   }, 60_000);
 });
 
+describe.runIf(canMakeDb)("devin: a chain that loops back on itself", () => {
+  // No recorded store has a loop, but nothing in the schema forbids one (corruption, a
+  // future writer). The walk is asserted out of process first, with a short timeout, so a
+  // query that never ends fails the test with null instead of hanging the worker; the
+  // in-process reader runs only once an out-of-process walk has come back.
+  let loopDb: string;
+  const outOfProcess = (session: string) => {
+    for (const engine of ["child", "cli"] as const) {
+      const opts = { engine, timeoutMs: 3000 };
+      const rows = querySqlite(loopDb, CHAIN_SQL, [session, session, session, 0], opts);
+      // An engine this machine lacks gives null for a plain query too; try the next one.
+      if (rows || querySqlite(loopDb, "SELECT 1 AS one", [], opts)) return { engine, rows };
+    }
+    return null;
+  };
+  beforeEach(() => {
+    loopDb = path.join(home, "loop.db");
+    const node = (session: string, id: number, parent: number, role: string, content: string) =>
+      `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('${session}',${id},${parent},${lit(msg(id, role, content, role === "user" ? true : undefined))},${T})`;
+    expect(
+      execSql(loopDb, [
+        ...SCHEMA,
+        `INSERT INTO sessions VALUES ('self-loop','/work/proj','windsurf','swe-2-medium','normal',${T - 60},${T},'x',2,0,'{}')`,
+        `INSERT INTO sessions VALUES ('two-loop','/work/proj','windsurf','swe-2-medium','normal',${T - 60},${T},'x',4,0,'{}')`,
+        // A node that is its own parent, under the head.
+        node("self-loop", 1, 1, "user", "ask one"),
+        node("self-loop", 2, 1, "assistant", "answer one"),
+        // Two nodes that name each other.
+        node("two-loop", 3, 4, "user", "ask two"),
+        node("two-loop", 4, 3, "assistant", "answer two"),
+      ]),
+    ).toBe(true);
+  });
+
+  it("a parent with a higher node_id is still walked, when it is not a loop", () => {
+    // UNION stops only a node reached twice, not one out of id order: earlier turns are
+    // never dropped on the strength of node_id alone.
+    expect(
+      execSql(loopDb, [
+        `INSERT INTO sessions VALUES ('out-of-order','/work/proj','windsurf','swe-2-medium','normal',${T - 60},${T},'x',5,0,'{}')`,
+        `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('out-of-order',1,NULL,${lit(msg(1, "user", "first", true))},${T})`,
+        `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('out-of-order',10,1,${lit(msg(10, "assistant", "second"))},${T})`,
+        `INSERT INTO message_nodes (session_id,node_id,parent_node_id,chat_message,created_at) VALUES ('out-of-order',5,10,${lit(msg(5, "user", "third", true))},${T})`,
+      ]),
+    ).toBe(true);
+    const walk = outOfProcess("out-of-order");
+    if (!walk) return;
+    expect(walk.rows?.map((r) => Number(r.node_id))).toEqual([10, 5, 1]);
+  });
+
+  it("the walk stops at a node it has already passed, on every engine out of process", (ctx) => {
+    const ran: string[] = [];
+    for (const engine of ["child", "cli"] as const) {
+      const opts = { engine, timeoutMs: 3000 };
+      const self = querySqlite(loopDb, CHAIN_SQL, ["self-loop", "self-loop", "self-loop", 0], opts);
+      // An engine this machine lacks gives null for a plain query too; skip only that one.
+      if (!self && !querySqlite(loopDb, "SELECT 1 AS one", [], opts)) continue;
+      ran.push(engine);
+      expect(
+        self?.map((r) => Number(r.node_id)),
+        engine,
+      ).toEqual([2, 1]);
+      const two = querySqlite(loopDb, CHAIN_SQL, ["two-loop", "two-loop", "two-loop", 0], opts);
+      expect(
+        two?.map((r) => Number(r.node_id)),
+        engine,
+      ).toEqual([4, 3]);
+    }
+    if (!ran.length) ctx.skip();
+  });
+
+  it.runIf(sqliteInProcess())("the reader delivers the turn, with the cursor past the head", () => {
+    // In process nothing can stop a query that never ends, so prove the walk ends first.
+    for (const session of ["self-loop", "two-loop"]) {
+      const walk = outOfProcess(session);
+      if (walk) expect(walk.rows, `${session} on ${walk.engine}`).not.toBeNull();
+    }
+    expect(readDevinChain(loopDb, "self-loop", 0)).toMatchObject({
+      turns: [{ user: "ask one", assistant: "answer one" }],
+      line: 3,
+    });
+    expect(readDevinChain(loopDb, "two-loop", 0)).toMatchObject({
+      turns: [{ user: "ask two", assistant: "answer two" }],
+      line: 5,
+    });
+  });
+});
+
 describe("devin: version and account", () => {
   // A directory symlink needs a privilege Windows runners do not have.
   it.skipIf(process.platform === "win32")("the version comes from the _versions/current symlink", () => {
