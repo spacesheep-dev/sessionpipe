@@ -845,7 +845,7 @@ export class ControlDaemon {
         // A turn began. Whether it is the turn a written message caused is the next
         // question (`tookIt`); this is only the signal that there is one to look at.
         const waiting = this.prompted.get(named);
-        if (waiting) {
+        if (typeof waiting === "function") {
           this.prompted.delete(named);
           waiting(true);
         }
