@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// npx @sessionpipe/conformance <fixture dir>          run adapter fixtures
+// npx @sessionpipe/conformance <fixture dir | file>   run adapter fixtures
 // npx @sessionpipe/conformance https://host [--token] run the receiver scenarios (M3)
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
@@ -17,14 +17,28 @@ const walk = (d: string): string[] =>
 export async function main(argv: string[], io: { stdout: { write(s: string): unknown } } = process): Promise<number> {
   const target = argv[0];
   if (!target) {
-    io.stdout.write("usage: sessionpipe-conformance <conformance/harness dir | https://receiver>\n");
+    io.stdout.write("usage: sessionpipe-conformance <conformance/harness dir | fixture file | https://receiver>\n");
     return 2;
   }
-  if (/^https?:\/\//.test(target)) {
+  if (/^https?:\/\//i.test(target)) {
     io.stdout.write("receiver scenarios land in M3\n");
     return 2;
   }
-  const r = await runAdapterFixtures(walk(target));
+  // A folder is walked for .json files; a file is run as the one fixture it is.
+  let files: string[];
+  try {
+    files = statSync(target).isDirectory() ? walk(target) : [target];
+  } catch (e) {
+    // Node's words name the code and the path that failed: the target, or an entry under
+    // it (a broken symlink, a locked folder).
+    io.stdout.write(`sessionpipe-conformance: ${(e as Error).message}\n`);
+    return 2;
+  }
+  if (!files.length) {
+    io.stdout.write(`sessionpipe-conformance: no .json fixtures under ${target}\n`);
+    return 2;
+  }
+  const r = await runAdapterFixtures(files);
   io.stdout.write(`${r.table}\n${r.results.length - r.failed}/${r.results.length} passed\n`);
   return r.failed ? 1 : 0;
 }
