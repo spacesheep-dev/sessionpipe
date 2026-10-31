@@ -4,13 +4,13 @@
 // `notify` at the top level of config.toml as the fallback when hooks are off or
 // not yet trusted (non-managed hooks need a /hooks review in the CLI). An existing
 // notify (Codex Computer Use) is chained through --previous-notify, never replaced.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { codexInjected, readCodex } from "../readers/transcripts.js";
 import type { DataOf } from "../types.js";
-import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped } from "./claude-shaped.js";
+import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped, writeBack } from "./claude-shaped.js";
 import * as toml from "./codex-config.js";
 import { codexReplayBoundary, codexSubagent } from "./codex-rollout.js";
 import type {
@@ -21,6 +21,7 @@ import type {
   HookResult,
   InstalledReport,
   InstallOptions,
+  InstallReport,
   SessionFacts,
 } from "./types.js";
 
@@ -51,30 +52,38 @@ const validTool = (n: unknown): n is string => typeof n === "string" && /^[A-Za-
 const endReason = (r: unknown): "clear" | "logout" | "exit" | "other" =>
   r === "clear" || r === "logout" || r === "exit" ? r : "other";
 
+/** What config.toml without our notify line means, said with every refusal of it. */
+const UNTIL_APPROVED =
+  "Codex will report nothing until you approve the hooks: start `codex` and accept the hook review";
+
 function installNotify(cmd: HookCommand, env: NodeJS.ProcessEnv) {
   const file = configFile(env);
   let text = "";
+  let existed = true;
   try {
     text = readFileSync(file, "utf8");
-  } catch {}
+  } catch (e) {
+    // Absent only when the system says so: a file that is there but can't be read (0200,
+    // root's) is still the person's, never `created` for uninstall to delete.
+    existed = (e as NodeJS.ErrnoException).code !== "ENOENT";
+  }
   const argv = cmd([NAME, "notify"]).argv;
   const line = `notify = ${JSON.stringify(argv)}`;
   const n = toml.readNotify(text);
-  const write = (next: string) => {
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, next);
+  /** The file written, with this note; or the refusal's report in its place. */
+  const write = (next: string, note: string): InstallReport => {
+    const bad = writeBack(file, next, existed);
+    return bad ? { ...bad, note: `${bad.note}. ${UNTIL_APPROVED}` } : { file, changed: true, note };
   };
   if (n && !n.other) {
     if (!n.misplaced && JSON.stringify(n.argv) === JSON.stringify(argv))
       return { file, changed: false, note: "notify current" };
-    write(toml.withNotify(text, line));
-    return {
-      file,
-      changed: true,
-      note: n.misplaced
+    return write(
+      toml.withNotify(text, line),
+      n.misplaced
         ? "notify moved to the top level (it sat inside a [table], where Codex never reads it)"
         : "notify updated",
-    };
+    );
   }
   if (n?.other) {
     const prev = toml.previousNotify(n.argv);
@@ -83,23 +92,23 @@ function installNotify(cmd: HookCommand, env: NodeJS.ProcessEnv) {
         if (JSON.stringify(prev) === JSON.stringify(argv))
           return { file, changed: false, note: "notify current (after Codex Computer Use)" };
       }
-      if (!prev || toml.OURS.test(JSON.stringify(prev))) {
-        write(toml.replaceNotify(text, n, `notify = ${toml.withPreviousRaw(n.raw, argv)}`));
-        return { file, changed: true, note: "chained after Codex Computer Use (--previous-notify)" };
-      }
+      if (!prev || toml.OURS.test(JSON.stringify(prev)))
+        return write(
+          toml.replaceNotify(text, n, `notify = ${toml.withPreviousRaw(n.raw, argv)}`),
+          "chained after Codex Computer Use (--previous-notify)",
+        );
     }
     return {
       file,
       changed: false,
       skipped: true,
-      note: `notify belongs to ${(n.argv?.[0] ?? n.raw).replace(/^.*\//, "").slice(0, 40)}; left alone. Codex will report nothing until you approve the hooks: start \`codex\` and accept the hook review`,
+      note: `notify belongs to ${(n.argv?.[0] ?? n.raw).replace(/^.*\//, "").slice(0, 40)}; left alone. ${UNTIL_APPROVED}`,
     };
   }
-  write(toml.withNotify(text, line));
-  return { file, changed: true, note: "notify set at the top level" };
+  return write(toml.withNotify(text, line), "notify set at the top level");
 }
 
-function uninstallNotify(env: NodeJS.ProcessEnv) {
+function uninstallNotify(env: NodeJS.ProcessEnv): InstallReport {
   const file = configFile(env);
   let text: string;
   try {
@@ -109,15 +118,15 @@ function uninstallNotify(env: NodeJS.ProcessEnv) {
   }
   const n = toml.readNotify(text);
   if (!n) return { file, changed: false };
-  if (!n.other) {
-    writeFileSync(file, toml.withoutNotify(text));
-    return { file, changed: true };
-  }
+  if (!n.other) return writeBack(file, toml.withoutNotify(text)) ?? { file, changed: true };
   const prev = toml.previousNotify(n.argv);
-  if (toml.isComputerUse(n.argv) && prev && toml.OURS.test(JSON.stringify(prev))) {
-    writeFileSync(file, toml.replaceNotify(text, n, `notify = ${toml.stripPreviousRaw(n.raw)}`));
-    return { file, changed: true };
-  }
+  if (toml.isComputerUse(n.argv) && prev && toml.OURS.test(JSON.stringify(prev)))
+    return (
+      writeBack(file, toml.replaceNotify(text, n, `notify = ${toml.stripPreviousRaw(n.raw)}`)) ?? {
+        file,
+        changed: true,
+      }
+    );
   return { file, changed: false };
 }
 

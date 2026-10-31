@@ -107,6 +107,66 @@ export function readJson(file: string): Record<string, unknown> {
   return f.ok ? f.value : {};
 }
 
+/** The report for a config file the system would not let us change, with the error's
+ *  code, so `install` and `uninstall` go on to the next file instead of ending on this
+ *  one. Node opens a file for truncation before it writes, so an error from the open
+ *  (EACCES; EPERM, which Windows gives a read-only file; EROFS) or from making its
+ *  folder left the file as it was, and so does a delete refused; the note says so. Only
+ *  an error from the write itself (ENOSPC, EIO) can have left the file cut short, and
+ *  that note says to check it instead. */
+function refused(
+  file: string,
+  e: unknown,
+  what: "write" | "remove",
+  existed: boolean,
+): InstallReport & { note: string } {
+  const { code, syscall } = e as NodeJS.ErrnoException;
+  const why = `can't ${what} it (${code ?? String(e)})`;
+  if (what === "remove" || syscall === "open" || syscall === "mkdir")
+    return { file, changed: false, skipped: true, note: `${why}; not touched` };
+  return {
+    file,
+    changed: true,
+    skipped: true,
+    ...(existed ? {} : { created: true }),
+    note: `${why} part way; check the file before the harness reads it`,
+  };
+}
+
+/** Write a config file back, its folder made first. Null once written; otherwise the
+ *  report for the refusal (see `refused`), which the caller returns in place of its own.
+ *  `existed` is whether the file was there before: a file cut short is still one
+ *  sessionpipe made, and the config remembers it as `created`. */
+export function writeBack(file: string, text: string, existed = true): InstallReport | null {
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    return null;
+  } catch (e) {
+    return refused(file, e, "write", existed);
+  }
+}
+
+/** Remove a config file sessionpipe created and uninstall has emptied. A delete needs
+ *  the folder's leave where a write needs only the file's, so a delete refused (a
+ *  ~/.claude owned by root, a folder ACL on Windows) writes the file back empty instead:
+ *  our hooks come out either way, and the note says what stayed. */
+export function removeEmptied(file: string, empty: string): InstallReport {
+  try {
+    unlinkSync(file);
+    return { file, changed: true, note: "removed (sessionpipe created it)" };
+  } catch (e) {
+    const bad = refused(file, e, "remove", true);
+    return (
+      writeBack(file, empty) ?? {
+        file,
+        changed: true,
+        note: `emptied; ${bad.note.replace(/; not touched$/, "")}, so the empty file stays`,
+      }
+    );
+  }
+}
+
 function entryFor(event: string, harness: string, cmd: HookCommand, o: ClaudeShapedOptions) {
   const matcher = o.matcherFor(event);
   return {
@@ -158,8 +218,8 @@ export function installClaudeShaped(
       }
   if (changed) {
     settings.hooks = hooks;
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, formatJson(settings, f));
+    const bad = writeBack(file, formatJson(settings, f), f.existed);
+    if (bad) return bad;
   }
   return { file, changed, created: !f.existed && changed };
 }
@@ -187,12 +247,8 @@ export function uninstallClaudeShaped(
   }
   if (!changed) return { file, changed: false };
   if (!Object.keys(hooks).length) delete settings.hooks;
-  if (opts.created && !Object.keys(settings).length) {
-    unlinkSync(file);
-    return { file, changed: true, note: "removed (sessionpipe created it)" };
-  }
-  writeFileSync(file, formatJson(settings, f));
-  return { file, changed: true };
+  if (opts.created && !Object.keys(settings).length) return removeEmptied(file, formatJson(settings, f));
+  return writeBack(file, formatJson(settings, f)) ?? { file, changed: true };
 }
 
 export function installedClaudeShaped(
