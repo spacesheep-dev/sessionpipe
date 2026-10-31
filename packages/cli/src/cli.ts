@@ -39,6 +39,7 @@ import {
   type Tier,
   takeLock,
   tilde,
+  waitNamedLock,
   writeConfig,
 } from "@sessionpipe/core";
 import { connectFolders, connectTier } from "./connect.js";
@@ -819,26 +820,54 @@ function backfill(): Promise<void> {
   return backfillRows(selectedAdapters(), Number(flag("--days") ?? 30), readConfig());
 }
 
+/** The drain's `flush` lock, waited for: a drain holds every sink's cursor map and
+ *  writes it back, so a command that writes a cursor goes under the same lock, and
+ *  takes it before it does anything, so a busy lock changes nothing. A drain takes
+ *  seconds; past 10 s the command says so, exits non-zero and gets null. */
+async function flushLock(): Promise<(() => void) | null> {
+  const release = await waitNamedLock(state, "flush", 10_000);
+  if (!release) {
+    process.exitCode = 1;
+    out("  ✗ a drain is running (the flush lock is held); nothing was changed, try again in a moment");
+  }
+  return release;
+}
+
+/** What `drain` does once it has let the lock go: a worker that found it held left
+ *  its events and this mark, and a command that held it sends them before it ends. */
+async function drainIfMarked(cfg: Config, outbox: Outbox): Promise<void> {
+  if (existsSync(path.join(state, "locks", "flush.more"))) await drain(state, cfg.sinks, outbox);
+}
+
 async function forget(): Promise<void> {
   const [, harness, session] = args;
   if (!harness || !session) return out("usage: sessionpipe forget <harness> <session>");
   const cfg = readConfig();
   const outbox = new Outbox(state);
   const ref = { harness, session };
-  const e = makeEvent(
-    { type: "session.forgotten", harnessEvent: "forget", data: {} },
-    {
-      harness: { name: harness },
-      session: { id: session, seq: outbox.nextSeq(ref), machine: machineName(cfg, os.hostname()) },
-    },
-  );
-  const sinks = buildSinks(cfg.sinks);
-  for (const s of sinks) {
-    const r = await s.send([filterEvent(e, s.tier, s.pii) as Event]);
-    out(r.ok ? `  ✓ ${s.name}: asked to delete ${harness}:${session}` : `  ✗ ${s.name}: ${r.error ?? r.status}`);
+  // Under the lock: the session's keys go out of every sink's cursor (Outbox.delete),
+  // and nothing is sent or removed when the lock stays held.
+  const release = await flushLock();
+  if (!release) return;
+  try {
+    const e = makeEvent(
+      { type: "session.forgotten", harnessEvent: "forget", data: {} },
+      {
+        harness: { name: harness },
+        session: { id: session, seq: outbox.nextSeq(ref), machine: machineName(cfg, os.hostname()) },
+      },
+    );
+    const sinks = buildSinks(cfg.sinks);
+    for (const s of sinks) {
+      const r = await s.send([filterEvent(e, s.tier, s.pii) as Event]);
+      out(r.ok ? `  ✓ ${s.name}: asked to delete ${harness}:${session}` : `  ✗ ${s.name}: ${r.error ?? r.status}`);
+    }
+    outbox.delete(ref);
+    out("  local outbox for the session removed, and every sink's cursor into it");
+  } finally {
+    release();
   }
-  outbox.delete(ref);
-  out("  local outbox for the session removed");
+  await drainIfMarked(cfg, outbox);
 }
 
 async function replay(): Promise<void> {
@@ -846,11 +875,20 @@ async function replay(): Promise<void> {
   const cfg = readConfig();
   const sinks = name ? cfg.sinks.filter((s) => s.name === name) : cfg.sinks;
   if (!sinks.length) return out("  no such sink");
-  for (const s of sinks) {
-    if (has("--from-start")) new Cursors(state, s.name).write({});
+  // Under the lock, like a drain: the rewind and the flush both write the cursors.
+  const release = await flushLock();
+  if (!release) return;
+  const outbox = new Outbox(state);
+  try {
+    for (const s of sinks) {
+      if (has("--from-start")) new Cursors(state, s.name).write({});
+    }
+    const d = await flush(state, sinks, outbox, undefined, { force: true });
+    for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
+  } finally {
+    release();
   }
-  const d = await flush(state, sinks, new Outbox(state), undefined, { force: true });
-  for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
+  await drainIfMarked(cfg, outbox);
 }
 
 type ControlHealth = {

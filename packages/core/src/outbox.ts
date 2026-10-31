@@ -165,10 +165,41 @@ export class Outbox {
   }
 
   delete(ref: OutboxRef): void {
+    // The cursor keys go before the files: a death between leaves the old file with
+    // no cursor, so the next drain sends it whole and the person, who sees no "removed"
+    // line, runs forget again; the other way round leaves a cursor past the end of
+    // the file a session that goes on starts, and nothing says so.
+    this.dropCursors(ref);
     for (const f of [this.file(ref), this.seqFile(ref)]) {
       try {
         unlinkSync(f);
       } catch {}
+    }
+  }
+
+  /** The key every sink's cursor holds for a session is removed with the session's
+   *  file: the key alone pointed into the old file, and a session that went on (still
+   *  running, or resumed later) had its new file's first events unsent until it grew
+   *  past that offset. Every file under <state>/cursors is taken (a sink since taken
+   *  out of the config still has one; one that doesn't parse reads as empty and is
+   *  left), by the key a drain writes (the file's own name, `safeId`) and by the ref
+   *  as given. The caller holds the drain's `flush` lock: a drain holds the whole
+   *  cursor map and writes it back, so a key dropped under it would come back. */
+  private dropCursors(ref: OutboxRef): void {
+    const keys = new Set([`${ref.harness}/${ref.session}`, `${safeId(ref.harness)}/${safeId(ref.session)}`]);
+    let names: string[] = [];
+    try {
+      names = readdirSync(path.join(this.root, "cursors")).filter((n) => n.endsWith(".json"));
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const s = new Cursors(this.root, n.slice(0, -5));
+      const c = s.read();
+      const had = Object.keys(c).filter((k) => keys.has(k));
+      if (!had.length) continue;
+      for (const k of had) delete c[k];
+      s.write(c);
     }
   }
 }
@@ -182,9 +213,12 @@ export class Cursors {
   private file(): string {
     return path.join(this.root, "cursors", `${safeId(this.sink)}.json`);
   }
+  /** The map; empty when the file is missing, cut off mid-write, or holds anything
+   *  but an object (`null`, a list), so a drain never indexes into those. */
   read(): Record<string, number> {
     try {
-      return JSON.parse(readFileSync(this.file(), "utf8")) as Record<string, number>;
+      const c = JSON.parse(readFileSync(this.file(), "utf8")) as unknown;
+      return c && typeof c === "object" && !Array.isArray(c) ? (c as Record<string, number>) : {};
     } catch {
       return {};
     }
@@ -227,6 +261,22 @@ export function takeNamedLock(root: string, name: string, staleMs = 5 * 60_000):
       unlinkSync(f);
     } catch {}
   };
+}
+
+/** `takeNamedLock`, tried again every `everyMs` until `forMs` have passed: for a
+ *  command whose work goes under a lock a worker holds for seconds (a drain). null
+ *  once the time is up. */
+export async function waitNamedLock(
+  root: string,
+  name: string,
+  forMs: number,
+  everyMs = 100,
+): Promise<(() => void) | null> {
+  for (let waited = 0; ; waited += everyMs) {
+    const release = takeNamedLock(root, name);
+    if (release || waited >= forMs) return release;
+    await new Promise((r) => setTimeout(r, everyMs));
+  }
 }
 
 /** Whether the process a lock or a claimed job names is still running. A pid that

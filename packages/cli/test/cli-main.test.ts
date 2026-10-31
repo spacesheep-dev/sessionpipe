@@ -22,7 +22,16 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { adapterByName, makeEvent, Outbox, readConfig, takeLock, writeConfig } from "@sessionpipe/core";
+import {
+  adapterByName,
+  Cursors,
+  makeEvent,
+  Outbox,
+  readConfig,
+  takeLock,
+  takeNamedLock,
+  writeConfig,
+} from "@sessionpipe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlMain, waitMain } from "../src/control/cli.js";
 import { moveControlSecrets } from "../src/control/store.js";
@@ -1396,7 +1405,7 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
     expect(lines).toEqual([
       "  ✓ ok: asked to delete claude-code:s1",
       "  ✗ gone: fetch failed",
-      "  local outbox for the session removed",
+      "  local outbox for the session removed, and every sink's cursor into it",
     ]);
     expect(existsSync(outbox.file({ harness: "claude-code", session: "s1" }))).toBe(false);
     // A sink's refusal without a message: the status is what there is to say.
@@ -1407,6 +1416,101 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
       action: "retry",
     });
     expect((await run("forget", "claude-code", "s2")).lines[0]).toBe("  ✗ ok: 503");
+  });
+
+  it("forget takes the drain's flush lock first; held past the wait, it changes nothing and says so", async () => {
+    const ok = await receiver();
+    const outbox = new Outbox(state);
+    const s1 = { harness: "claude-code", session: "s1" };
+    outbox.append(s1, [event("session.heartbeat", {})]);
+    const cursor = new Cursors(state, "ok");
+    cursor.write({ "claude-code/s1": 50 });
+    writeConfig({ sinks: [{ name: "ok", url: ok.url, tier: 1 }], harnesses: {} } as never);
+    const held = takeNamedLock(state, "flush");
+    expect(held).not.toBeNull();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const p = run("forget", "claude-code", "s1");
+      await vi.advanceTimersByTimeAsync(10_500);
+      const { lines } = await p;
+      expect(lines).toEqual([
+        "  ✗ a drain is running (the flush lock is held); nothing was changed, try again in a moment",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    expect(ok.posts).toEqual([]);
+    expect(existsSync(outbox.file(s1))).toBe(true);
+    expect(existsSync(path.join(state, "outbox", "claude-code", "s1.seq"))).toBe(false);
+    expect(cursor.read()).toEqual({ "claude-code/s1": 50 });
+    // Let go within the wait: the command goes on.
+    setTimeout(() => held?.(), 300);
+    const { lines } = await run("forget", "claude-code", "s1");
+    expect(lines).toEqual([
+      "  ✓ ok: asked to delete claude-code:s1",
+      "  local outbox for the session removed, and every sink's cursor into it",
+    ]);
+    expect(ok.posts).toHaveLength(1);
+    expect(existsSync(outbox.file(s1))).toBe(false);
+    expect(cursor.read()).toEqual({});
+    expect(takeNamedLock(state, "flush")).not.toBeNull();
+  });
+
+  it("forget and replay send what a worker left under `flush.more` while they held the lock", async () => {
+    const ok = await receiver({ body: { accepted: 1 } });
+    const outbox = new Outbox(state);
+    writeConfig({ sinks: [{ name: "ok", url: ok.url, tier: 1 }], harnesses: {} } as never);
+    const more = path.join(state, "locks", "flush.more");
+    // What a hook worker does when it finds the lock held: appends, marks, leaves.
+    const worker = (s: string) => {
+      outbox.append({ harness: "claude-code", session: s }, [event("session.heartbeat", {})]);
+      mkdirSync(path.dirname(more), { recursive: true });
+      writeFileSync(more, "");
+    };
+    worker("s2");
+    expect((await run("forget", "claude-code", "s1")).lines).toEqual([
+      "  ✓ ok: asked to delete claude-code:s1",
+      "  local outbox for the session removed, and every sink's cursor into it",
+    ]);
+    expect(existsSync(more)).toBe(false);
+    expect(ok.posts).toHaveLength(2);
+    expect(new Cursors(state, "ok").read()["claude-code/s2"]).toBeGreaterThan(0);
+    worker("s3");
+    expect((await run("replay", "--sink", "ok")).lines).toEqual(["  ok: 1 event delivered"]);
+    expect(existsSync(more)).toBe(false);
+    expect(ok.posts).toHaveLength(3);
+  });
+
+  it("forget drops the session from every sink's cursor, so a session that goes on is delivered from its start", async () => {
+    const ok = await receiver({ body: { accepted: 1 } });
+    const outbox = new Outbox(state);
+    const s1 = { harness: "claude-code", session: "s1" };
+    const s2 = { harness: "claude-code", session: "s2" };
+    outbox.append(s1, [event("session.heartbeat", {}), event("session.heartbeat", {}, { seq: 1 })]);
+    outbox.append(s2, [event("session.heartbeat", {})]);
+    writeConfig({ sinks: [{ name: "ok", url: ok.url, tier: 1 }], harnesses: {} } as never);
+    expect((await run("replay", "--sink", "ok")).lines).toEqual(["  ok: 3 events delivered"]);
+    const cursor = new Cursors(state, "ok");
+    const s2End = cursor.read()["claude-code/s2"];
+    expect(cursor.read()["claude-code/s1"]).toBeGreaterThan(0);
+    // A sink since taken out of the config still has a cursor file; a file that
+    // doesn't parse is left as it is.
+    new Cursors(state, "old").write({ "claude-code/s1": 999, "codex/x": 1 });
+    writeFileSync(path.join(state, "cursors", "bad.json"), '{"claude-code/s1": 9');
+    expect((await run("forget", "claude-code", "s1")).lines).toEqual([
+      "  ✓ ok: asked to delete claude-code:s1",
+      "  local outbox for the session removed, and every sink's cursor into it",
+    ]);
+    expect(cursor.read()).toEqual({ "claude-code/s2": s2End });
+    expect(new Cursors(state, "old").read()).toEqual({ "codex/x": 1 });
+    expect(readFileSync(path.join(state, "cursors", "bad.json"), "utf8")).toBe('{"claude-code/s1": 9');
+    // The session goes on: one event in a new file, shorter than the old offset.
+    outbox.append(s1, [event("tool.started", { tool: "Bash" })]);
+    expect((await run("replay", "--sink", "ok")).lines).toEqual(["  ok: 1 event delivered"]);
+    const last = ok.posts.at(-1) as { events: { type: string; session: { id: string } }[] };
+    expect(last.events.map((e) => [e.type, e.session.id])).toEqual([["tool.started", "0123456789abcdef"]]);
   });
 
   it("replay sends what a sink has not taken yet, or everything again from the start", async () => {
@@ -1431,6 +1535,33 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
     expect(all.lines.sort()).toEqual(["  f: 3 events delivered", "  rx: 3 events delivered"]);
     outbox.append({ harness: "claude-code", session: "s3" }, [event("session.heartbeat", {})]);
     expect((await run("replay", "--sink", "f")).lines).toEqual(["  f: 1 event delivered"]);
+  });
+
+  it("replay goes under the drain's flush lock too: held past the wait, it rewinds and sends nothing", async () => {
+    const rx = await receiver();
+    const outbox = new Outbox(state);
+    outbox.append({ harness: "claude-code", session: "s1" }, [event("session.heartbeat", {})]);
+    writeConfig({ sinks: [{ name: "rx", url: rx.url, tier: 1 }], harnesses: {} } as never);
+    const cursor = new Cursors(state, "rx");
+    cursor.write({ "claude-code/s1": 50 });
+    const held = takeNamedLock(state, "flush");
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const p = run("replay", "--from-start");
+      await vi.advanceTimersByTimeAsync(10_500);
+      expect((await p).lines).toEqual([
+        "  ✗ a drain is running (the flush lock is held); nothing was changed, try again in a moment",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    expect(rx.posts).toEqual([]);
+    expect(cursor.read()).toEqual({ "claude-code/s1": 50 });
+    held?.();
+    expect((await run("replay", "--from-start")).lines).toEqual(["  rx: 1 event delivered"]);
+    expect(takeNamedLock(state, "flush")).not.toBeNull();
   });
 });
 
