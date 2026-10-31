@@ -48,9 +48,17 @@ that has it only ever uses it for a command it has already verified.
 - **A channel delivers in place too** (CONTROL.md §8). `sessionpipe channel` is a Claude
   Code channel (its `--channels` MCP mechanism, the way the Telegram plugin reaches a
   session) that parks as the session's waiter and pushes each message into the live
-  session, in its own thread and permission mode; the daemon reads the answer back from
-  the transcript as for any waiter. A receiver sees the reply as the session's own, the
-  same as `inbox`; nothing new on the wire.
+  session, in its own thread and permission mode, as the person's own words; the daemon
+  reads the answer back from the transcript as for any waiter. A channel is used only
+  while the session is idle, and before `inbox`; its delivery is proven by the turn it
+  causes, and a channel message the session began no turn for is acked `failed` with
+  `code: "held"` like an inbox write (conformance `delivery/28`). A receiver sees the
+  reply as the session's own, acked `mode: "waiter"`; a channel's ask is `injected`.
+- **An `inbox` answer is a teammate's, to the session.** Claude Code tells the model a
+  message arriving through its inbox came from another Claude session, not its user, so
+  the session won't change its permission settings, CLAUDE.md or configuration for one,
+  or take one as the person's approval of a pending prompt (CONTROL.md §6.3). A receiver
+  SHOULD say so beside an answer acked `mode: "inbox"`.
 
 ### For receivers (0.11.0)
 

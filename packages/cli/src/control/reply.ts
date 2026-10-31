@@ -16,18 +16,19 @@ export function transcriptEnd(file: string): number {
   }
 }
 
-/** Who asked for the first turn the transcript gained after a delivery: `peer` — the
- *  message this daemon wrote into the session's own inbox, recognised by the mark in the
- *  text it was written with; `other` — any other turn, the person typing in the same
- *  second above all, or another local process's peer message. Null while nothing has
- *  been written yet.
+/** Who asked for the first turn the transcript gained after a delivery: `ours` — the
+ *  message this daemon handed the session in place, recognised by its own mark in the row
+ *  the session wrote for it: a peer row for the inbox (the mark is in the text it was
+ *  written with), a channel row for `sessionpipe channel` (the tag names the message's
+ *  id); `other` — any other turn, the person typing in the same second above all, or
+ *  another local process's message. Null while nothing has been written yet.
  *
  *  This is the second half of a delivery's proof. The hook's own `UserPromptSubmit` says
  *  a turn began and carries no text, so on its own it cannot tell this message's turn
  *  from the person's: confirming on it alone acked a delivery that was really a hold,
  *  and then sent the answer to THEIR prompt back to the receiver as the answer to this
  *  message. */
-export function firstAsk(file: string, from: number, mark: string): "peer" | "other" | null {
+export function firstAsk(file: string, from: number, mark: string): "ours" | "other" | null {
   const size = transcriptEnd(file);
   if (size <= from) return null;
   let text: string;
@@ -59,7 +60,7 @@ export function firstAsk(file: string, from: number, mark: string): "peer" | "ot
     if (Array.isArray(c) && c.some((b) => (b as { type?: unknown } | null)?.type === "tool_result")) continue;
     const origin = j.origin as { kind?: unknown; body?: unknown } | undefined;
     const said = `${typeof origin?.body === "string" ? origin.body : ""}\n${rowText(c)}`;
-    return origin?.kind === "peer" && said.includes(mark) ? "peer" : "other";
+    return (origin?.kind === "peer" || origin?.kind === "channel") && said.includes(mark) ? "ours" : "other";
   }
   return null;
 }
@@ -104,9 +105,17 @@ const rowText = (c: unknown): string => {
 
 /** Claude Code records after the delivery → the turn's answer once the turn ended
  *  (an assistant record with `stop_reason: "end_turn"`), else null. The answer is the
- *  turn's assistant text, in order; sidechains (subagents) are not the session's words. */
+ *  turn's assistant text, in order; sidechains (subagents) are not the session's words.
+ *
+ *  One model message can be written as several records, and every one carries the
+ *  message's stop reason: when the model thinks before it answers, Claude Code 2.1.314
+ *  writes a thinking record and then the text, both `end_turn`. A record with no text is
+ *  not where the answer ends — taking it for the end acked every such answer with no
+ *  reply. The turn is over at the `end_turn` record that has text, or at whatever follows
+ *  a textless one (a turn that ended with nothing said). */
 export function answerIn(lines: string[]): { done: boolean; text: string } {
   const parts: string[] = [];
+  let ended = false;
   for (const line of lines) {
     let j: {
       type?: string;
@@ -118,12 +127,22 @@ export function answerIn(lines: string[]): { done: boolean; text: string } {
     } catch {
       continue;
     }
-    if (j.type !== "assistant" || j.isSidechain) continue;
+    if (j.type !== "assistant" || j.isSidechain) {
+      if (ended) return { done: true, text: parts.join("\n\n") };
+      continue;
+    }
+    let said = false;
     const content = j.message?.content;
     if (Array.isArray(content))
       for (const c of content as { type?: string; text?: unknown }[])
-        if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) parts.push(c.text.trim());
-    if (j.message?.stop_reason === "end_turn") return { done: true, text: parts.join("\n\n") };
+        if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) {
+          parts.push(c.text.trim());
+          said = true;
+        }
+    if (j.message?.stop_reason === "end_turn") {
+      if (said) return { done: true, text: parts.join("\n\n") };
+      ended = true;
+    }
   }
   return { done: false, text: parts.join("\n\n") };
 }

@@ -124,7 +124,10 @@ describe("runChannel", () => {
     expect(h.out[0]).toMatchObject({ id: 0, result: { capabilities: { experimental: { "claude/channel": {} } } } });
     h.say({ jsonrpc: "2.0", method: "notifications/initialized" });
     await settle();
-    expect(h.calls[0]).toEqual({ sock: "/tmp/sp-test.sock", req: { op: "wait", session: SESSION, pid: process.pid } });
+    expect(h.calls[0]).toEqual({
+      sock: "/tmp/sp-test.sock",
+      req: { op: "wait", session: SESSION, pid: process.pid, channel: true },
+    });
     expect(h.out[1]).toEqual({
       jsonrpc: "2.0",
       method: "notifications/claude/channel",
@@ -232,7 +235,7 @@ describe.runIf(unix)("runChannel on a real socket", () => {
     const done = runChannel(SESSION, input, (l) => out.push(l), { version: "1", registered: () => true });
     input.write('{"method":"notifications/initialized"}\n');
     await settle(150);
-    expect(seen[0]).toEqual({ op: "wait", session: SESSION, pid: process.pid });
+    expect(seen[0]).toEqual({ op: "wait", session: SESSION, pid: process.pid, channel: true });
     expect(JSON.parse(out[0]!)).toMatchObject({ params: { content: "hi", meta: { message_id: "01K" } } });
     input.end();
     await done;
@@ -261,6 +264,14 @@ describe("namedAsChannel", () => {
     );
     expect(namedAsChannel(claude("server:sessionpipe"), "sessionpipe")).toBe(false);
     expect(namedAsChannel(claude("--channels", "server:sessionpipe-two"), "sessionpipe")).toBe(false);
+  });
+  it("not in a session that isn't interactive, named or not: Claude Code takes no channel there", () => {
+    // A claude.ai worker's command line (2.1.314), and the other ways to run headless.
+    const dev = ["--dangerously-load-development-channels", "server:sessionpipe"];
+    expect(namedAsChannel(claude("--print", "--sdk-url", "wss://x", ...dev), "sessionpipe")).toBe(false);
+    expect(namedAsChannel(claude("-p", ...dev), "sessionpipe")).toBe(false);
+    expect(namedAsChannel(claude("--input-format=stream-json", ...dev), "sessionpipe")).toBe(false);
+    expect(namedAsChannel(claude(...dev, "--output-format", "stream-json"), "sessionpipe")).toBe(false);
   });
 });
 

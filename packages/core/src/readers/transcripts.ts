@@ -12,8 +12,9 @@ interface Msg {
   at: number;
   line: number;
   /** This ask reached the session from somewhere other than its own keyboard: another
-   *  local session handed it over, which is how a control daemon reaches a session in
-   *  place (spec/CONTROL.md §6.3). The words are the person's; the arrival was not. */
+   *  local session handed it over, or a channel pushed it, which are the two ways a
+   *  control daemon reaches a session in place (spec/CONTROL.md §6.3, §8). The words are
+   *  the person's; the arrival was not. */
   injected?: true;
 }
 
@@ -180,8 +181,9 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const c = (j.message as { content?: unknown } | undefined)?.content;
     if (channel) {
+      // Like a peer's: the words are the person's, the arrival was not the keyboard's.
       const text = channelText(textParts(c, ["text"]).trim());
-      if (text) msgs.push({ role: "user", text, at, line: i });
+      if (text) msgs.push({ role: "user", text, at, line: i, injected: true });
     } else if (j.type === "user") {
       const raw = textParts(c, ["text"]).trim();
       const text = peer ? peerAsk(origin, raw) : raw;

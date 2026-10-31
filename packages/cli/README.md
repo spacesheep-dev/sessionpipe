@@ -72,12 +72,16 @@ is missing or doesn't match, the session doesn't start.
 
 One daemon per computer holds one long-poll per receiver and delivers each message the
 cheapest way the session allows: to `sessionpipe wait` parked in the session's
-background (in place, ~60 ms, no network), at the session's next Stop if it is
-mid-turn, through the Agent SDK for a session it started (if the SDK is installed), or
-as a headless `claude -p --resume` (a `--fork-session` copy when a live process holds
-it). A session stays reachable in place with zero idle turns by running, as a
-background command with the longest timeout it can (Claude Code: raise
-`BASH_MAX_TIMEOUT_MS`, else a background command is stopped after 2 hours at most):
+background (in place, ~60 ms, no network), at the session's next Stop if it is mid-turn,
+through its channel if it has one (below), into the live session's own inbox if it is
+idle (every Claude Code session on macOS and Linux has one, the Claude app's included;
+the session reads such a message as a teammate's request, so it won't change its
+settings or CLAUDE.md for it), through the Agent SDK for a session it started (if the
+SDK is installed), or as a headless `claude -p --resume` (a `--fork-session` copy when a
+live process holds it and nothing else reaches it). A session stays reachable in place
+with zero idle turns by running, as a background command with the longest timeout it can
+(Claude Code: raise `BASH_MAX_TIMEOUT_MS`, else a background command is stopped after 2
+hours at most):
 
 ```sh
 sessionpipe wait            # Claude Code: the session id comes from CLAUDE_CODE_SESSION_ID
@@ -86,9 +90,10 @@ sessionpipe wait            # Claude Code: the session id comes from CLAUDE_CODE
 Or let Claude Code keep the waiter for you, the way its Telegram plugin reaches a
 session: `sessionpipe channel` is a Claude Code channel (an MCP server that pushes
 messages in). It parks for its session the whole time the session runs, and each message
-arrives in the session's own thread, in the terminal and in the Claude app, as a
-message from `sessionpipe`, in the session's own permission mode. Channels are a
-research preview: a channel that isn't on Anthropic's allowlist loads only with
+sent while the session is idle arrives in the session's own thread, in the terminal and
+in the Claude app, as a message from `sessionpipe`, in the session's own permission
+mode, and the session reads it as your own words. Channels are a research preview: a
+channel that isn't on Anthropic's allowlist loads only with
 `--dangerously-load-development-channels`, which asks once at startup, and a session the
 Claude app starts through `claude remote-control` can't be given one yet.
 

@@ -126,6 +126,10 @@ export function unframe(text: string): { text: string; via: string | null } {
  *  caused (§6.3): a turn is only proof of delivery when it is THIS message's turn. */
 export const inboxMark = (id: string): string => `message ${id.slice(-12)}`;
 
+/** The same for a channel's message (§8): `sessionpipe channel` names the message's id on
+ *  its `<channel>` tag, and Claude Code writes the tag into the row of the turn it causes. */
+export const channelMark = (id: string): string => `message_id="${id}"`;
+
 /** The framed text for the `inbox` lane: `frame()` with that mark in it, since the
  *  message becomes a prompt of the session's own and the daemon has to recognise it
  *  again in the transcript. */

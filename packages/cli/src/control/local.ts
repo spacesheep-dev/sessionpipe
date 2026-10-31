@@ -9,8 +9,10 @@ import os from "node:os";
 import path from "node:path";
 
 export type LocalRequest =
-  /** A waiter parks until a message for its session arrives. */
-  | { op: "wait"; session: string; pid?: number }
+  /** A waiter parks until a message for its session arrives. `channel`: the waiter is
+   *  `sessionpipe channel`, which pushes the message into the session rather than handing
+   *  it to a turn that asked for it (CONTROL.md §8). */
+  | { op: "wait"; session: string; pid?: number; channel?: boolean }
   /** A Stop hook asks for a queued message (turn mode). `mode` is the session's own
    *  permission mode, as its payload reports it (CONTROL.md §6, The session's mode). */
   | { op: "stop"; session: string; active: boolean; mode?: string }

@@ -4,10 +4,12 @@
 // session's MCP server over stdio when the session starts with `--channels`. It parks on
 // the daemon's local socket as that session's waiter, as `sessionpipe wait` does, but
 // it never exits: each message goes into the session as a channel notification. The
-// session takes it at once, idle or not, in its own permission mode and in its own
-// thread ("Message from …" in the terminal and in the Claude app), and answers in its
-// own turn, which the daemon reads back from the transcript as for any waiter. Only
-// node: builtins and the local socket.
+// daemon hands it one only while the session is idle (a running turn takes a message at
+// its Stop), and the session takes it at once, in its own permission mode and in its own
+// thread ("Message from …" in the terminal and in the Claude app), as the person's own
+// words. The daemon proves the delivery by the turn the session begins for it and reads
+// the answer back from the transcript as for any waiter. Only node: builtins and the
+// local socket.
 import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { stateDir } from "@sessionpipe/core";
@@ -27,13 +29,21 @@ const PROTOCOL = "2025-06-18";
 
 type Rpc = { id?: unknown; method?: unknown; params?: unknown };
 
+/** The flags of a Claude Code that isn't interactive. Under `--print` (how every session
+ *  the Claude app starts runs) and the Agent SDK, Claude Code ignores both channel flags
+ *  and registers no channel, though the flag is still on its command line (its channels
+ *  reference; on 2.1.314 such a session took no turn for a message parked here). */
+const NOT_INTERACTIVE = new Set(["-p", "--print", "--input-format", "--output-format", "--sdk-url"]);
+
 /** Whether the Claude Code that runs this server took it as a channel: `server:<name>`,
  *  or a plugin of that name, follows `--channels` or
- *  `--dangerously-load-development-channels` on its command line. The handshake doesn't
- *  say (2.1.312 sends a channel and a plain server the same initialize), and Claude Code
- *  drops a notification from a server it didn't take, in silence: parked there, this
- *  server would swallow every message sent to the session. */
+ *  `--dangerously-load-development-channels` on the command line of an interactive
+ *  session. The handshake doesn't say (2.1.312 sends a channel and a plain server the
+ *  same initialize), and Claude Code drops a notification from a server it didn't take,
+ *  in silence: parked there, this server would swallow every message sent to the
+ *  session. */
 export function namedAsChannel(argv: string[], name: string): boolean {
+  if (argv.some((a) => NOT_INTERACTIVE.has(a.split("=")[0] as string))) return false;
   const names = (e: string) => e === `server:${name}` || e.startsWith(`plugin:${name}@`);
   let list = false;
   for (const a of argv) {
@@ -128,7 +138,7 @@ export async function runChannel(
   const park = async () => {
     while (open) {
       // No timeout of its own, as for `sessionpipe wait`: it waits as long as the session lives.
-      const r = await call(sock, { op: "wait", session, pid: process.pid }, 2 ** 31 - 1);
+      const r = await call(sock, { op: "wait", session, pid: process.pid, channel: true }, 2 ** 31 - 1);
       if (!open) return;
       if (r?.op === "message") {
         send(notification(r.text, r.id));

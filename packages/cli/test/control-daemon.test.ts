@@ -410,6 +410,67 @@ describe.runIf(unix)("delivery", () => {
     });
   });
 
+  /** The row Claude Code writes for the turn a channel's message causes (2.1.314). */
+  const channelRow = (id: string, words: string) =>
+    appendFileSync(
+      path.join(configDir, "projects", project.replace(/[^a-zA-Z0-9]/g, "-"), `${SID}.jsonl`),
+      `${JSON.stringify({
+        type: "user",
+        isMeta: true,
+        origin: { kind: "channel", server: "sessionpipe" },
+        message: { content: `<channel source="sessionpipe" via="localhost" message_id="${id}">\n${words}\n</channel>` },
+      })}\n`,
+    );
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("channel: in place while the session is idle, proven by the row of the turn it caused", async () => {
+    await startDaemon();
+    const parked = ask(sock, { op: "wait", session: SESSION, pid: 4242, channel: true }, 10_000);
+    await sleep(100);
+    const q = await rx.send({ session: SESSION, text: "Add the Oct 8 row" });
+    expect(await parked).toMatchObject({ op: "message", id: q.id });
+    channelRow(q.id, "Add the Oct 8 row");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
+    answer(SID, project, "Added the Oct 8 row.");
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({
+      outcome: "delivered",
+      mode: "waiter",
+      reply: "Added the Oct 8 row.",
+    });
+  });
+
+  it("channel: a session that begins no turn for it is acked held, and that channel takes no more", async () => {
+    await startDaemon();
+    const parked = ask(sock, { op: "wait", session: SESSION, pid: 4343, channel: true }, 10_000);
+    await sleep(100);
+    const q = await rx.send({ session: SESSION, text: "anyone there?" });
+    expect(await parked).toMatchObject({ op: "message", id: q.id });
+    // Claude Code dropped it (a --print session, an organization without channels): no turn.
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "failed", code: "held" });
+    // The same channel parks again; the next message goes another way (a resume here,
+    // since nothing holds the session) and the channel is handed nothing.
+    const again = ask(sock, { op: "wait", session: SESSION, pid: 4343, channel: true }, 2000);
+    await sleep(100);
+    const q2 = await rx.send({ session: SESSION, text: "second try" });
+    expect(await rx.waitAck(q2.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(await again).toBeNull();
+  }, 30_000);
+
+  it("channel: a session in the middle of a turn takes it at its Stop, not through the channel", async () => {
+    await startDaemon();
+    // (A channel that names no process of its own is still a channel.)
+    const parked = ask(sock, { op: "wait", session: SESSION, channel: true }, 3000);
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
+    const q = await rx.send({ session: SESSION, text: "also write pong" });
+    for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await sleep(20);
+    expect(rx.acks.find((a) => a.id === q.id)?.outcome).toBe("taken");
+    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 500)).toMatchObject({ op: "block" });
+    answer(SID, project, "pong");
+    await ask(sock, { op: "event", session: SESSION, event: "Stop" }, 500);
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "turn", reply: "pong" });
+    expect(await parked).toBeNull();
+  });
+
   it("turn: a message for a session mid-turn is the Stop hook's block, once", async () => {
     await startDaemon();
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);

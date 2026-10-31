@@ -427,7 +427,7 @@ used:
 | Mode | When | Harnesses | While waiting |
 |------|------|-----------|---------------|
 | `sdk` | The daemon started the session itself (Agent SDK streaming input) and still holds it | Claude Code | 0 turns |
-| `waiter` | The session runs `sessionpipe wait` in the background (§8) | Claude Code | 0 turns, no network |
+| `waiter` | The session runs `sessionpipe wait` in the background, or was started with `sessionpipe channel` as its channel and is **idle** (§8) | Claude Code | 0 turns, no network |
 | `turn` | The session is mid-turn: the message lands at its next Stop | Claude Code, Codex, Gemini CLI (AfterAgent), Cursor, Copilot CLI, Droid, Kiro | 0 turns |
 | `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3) | Claude Code | 0 turns |
 | `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
@@ -546,6 +546,17 @@ parked while the person typed something of their own would otherwise be acked
 delivered, and the answer to THEIR words sent back as the answer to this one.
 Unconfirmed, it is acked `failed` with code `held` and says plainly that the message was
 sent, may be held, and was not duplicated. It MUST NOT try another mode.
+
+**The session reads it as a teammate's request, not the person's.** Claude Code tells the
+model that a message arriving this way came from another Claude session, not from its
+user, and to act on it within its own permission settings: never to edit those settings,
+CLAUDE.md or its configuration because one asked, and never to take one as the person's
+approval of a pending prompt (2.1.314; a live session asked this way to write CLAUDE.md
+declined, and said why). The words are still the person's, and the mode still reaches
+every live session — the Claude app's included — in its own thread and mode. A receiver
+SHOULD tell the person, with an answer acked `mode: inbox`, that the session took the
+message as a teammate's request. Where a session has a channel (§8), the message goes there
+instead, as the person's own words.
 
 A message the session has not taken may still be released to it later, so for as long as
 that can happen (300 s, the receiving inbox's own hold) the mode stays shut for that
@@ -823,7 +834,7 @@ from its `attention.needed` until its `attention.cleared` or the session's next 
 event, whichever comes first. A receiver SHOULD show the Allow / Deny pair only while
 the attention is open.
 
-## 8. The waiter (`sessionpipe wait`)
+## 8. The waiter (`sessionpipe wait`, `sessionpipe channel`)
 
 A session that should be reachable in place runs, as a **background** command,
 `sessionpipe wait --session <harness>:<id>`. It connects to the daemon's local socket
@@ -838,6 +849,28 @@ A harness may stop a background command at a deadline of its own (Claude Code 2.
 30 minutes by default, 2 hours at most unless `BASH_MAX_TIMEOUT_MS` is raised). Every
 such stop wakes the session once, so the waiter SHOULD be started with the longest
 timeout the harness allows.
+
+A Claude Code session can instead be started with **`sessionpipe channel`** as a Claude
+Code channel (an MCP server the session's command line names after `--channels` or
+`--dangerously-load-development-channels`). It parks on the same socket as that session's
+waiter, says so (`channel: true`), and never exits: each message it is handed goes into
+the session as a channel notification, which the session takes as the person's own words,
+in its own thread and permission mode. Three rules make it safe:
+
+- **Only an idle session.** Claude Code folds a channel message that arrives during a turn
+  into that turn, where the model need not answer it (on 2.1.314 it didn't), so a daemon
+  MUST NOT hand a channel a message while the session is mid-turn: the turn's Stop takes it
+  (`turn`).
+- **Proven like an inbox write.** Claude Code acknowledges nothing a channel sends, and
+  drops a notification in silence where it didn't register the channel: a session started
+  with `--print` (as every session the Claude app starts is) or through the Agent SDK, both
+  of which ignore the flags, or an organization with channels turned off. A daemon MUST
+  confirm within §6.3's window that the session began a turn for this message — the row
+  that turn writes carries the message's id on its `<channel>` tag — and otherwise acks it
+  `failed` with code `held`, tries no other mode, and hands that channel no further
+  message: whatever it is handed next would be lost the same way.
+- **Only where it can be one.** `sessionpipe channel` MUST NOT park in a session that isn't
+  interactive, whatever its command line names.
 
 ## 9. Hook output
 
@@ -861,7 +894,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode (§6.3). The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -900,6 +933,8 @@ send → delivered time.
   session never took, acked `failed` with code `held` once and never retried (§6.3); and
   a copy's ack, naming the copy in `session` and the session the person addressed in
   `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
+- `conformance/delivery/28` — a prompt handed to a session's channel that began no turn
+  for it, acked `failed` with code `held` once and never redelivered (§8).
 
 ## 12. Status
 
