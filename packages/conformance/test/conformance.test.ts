@@ -95,6 +95,26 @@ describe("runAdapterFixtures", () => {
     expect(r.failed).toBe(1);
     expect(r.table.split("\n")).toEqual([`FAIL ${r.results[0]!.file} — no adapter nope`, `ok   ${r.results[1]!.file}`]);
   });
+  it("a file that is not an adapter fixture, or not JSON at all, is a failure, not a throw", async () => {
+    const notFixture = "not an adapter fixture: it needs harness, input and expect";
+    // A delivery fixture, a fixture with no input, one with no expect, and a bare null.
+    expect(await why({ steps: [] })).toMatchObject({ ok: false, why: notFixture });
+    expect(await why({ harness: "codex", expect: [] })).toMatchObject({ ok: false, why: notFixture });
+    expect(await why({ harness: "codex", input: { argv: [], stdin: "" } })).toMatchObject({
+      ok: false,
+      why: notFixture,
+    });
+    expect(await why(null)).toMatchObject({ ok: false, why: notFixture });
+    const text = path.join(tmp, "notes.json");
+    writeFileSync(text, "notes, not JSON");
+    // A path that can't be read as a file (here a folder) is a failure too.
+    const folder = path.join(tmp, "folder.json");
+    mkdirSync(folder, { recursive: true });
+    const r = await runAdapterFixtures([text, folder, fixture(recorded())]);
+    expect(r.results[0]).toMatchObject({ ok: false, why: expect.stringMatching(/^not JSON: /) });
+    expect(r.results[1]).toMatchObject({ ok: false, why: "not readable: EISDIR" });
+    expect(r.results[2]).toMatchObject({ ok: true });
+  });
 });
 
 describe("the command", () => {
@@ -105,7 +125,9 @@ describe("the command", () => {
   it("usage without a target, M3 for a receiver URL, the table and the count for a fixture dir", async () => {
     const none = io();
     expect(await main([], none)).toBe(2);
-    expect(none.out.join("")).toBe("usage: sessionpipe-conformance <conformance/harness dir | https://receiver>\n");
+    expect(none.out.join("")).toBe(
+      "usage: sessionpipe-conformance <conformance/harness dir | fixture file | https://receiver>\n",
+    );
     const url = io();
     expect(await main(["https://receiver.example"], url)).toBe(2);
     expect(url.out.join("")).toBe("receiver scenarios land in M3\n");
@@ -121,6 +143,43 @@ describe("the command", () => {
     const fail = io();
     expect(await main([dir], fail)).toBe(1);
     expect(fail.out.join("")).toBe(`FAIL ${failing} — no adapter nope\nok   ${good}\n1/2 passed\n`);
+  });
+  it("one fixture file, an upper-case URL, a path that is not there, and a folder with no fixtures", async () => {
+    const good = fixture(recorded(), path.join(tmp, "one"));
+    const file = io();
+    expect(await main([good], file)).toBe(0);
+    expect(file.out.join("")).toBe(`ok   ${good}\n1/1 passed\n`);
+    const url = io();
+    expect(await main(["HTTPS://receiver.example"], url)).toBe(2);
+    expect(url.out.join("")).toBe("receiver scenarios land in M3\n");
+    const gone = path.join(tmp, "gone");
+    const missing = io();
+    expect(await main([gone], missing)).toBe(2);
+    expect(missing.out.join("")).toBe(`sessionpipe-conformance: ENOENT: no such file or directory, stat '${gone}'\n`);
+    const under = path.join(good, "x");
+    const notDir = io();
+    expect(await main([under], notDir)).toBe(2);
+    // A path under a file: ENOTDIR on Linux and macOS, ENOENT on Windows.
+    const reason = process.platform === "win32" ? "ENOENT: no such file or directory" : "ENOTDIR: not a directory";
+    expect(notDir.out.join("")).toBe(`sessionpipe-conformance: ${reason}, stat '${under}'\n`);
+    // An entry under the target that fails is named, not the target (symlinks need admin on Windows).
+    if (process.platform !== "win32") {
+      const linked = path.join(tmp, "linked");
+      mkdirSync(linked, { recursive: true });
+      const dangling = path.join(linked, "broken.json");
+      symlinkSync(path.join(tmp, "nowhere"), dangling);
+      const broken = io();
+      expect(await main([linked], broken)).toBe(2);
+      expect(broken.out.join("")).toBe(
+        `sessionpipe-conformance: ENOENT: no such file or directory, stat '${dangling}'\n`,
+      );
+    }
+    const empty = path.join(tmp, "empty");
+    mkdirSync(empty, { recursive: true });
+    writeFileSync(path.join(empty, "notes.txt"), "not a fixture");
+    const none = io();
+    expect(await main([empty], none)).toBe(2);
+    expect(none.out.join("")).toBe(`sessionpipe-conformance: no .json fixtures under ${empty}\n`);
   });
 });
 
@@ -147,7 +206,7 @@ describe("as the script node started", () => {
   }
   it("runs with the script's own path and through a symlink to it", async () => {
     expect(await load([process.execPath, cli])).toEqual({
-      out: "usage: sessionpipe-conformance <conformance/harness dir | https://receiver>\n",
+      out: "usage: sessionpipe-conformance <conformance/harness dir | fixture file | https://receiver>\n",
       code: 2,
     });
     if (process.platform !== "win32") {

@@ -36,11 +36,24 @@ export async function runAdapterFixtures(
 ): Promise<{ results: FixtureResult[]; failed: number; table: string }> {
   const results: FixtureResult[] = [];
   for (const file of files) {
-    const fx = JSON.parse(readFileSync(file, "utf8")) as {
+    let fx: {
       harness: string;
       input: { argv: string[]; stdin: string; env?: Record<string, string>; cwd?: string };
       expect: { type: string; harness: { event: string }; session: Record<string, unknown>; data: unknown }[];
-    };
+    } | null;
+    try {
+      fx = JSON.parse(readFileSync(file, "utf8"));
+    } catch (e) {
+      // A read error has a code (EISDIR, EACCES); a parse error has none.
+      const code = (e as NodeJS.ErrnoException).code;
+      results.push({ file, ok: false, why: code ? `not readable: ${code}` : `not JSON: ${(e as Error).message}` });
+      continue;
+    }
+    // A redaction, delivery or control-vector fixture in the same tree is not one of these.
+    if (typeof fx?.harness !== "string" || !fx.input || !Array.isArray(fx.expect)) {
+      results.push({ file, ok: false, why: "not an adapter fixture: it needs harness, input and expect" });
+      continue;
+    }
     const adapter = adapterByName(fx.harness);
     if (!adapter) {
       results.push({ file, ok: false, why: `no adapter ${fx.harness}` });
