@@ -1332,6 +1332,11 @@ async function update(): Promise<void> {
         : "  ✓ The control daemon checks npm once a day and installs a new release when it's idle.",
     );
   }
+  // `update OFF` or `update of` is someone switching updates off: never install for them.
+  if (sub !== undefined) {
+    process.exitCode = 2;
+    return out("usage: sessionpipe update [off|on]");
+  }
   if (process.env.SESSIONPIPE_NO_UPDATE_CHECK) return out("  update check is off (SESSIONPIPE_NO_UPDATE_CHECK)");
   let latest: string;
   try {

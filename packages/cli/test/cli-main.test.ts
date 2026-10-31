@@ -1537,6 +1537,20 @@ describe.skipIf(process.platform === "win32")("update", () => {
     expect(latestVersion).not.toHaveBeenCalled();
   });
 
+  it("any other word is a usage error: npm is never asked and nothing is installed", async () => {
+    vi.mocked(latestVersion).mockResolvedValue("99.0.0");
+    vi.mocked(globalPrefix).mockReturnValue(path.join(home, ".local"));
+    writeConfig({ sinks: [], harnesses: {}, update_check: true } as never);
+    for (const word of ["OFF", "of", "--off", "disable"]) {
+      expect((await run("update", word)).lines).toEqual(["usage: sessionpipe update [off|on]"]);
+      expect(process.exitCode).toBe(2);
+      process.exitCode = undefined;
+    }
+    expect(latestVersion).not.toHaveBeenCalled();
+    expect(installVersion).not.toHaveBeenCalled();
+    expect(cfg().update_check).toBe(true);
+  });
+
   it("asks npm: unreachable, current, or newer but not a global install", async () => {
     vi.mocked(latestVersion).mockRejectedValueOnce(new Error("ENOTFOUND"));
     expect((await run("update")).lines).toEqual(["  couldn't check npm: ENOTFOUND"]);
