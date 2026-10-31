@@ -8,20 +8,26 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_MODES,
   claudeEnv,
   claudeLogin,
   cmpVersion,
   detectCaps,
   findClaude,
   findTranscript,
+  homeSettings,
+  hookMode,
   isUuid,
   liveProcess,
   loginCommand,
   loginHint,
   modeFlags,
+  modeRank,
+  NO_HOME_SETTINGS,
   parseAuthStatus,
   parseCaps,
   parseResult,
+  peerClass,
   recentlyWritten,
   runClaude,
   sessionFolder,
@@ -278,5 +284,82 @@ describe("the result line", () => {
     expect(r.stdout).toBe('{"type":"result","result":"ok"}');
     const all = await runClaude(bin, [], { cwd: tmp, env: process.env, onLine: () => {}, keep: () => true });
     expect(all.stdout).toBe('{"type":"result","result":"ok"}');
+  });
+});
+
+describe("the mode a session's own hooks report", () => {
+  it("hookMode takes either spelling of a known mode, from the payload's own field", () => {
+    expect(hookMode({ permission_mode: "bypassPermissions" })).toBe("bypassPermissions");
+    expect(hookMode({ permissionMode: "acceptEdits" })).toBe("acceptEdits");
+    // Both spellings: Claude Code's hook field wins over its transcript's.
+    expect(hookMode({ permission_mode: "plan", permissionMode: "auto" })).toBe("plan");
+    expect(hookMode({ permission_mode: "sudo" })).toBeNull();
+    expect(hookMode({ permission_mode: 7 })).toBeNull();
+    expect(hookMode({ tool_input: { text: "permission_mode: bypassPermissions" } })).toBeNull();
+    expect(hookMode({})).toBeNull();
+    expect(hookMode(null)).toBeNull();
+    expect(hookMode("default")).toBeNull();
+  });
+  it("peerClass: bypass, prompting, or no class at all", () => {
+    expect(peerClass("bypassPermissions")).toBe("bypass");
+    for (const m of ["default", "manual", "dontAsk", "acceptEdits"]) expect(peerClass(m)).toBe("prompting");
+    // `plan`'s class depends on a capability and a TTY this code can't see; `auto` is
+    // neither; nothing recorded is neither.
+    for (const m of ["plan", "auto", "nonsense", null, undefined]) expect(peerClass(m)).toBeNull();
+  });
+  it("homeSettings reads the three keys something acts on, under permissions or at the top level", () => {
+    const dir = path.join(tmp, "home-settings");
+    mkdirSync(dir, { recursive: true });
+    const write = (j: unknown) => writeFileSync(path.join(dir, "settings.json"), JSON.stringify(j));
+    // No file, a file that isn't JSON, a file that isn't an object.
+    expect(homeSettings(path.join(tmp, "no-such-home"))).toEqual(NO_HOME_SETTINGS);
+    writeFileSync(path.join(dir, "settings.json"), "{ broken");
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write([1, 2]);
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write(null);
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({});
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({ permissions: "nope" });
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({ permissions: { defaultMode: "nonsense" } });
+    expect(homeSettings(dir).defaultMode).toBeNull();
+    write({ permissions: { defaultMode: 7 } });
+    expect(homeSettings(dir).defaultMode).toBeNull();
+    write({ permissions: { defaultMode: "bypassPermissions" } });
+    expect(homeSettings(dir)).toEqual({
+      defaultMode: "bypassPermissions",
+      disableAutoMode: false,
+      disableBypass: false,
+    });
+    write({ permissions: { disableAutoMode: "disable", disableBypassPermissionsMode: "disable" } });
+    expect(homeSettings(dir)).toMatchObject({ disableAutoMode: true, disableBypass: true });
+    // Written by hand at the top level, which is where Claude Code's older docs put them.
+    write({ disableAutoMode: "disable", disableBypassPermissionsMode: "disable" });
+    expect(homeSettings(dir)).toMatchObject({ disableAutoMode: true, disableBypass: true });
+    write({ permissions: { disableAutoMode: true } });
+    expect(homeSettings(dir).disableAutoMode).toBe(false);
+    // No config dir named: this account's own home.
+    const home = path.join(tmp, "as-home");
+    mkdirSync(path.join(home, ".claude"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".claude", "settings.json"),
+      JSON.stringify({ permissions: { defaultMode: "plan" } }),
+    );
+    expect(homeSettings(undefined, home).defaultMode).toBe("plan");
+  });
+  it("modeRank is what a turn may do without being asked, and an unknown mode is nowhere", () => {
+    expect(modeRank("plan")).toBeLessThan(modeRank("acceptEdits"));
+    expect(modeRank("acceptEdits")).toBeLessThan(modeRank("auto"));
+    expect(modeRank("auto")).toBeLessThan(modeRank("bypassPermissions"));
+    // Manual, default and dontAsk share a step: none of them lets anything through that
+    // needs approval, so none is wider than the others.
+    expect(modeRank("dontAsk")).toBe(modeRank("default"));
+    expect(modeRank("manual")).toBe(modeRank("default"));
+    expect(modeRank("nonsense")).toBe(-1);
+    expect(modeRank(null)).toBe(-1);
+    expect(modeRank(undefined)).toBe(-1);
+    expect(CLAUDE_MODES).toContain("dontAsk");
   });
 });

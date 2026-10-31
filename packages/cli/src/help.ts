@@ -47,6 +47,7 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "pool order": "pool order <id|email>… (the complete order)",
     "pool refresh": "pool refresh [<id|email>] (read usage from the vendor now)",
     wait: "wait [--session <harness>:<id>]",
+    channel: "channel [--session claude-code:<id>] [--name N] (Claude Code runs it as a channel, with --channels)",
     worker: "worker <job-file> (internal: process one queued job)",
     hook: "hook (internal: harnesses run dist/hook.js directly)",
     version: "version (print the installed version)",

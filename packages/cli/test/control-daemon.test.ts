@@ -183,18 +183,32 @@ describe("routing (CONTROL.md §6)", () => {
     sdk: false,
     waiter: false,
     midTurn: false,
+    inbox: false,
     live: false,
     known: true,
     canFork: true,
+    copied: false,
     api: false,
   };
   it("takes the first mode that fits", () => {
     expect(routePrompt({ ...base, sdk: true, waiter: true })).toEqual({ mode: "sdk" });
     expect(routePrompt({ ...base, waiter: true, midTurn: true })).toEqual({ mode: "waiter" });
     expect(routePrompt({ ...base, midTurn: true, live: true })).toEqual({ mode: "turn" });
+    // The session's own inbox sits under the lanes it opened itself and above every
+    // lane that starts a process (§6.3).
+    expect(routePrompt({ ...base, midTurn: true, inbox: true, live: true })).toEqual({ mode: "turn" });
+    expect(routePrompt({ ...base, inbox: true, live: true })).toEqual({ mode: "inbox" });
+    expect(routePrompt({ ...base, inbox: true, api: true, live: true })).toEqual({ mode: "inbox" });
     expect(routePrompt({ ...base })).toEqual({ mode: "resume" });
     expect(routePrompt({ ...base, live: true })).toEqual({ mode: "fork" });
     expect(routePrompt({ ...base, live: true, canFork: false })).toHaveProperty("unsupported");
+    // A session that already has a copy is not copied again, and is told which it is.
+    expect(routePrompt({ ...base, live: true, copied: true })).toEqual({
+      unsupported: "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
+    });
+    expect(routePrompt({ ...base, live: true, canFork: false })).toEqual({
+      unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
+    });
     expect(routePrompt({ ...base, known: false })).toEqual({ refused: "no_session" });
     expect(routePrompt({ ...base, harness: "kiro" })).toHaveProperty("unsupported");
     expect(routePrompt({ ...base, harness: "codex", midTurn: true })).toEqual({ mode: "turn" });

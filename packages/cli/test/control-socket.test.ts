@@ -3,7 +3,16 @@
 // won't read, waiters and hooks that replace each other, events that only touch state,
 // what `busy()` says for each thing in hand, a socket path that is taken, blocked or
 // lost, and a daemon told to stop at every point.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -216,6 +225,52 @@ describe.runIf(unix)("frames on the socket", () => {
     await ask(sock, { op: "event", session: "nocolon", event: "UserPromptSubmit" }, 500);
     expect(d?.status().mid_turn).toEqual(["nocolon"]);
     expect(await ask(sock, { op: "restart" }, 500)).toEqual({ op: "none" });
+  });
+
+  it("a session's own permission mode is recorded from its hooks: latest word wins, an unchanged one writes nothing", async () => {
+    const state = path.join(tmp, "state", "control", "state.json");
+    const modes = () => (JSON.parse(readFileSync(state, "utf8")) as { modes: Record<string, string> }).modes;
+    await make().start();
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "acceptEdits" }, 500);
+    expect(modes()).toEqual({ [SESSION]: "acceptEdits" });
+    // A hook fires for every tool call of every session, so an unchanged mode is not a
+    // write: the file is gone and stays gone.
+    rmSync(state);
+    await ask(sock, { op: "event", session: SESSION, event: "PostToolUse", mode: "acceptEdits" }, 500);
+    expect(existsSync(state)).toBe(false);
+    // A mode this daemon has no meaning for is not recorded; the Stop hook's word counts too.
+    await ask(sock, { op: "event", session: SESSION, event: "PostToolUse", mode: "whatever" }, 500);
+    expect(existsSync(state)).toBe(false);
+    await ask(sock, { op: "stop", session: SESSION, active: false, mode: "bypassPermissions" }, 500);
+    expect(modes()).toEqual({ [SESSION]: "bypassPermissions" });
+    // And it outlives the daemon.
+    await d?.stop();
+    d = null;
+    await make().start();
+    await ask(sock, { op: "event", session: SESSION, event: "PostToolUse", mode: "bypassPermissions" }, 500);
+    expect(modes()).toEqual({ [SESSION]: "bypassPermissions" });
+  });
+
+  it("the oldest recorded modes go once there are more than five hundred", async () => {
+    await make().start();
+    const sid = (n: number) => `claude-code:${String(n).padStart(8, "0")}-8c3f-4814-870a-afc3d05e1d2e`;
+    for (let i = 0; i < 502; i++)
+      await ask(sock, { op: "event", session: sid(i), event: "PostToolUse", mode: "plan" }, 500);
+    const modes = (
+      JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
+        modes: Record<string, string>;
+      }
+    ).modes;
+    expect(Object.keys(modes)).toHaveLength(500);
+    expect(modes[sid(0)]).toBeUndefined();
+    expect(modes[sid(501)]).toBe("plan");
+  });
+
+  it("a mode that can't be written is logged and nothing else", async () => {
+    mkdirSync(path.join(tmp, "state", "control", "state.json"), { recursive: true });
+    await make().start();
+    await ask(sock, { op: "event", session: SESSION, event: "PostToolUse", mode: "plan" }, 500);
+    expect(log.some((l) => l.startsWith(`couldn't record ${SESSION.slice(0, 24)}'s permission mode`))).toBe(true);
   });
 
   it("a Stop skips a queued message that was already acked some other way", async () => {

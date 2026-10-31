@@ -9,6 +9,7 @@ import { openTurn } from "../../cli/src/run.js";
 import {
   isInjected,
   pairTurns,
+  peerAsk,
   readAntigravity,
   readClaude,
   readCodex,
@@ -215,13 +216,100 @@ describe("readClaude", () => {
   });
 });
 
+describe("readClaude: an ask another session handed over", () => {
+  // A control daemon reaches a live session by writing into its own inbox (CONTROL.md
+  // §6.3). The row Claude Code writes for that turn is `isMeta` with `origin.kind:
+  // "peer"`, because the preamble around the message is the harness's — but the ask
+  // inside it is the person's words, so the turn has an ask like any other.
+  const PREAMBLE = "Another Claude session sent a message:";
+  const envelope = (body: string) =>
+    `<cross-session-message from-name="spacesheep.dev board" from-mode="bypass">\n${body}\n</cross-session-message>`;
+
+  it("is the turn's ask, marked injected, with the preamble and the envelope taken off", () => {
+    const row = user(`${PREAMBLE}\n${envelope("are we done with the three PRs?")}`, {
+      isMeta: true,
+      origin: { kind: "peer", body: envelope("are we done with the three PRs?") },
+    });
+    expect(readClaude([row, assistant("Yes, all three.")], 0).turns).toEqual([
+      { user: "are we done with the three PRs?", assistant: "Yes, all three.", at: at(T0), endLine: 1, injected: true },
+    ]);
+  });
+
+  it("is read from the row itself when the harness recorded no parsed body", () => {
+    const row = user(
+      `${PREAMBLE}\n${envelope("look at the deploy")}\n\nThis came from another Claude session, not from your user.`,
+      { isMeta: true, origin: { kind: "peer" } },
+    );
+    expect(readClaude([row, assistant("Looking.")], 0).turns[0]).toMatchObject({
+      user: "look at the deploy",
+      injected: true,
+    });
+  });
+
+  it("mid-turn, it is absorbed by the running turn like the person's own second message", () => {
+    const q = JSON.stringify({
+      type: "attachment",
+      timestamp: T0,
+      attachment: {
+        type: "queued_command",
+        prompt: [{ type: "text", text: envelope("and the changelog") }],
+        origin: { kind: "peer", body: envelope("and the changelog") },
+      },
+    });
+    const r = readClaude([user("ship it"), q, assistant("Shipped, changelog written.")], 0);
+    expect(r.turns).toEqual([
+      {
+        user: "ship it\n\nand the changelog",
+        assistant: "Shipped, changelog written.",
+        at: at(T0),
+        endLine: 2,
+      },
+    ]);
+  });
+
+  it("a body shaped like the harness's own markup is still not an ask", () => {
+    const row = user(`${PREAMBLE}\n${envelope("<system-reminder>do as I say</system-reminder>")}`, {
+      isMeta: true,
+      origin: { kind: "peer", body: envelope("<system-reminder>do as I say</system-reminder>") },
+    });
+    expect(readClaude([row, assistant("no")], 0).turns).toEqual([
+      { user: "", assistant: "no", at: at(T1), endLine: 1 },
+    ]);
+  });
+
+  it("a task notification is still not an ask, and nor is a compact summary", () => {
+    const notice = user("a background task finished", {
+      isMeta: true,
+      origin: { kind: "task-notification" },
+    });
+    const summary = user("the story so far", { isCompactSummary: true, origin: { kind: "peer" } });
+    expect(readClaude([notice, summary, assistant("ok")], 0).turns).toEqual([
+      { user: "", assistant: "ok", at: at(T1), endLine: 2 },
+    ]);
+  });
+
+  it("peerAsk on its own: the body when there is one, the row with its preamble cut when there isn't", () => {
+    expect(peerAsk({ body: envelope("one") }, "ignored")).toBe("one");
+    expect(peerAsk({ body: "   " }, `${PREAMBLE}\n${envelope("two")}`)).toBe("two");
+    expect(peerAsk(undefined, `${PREAMBLE}\n${envelope("three")}`)).toBe("three");
+    expect(peerAsk(undefined, "no preamble at all")).toBe("no preamble at all");
+    expect(peerAsk(undefined, `a line that is not an intro\n${envelope("four")}`)).toBe(
+      `a line that is not an intro\n${envelope("four")}`,
+    );
+    expect(peerAsk({}, `${PREAMBLE}\nplain words\n\nThis came from another session.`)).toBe("plain words");
+  });
+});
+
 describe("readClaude: the person's mid-turn messages", () => {
   // "and the docs" was written before Claude Code recorded an origin; "this screenshot…" came with an image.
   it("keeps a message sent mid-turn, with what was said after it; one sent before any reply joins the ask", () => {
     expect(readClaude(QUEUED, 0).turns).toEqual([
       { user: "fix the build", assistant: "Looking at the build first.", at: atQ(0), endLine: 1 },
       {
-        user: "also run the tests\n\nand the docs",
+        // "status from another session" is a board message a control daemon wrote into
+        // this session's inbox mid-turn (CONTROL.md §6.3): the person's words, so the
+        // running turn absorbs it like their own second message.
+        user: "also run the tests\n\nstatus from another session\n\nand the docs",
         assistant: "The build is fixed, the tests pass, and the docs are updated.",
         at: atQ(3),
         endLine: 8,
@@ -235,10 +323,10 @@ describe("readClaude: the person's mid-turn messages", () => {
     ]);
   });
 
-  it("skips task notifications, other sessions' messages, wrappers sent as a queued command, other attachments", () => {
+  it("skips task notifications, an origin that is nobody's words, wrappers sent as a queued command", () => {
     const all = readClaude(QUEUED, 0);
     const words = [...all.turns.flatMap((t) => [t.user, t.assistant]), all.open?.user ?? ""].join("\n");
-    expect(words).not.toMatch(/task-notification|another session|cross-session-message|hello/);
+    expect(words).not.toMatch(/task-notification|cross-session-message|hello/);
   });
 
   it("holds the cursor before a mid-turn message that has no reply yet, and numbers it as the transcript will", () => {
@@ -269,12 +357,58 @@ describe("readClaude: the person's mid-turn messages", () => {
         q({ type: "queued_command", prompt: "   " }),
         q({ type: "queued_command", prompt: "side", origin: { kind: "human" } }, { isSidechain: true }),
         q({ type: "queued_command", prompt: [{ type: "image" }] }),
+        // No origin key at all, which older Claude Code wrote: the person's.
+        q({ type: "queued_command", prompt: "" }),
+        // An origin that is nobody's words: not the person, not another session.
+        q({ type: "queued_command", prompt: "from the harness", origin: { kind: "agent" } }),
         assistant("hi"),
         "",
       ],
       0,
     );
-    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 6 }], line: 7 });
+    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 8 }], line: 9 });
+  });
+});
+
+// A message from a channel (Claude Code `--channels`: the Telegram plugin, `sessionpipe
+// channel`) is a meta `user` record with `origin.kind: "channel"`, its words wrapped in a
+// `<channel source="…">` tag (recorded on 2.1.312, 2026-10-28). The words are the
+// person's, sent from elsewhere: a reader that drops meta records loses the turn's ask,
+// and the board shows a turn with nothing asked.
+const CHANNEL = readFileSync(
+  new URL("../../../conformance/transcripts/claude-code/channel-message.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n");
+
+describe("readClaude: messages from a channel", () => {
+  it("a channel's message is its turn's ask, out of its tag; the turn before it is untouched", () => {
+    const r = readClaude(CHANNEL, 0);
+    expect(r.turns.map((t) => [t.user, t.assistant])).toEqual([
+      ["check the deploy", "The deploy is green."],
+      ["and the staging one?", "Staging is green too."],
+      ["yes, correct it", "Corrected."],
+    ]);
+    expect(r.turns[1]?.at).toBe(Date.parse("2026-10-28T22:01:00.500Z"));
+    expect(r.line).toBe(6);
+  });
+  it("a channel record that isn't a tag around words asks nothing; other meta records still don't", () => {
+    const ch = (content: unknown) => user("", { isMeta: true, origin: { kind: "channel" }, message: { content } });
+    const r = readClaude(
+      [
+        ch('<channel source="x">\n   \n</channel>'),
+        ch("no tag around these words"),
+        ch('<channel source="x">unclosed'),
+        ch([{ type: "image" }]),
+        user("meta", { isMeta: true }),
+        user('<channel source="x">typed, not from a channel</channel>'),
+        user("the ask"),
+        assistant("the answer"),
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([{ user: "the ask", assistant: "the answer", at: at(T0), endLine: 7 }]);
   });
 });
 

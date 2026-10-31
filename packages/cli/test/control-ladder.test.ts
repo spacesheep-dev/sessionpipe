@@ -529,7 +529,12 @@ describe.runIf(unix)("the answer read from a live session", () => {
 
   it("a fork whose copy has no transcript yet: delivered to the waiter, without a reply", async () => {
     const COPY = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
-    writeState(path.join(tmp, "state", "control", "state.json"), { started: {}, copies: { [SID]: COPY } });
+    writeState(path.join(tmp, "state", "control", "state.json"), {
+      started: {},
+      modes: {},
+      parked: {},
+      copies: { [SID]: { id: COPY, at: new Date().toISOString(), reason: "a test put it there" } },
+    });
     await startDaemon();
     const got = waitForMessage(SESSION, { env });
     await settle(100);
