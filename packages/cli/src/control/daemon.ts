@@ -51,6 +51,7 @@ import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
 import {
   COPY_NOTE,
+  channelMark,
   type DeliveryMode,
   earlier,
   frame,
@@ -200,6 +201,13 @@ const PARKED_ACK = {
   code: "parked",
   detail: "another message for that session is still waiting for it to answer; send this one again in a moment",
 };
+/** A channel took the message and the session began no turn for it (CONTROL.md §8). */
+const CHANNEL_HELD_ACK = {
+  outcome: "failed" as const,
+  code: "held",
+  detail:
+    "handed to the session's sessionpipe channel on this computer; it didn't begin a turn for it, so Claude Code may have dropped the message or be holding it. Nothing was duplicated and nothing else was tried; the next message to it goes another way.",
+};
 /** Events that prove a pending permission prompt was resolved some other way. */
 const CLOSES_ATTENTION = new Set([
   "PostToolUse",
@@ -330,6 +338,10 @@ interface Live {
   /** The Stop hook just delivered a block: the next Stop event continues the turn. */
   continued: boolean;
   waiter: net.Socket | null;
+  /** The parked waiter is `sessionpipe channel`, and this is its process: a channel's
+   *  message has to be proven by the turn it causes (CONTROL.md §8). Null: a
+   *  `sessionpipe wait`, or no waiter. */
+  channel: number | null;
   turnQueue: TurnPending[];
   attentions: Map<string, net.Socket>;
   cwd?: string;
@@ -422,6 +434,11 @@ export class ControlDaemon {
    *  minutes, and a hold can be RELEASED later (a mode change does it), so for that long
    *  another write would mean the person's words arriving twice (CONTROL.md §6.3). */
   private readonly parked = new Map<string, { at: number; id: string }>();
+  /** `sessionpipe channel` processes that took a message and no turn began for it:
+   *  Claude Code drops a channel's notification in silence when it didn't register the
+   *  channel (a `--print` session, an organization that turns channels off), so this one
+   *  would swallow every message after it too. A new channel process starts trusted. */
+  private readonly mutedChannels = new Set<number>();
   /** Things said once in the log however many acks carry them (a mode the settings turn
    *  off): the person reads the ack, the machine's log doesn't need it every time. */
   private readonly warned = new Set<string>();
@@ -741,6 +758,7 @@ export class ControlDaemon {
         midTurn: false,
         continued: false,
         waiter: null,
+        channel: null,
         turnQueue: [],
         attentions: new Map(),
         lastEvent: this.deps.now(),
@@ -763,9 +781,11 @@ export class ControlDaemon {
         const l = this.liveOf(req.session);
         if (l.waiter && l.waiter !== s) this.reply(l.waiter, { op: "replaced" });
         l.waiter = s;
+        l.channel = req.channel ? (req.pid ?? 0) : null;
         s.on("close", () => {
           if (l.waiter === s) {
             l.waiter = null;
+            l.channel = null;
             this.scheduleHello();
           }
         });
@@ -1814,12 +1834,13 @@ export class ControlDaemon {
     };
   }
 
-  /** Did the session take the message that was just written, or only begin some other
-   *  turn? `UserPromptSubmit` says a turn began; it carries no text, so the proof that
-   *  it is OUR turn is the row the harness wrote for it — a `user` row whose origin is a
-   *  peer, carrying this message's own mark. Anything else (the person typing in the
-   *  same second, another local process's message) means the write is still parked, and
-   *  the answer to THEIR prompt must not be sent back as the answer to this one. */
+  /** Did the session take the message that was just handed over, or only begin some
+   *  other turn? `UserPromptSubmit` says a turn began; it carries no text, so the proof
+   *  that it is OUR turn is the row the harness wrote for it — a `user` row whose origin
+   *  is a peer (the inbox) or a channel (`sessionpipe channel`), carrying this message's
+   *  own mark. Anything else (the person typing in the same second, another local
+   *  process's message) means the message is still parked, and the answer to THEIR
+   *  prompt must not be sent back as the answer to this one. */
   private async tookIt(
     started: { ok: Promise<boolean> },
     session: string,
@@ -1831,7 +1852,7 @@ export class ControlDaemon {
     if (!from) return true;
     for (let i = 0; i < PEER_ROW_TRIES; i++) {
       const row = firstAsk(from.file, from.offset, mark);
-      if (row === "peer") return true;
+      if (row === "ours") return true;
       if (row !== null) {
         this.deps.log(`${session.slice(0, 24)}: the turn that began was asked for by something else`);
         return false;
@@ -1843,6 +1864,16 @@ export class ControlDaemon {
     }
     this.deps.log(`${session.slice(0, 24)}: a turn began and nothing was written for it yet`);
     return false;
+  }
+
+  /** A parked waiter that may take a message now. `sessionpipe wait` always may: the
+   *  session asked for it. A channel only while the session is idle, and never one that
+   *  already swallowed a message (CONTROL.md §8): Claude Code folds a channel message that
+   *  arrives during a turn into that turn as a queued command, which the model need not
+   *  answer (on 2.1.314 it didn't), so a running turn takes the message at its Stop. */
+  private waiterFits(l: Live | undefined): boolean {
+    if (!l?.waiter || l.waiter.destroyed) return false;
+    return l.channel === null || (!l.midTurn && !this.mutedChannels.has(l.channel));
   }
 
   private view(session: string, place: Placed, look?: ReturnType<ControlDaemon["inboxLook"]>) {
@@ -1859,7 +1890,7 @@ export class ControlDaemon {
       return {
         harness: ref.harness,
         sdk: this.sdkSessions.has(ref.id),
-        waiter: !!l?.waiter && !l.waiter.destroyed,
+        waiter: this.waiterFits(l),
         midTurn: !!l?.midTurn,
         // The inbox is Claude Code's own local socket; no other harness has one.
         inbox: false,
@@ -1886,7 +1917,7 @@ export class ControlDaemon {
     return {
       harness: ref.harness,
       sdk: this.sdkSessions.has(ref.id),
-      waiter: !!l?.waiter && !l.waiter.destroyed,
+      waiter: this.waiterFits(l),
       midTurn: !!l?.midTurn,
       inbox: !!look && "rec" in look,
       live,
@@ -1930,10 +1961,25 @@ export class ControlDaemon {
       case "waiter": {
         const l = this.live.get(cmd.session)!;
         const w = l.waiter!;
+        const channel = l.channel;
+        // A channel pushes the message into the session, and Claude Code acknowledges
+        // nothing: the proof is the turn the session begins for it, as for the inbox
+        // (§8). Watch before handing it over, or a turn that begins at once is missed.
+        const started = channel === null ? null : this.awaitPrompted(cmd.session, inbox.CONFIRM_MS);
+        /* v8 ignore next -- one in-place delivery per session at a time (`serial`); this is the backstop */
+        if (channel !== null && !started) return this.finish(r, id, PARKED_ACK);
         l.waiter = null;
+        l.channel = null;
         const from = this.answerFrom(cmd.session);
         this.reply(w, { op: "message", text: frame(text, r.url), id });
         this.scheduleHello();
+        if (channel !== null && !(await this.tookIt(started!, cmd.session, from, channelMark(id)))) {
+          this.mutedChannels.add(channel);
+          this.deps.log(
+            `${id.slice(-8)}: the channel in ${cmd.session.slice(0, 24)} took it and no turn began for it; that channel takes no more messages`,
+          );
+          return this.finish(r, id, CHANNEL_HELD_ACK, sent);
+        }
         return this.followAnswer(r, id, "waiter", cmd.session, from, sent);
       }
       case "turn": {

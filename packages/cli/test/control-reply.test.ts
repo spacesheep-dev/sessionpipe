@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { answerIn, awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "../src/control/reply.js";
-import { kindPath, routePrompt } from "../src/control/route.js";
+import { channelMark, kindPath, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
@@ -26,12 +26,12 @@ describe("firstAsk: which message the turn that just began is for", () => {
     rec({ type: "user", isMeta: true, origin: { kind: "peer", ...o }, message: { content: [{ type: "text", text }] } });
 
   it("is the peer row carrying this message's own mark", () => {
-    expect(firstAsk(file, after(peerRow()), MARK)).toBe("peer");
+    expect(firstAsk(file, after(peerRow()), MARK)).toBe("ours");
     // The parsed body the harness records counts too, and a string content.
-    expect(firstAsk(file, after(peerRow({ body: `… ${MARK} …` }, "nothing here")), MARK)).toBe("peer");
+    expect(firstAsk(file, after(peerRow({ body: `… ${MARK} …` }, "nothing here")), MARK)).toBe("ours");
     expect(
       firstAsk(file, after(rec({ type: "user", origin: { kind: "peer" }, message: { content: `… ${MARK} …` } })), MARK),
-    ).toBe("peer");
+    ).toBe("ours");
     // A block with no text of its own is not where the mark is.
     expect(
       firstAsk(
@@ -45,7 +45,24 @@ describe("firstAsk: which message the turn that just began is for", () => {
         ),
         MARK,
       ),
-    ).toBe("peer");
+    ).toBe("ours");
+  });
+
+  it("is the channel row whose tag names this message's id", () => {
+    const ID = "01K6ABCDEF1234567890ABCDEF";
+    const channelRow = (id: string) =>
+      rec({
+        type: "user",
+        isMeta: true,
+        origin: { kind: "channel", server: "sessionpipe" },
+        message: { content: `<channel source="sessionpipe" via="spacesheep.dev" message_id="${id}">\nhi\n</channel>` },
+      });
+    expect(firstAsk(file, after(channelRow(ID)), channelMark(ID))).toBe("ours");
+    // Another message's row, or a typed one quoting the tag, is not this message's.
+    expect(firstAsk(file, after(channelRow("01K6OTHER")), channelMark(ID))).toBe("other");
+    expect(firstAsk(file, after(rec({ type: "user", message: { content: channelMark(ID) } })), channelMark(ID))).toBe(
+      "other",
+    );
   });
 
   it("is `other` for any turn this message did not cause", () => {
