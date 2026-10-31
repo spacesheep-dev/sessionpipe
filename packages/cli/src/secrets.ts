@@ -111,15 +111,20 @@ export function bestStore(
 export const storeLabel = (s: StoreName | undefined): string =>
   s === "keychain" ? "the macOS Keychain" : s === "secret-service" ? "the Secret Service keyring" : "a 0600 file";
 
-/** The sink with its token and secret filled in from its store. Null when they live in
- *  a store this process can't read right now (a keychain locked in an ssh session):
- *  the caller leaves the events in the outbox rather than sending them unsigned. */
+/** The sink with its token and secret filled in from its store: each item the store
+ *  holds, since a sink has a token, a Webhooks secret, or both (`sink add --secret`
+ *  with no `--token` signs and sends no bearer). Null when the store can't be read
+ *  from this process right now (a keychain locked in an ssh session): the caller
+ *  leaves the events in the outbox rather than sending them unsigned. One item and not
+ *  the other is not that: the store has just answered a read from this process, so it
+ *  is readable right now, and the item it didn't give is one it doesn't hold. A locked
+ *  store fails both reads. */
 export function sinkWithSecrets(s: SinkConfig, run: Runner = defaultRunner): SinkConfig | null {
   if (!s.token_in) return s;
   const token = secretGet(s.token_in, sinkAccount(s.name), run);
-  if (!token) return null;
   const secret = secretGet(s.token_in, sinkAccount(s.name, "secret"), run);
-  return { ...s, token, ...(secret ? { secret } : {}) };
+  if (!token && !secret) return null;
+  return { ...s, ...(token ? { token } : {}), ...(secret ? { secret } : {}) };
 }
 
 /** Store a sink's secrets in `to` (or back in the file) and save the config. */
@@ -141,9 +146,8 @@ export function moveSinkSecrets(
     }
     if (!full.token && !full.secret) continue;
     if (to === "file") {
-      // From a store, so with a token (sinkWithSecrets is null without one); a sink
-      // already in the file never gets here.
-      /* v8 ignore else */
+      // From a store, so with a token, a secret or both (sinkWithSecrets is null with
+      // neither); a sink already in the file never gets here.
       if (full.token) s.token = full.token;
       if (full.secret) s.secret = full.secret;
       delete s.token_in;
