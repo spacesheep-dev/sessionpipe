@@ -94,22 +94,33 @@ const queuedPrompt = (a: unknown): string => {
   return textParts(q.prompt, ["text"]).trim();
 };
 
+/** A channel's message (Claude Code `--channels`: Telegram, sessionpipe's own) as Claude
+ *  Code records it: {type:"user", isMeta:true, origin:{kind:"channel", server}, content:
+ *  `<channel source="…" …>\n…\n</channel>`}. The words inside are the person's, sent from
+ *  elsewhere: the turn's ask. Anything else in that record is nobody's words. */
+const channelText = (text: string): string => /^<channel\b[^>]*>([\s\S]*)<\/channel>$/.exec(text)?.[1]?.trim() ?? "";
+
 /** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},
- *  plus the person's mid-turn messages (queuedPrompt). */
+ *  plus the person's mid-turn messages (queuedPrompt) and messages from a channel (channelText). */
 export function readClaude(lines: string[], from: number): TranscriptRead {
   const msgs: Msg[] = [];
   for (let i = from; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j || j.isSidechain) continue;
     const origin = j.origin as { kind?: string } | undefined;
+    const channel = j.type === "user" && origin?.kind === "channel";
     if (
       j.type === "user" &&
+      !channel &&
       (j.isMeta || j.isCompactSummary || j.repeatsCompactSummary || (origin?.kind && origin.kind !== "human"))
     )
       continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const c = (j.message as { content?: unknown } | undefined)?.content;
-    if (j.type === "user") {
+    if (channel) {
+      const text = channelText(textParts(c, ["text"]).trim());
+      if (text) msgs.push({ role: "user", text, at, line: i });
+    } else if (j.type === "user") {
       const text = textParts(c, ["text"]).trim();
       if (!text || isInjected(text)) continue;
       msgs.push({ role: "user", text, at, line: i });
