@@ -267,6 +267,20 @@ describe("what a receiver may leave out of its answer", () => {
     expect(http.send).toHaveBeenCalledTimes(3);
   });
 
+  it("a half dropped with no status or message: logged, and the other half still sent", async () => {
+    http.send.mockImplementation(async (_n, events) =>
+      events.length > 1
+        ? { ok: false, acknowledged: 0, action: "split" }
+        : events[0]!.session.seq === 0
+          ? { ok: false, acknowledged: 0, action: "drop" }
+          : { ok: true, acknowledged: 1 },
+    );
+    expect(await flush(tmp, sinks(), outboxWith(2))).toEqual({ h: 2 });
+    expect(http.send).toHaveBeenCalledTimes(3);
+    expect(http.send.mock.calls[2]![1].map((e: Event) => e.session.seq)).toEqual([1]);
+    expect(logged()).toMatch(/sink h: {3}→ drop, 1 of 2 events/);
+  });
+
   it("lower-tier without a cap changes nothing; with one it caps the sink", async () => {
     http.send.mockResolvedValue({ ok: false, acknowledged: 0, action: "lower-tier" });
     await flush(tmp, sinks(), outboxWith(1));

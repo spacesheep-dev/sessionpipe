@@ -692,9 +692,11 @@ export async function flush(
     let batch: Event[] = [];
     let pending: Record<string, number> = {};
     // HTTP.md §2 413: halve the batch and try again; one event too large on its own
-    // is dropped and logged. A half that is refused for another reason stops the
-    // run like any refusal: the cursor stays, and the halves that went through are
-    // sent again next time (the receiver counts them as duplicates).
+    // is dropped and logged. A half the receiver drops (400) is dropped and logged on
+    // its own, and the other half is still sent: the 400 answered that half, not the
+    // batch. A half that is refused for another reason stops the run like any
+    // refusal: the cursor stays, and the halves that went through are sent again
+    // next time (the receiver counts them as duplicates).
     const deliver = async (events: Event[]): Promise<DeliveryResult> => {
       const res = await sink.send(events);
       if (res.ok || res.action !== "split") return res;
@@ -703,10 +705,20 @@ export async function flush(
         log(state, `sink ${sink.name}: 413 ${res.error ?? ""} → event ${e.id} (${e.type}) is too large alone, dropped`);
         return { ok: true, acknowledged: 0, accepted: 0, duplicates: 0, rejected: [{ id: e.id, reason: "too_large" }] };
       }
+      const part = async (some: Event[]): Promise<DeliveryResult> => {
+        const r = await deliver(some);
+        if (r.ok || r.action !== "drop") return r;
+        log(
+          state,
+          `sink ${sink.name}: ${r.status ?? ""} ${r.error ?? ""} → drop, ${some.length} of ${events.length} events`,
+        );
+        const rejected = some.map((e) => ({ id: e.id, reason: "dropped" }));
+        return { ok: true, acknowledged: 0, accepted: 0, duplicates: 0, rejected };
+      };
       const half = Math.ceil(events.length / 2);
-      const a = await deliver(events.slice(0, half));
+      const a = await part(events.slice(0, half));
       if (!a.ok) return a;
-      const b = await deliver(events.slice(half));
+      const b = await part(events.slice(half));
       if (!b.ok) return b;
       return {
         ok: true,

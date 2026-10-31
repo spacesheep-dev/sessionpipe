@@ -631,6 +631,53 @@ describe("the drain and its cursors (PROTOCOL.md ground rule 1, HTTP.md §2)", (
       await rx.close();
     }
   });
+  it("a split whose half is answered 400 drops that half alone: the other half is still sent", async () => {
+    const events = batch(4, "c");
+    const bad = events[0]!;
+    const rx = await receiver((_n, hit) =>
+      hit.events.length > 2
+        ? { status: 413 }
+        : hit.events.some((e) => e.id === bad.id)
+          ? { status: 400, body: { reason: "malformed" } }
+          : { status: 202 },
+    );
+    try {
+      const outbox = new Outbox(tmp);
+      outbox.append({ harness: "codex", session: "c" }, events);
+      expect((await flush(tmp, sinks(rx.url), outbox)).s).toBe(4);
+      expect(rx.hits.map((h) => h.events.map((e) => e.session.seq))).toEqual([
+        [0, 1, 2, 3],
+        [0, 1],
+        [2, 3],
+      ]);
+      expect(cursor()).toBe(statSync(outbox.file({ harness: "codex", session: "c" })).size);
+      expect(readFileSync(path.join(tmp, "log"), "utf8")).toMatch(/sink s: 400 malformed → drop, 2 of 4 events/);
+      expect(readBackoff(tmp, "s")).toBeNull();
+    } finally {
+      await rx.close();
+    }
+  });
+  it("a split whose other half is refused after one half was dropped leaves the cursor where it was", async () => {
+    const events = batch(4, "c");
+    const bad = events[0]!;
+    const rx = await receiver((_n, hit) =>
+      hit.events.length > 2
+        ? { status: 413 }
+        : hit.events.some((e) => e.id === bad.id)
+          ? { status: 400, body: { reason: "malformed" } }
+          : { status: 503 },
+    );
+    try {
+      const outbox = new Outbox(tmp);
+      outbox.append({ harness: "codex", session: "c" }, events);
+      expect((await flush(tmp, sinks(rx.url), outbox)).s).toBe(0);
+      expect(rx.hits.map((h) => h.events.length)).toEqual([4, 2, 2]);
+      expect(cursor()).toBeUndefined();
+      expect(readBackoff(tmp, "s")?.failures).toBe(1);
+    } finally {
+      await rx.close();
+    }
+  });
   it("401 pauses the sink in the config: the next worker builds no sink for it", async () => {
     const file = path.join(tmp, "config.json");
     const rx = await receiver(() => ({ status: 401, body: { reason: "bad_token" } }));
