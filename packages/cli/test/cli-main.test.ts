@@ -87,6 +87,23 @@ vi.mock("../src/control/cli.js", async (original) => ({
   waitMain: vi.fn(async () => {}),
 }));
 
+// A harness config file the system refuses to let us write (read-only: EACCES, or
+// EPERM on Windows), faked at node:fs, since chmod means nothing on Windows or to root.
+// A code alone is refused at the open, as Node does; `@write` fails in the write, after
+// the open has truncated the file. Empty, every write goes through.
+const unwritable = vi.hoisted(() => ({ files: new Map<string, string>() }));
+vi.mock("node:fs", async (original) => {
+  const real = await original<typeof import("node:fs")>();
+  const write = real.writeFileSync as (...a: unknown[]) => void;
+  const writeFileSync = ((p: unknown, ...rest: unknown[]) => {
+    const [code, syscall = "open"] = (typeof p === "string" ? unwritable.files.get(p) : undefined)?.split("@") ?? [];
+    if (!code) return write(p, ...rest);
+    if (syscall === "write") write(p, "");
+    throw Object.assign(new Error(`${code}: refused, ${syscall} '${p}'`), { code, syscall });
+  }) as typeof real.writeFileSync;
+  return { ...real, writeFileSync };
+});
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realDist = path.resolve(here, "../dist");
 const claudeCode = adapterByName("claude-code")!;
@@ -1635,6 +1652,95 @@ describe.skipIf(process.platform === "win32")("worker", () => {
     } finally {
       chmodSync(dir, 0o755);
     }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("a harness config the system won't let us write", () => {
+  const settings = () => path.join(home, ".claude", "settings.json");
+  const codexHooks = () => path.join(home, ".codex", "hooks.json");
+  const codexConfig = () => path.join(home, ".codex", "config.toml");
+  afterEach(() => unwritable.files.clear());
+
+  it("is reported with the file and the code, left as it was, and the other harnesses are still hooked", async () => {
+    put(settings(), {});
+    put(codexConfig(), "");
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    vi.spyOn(codex, "backfill").mockReturnValue([]);
+    for (const code of ["EACCES", "EPERM"]) {
+      unwritable.files.set(settings(), code);
+      const { text, err, exit } = await run("install");
+      expect(text).toMatch(new RegExp(`! claude-code: .*settings\\.json — can't write it \\(${code}\\); not touched`));
+      expect(text).toMatch(/✓ codex: .*hooks\.json written|= codex: .*hooks\.json already current/);
+      expect(text).toMatch(/[✓=] codex: .*config\.toml — notify (set at the top level|current)/);
+      expect(text).toContain("note: Codex runs non-managed hooks only after you approve them");
+      expect(text).toContain("Nothing leaves this machine yet");
+      expect(err).not.toHaveBeenCalled();
+      expect(exit).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    }
+    expect(readFileSync(settings(), "utf8")).toBe("{}\n");
+    expect(cfg().harnesses.codex).toMatchObject({ enabled: true, created: [codexHooks()] });
+    expect(cfg().harnesses["claude-code"]?.created).toBeUndefined();
+    const { text } = await run("status");
+    expect(text).toMatch(/claude-code {2}.*settings\.json +missing\n/);
+    expect(text).toMatch(/codex {8}.*hooks\.json +current\n/);
+  });
+
+  it("codex: hooks.json written and remembered as created before config.toml is refused", async () => {
+    put(codexConfig(), 'model = "o3"\n');
+    vi.spyOn(codex, "backfill").mockReturnValue([]);
+    unwritable.files.set(codexConfig(), "EACCES");
+    const { text } = await run("install", "--codex", "--backfill", "0");
+    expect(text).toMatch(/✓ codex: .*hooks\.json written/);
+    expect(text).toMatch(
+      /! codex: .*config\.toml — can't write it \(EACCES\); not touched\. Codex will report nothing until you approve the hooks/,
+    );
+    expect(text).not.toContain("note: Codex runs non-managed hooks");
+    expect(readFileSync(codexConfig(), "utf8")).toBe('model = "o3"\n');
+    expect(cfg().harnesses.codex).toEqual({ enabled: true, created: [codexHooks()] });
+  });
+
+  it("a file sessionpipe created that is read-only now: a repeat install reads it as current, a rehook is refused, and `created` is kept", async () => {
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    await run("install", "--claude-code", "--backfill", "0");
+    expect(cfg().harnesses["claude-code"]).toEqual({ enabled: true, created: [settings()] });
+    unwritable.files.set(settings(), "EACCES");
+    const again = await run("install", "--claude-code", "--backfill", "0");
+    expect(again.text).toMatch(/= claude-code: .*settings\.json already current/);
+    // A tier-1 sink wants the full hook set: the rewrite is refused, said, and `created` survives it.
+    const full = await run("install", "--claude-code", "--sink", "stdout", "--tier", "1", "--backfill", "0");
+    expect(full.text).toMatch(/! claude-code: .*settings\.json — can't write it \(EACCES\); not touched/);
+    expect(cfg().harnesses["claude-code"]).toEqual({ enabled: true, created: [settings()] });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("uninstall: a file it can't write is said so and left; the other harnesses' hooks still come out", async () => {
+    put(settings(), {});
+    put(codexConfig(), "");
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    vi.spyOn(codex, "backfill").mockReturnValue([]);
+    await run("install", "--backfill", "0");
+    const hooked = readFileSync(settings(), "utf8");
+    unwritable.files.set(settings(), "EPERM");
+    const { text, err } = await run("uninstall");
+    expect(text).toMatch(/! claude-code: .*settings\.json — can't write it \(EPERM\); not touched/);
+    expect(text).toMatch(/✓ codex: hooks removed from .*hooks\.json|✓ codex: removed \(sessionpipe created it\)/);
+    expect(err).not.toHaveBeenCalled();
+    expect(readFileSync(settings(), "utf8")).toBe(hooked);
+    expect(existsSync(codexHooks())).toBe(false);
+  });
+
+  it("uninstall: a write that fails part way is a `!` line naming the file, never a check mark", async () => {
+    put(settings(), {});
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    await run("install", "--claude-code", "--backfill", "0");
+    unwritable.files.set(settings(), "ENOSPC@write");
+    const { text } = await run("uninstall", "--claude-code");
+    expect(text).toMatch(
+      /! claude-code: .*settings\.json — can't write it \(ENOSPC\) part way; check the file before the harness reads it/,
+    );
+    expect(text).not.toMatch(/✓ claude-code/);
+    expect(readFileSync(settings(), "utf8")).toBe("");
   });
 });
 

@@ -589,8 +589,8 @@ async function uninstall(): Promise<void> {
   for (const a of all ? ADAPTERS : named) {
     const created = cfg.harnesses[a.name]?.created ?? [];
     for (const r of a.uninstall(process.env, { created }))
-      if (r.changed) out(`  ✓ ${a.name}: ${r.note ?? `hooks removed from ${tilde(r.file)}`}`);
-      else if (r.skipped) out(`  ! ${a.name}: ${tilde(r.file)} — ${r.note}`);
+      if (r.skipped) out(`  ! ${a.name}: ${tilde(r.file)} — ${r.note}`);
+      else if (r.changed) out(`  ✓ ${a.name}: ${r.note ?? `hooks removed from ${tilde(r.file)}`}`);
     delete cfg.harnesses[a.name];
   }
   writeConfig(cfg);

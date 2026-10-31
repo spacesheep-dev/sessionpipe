@@ -11,7 +11,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import path from "node:path";
 import { homeDir } from "../paths.js";
@@ -27,6 +27,7 @@ import {
   readJson,
   readJsonFile,
   uninstallClaudeShaped,
+  writeBack,
 } from "./claude-shaped.js";
 import type {
   Adapter,
@@ -113,7 +114,9 @@ export const claudeCode: Adapter = {
   install: (cmd, env = process.env, opts: InstallOptions = {}) =>
     claudeDirs(env).flatMap((d) => {
       const hooks = installClaudeShaped(settingsIn(d), NAME, eventsFor(opts.lean), cmd, OPTS);
-      const line = opts.statusLine === undefined ? null : statusLine(settingsIn(d), opts.statusLine, cmd);
+      // A file the hooks could not go into (not JSON, or refused) gets the one report, theirs.
+      const line =
+        opts.statusLine === undefined || hooks.skipped ? null : statusLine(settingsIn(d), opts.statusLine, cmd);
       return line ? [hooks, line] : [hooks];
     }),
   uninstall: (env = process.env, opts: InstallOptions = {}) =>
@@ -122,7 +125,11 @@ export const claudeCode: Adapter = {
       const hooks = uninstallClaudeShaped(settingsIn(d), CLAUDE_EVENTS, {
         created: opts.created?.includes(settingsIn(d)),
       });
-      return line && !hooks.changed ? line : hooks;
+      // A status line taken out, then the hooks' write refused: "not touched" would be
+      // false of the file, so the one report says both.
+      if (line?.changed && !line.skipped && hooks.skipped)
+        return { ...hooks, note: `status line removed, hooks not: ${hooks.note?.replace(/; not touched$/, "")}` };
+      return line && !hooks.changed && !hooks.skipped ? line : hooks;
     }),
   installed: (cmd, env = process.env, opts: InstallOptions = {}) =>
     claudeDirs(env).map((d) => ({
@@ -386,8 +393,13 @@ function statusLine(file: string, want: boolean, cmd?: HookCommand): InstallRepo
   if (want ? ours && cur?.command === command && cur?.refreshInterval === LINE_REFRESH_S : !ours) return null;
   if (want) f.value.statusLine = { type: "command", command, refreshInterval: LINE_REFRESH_S };
   else delete f.value.statusLine;
-  writeFileSync(file, formatJson(f.value, f));
-  return { file, changed: true, note: want ? "status line written (account limits)" : "status line removed" };
+  return (
+    writeBack(file, formatJson(f.value, f), f.existed) ?? {
+      file,
+      changed: true,
+      note: want ? "status line written (account limits)" : "status line removed",
+    }
+  );
 }
 
 /** Epoch seconds as RFC 3339; anything that is not a plausible time is no time. */

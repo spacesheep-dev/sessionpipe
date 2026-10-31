@@ -72,7 +72,8 @@ export interface InstallReport {
   note?: string;
   /** The file did not exist before this install; uninstall may delete it when empty. */
   created?: boolean;
-  /** The file was left alone (not plain JSON, another tool's slot); `note` says why. */
+  /** Our entries did not go in (not plain JSON, another tool's slot, a write the system
+   *  refused); `note` says why. With `changed` too: a write that failed part way. */
   skipped?: boolean;
 }
 

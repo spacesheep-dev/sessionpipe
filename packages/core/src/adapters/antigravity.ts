@@ -11,21 +11,12 @@
 // 2.19.1), and `allow` would wave calls past the person's own review settings. So the
 // tool events come from PostToolUse alone, which carries no tool name (only `stepIdx`
 // and `error`): it is a "still working" beat.
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readAntigravity } from "../readers/transcripts.js";
-import { formatJson, readJsonFile } from "./claude-shaped.js";
+import { formatJson, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
 import type {
   Adapter,
   BackfillRow,
@@ -77,10 +68,8 @@ export const antigravity: Adapter = {
     const e = entry(cmd);
     if (JSON.stringify(hooks[HOOK_NAME]) === JSON.stringify(e)) return [{ file, changed: false }];
     hooks[HOOK_NAME] = e;
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, formatJson(hooks, f));
     return [
-      {
+      writeBack(file, formatJson(hooks, f), f.existed) ?? {
         file,
         changed: true,
         created: !f.existed,
@@ -96,12 +85,8 @@ export const antigravity: Adapter = {
     const hooks = f.value;
     if (!(HOOK_NAME in hooks)) return [{ file, changed: false }];
     delete hooks[HOOK_NAME];
-    if (opts.created?.includes(file) && !Object.keys(hooks).length) {
-      unlinkSync(file);
-      return [{ file, changed: true, note: "removed (sessionpipe created it)" }];
-    }
-    writeFileSync(file, formatJson(hooks, f));
-    return [{ file, changed: true }];
+    if (opts.created?.includes(file) && !Object.keys(hooks).length) return [removeEmptied(file, formatJson(hooks, f))];
+    return [writeBack(file, formatJson(hooks, f)) ?? { file, changed: true }];
   },
   installed(cmd, env = process.env) {
     const file = hooksFile(env);
