@@ -28,6 +28,7 @@ import {
   machineName,
   makeEvent,
   Outbox,
+  type OutboxRef,
   processAlive,
   readConfig,
   readHook,
@@ -677,6 +678,31 @@ export async function flush(
     const k = `${first.harness}/${safeId(first.session)}`;
     refs.sort((a, b) => (`${a.harness}/${a.session}` === k ? -1 : `${b.harness}/${b.session}` === k ? 1 : 0));
   }
+  // A session file this process can't read (a 0600 file a hook left as another user
+  // under the same HOME, EACCES; a folder named <id>.jsonl, EISDIR on macOS and Linux,
+  // while Windows stats a folder at 0 bytes and reads it as empty) is skipped with a
+  // line in the log, and the other sessions still go out to every sink; before, the
+  // error threw out of `flush`, so no sink took the sessions listed after that file,
+  // and nothing was logged. Its cursors stay where they were, so a file readable again
+  // is taken from there on the next drain. Logged once per flush pass, not once per
+  // sink (the sinks drain at once), and again on every pass while the file stays
+  // unreadable. Only a system error (one with a code) is a skip; anything else is a
+  // bug and throws as before.
+  const unreadable = new Set<string>();
+  const readOrSkip = (ref: OutboxRef, offset: number, room: number): { events: Event[]; offset: number } | null => {
+    try {
+      return outbox.read(ref, offset, room);
+    } catch (e) {
+      const code = (e as { code?: unknown }).code;
+      if (typeof code !== "string") throw e;
+      const f = outbox.file(ref);
+      if (!unreadable.has(f)) {
+        unreadable.add(f);
+        log(state, `drain: can't read ${f} (${code}); skipped, its cursors stay`);
+      }
+      return null;
+    }
+  };
   const drainSink = async (sink: Sink): Promise<void> => {
     let backoff = readBackoff(state, sink.name);
     if (backoff && !o.force && backoff.until > Date.now()) {
@@ -754,7 +780,9 @@ export async function flush(
       let offset = pending[cursors.key(ref)] ?? c[cursors.key(ref)] ?? 0;
       for (;;) {
         const room = BATCH - batch.length;
-        const { events, offset: next } = outbox.read(ref, offset, room);
+        const read = readOrSkip(ref, offset, room);
+        if (!read) break;
+        const { events, offset: next } = read;
         if (!events.length) break;
         for (const e of events) {
           const f = filterEvent(e, sink.tier, sink.pii, { home: os.homedir() });

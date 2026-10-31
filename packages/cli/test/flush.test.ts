@@ -2,17 +2,20 @@
 // The drain packs events from many sessions into one batch and moves every
 // cursor only after the batch was acknowledged; a sink that refused waits as
 // HTTP.md §2 says, for every worker; one worker drains at a time.
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Cursors, type Event, Outbox, takeNamedLock, ulid } from "@sessionpipe/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { drain, flush, readBackoff } from "../src/run.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-flush-"));
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => {
+  vi.restoreAllMocks();
+  rmSync(tmp, { recursive: true, force: true });
+});
 const ev = (session: string, seq: number, type = "session.heartbeat"): Event => ({
   protocol: 1,
   id: ulid(),
@@ -274,5 +277,96 @@ describe("a batch too large is halved (HTTP.md §2 413)", () => {
     } finally {
       await rx.close();
     }
+  });
+});
+
+describe("an outbox file the drain can't read", () => {
+  const lines = (f: string) => (existsSync(f) ? readFileSync(f, "utf8").trim().split("\n") : []);
+  const seqs = (f: string) => lines(f).map((l) => (JSON.parse(l) as Event).session.seq);
+  const logged = () => lines(path.join(tmp, "log")).filter((l) => l.includes("drain: can't read"));
+  const errno = (code: string) => Object.assign(new Error(`${code}: can't`), { code });
+
+  // `read` stats the folder first and takes a size of 0 for an empty file: on Windows
+  // every folder is 0, so there it throws nothing and the faked EACCES below covers the
+  // skip; on btrfs an empty folder is 0 too, so the folder gets a file.
+  it.skipIf(process.platform === "win32")(
+    "a folder named <id>.jsonl is skipped with one line, not one per sink; the other sessions still go out",
+    async () => {
+      const outbox = new Outbox(tmp);
+      outbox.append({ harness: "codex", session: "ok" }, [ev("ok", 0), ev("ok", 1)]);
+      const dir = outbox.file({ harness: "codex", session: "dir" });
+      mkdirSync(dir);
+      writeFileSync(path.join(dir, "inside"), "");
+      const [a, b] = [path.join(tmp, "a.jsonl"), path.join(tmp, "b.jsonl")];
+      const sinks = [
+        { name: "a", url: `file:${a}`, tier: 3 as const },
+        { name: "b", url: `file:${b}`, tier: 3 as const },
+      ];
+      // The hook's own session is the unreadable one: the rest still go, first or not.
+      expect(await flush(tmp, sinks, outbox, { harness: "codex", session: "dir" })).toEqual({ a: 2, b: 2 });
+      expect(seqs(a)).toEqual([0, 1]);
+      expect(seqs(b)).toEqual([0, 1]);
+      for (const s of ["a", "b"]) {
+        const c = new Cursors(tmp, s).read();
+        expect(c["codex/ok"]).toBe(statSync(outbox.file({ harness: "codex", session: "ok" })).size);
+        expect(c["codex/dir"]).toBeUndefined();
+      }
+      expect(logged()).toEqual([
+        expect.stringContaining(`drain: can't read ${dir} (EISDIR); skipped, its cursors stay`),
+      ]);
+      // Every drain says so again while it stays unreadable.
+      expect(await flush(tmp, sinks, outbox)).toEqual({ a: 0, b: 0 });
+      expect(logged()).toHaveLength(2);
+      // A real file in its place is taken from the start.
+      rmSync(dir, { recursive: true });
+      outbox.append({ harness: "codex", session: "dir" }, [ev("dir", 0)]);
+      expect(await flush(tmp, sinks, outbox)).toEqual({ a: 1, b: 1 });
+      expect(seqs(a)).toEqual([0, 1, 0]);
+      expect(new Cursors(tmp, "b").read()["codex/dir"]).toBe(statSync(dir).size);
+      expect(logged()).toHaveLength(2);
+    },
+  );
+
+  it("a file that can't be read (EACCES) keeps its cursor, and a later drain goes on from there", async () => {
+    const outbox = new Outbox(tmp);
+    const u = { harness: "codex", session: "u" };
+    const file = path.join(tmp, "out.jsonl");
+    const sink = [{ name: "f", url: `file:${file}`, tier: 3 as const }];
+    outbox.append(u, [ev("u", 0)]);
+    outbox.append({ harness: "codex", session: "v" }, [ev("v", 0)]);
+    expect((await flush(tmp, sink, outbox)).f).toBe(2);
+    const at = new Cursors(tmp, "f").read()["codex/u"];
+    expect(at).toBe(statSync(outbox.file(u)).size);
+    // The file turns unreadable with an event the sink hasn't seen; the other session's goes.
+    outbox.append(u, [ev("u", 1)]);
+    outbox.append({ harness: "codex", session: "v" }, [ev("v", 1)]);
+    const read = outbox.read.bind(outbox);
+    const spy = vi.spyOn(outbox, "read").mockImplementation((ref, from, max) => {
+      if (ref.session === "u") throw errno("EACCES");
+      return read(ref, from, max);
+    });
+    expect((await flush(tmp, sink, outbox)).f).toBe(1);
+    expect(seqs(file)).toEqual([0, 0, 1]);
+    expect(new Cursors(tmp, "f").read()["codex/u"]).toBe(at);
+    expect(logged()).toEqual([
+      expect.stringContaining(`drain: can't read ${outbox.file(u)} (EACCES); skipped, its cursors stay`),
+    ]);
+    // Readable again: only the event after the cursor goes, once.
+    spy.mockRestore();
+    expect((await flush(tmp, sink, outbox)).f).toBe(1);
+    expect(seqs(file)).toEqual([0, 0, 1, 1]);
+    expect(new Cursors(tmp, "f").read()["codex/u"]).toBe(statSync(outbox.file(u)).size);
+  });
+
+  it("an error that is no system error (no code) is a bug, and still throws", async () => {
+    const outbox = new Outbox(tmp);
+    outbox.append({ harness: "codex", session: "w" }, [ev("w", 0)]);
+    vi.spyOn(outbox, "read").mockImplementation(() => {
+      throw new Error("boom");
+    });
+    await expect(
+      flush(tmp, [{ name: "f", url: `file:${path.join(tmp, "o.jsonl")}`, tier: 3 }], outbox),
+    ).rejects.toThrow("boom");
+    expect(logged()).toEqual([]);
   });
 });
