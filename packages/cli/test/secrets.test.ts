@@ -112,6 +112,79 @@ describe("sinks", () => {
     expect(sinkWithSecrets(s, keychain({ locked: true }).run)).toBeNull();
   });
 
+  it("a sink with a signing secret and no token (sink add --secret) reads back from the keychain, and comes back whole", () => {
+    const k = keychain();
+    write([{ name: "rx.dev", url: "https://rx.dev", tier: 2, secret: "whsec_c2VjcmV0" }]);
+    expect(moveSinkSecrets("keychain", { run: k.run, file })).toEqual({ moved: ["rx.dev"], kept: [] });
+    expect(readFileSync(file, "utf8")).not.toContain("whsec_");
+    expect([...k.items.keys()]).toEqual([sinkAccount("rx.dev", "secret")]);
+    const s = readConfig(file).sinks[0];
+    expect(s?.token_in).toBe("keychain");
+    const full = sinkWithSecrets(s as never, k.run);
+    expect(full).toMatchObject({ secret: "whsec_c2VjcmV0", token_in: "keychain" });
+    expect(full?.token).toBeUndefined();
+
+    expect(moveSinkSecrets("file", { run: k.run, file })).toEqual({ moved: ["rx.dev"], kept: [] });
+    expect(readConfig(file).sinks[0]).toEqual({
+      name: "rx.dev",
+      url: "https://rx.dev",
+      tier: 2,
+      secret: "whsec_c2VjcmV0",
+    });
+    expect(k.items.size).toBe(0);
+  });
+
+  it("a sink an older release left stuck (token_in set, only the secret in the keychain) reads back, and moves back", () => {
+    const k = keychain();
+    k.items.set(sinkAccount("rx.dev", "secret"), "whsec_c2VjcmV0");
+    write([{ name: "rx.dev", url: "https://rx.dev", tier: 2, token_in: "keychain" }]);
+    const s = readConfig(file).sinks[0];
+    const full = sinkWithSecrets(s as never, k.run);
+    expect(full).toEqual({
+      name: "rx.dev",
+      url: "https://rx.dev",
+      tier: 2,
+      token_in: "keychain",
+      secret: "whsec_c2VjcmV0",
+    });
+    expect(moveSinkSecrets("file", { run: k.run, file })).toEqual({ moved: ["rx.dev"], kept: [] });
+    expect(readConfig(file).sinks[0]).toEqual({
+      name: "rx.dev",
+      url: "https://rx.dev",
+      tier: 2,
+      secret: "whsec_c2VjcmV0",
+    });
+    expect(k.items.size).toBe(0);
+  });
+
+  it("the token gone by hand, the secret still there: read back with the secret and no token; neither there, or locked: null", () => {
+    const k = keychain();
+    k.items.set(sinkAccount("rx.dev", "secret"), "whsec_c2VjcmV0");
+    const s = { name: "rx.dev", url: "https://rx.dev", tier: 2 as const, token_in: "keychain" as const };
+    // The keychain answered a read, so it is readable now: the sink sends signed and
+    // with no bearer (the receiver's 401 pauses it, and doctor says so) rather than
+    // waiting for good.
+    expect(sinkWithSecrets(s, k.run)).toEqual({ ...s, secret: "whsec_c2VjcmV0" });
+    // The other way round: a secret item gone leaves the token (most sinks have no secret).
+    k.items.clear();
+    k.items.set(sinkAccount("rx.dev"), "ss_key1");
+    expect(sinkWithSecrets(s, k.run)).toEqual({ ...s, token: "ss_key1" });
+    // Both items.
+    k.items.set(sinkAccount("rx.dev", "secret"), "whsec_c2VjcmV0");
+    expect(sinkWithSecrets(s, k.run)).toEqual({ ...s, token: "ss_key1", secret: "whsec_c2VjcmV0" });
+    // Neither item: nothing to send with, so no sink is built.
+    k.items.clear();
+    expect(sinkWithSecrets(s, k.run)).toBeNull();
+    // Locked (both reads fail): the same, and the events wait.
+    const locked = keychain({ locked: true });
+    expect(sinkWithSecrets(s, locked.run)).toBeNull();
+    // Reads only, whatever the store holds: never a probe item written.
+    for (const c of [...k.calls, ...locked.calls]) {
+      expect(c.args[0]).toBe("find-generic-password");
+      expect(c.input).toBeUndefined();
+    }
+  });
+
   it("a token the keychain refuses stays in the file", () => {
     write([{ name: "rx.dev", url: "https://rx.dev", tier: 2, token: "has space" }]);
     expect(moveSinkSecrets("keychain", { run: keychain().run, file })).toEqual({ moved: [], kept: ["rx.dev"] });
@@ -257,6 +330,20 @@ describe("moving sinks' keys", () => {
     dropSinkSecrets(readConfig(file).sinks[0] as never, run);
     expect(s.items.size).toBe(0);
     dropSinkSecrets({ name: "plain", url: "stdout", tier: 0 }, run);
+  });
+
+  it("a sink with a signing secret and no token reads back from the Secret Service, and comes back whole", () => {
+    const s = secretService();
+    write([{ name: "rx", url: "https://rx.dev", tier: 1, secret: "whsec_s" }]);
+    expect(moveSinkSecrets("secret-service", { run: s.run, file })).toEqual({ moved: ["rx"], kept: [] });
+    expect(readFileSync(file, "utf8")).not.toContain("whsec_");
+    expect([...s.items.entries()]).toEqual([[sinkAccount("rx", "secret"), "whsec_s"]]);
+    const full = sinkWithSecrets(readConfig(file).sinks[0] as never, s.run);
+    expect(full).toMatchObject({ secret: "whsec_s", token_in: "secret-service" });
+    expect(full?.token).toBeUndefined();
+    expect(moveSinkSecrets("file", { run: s.run, file })).toEqual({ moved: ["rx"], kept: [] });
+    expect(readConfig(file).sinks[0]).toEqual({ name: "rx", url: "https://rx.dev", tier: 1, secret: "whsec_s" });
+    expect(s.items.size).toBe(0);
   });
 
   it("a key in a store this session can't read stays there, and is named", () => {

@@ -201,4 +201,23 @@ describe("the control daemon's once-a-minute drain", () => {
       expect(pending()).toEqual([]);
     },
   );
+
+  it.each(["keychain", "secret-service"] as const)(
+    "delivers a %s sink whose store holds a signing secret and no token (sink add --secret), signed and without a bearer",
+    async (store) => {
+      configure(store);
+      secretCommand.mockImplementation((_cmd, args) =>
+        args.includes(sinkAccount("s", "secret"))
+          ? { status: 0, stdout: "whsec_c2VjcmV0\n" }
+          : { status: 1, stdout: "" },
+      );
+      await start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(post).toHaveBeenCalledTimes(1);
+      const headers = new Headers(post.mock.calls[0]?.[1]?.headers);
+      expect(headers.get("authorization")).toBeNull();
+      expect(headers.get("webhook-signature")).toMatch(/^v1,/);
+      expect(pending()).toEqual([]);
+    },
+  );
 });
