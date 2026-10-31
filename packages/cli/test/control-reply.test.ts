@@ -28,6 +28,24 @@ describe("answerIn", () => {
   it("skips lines that aren't JSON", () => {
     expect(answerIn(["{", asst("end_turn", [{ type: "text", text: "ok" }])])).toEqual({ done: true, text: "ok" });
   });
+  it("reads past a thinking record that ends the turn to the text written after it", () => {
+    // How Claude Code 2.1.314 wrote a turn the model thought about first: one message,
+    // two records, both end_turn (a live session on the Intel, 2026-10-30).
+    const id = "msg_011CgZPu17RdACuTWfUt8AuK";
+    const think = rec({
+      type: "assistant",
+      message: { id, stop_reason: "end_turn", content: [{ type: "thinking", thinking: "" }] },
+    });
+    const text = rec({
+      type: "assistant",
+      message: { id, stop_reason: "end_turn", content: [{ type: "text", text: "BUSY-OK-1" }] },
+    });
+    expect(answerIn([think])).toEqual({ done: false, text: "" });
+    expect(answerIn([think, text])).toEqual({ done: true, text: "BUSY-OK-1" });
+    // A turn whose last message is all thinking has ended once anything else follows it.
+    const after = rec({ type: "system", subtype: "turn_duration" });
+    expect(answerIn([think, after])).toEqual({ done: true, text: "" });
+  });
 });
 
 describe("awaitAnswer", () => {
@@ -49,7 +67,11 @@ describe("awaitAnswer", () => {
     const f = path.join(dir, "t.jsonl");
     writeFileSync(f, "");
     appendFileSync(f, `${asst("end_turn", [{ type: "tool_use", name: "Edit" }])}\n`);
+    // What Claude Code writes once a turn is over: the end is seen, not waited out.
+    appendFileSync(f, `${rec({ type: "system", subtype: "turn_duration" })}\n`);
+    const t0 = Date.now();
     expect(await awaitAnswer(f, 0, { timeoutMs: 3000, pollMs: 20 })).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1500);
   });
   it("gives up after its timeout when the turn never ends", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
