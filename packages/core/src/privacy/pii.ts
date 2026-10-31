@@ -8,8 +8,17 @@ export const RULESET_PII = "pii@1";
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 /** E.164 and common national forms: an optional +, 7–15 digits with separators,
  *  optional area-code parentheses. A version number (22.23.1) or an IP never matches:
- *  the run must not sit between dots, and needs ≥ 7 digits. */
-const PHONE = /(?<![\w.])(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)[ .-]?)?\d{2,4}(?:[ .-]?\d{2,4}){1,3}(?!\w)/g;
+ *  the run must not sit between dots, and needs ≥ 7 digits. An ISO date (2026-10-31)
+ *  has a phone's shape, so it is tried first (group 1) and kept, but only when nothing
+ *  after it could carry the run on: no letter or digit, and no separator then two digits
+ *  (a phone's group is two to four; one digit, as in "2026-10-31 5 files", never is),
+ *  unless that is a time's hour (" 12:", 00–23), and not right after a ")" or a "+"
+ *  with a country code: a phone's prefix this pass could not take ("x(415) 2026-10-31",
+ *  "[phone]+1 2026-10-31") would take the date on the next one. Any other date is read
+ *  as before. The date may follow a `+` (a diff's added line), so a second pass over
+ *  "[phone]+2026-10-31" keeps it too. */
+const PHONE =
+  /(?<![\w.])(?:(?<!\)[ .-]?|\+\d{1,3}[ .-]?)(\+?(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))(?:(?= (?:[01]?\d|2[0-3]):)|(?!\w|[ .-]\d\d))|(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)[ .-]?)?\d{2,4}(?:[ .-]?\d{2,4}){1,3}(?!\w))/g;
 
 function looksPhone(s: string): boolean {
   const digits = s.replace(/\D/g, "");
@@ -25,7 +34,7 @@ function looksPhone(s: string): boolean {
 export function reducePii(text: string, home?: string): string {
   if (!text) return text;
   let out = text.replace(EMAIL, "[email]");
-  out = out.replace(PHONE, (m) => (looksPhone(m) ? "[phone]" : m));
+  out = out.replace(PHONE, (m, date?: string) => (!date && looksPhone(m) ? "[phone]" : m));
   if (home) {
     const h = home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     out = out.replace(new RegExp(`(?<![A-Za-z0-9_])${h}(?=/|$|\\s|["'\`])`, "g"), "~");

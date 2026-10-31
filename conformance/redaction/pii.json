@@ -49,6 +49,11 @@
       "out": "port 8891, pr 12345"
     },
     {
+      "name": "a date is not a phone",
+      "in": "released 2026-10-31, at 2026-10-31 12:00",
+      "out": "released 2026-10-31, at 2026-10-31 12:00"
+    },
+    {
       "name": "an at-handle is not an email",
       "in": "ask @misha on the feed",
       "out": "ask @misha on the feed"

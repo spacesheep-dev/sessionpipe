@@ -30,6 +30,64 @@ describe("pii@1 edges", () => {
     expect(reducePii("10.100.1000.100")).toBe("10.100.1000.100");
     expect(reducePii("+1 (415) 555-0100 x")).toBe("[phone] x");
   });
+  it("a date is kept unless what follows could carry a phone on", () => {
+    expect(reducePii("2026-10-31T12:00:00Z, 2026-10-31 9:00, 2026-10-31.")).toBe(
+      "2026-10-31T12:00:00Z, 2026-10-31 9:00, 2026-10-31.",
+    );
+    expect(reducePii("1999-01-01/2026-12-31 (2026-10-31) v2026-10-31")).toBe(
+      "1999-01-01/2026-12-31 (2026-10-31) v2026-10-31",
+    );
+    expect(reducePii("+2026-10-31,42")).toBe("+2026-10-31,42");
+    // One digit after the date is never a phone's group: the date stays.
+    expect(reducePii("2026-10-31 5 files changed, 2026-10-31-7, 2026-10-31.5")).toBe(
+      "2026-10-31 5 files changed, 2026-10-31-7, 2026-10-31.5",
+    );
+    expect(reducePii("2026-10-31 1-415-555-0132")).toBe("2026-10-31 1-[phone]");
+    // The years it knows, a filename, the end of the string.
+    expect(reducePii("1900-01-01 and 2099-12-31, report-2026-10-31.pdf, due 2026-10-31")).toBe(
+      "1900-01-01 and 2099-12-31, report-2026-10-31.pdf, due 2026-10-31",
+    );
+    // Month 13, day 32, a year outside 1900–2099, or a digit group after it: a phone's shape, as before.
+    for (const s of [
+      "2026-13-01",
+      "2026-10-32",
+      "1899-12-31",
+      "2100-01-01",
+      "2026-10-3112",
+      "2026-10-31-1234",
+      "2012-12-12 34",
+    ])
+      expect(reducePii(`x ${s}`)).toBe("x [phone]");
+    expect(reducePii("2026-10-31 415-555-0132")).toBe("[phone]-[phone]");
+    expect(reducePii("+1 2026-10-31")).toBe("[phone]");
+    // Only an hour, 00–23, right before ":mm" counts as a time.
+    expect(reducePii("2026-10-31 0132: call")).toBe("[phone]: call");
+    expect(reducePii("2026-10-31 99:00, 2026-10-31 41:555-0132")).toBe("[phone]:00, [phone]:[phone]");
+    expect(reducePii("2026-10-31 00:00, 2026-10-31 23:59")).toBe("2026-10-31 00:00, 2026-10-31 23:59");
+    expect(reducePii("2026-10-31-12:00")).toBe("[phone]:00");
+    expect(reducePii("2026-10-31.12:00")).toBe("[phone]:00");
+    expect(reducePii("2026-10-31 12:00:00, 2026-10-31 (415) 555-0132")).toBe("2026-10-31 12:00:00, 2026-10-31 [phone]");
+    // A phone's prefix the pass could not take (a letter or a phone before it) would take the date next time.
+    expect(reducePii("x(415) 2026-10-31, (+45) 2026-10-31")).toBe("x(415) [phone], (+45) [phone]");
+  });
+  it("a date after a phone reads the same on a second pass", () => {
+    const once = reducePii("415-555-0132+2026-10-31");
+    expect(once).toBe("[phone]+2026-10-31");
+    expect(reducePii(once)).toBe(once);
+    expect(reducePii("(650) 210-0867+1 2046-01-19")).toBe("[phone]+1 [phone]");
+    expect(reducePii("555-0132(902) 1993-05-10")).toBe("[phone](902) [phone]");
+    expect(reducePii("856-975-2345(430)-1957-01-02")).toBe("[phone](430)-[phone]");
+    for (const s of [
+      "2026-10-31 12:00 555-0132",
+      "2026-10-31 9:00 1234567",
+      "415-555-0132(20)2026-10-31",
+      "(650) 210-0867+1 2046-01-19",
+      "555-0132(902) 1993-05-10",
+      "0907-0049+2-2052-03-15",
+      "856-975-2345(430)-1957-01-02",
+    ])
+      expect(reducePii(reducePii(s))).toBe(reducePii(s));
+  });
   it("the home path: regex characters in it, a quote after it, never a neighbour", () => {
     expect(reducePii("see /Users/mi.sha/x and /Users/mixsha/x", "/Users/mi.sha")).toBe("see ~/x and /Users/mixsha/x");
     expect(reducePii('cwd="/home/m" or `/home/m`', "/home/m")).toBe('cwd="~" or `~`');
