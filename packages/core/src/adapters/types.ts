@@ -38,8 +38,9 @@ export interface Turn {
   at: number;
   endLine: number;
   /** The ask reached the session from somewhere other than its own keyboard — another
-   *  local session handed it over, which is how a control daemon reaches a session in
-   *  place (spec/CONTROL.md §6.3). The words are the person's; the arrival was not. */
+   *  local session handed it over or a channel pushed it, the two ways a control
+   *  daemon reaches a session in place (spec/CONTROL.md §6.3, §8). The words are the
+   *  person's; the arrival was not. */
   injected?: true;
 }
 

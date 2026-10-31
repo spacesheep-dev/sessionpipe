@@ -187,10 +187,11 @@ export const EventData = z.object({
     assistant: z.string().max(20_000),
     at: Rfc3339,
     /** The ask reached the session from somewhere other than its own keyboard: another
-     *  local session handed it over, which is how a control daemon reaches a session in
-     *  place (CONTROL.md §6.3). The words are the person's; the arrival was not. Absent
-     *  means a turn asked for where the session runs. Like turn.started's `injected`,
-     *  and never a claim that no person is behind the ask. */
+     *  local session handed it over or a channel pushed it, the two ways a control
+     *  daemon reaches a session in place (CONTROL.md §6.3, §8). The words are the
+     *  person's; the arrival was not. Absent means a turn asked for where the session
+     *  runs. Like turn.started's `injected`, and never a claim that no person is behind
+     *  the ask. */
     injected: z.literal(true).optional(),
   }),
   /** The turn still running: its prompt and what the assistant has said so far. A

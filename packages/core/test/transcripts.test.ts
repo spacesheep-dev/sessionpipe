@@ -392,6 +392,8 @@ describe("readClaude: messages from a channel", () => {
     ]);
     expect(r.turns[1]?.at).toBe(Date.parse("2026-10-28T22:01:00.500Z"));
     expect(r.line).toBe(6);
+    // A channel's ask is the person's words that didn't arrive by the keyboard, as a peer's is.
+    expect(r.turns.map((t) => t.injected ?? false)).toEqual([false, true, true]);
   });
   it("a channel record that isn't a tag around words asks nothing; other meta records still don't", () => {
     const ch = (content: unknown) => user("", { isMeta: true, origin: { kind: "channel" }, message: { content } });
