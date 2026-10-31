@@ -5,6 +5,24 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.12.0)
+
+- **A session waiting on its own background work stays "working" until its next
+  `turn.ended`** (PROTOCOL.md §4, the `turn.ended` and `subagent.ended` rows; issue #153).
+  The `turn.ended` row said a receiver MAY show such a session as working "until its next
+  event"; the next event was always the work's own (a `subagent.started` seconds after the
+  Stop), so a session that had handed its turn to a background workflow read idle while the
+  workflow ran. It now says SHOULD, until the session's next `turn.ended` or
+  `session.ended`, and that `subagent.*` and a subagent's tool events are not the session
+  waking. Two things from the sender help: `subagent.ended` MAY carry `background`, the
+  count once that subagent is out of it (`schemas/v1/event-data.json`; fixture
+  `harness/claude-code/subagent-stop`), so a receiver sees the count fall to 0 before the
+  next turn; and `turn.ended.background` no longer counts sessionpipe's own waiter
+  (`sessionpipe wait`, CONTROL.md §8; fixture `harness/claude-code/stop-waiter`), which
+  ends only when a message arrives and so held every reachable session at "working".
+  Additive: a receiver that ignores the new field, or still drops the reading at the next
+  event, keeps working as before.
+
 ### For receivers (0.11.0)
 
 What a 0.11.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
