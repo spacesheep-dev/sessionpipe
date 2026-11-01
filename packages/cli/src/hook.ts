@@ -237,7 +237,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
   function anySinkAbove(tier: number): boolean {
     try {
       const c = JSON.parse(readFileSync(configFile(), "utf8")) as { sinks?: { tier?: number; paused?: string }[] };
-      return (c.sinks ?? []).some((s) => Number(s.tier) > tier && !s.paused);
+      // Math.trunc: a tier of 0.5 that an older `sink add --tier 0.5` stored is sent as 0 (run.ts).
+      return (c.sinks ?? []).some((s) => Math.trunc(Number(s.tier)) > tier && !s.paused);
     } catch {
       return false;
     }

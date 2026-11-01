@@ -241,6 +241,13 @@ describe("the heartbeat throttle: a tool event is a job once a minute when no si
     expect(jobs()).toHaveLength(3);
   });
 
+  it("a tier of 0.5 an older release stored is tier 0: tool events stay a beat", async () => {
+    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 0.5 }] }));
+    await tool();
+    await tool();
+    expect(jobs()).toHaveLength(1);
+  });
+
   it("a stamp that cannot be written still lets the beat through", async () => {
     writeFileSync(path.join(state, "beats"), "");
     await tool();
