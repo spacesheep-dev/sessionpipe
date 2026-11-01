@@ -493,6 +493,75 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(settings).toContain(path.join(realDist, "hook.js"));
     expect(settings).not.toContain("sessionpipe-hook");
   });
+  it("a bare word is refused before any work: install, uninstall and backfill name a harness as --<harness>", async () => {
+    const settings = path.join(home, ".claude", "settings.json");
+    const toml = path.join(home, ".codex", "config.toml");
+    put(settings, {});
+    put(toml, "");
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    // `install claude-code` used to hook every harness found here, Codex too.
+    expect((await run("install", "claude-code")).lines).toEqual([
+      '  ! `sessionpipe install` takes options only, and "claude-code" is not one; to name that harness, pass --claude-code.',
+      "  Nothing was changed. See `sessionpipe install --help`.",
+    ]);
+    expect(process.exitCode).toBe(2);
+    expect(readFileSync(settings, "utf8")).toBe("{}\n");
+    expect(readFileSync(toml, "utf8")).toBe("");
+    expect(existsSync(config)).toBe(false);
+    process.exitCode = undefined;
+    // After an option too, unless it is that option's value.
+    expect((await run("install", "--codex", "claude-code")).lines[0]).toContain('"claude-code" is not one');
+    expect(process.exitCode).toBe(2);
+    expect(existsSync(config)).toBe(false);
+    process.exitCode = undefined;
+    await run(
+      "install",
+      "--machine",
+      "codex",
+      "--backfill",
+      "0",
+      "--sink",
+      "stdout",
+      "--tier",
+      "0",
+      "--name",
+      "out",
+      "--token",
+      "tok",
+      "--secret",
+      "sec",
+    );
+    expect(process.exitCode).toBeUndefined();
+    expect(cfg().machine).toBe("codex");
+    expect(cfg().sinks.map((s) => s.name)).toEqual(["out"]);
+    const hooked = [readFileSync(settings, "utf8"), readFileSync(toml, "utf8")];
+    const harnesses = Object.keys(cfg().harnesses);
+    expect(harnesses).toEqual(expect.arrayContaining(["claude-code", "codex"]));
+    // `uninstall codex` used to unhook Claude Code as well.
+    expect((await run("uninstall", "codex")).lines).toEqual([
+      '  ! `sessionpipe uninstall` takes options only, and "codex" is not one; to name that harness, pass --codex.',
+      "  Nothing was changed. See `sessionpipe uninstall --help`.",
+    ]);
+    expect(process.exitCode).toBe(2);
+    expect([readFileSync(settings, "utf8"), readFileSync(toml, "utf8")]).toEqual(hooked);
+    expect(Object.keys(cfg().harnesses)).toEqual(harnesses);
+    process.exitCode = undefined;
+    // uninstall has no option that takes a value: a word anywhere is refused.
+    expect((await run("uninstall", "--keep-state", "codex")).lines[0]).toContain('"codex" is not one');
+    expect(process.exitCode).toBe(2);
+    expect(Object.keys(cfg().harnesses)).toEqual(harnesses);
+    process.exitCode = undefined;
+    expect((await run("backfill", "--days", "7", "--codex")).lines).not.toContainEqual(
+      expect.stringContaining("is not one"),
+    );
+    // A word that names no harness gets no hint.
+    expect((await run("backfill", "30")).lines).toEqual([
+      '  ! `sessionpipe backfill` takes options only, and "30" is not one.',
+      "  Nothing was changed. See `sessionpipe backfill --help`.",
+    ]);
+    expect(process.exitCode).toBe(2);
+    expect(claudeCode.backfill).not.toHaveBeenCalled();
+  });
 });
 
 describe.skipIf(process.platform === "win32")("uninstall", () => {
