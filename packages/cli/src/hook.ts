@@ -236,9 +236,12 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
   }
   function anySinkAbove(tier: number): boolean {
     try {
-      const c = JSON.parse(readFileSync(configFile(), "utf8")) as { sinks?: { tier?: number; paused?: string }[] };
-      // Math.trunc: a tier of 0.5 that an older `sink add --tier 0.5` stored is sent as 0 (run.ts).
-      return (c.sinks ?? []).some((s) => Math.trunc(Number(s.tier)) > tier && !s.paused);
+      const c = JSON.parse(readFileSync(configFile(), "utf8")) as {
+        sinks?: { tier?: number; max_tier?: number; paused?: string }[];
+      };
+      // The tier a sink is sent at (run.ts buildSinks): capped by the receiver's max_tier, and
+      // whole (a 0.5 that an older `sink add --tier 0.5` stored is sent as 0).
+      return (c.sinks ?? []).some((s) => Math.trunc(Math.min(Number(s.tier), s.max_tier ?? 3)) > tier && !s.paused);
     } catch {
       return false;
     }
