@@ -727,6 +727,14 @@ describe("the drain: which sinks it builds, and how much it sends per run", () =
     const [s] = buildSinks([{ name: "o", url: "stdout", tier: 1.5 as 1 }]);
     expect(s!.tier).toBe(1);
   });
+  it("a sink with no tier, or one that is not a number (a hand edit), sends at tier 0", () => {
+    const sinks = buildSinks([
+      { name: "a", url: "stdout", tier: undefined as unknown as 0 },
+      { name: "b", url: "stdout", tier: "two" as unknown as 0 },
+      { name: "c", url: "stdout", tier: null as unknown as 0 },
+    ]);
+    expect(sinks.map((s) => s.tier)).toEqual([0, 0, 0]);
+  });
   it("a stdout sink drains to the process's stdout, one line per event", async () => {
     const lines: string[] = [];
     const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {

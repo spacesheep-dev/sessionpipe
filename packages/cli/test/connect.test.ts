@@ -86,6 +86,10 @@ describe("tier", () => {
     expect(connectTier(undefined, 2.5)).toBe(2);
     expect(connectTier(undefined, 3.5)).toBe(3);
   });
+  it("a stored tier that is not a number counts as none: 2", () => {
+    expect(connectTier(undefined, "two" as unknown as number)).toBe(2);
+    expect(connectTier(undefined, null as unknown as number)).toBe(2);
+  });
   it("--tier takes a whole number, held to 0–3; one left off or not whole is refused", () => {
     expect(tierArg(["sink", "add", "stdout"], 1)).toBe(1);
     expect(tierArg(["--tier", "2"], 0)).toBe(2);

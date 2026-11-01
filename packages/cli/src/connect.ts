@@ -70,6 +70,6 @@ export function tierArg(argv: readonly string[], fallback: 0 | 1 | 2 | 3): 0 | 1
 export function connectTier(flag: 0 | 1 | 2 | 3 | undefined, current: number | undefined): 0 | 1 | 2 | 3 {
   if (flag !== undefined) return flag;
   // Math.trunc: a stored 2.5 (an older `sink add --tier 2.5`) is kept as 2, not written
-  // back or handed to `control pair` as 2.5.
-  return Math.max(2, Math.min(3, Math.trunc(current ?? 0))) as 2 | 3;
+  // back or handed to `control pair` as 2.5; a stored tier that is not a number counts as 0.
+  return Math.max(2, Math.min(3, Math.trunc(Number(current) || 0))) as 2 | 3;
 }
