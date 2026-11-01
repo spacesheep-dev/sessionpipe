@@ -20,7 +20,7 @@ import {
 
 const { claudeLogin, detectCaps, findClaude, isUuid, runClaude } = claudeControl;
 
-import { isBroad } from "../connect.js";
+import { isBroad, tierArg } from "../connect.js";
 import { openPool, readPool } from "../pool/index.js";
 import { appendObserved, drain, VERSION } from "../run.js";
 import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
@@ -183,7 +183,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       // the machine — never a default they find out about when a session can't read a file.
       const mode =
         parseMode(flag("--mode")) ?? (existing?.mode && existing.receivers.length ? existing.mode : await askMode(out));
-      const tier = argv.includes("--tier") ? (Math.max(0, Math.min(3, Number(flag("--tier")) || 0)) as Tier) : 0;
+      const tier: Tier = tierArg(argv, 0);
       await pair({
         url,
         token,

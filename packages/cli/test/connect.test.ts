@@ -79,8 +79,12 @@ describe("tier", () => {
     expect(connectTier(undefined, undefined)).toBe(2);
     expect(connectTier(undefined, 0)).toBe(2);
     expect(connectTier(undefined, 3)).toBe(3);
-    expect(connectTier("0", 3)).toBe(0);
-    expect(connectTier("9", 0)).toBe(3);
+    expect(connectTier(0, 3)).toBe(0);
+    expect(connectTier(3, 0)).toBe(3);
+  });
+  it("a stored tier that is not a whole number is kept as the whole number below it", () => {
+    expect(connectTier(undefined, 2.5)).toBe(2);
+    expect(connectTier(undefined, 3.5)).toBe(3);
   });
   it("--tier takes a whole number, held to 0–3; one left off or not whole is refused", () => {
     expect(tierArg(["sink", "add", "stdout"], 1)).toBe(1);
