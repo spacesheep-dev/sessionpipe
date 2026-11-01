@@ -39,7 +39,12 @@ byte-identical. The outbox stays under the state folder and is pruned after 30 d
 
 Adds a destination: an HTTPS receiver, a file, or stdout. For a receiver it reads
 `/.well-known/sessionpipe`, caps the tier at the receiver's `max_tier`, stores the token and
-sends one heartbeat as a test. `--pii` turns on the PII pass for this sink.
+sends one heartbeat as a test. `--pii` turns on the PII pass for this sink. `--tools` says which
+tool events it is sent: `main` (the default for a receiver) sends the main thread's as they happen
+and a subagent's at most one per session per minute; `all` (the default for a file or stdout) sends
+every one; `beat` sends a session's at most one a minute. The local outbox keeps every event either
+way. A receiver also gets at most one request a second from the machine, with everything that piled
+up meanwhile in it.
 
 {{usage sink list}}
 

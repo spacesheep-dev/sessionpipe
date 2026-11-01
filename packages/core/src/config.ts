@@ -25,6 +25,11 @@ export interface SinkConfig {
   max_tier?: Tier;
   well_known_at?: string;
   paused?: string;
+  /** Which tool events this sink is sent (issue #208): `all`; `main`, a subagent's at
+   *  most one per session per minute; `beat`, every tool event at most one per session
+   *  per minute. Unset: `main` for an HTTP receiver, `all` for a file or stdout. The
+   *  outbox keeps every event either way. */
+  tools?: "all" | "main" | "beat";
 }
 
 export interface Config {

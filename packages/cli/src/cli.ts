@@ -47,6 +47,7 @@ import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
+import { isToolsMode, type ToolsMode, toolsMode } from "./fold.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { POOL_HELP, poolMain, poolOffForUninstall } from "./pool/cli.js";
@@ -193,7 +194,7 @@ Usage:
                                   (everything, in one go: hooks, a sink, signed messages, keys)
   sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]
   sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin | --all] [--keep-state]
-  sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--name N]
+  sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--tools all|main|beat] [--name N]
   sessionpipe sink list | remove <name> | test <name>
   sessionpipe secrets [move keychain|secret-service|file]   (where the machine's keys live)
   sessionpipe status [--json] | doctor [--json]
@@ -621,7 +622,7 @@ async function sink(): Promise<void> {
     if (!cfg.sinks.length) out("  no sinks");
     for (const s of cfg.sinks)
       out(
-        `  ${s.name.padEnd(16)} ${s.url.padEnd(44)} tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}`,
+        `  ${s.name.padEnd(16)} ${s.url.padEnd(44)} tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`,
       );
     return;
   }
@@ -659,7 +660,7 @@ async function sink(): Promise<void> {
     return;
   }
   out(
-    "usage: sessionpipe sink add <url|file:PATH|stdout> [--tier N] [--token T] [--pii] [--name N] | list | remove <name> | test <name>",
+    "usage: sessionpipe sink add <url|file:PATH|stdout> [--tier N] [--token T] [--pii] [--tools all|main|beat] [--name N] | list | remove <name> | test <name>",
   );
 }
 
@@ -671,10 +672,19 @@ async function sinkAdd(url: string, cfg: Config): Promise<void> {
   // carries `control: true`.
   if (has("--control"))
     out("  --control is ignored: control is set up per machine (`sessionpipe control pair <url>`, spec/CONTROL.md)");
+  const tools = flag("--tools");
+  if (tools !== undefined && !isToolsMode(tools)) {
+    out(`  ! --tools takes all, main or beat (got ${JSON.stringify(tools)}): nothing was changed`);
+    process.exitCode = 2;
+    return;
+  }
   const s: SinkConfig = { name, url, tier, pii: has("--pii") };
   // Changing a sink's tier keeps the key it has (pairing may have handed it over, and
-  // it may live in a keychain): only --token / --secret replace one.
+  // it may live in a keychain): only --token / --secret replace one. Its --tools stays
+  // too, unless given again.
   const prev = cfg.sinks.find((x) => x.name === name && x.url === url);
+  const keptTools = tools ?? prev?.tools;
+  if (keptTools) s.tools = keptTools;
   const token = flag("--token");
   const secret = flag("--secret");
   if (prev?.token_in && !token && !secret) s.token_in = prev.token_in;
@@ -691,6 +701,7 @@ async function sinkAdd(url: string, cfg: Config): Promise<void> {
   writeConfig(cfg);
   out(`  ✓ sink ${name}: ${url} at tier ${Math.min(tier, s.max_tier ?? 3)}${s.pii ? ", pii" : ""}`);
   out(`    tier ${tier} sends: ${TIER_TEXT[Math.min(tier, s.max_tier ?? 3) as Tier]}`);
+  if (Math.min(tier, s.max_tier ?? 3) >= 1) out(`    tool events: ${TOOLS_TEXT[toolsMode(s)]}`);
 }
 /** Read the receiver's well-known file onto the sink: its tier cap and endpoints. */
 async function learnReceiver(s: SinkConfig, tier: Tier): Promise<void> {
@@ -717,6 +728,15 @@ const TIER_TEXT: Record<Tier, string> = {
   1: "tier 0 + tool names, durations, ok/error, file paths, the attention message, subagents, compactions, account limits — no prompts",
   2: "tier 1 + your prompts and the assistant's text, secrets removed",
   3: "everything, including tool input and output",
+};
+/** ` · tools main` on a sink's line, for a sink that is sent tool events at all (tier ≥ 1). */
+function toolsNote(tier: number, maxTier: number | null | undefined, mode: ToolsMode): string {
+  return Math.min(tier, maxTier ?? 3) >= 1 ? ` · tools ${mode}` : "";
+}
+const TOOLS_TEXT: Record<ToolsMode, string> = {
+  all: "every tool call (--tools main: a subagent's at most one a minute)",
+  main: "the main thread's tool calls as they happen; a subagent's at most one a minute per session (--tools all: every one)",
+  beat: "at most one tool call a minute per session (--tools all: every one)",
 };
 
 /** Each harness's sessions of the last `days` days, as the backfill reads them. */
@@ -934,13 +954,14 @@ async function status(): Promise<void> {
       tier: s.tier,
       max_tier: s.max_tier ?? null,
       pii: !!s.pii,
+      tools: toolsMode(s),
       control: !!s.control,
       paused: s.paused ?? null,
       pending_sessions: pending,
     });
     if (!json)
       out(
-        `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}`,
+        `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`,
       );
   }
   const control = await controlHealth();
@@ -1172,6 +1193,7 @@ async function doctor(): Promise<void> {
       tier: s.tier,
       max_tier: s.max_tier ?? null,
       pii: !!s.pii,
+      tools: toolsMode(s),
       control: !!s.control,
       paused: s.paused ?? null,
       token: s.token_in ? `in ${s.token_in}` : s.token ? `${s.token.slice(0, 4)}…` : null,
@@ -1189,9 +1211,15 @@ async function doctor(): Promise<void> {
   out(`  config ${tilde(configFile())} · state ${tilde(state)}`);
   for (const [h, st] of Object.entries(report.harnesses as Record<string, { file: string; state: string }[]>))
     for (const r of st) out(`  ${h.padEnd(12)} ${r.file.padEnd(44)} ${r.state}`);
-  for (const s of report.sinks as { name: string; tier: number; max_tier: number | null; paused: string | null }[])
+  for (const s of report.sinks as {
+    name: string;
+    tier: number;
+    max_tier: number | null;
+    tools: ToolsMode;
+    paused: string | null;
+  }[])
     out(
-      `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}`,
+      `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, s.tools)}`,
     );
   controlLines(health);
   const lr = report.launcher as { file: string; node: string | null; node_ok: boolean } | undefined;

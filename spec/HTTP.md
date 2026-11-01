@@ -155,6 +155,13 @@ as though it never existed.
   backlog for the next worker.
 - A sender MUST send `session.*` and `turn.*` events of one session in `seq` order
   within a batch; across batches order is best effort.
+- A sender SHOULD start at most one request a second per machine, and send in it
+  everything that arrived while it waited: a busy machine is then one request a
+  second with a full batch, not one per hook (sessionpipe issue #208). A lone event
+  still goes at once, and the full batches of a backlog MAY follow one another. A
+  receiver that limits requests per machine SHOULD allow at least one a second.
+- A sender MAY thin a sink's tool events (PROTOCOL.md §4): the `seq` of one session
+  then has gaps, which a receiver accepts like any other.
 
 ## 7. Delivery scenarios (conformance)
 
@@ -171,6 +178,7 @@ The runner sends and expects, in this order; each is a fixture under
 | auth | a wrong bearer (`auth: "wrong"` in the fixture) | 401 |
 | unknown-type | `type: "x.y"` | 202, stored, retrievable |
 | forget | `session.forgotten`, then a read | 202, then nothing |
+| seq-gap | a batch with gaps in `seq` and a `tool.started` with no `tool.ended` (a thinned sink, PROTOCOL.md §4), then one of its events again | 202, `accepted` = n; then 202, `duplicates` = 1 |
 | control | a queued prompt, a poll, an ack | 200 with the message; 204 after the ack |
 | control-expired | a message that expires unpolled | 204 |
 | control-double-ack | the same ack twice | 202, 202 |
