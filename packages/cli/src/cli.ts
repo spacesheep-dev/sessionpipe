@@ -123,6 +123,20 @@ function hookCommand(): HookCommand {
   });
 }
 
+/** install, uninstall and backfill take options only, and name a harness as --<harness>.
+ *  A bare word was ignored, so `uninstall codex` unhooked every harness. A word that is
+ *  not the value of one of the command's `valued` options is refused before any work. */
+function strayWord(valued: readonly string[] = []): boolean {
+  // args[i] is the word before args.slice(1)[i].
+  const word = args.slice(1).find((a, i) => !a.startsWith("-") && !valued.some((v) => v === args[i]));
+  if (word === undefined) return false;
+  const harness = ADAPTERS.some((a) => a.name === word) ? `; to name that harness, pass --${word}` : "";
+  out(`  ! \`sessionpipe ${args[0]}\` takes options only, and "${word}" is not one${harness}.`);
+  out(`  Nothing was changed. See \`sessionpipe ${args[0]} --help\`.`);
+  process.exitCode = 2;
+  return true;
+}
+
 function selectedAdapters(): typeof ADAPTERS {
   const named = ADAPTERS.filter((a) => has(`--${a.name}`));
   if (named.length) return named;
@@ -253,6 +267,7 @@ function setupConfig(): Config {
 }
 
 async function install(): Promise<void> {
+  if (strayWord(["--machine", "--backfill", "--sink", "--tier", "--name", "--token", "--secret"])) return;
   const cfg = setupConfig();
   if (viaNpx(distDir)) return rerunGlobally(args, out, { allowDowngrade: has("--allow-downgrade") });
   assertSetupVersion(has("--allow-downgrade"));
@@ -586,6 +601,7 @@ function unisolated(): string[] {
 }
 
 async function uninstall(): Promise<void> {
+  if (strayWord()) return;
   // `install` has had a per-harness selector all along; uninstall taking every harness
   // with no way to say otherwise is how one harness's test strips the other four.
   const named = ADAPTERS.filter((a) => has(`--${a.name}`));
@@ -835,7 +851,8 @@ async function queueBackfill(
   return { named, renamed };
 }
 
-function backfill(): Promise<void> {
+async function backfill(): Promise<void> {
+  if (strayWord(["--days"])) return;
   return backfillRows(selectedAdapters(), Number(flag("--days") ?? 30), readConfig());
 }
 
