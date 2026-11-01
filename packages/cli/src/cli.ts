@@ -668,7 +668,7 @@ async function sink(): Promise<void> {
 }
 
 async function sinkAdd(url: string, cfg: Config): Promise<void> {
-  const tier: Tier = tierArg(args, 0);
+  const tier = Math.max(0, Math.min(3, Number(flag("--tier") ?? 0))) as Tier;
   const name = flag("--name") ?? (url === "stdout" ? "stdout" : url.startsWith("file:") ? "file" : new URL(url).host);
   // Control is not a property of a sink: it is set up per machine, with keys enrolled
   // at this terminal (spec/CONTROL.md §2, `sessionpipe control pair`). A sink never
