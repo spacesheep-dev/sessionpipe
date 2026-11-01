@@ -723,6 +723,10 @@ describe("the drain: which sinks it builds, and how much it sends per run", () =
     expect(sinks[2]).toBeInstanceOf(HttpSink);
     expect(sinks[2]!.pii).toBe(true);
   });
+  it("a tier of 1.5 that an older `sink add` stored sends as 1, a tier events can carry", () => {
+    const [s] = buildSinks([{ name: "o", url: "stdout", tier: 1.5 as 1 }]);
+    expect(s!.tier).toBe(1);
+  });
   it("a stdout sink drains to the process's stdout, one line per event", async () => {
     const lines: string[] = [];
     const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {

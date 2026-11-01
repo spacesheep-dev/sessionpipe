@@ -41,7 +41,7 @@ import {
   tilde,
   writeConfig,
 } from "@sessionpipe/core";
-import { connectFolders, connectTier } from "./connect.js";
+import { connectFolders, connectTier, tierArg } from "./connect.js";
 import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
 import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
@@ -137,6 +137,10 @@ async function command(cmd: string): Promise<void> {
     );
     return usage ? out(usage) : help();
   }
+  // A --tier that is not a whole number stops every command here, before any work: an
+  // npx re-run, a hook written, a sink stored (`sink add`, `install --sink`, `connect`,
+  // `control pair`, `tail`).
+  if (has("--tier")) tierArg(args, 0);
   switch (cmd) {
     case "connect":
       return connect();
