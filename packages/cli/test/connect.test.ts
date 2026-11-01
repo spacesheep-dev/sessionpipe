@@ -99,6 +99,9 @@ describe("tier", () => {
     expect(() => tierArg(["--tier", " "], 0)).toThrow('--tier takes 0, 1, 2 or 3, not " "');
     expect(() => tierArg(["--tier", "one"], 0)).toThrow('--tier takes 0, 1, 2 or 3, not "one"');
     expect(() => tierArg(["--tier", "1.5"], 0)).toThrow('not "1.5"');
+    for (const v of ["0x2", "1e0", "2.0", "+2", "Infinity"])
+      expect(() => tierArg(["--tier", v], 0)).toThrow(`not "${v}"`);
+    expect(tierArg(["--tier", " 2 "], 0)).toBe(2);
     expect(() => tierArg(["--tier", "--name", "x"], 0)).toThrow('not "--name"');
   });
 });

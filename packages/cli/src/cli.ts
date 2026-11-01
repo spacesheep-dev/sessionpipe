@@ -137,9 +137,10 @@ async function command(cmd: string): Promise<void> {
     );
     return usage ? out(usage) : help();
   }
-  // A --tier that is not a whole number stops the commands that take one here, before any
-  // work: an npx re-run, a hook written, a sink stored (`sink add`, `install --sink`,
-  // `connect`, `control pair`, `tail`). Other commands ignore --tier, as before.
+  // A --tier that is not a whole number stops these commands here, before any work: an npx
+  // re-run, a hook written, a sink stored. `sink add`, `install --sink`, `connect`,
+  // `control pair` and `tail` read it; their sibling subcommands refuse it too, rather than
+  // ignore a typo. Other commands ignore --tier, as before.
   if (["connect", "install", "sink", "control", "tail"].includes(cmd)) tierArg(args, 0);
   switch (cmd) {
     case "connect":

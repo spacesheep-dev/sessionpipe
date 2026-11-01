@@ -52,16 +52,16 @@ export function connectFolders(o: {
   return picked.length ? { folders: picked, from: "recent" } : { folders: [], from: "none" };
 }
 
-/** `--tier N` from the command line: a whole number, held to 0–3 (`--tier 9` is 3), or
- *  `fallback` when there is no --tier. A value left off or not a whole number (`--tier`
- *  last, `--tier one`, `--tier 1.5`, `--tier --name x`) is refused: stored, it became a
- *  tier no event can carry (`null`, or 1.5 where the schema takes an integer). */
+/** `--tier N` from the command line: digits, held to 0–3 (`--tier 9` is 3), or `fallback`
+ *  when there is no --tier. A value left off or not written in digits (`--tier` last,
+ *  `--tier one`, `--tier 1.5`, `--tier 0x2`, `--tier --name x`) is refused: stored, it
+ *  became a tier no event can carry (`null`, or 1.5 where the schema takes an integer). */
 export function tierArg(argv: readonly string[], fallback: 0 | 1 | 2 | 3): 0 | 1 | 2 | 3 {
   const i = argv.indexOf("--tier");
   if (i < 0) return fallback;
   const v = argv[i + 1] ?? "";
-  const n = v.trim() === "" ? Number.NaN : Number(v);
-  if (!Number.isInteger(n)) throw new Error(`--tier takes 0, 1, 2 or 3${v ? `, not "${v}"` : ""}`);
+  const n = /^-?\d+$/.test(v.trim()) ? Number(v) : Number.NaN;
+  if (Number.isNaN(n)) throw new Error(`--tier takes 0, 1, 2 or 3${v ? `, not "${v}"` : ""}`);
   return Math.max(0, Math.min(3, n)) as 0 | 1 | 2 | 3;
 }
 
