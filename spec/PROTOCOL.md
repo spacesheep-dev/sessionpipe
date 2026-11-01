@@ -105,7 +105,7 @@ Per-type `data` shapes are normative in
 | type | tier | data | Fires when |
 |------|:----:|------|------------|
 | `session.started` | 0 | `source`: `startup` · `resume` · `clear` · `compact` · `fork` · `unknown` | The harness's session-start hook; for Antigravity, the first `PreInvocation` of a conversation. |
-| `session.heartbeat` | 0 | — | At most once per 60 s while a turn is running, for sinks **below tier 1** (which get no tool events). Lets a tier-0 receiver show "working". A sink at tier 1 or above is sent tool events instead, at least one per session per 60 s while tools run, even when its tool events are thinned (§4). |
+| `session.heartbeat` | 0 | — | At most once per 60 s while a turn is running, for sinks **below tier 1** (which get no tool events). Lets a tier-0 receiver show "working". A sink at tier 1 or above is sent tool events instead; thinned (§4), a session whose tools keep finishing still sends a `tool.ended` at least once a window plus the time to the next call that finishes. |
 | `session.ended` | 0 | `reason`: `clear` · `logout` · `exit` · `other` | The harness's session-end hook. Four harnesses never fire one (ADAPTERS.md); a receiver infers "done" from silence and MUST present that as its own reading. |
 | `session.backfill` | 0 | `started_at`, `last_at`, `turns?` | One per historical session found in local files at install. `seq` is 0 and the session block carries what the files say. Sent again, with the session's next `seq`, when the machine learns a better name for a session it already sent (`sessionpipe titles on`: the name a harness's own service gave it); a receiver applies its session block as it does any event's. |
 | `session.forgotten` | 0 | — | The person ran `sessionpipe forget`. A receiver MUST delete everything it holds for the session and answer as for any accepted event. |
@@ -116,7 +116,7 @@ Per-type `data` shapes are normative in
 | `tool.started` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?` (set when a subagent made the call); tier 3 adds `input` | Pre-tool hook. OPTIONAL for senders whose harness has none. |
 | `tool.ended` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?`, `ms?`, `ok`, `error?`; tier 3 adds `input`, `output` (each ≤ 64 KB) | Post-tool hook. A tool name is `[A-Za-z0-9_.:-]{1,120}`; MCP tools keep the harness's own spelling. |
 | `files.changed` | 1 | `paths[]` (repo-relative or `~`-relative) | File-edit hooks (Cursor, Kiro, Goose), or paths lifted from a write tool's input. |
-| `attention.needed` | 0 | `attention_id`, `kind`: `permission` · `question` · `elicitation` · `idle` · `error`; tier 1 adds `tool`, `message` (redacted, ≤ 200) | PermissionRequest, Notification, permission.asked. Tier-0 receivers learn "needs you" without the words. |
+| `attention.needed` | 0 | `attention_id`, `kind`: `permission` · `question` · `elicitation` · `idle` · `error`; tier 1 adds `tool`, `message` (redacted, ≤ 200), `agent_id` (set when a subagent asked) | PermissionRequest, Notification, permission.asked. Tier-0 receivers learn "needs you" without the words. |
 | `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool ran, a turn ended), or a control answer. |
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?` | Subagent hooks; the subagent's own events carry `session.parent_id`. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
@@ -135,21 +135,26 @@ Rules for all types:
   used as is.
 - **Thinned tool events.** A harness fires a hook per tool call, and a session that
   runs a few hundred subagents fires thousands a minute (sessionpipe issue #208: 97 243
-  events by 10 a.m., 87 % of them subagents' tool calls). A sender MAY send a sink fewer
-  `tool.started` / `tool.ended` events than the harness reported, in one of two ways:
-  a subagent's (`agent_id` set) at most one per session per 60 s, the main thread's
-  all; or every tool event of the session at most one per 60 s. The one sent is the
-  first of its window by the event's `time`; the window restarts at the next one sent.
-  A sender that thins MUST NOT thin any other type (turns, attention, subagents,
-  files, limits, sessions all go as they come), and MUST still send a tool event of the
-  session at least every 60 s while its tools run. What is thinned is a delivery choice
-  per sink, never what the sender records: it keeps every event. A receiver, which
-  can't tell a thinned sink from another:
+  events by 10 a.m., 87 % of them subagents' tool calls). A sender MAY thin a sink's tool
+  events, for a subagent's calls (`agent_id` set; the main thread's all go) or for every
+  call of the session. A thinned thread is sent no `tool.started`, and of its
+  `tool.ended` events the first by `time` that is at least 60 s from the last one the
+  session was sent; the window restarts there. An event a little out of time order falls
+  in the window like any other. Whatever the window says, the sender MUST send a
+  thread's first `tool.ended` timed at or after its `attention.needed` (which then
+  carries that `agent_id`): it is the event that shows the prompt was answered
+  (`attention.cleared`, above). A sender that thins MUST NOT thin any other type (turns,
+  attention, subagents, files, limits, sessions all go as they come). So a session whose
+  tools keep finishing is seen to work at least once a window plus the time to the next
+  call that finishes. What is thinned is a delivery choice per sink, never what the
+  sender records: it keeps every event. A receiver, which can't tell a thinned sink from
+  another:
   - MUST NOT read a `seq` gap as a lost event;
   - MUST NOT expect a `tool.ended` for every `tool.started`, or the reverse: a call's
     `call_id` may be seen once, or not at all;
-  - MAY read a session's tool events as a sign that it is working, and MUST NOT present
-    the number it got as the number of tool calls the session made.
+  - MAY read a session's `tool.ended` as a sign that it is working and that an open
+    prompt was answered, and MUST NOT present the number it got as the number of tool
+    calls the session made.
 
   The reference client's setting is the sink's `tools`: `all` (every tool event),
   `main` (a subagent's thinned; the default for an HTTP receiver), `beat` (all of

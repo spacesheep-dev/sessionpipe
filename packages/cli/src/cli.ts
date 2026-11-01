@@ -47,7 +47,7 @@ import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
-import { isToolsMode, type ToolsMode, toolsMode } from "./fold.js";
+import { isToolsMode, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
 import { commandHelp } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { POOL_HELP, poolMain, poolOffForUninstall } from "./pool/cli.js";
@@ -199,7 +199,7 @@ Usage:
   sessionpipe secrets [move keychain|secret-service|file]   (where the machine's keys live)
   sessionpipe status [--json] | doctor [--json]
   sessionpipe tail [--session ID] [--tier N] [--harness NAME]
-  sessionpipe backfill [--days 30] | forget <harness> <session> | replay --sink NAME
+  sessionpipe backfill [--days 30] | forget <harness> <session> | replay --sink NAME [--from-start] [--tools all|main|beat]
   sessionpipe update [off|on]       (install the latest now; off/on: the daemon's daily update)
   sessionpipe titles [on|off|refresh] (on: name Claude Code sessions as claude.ai does; off by default)
 ${CONTROL_HELP}
@@ -863,14 +863,32 @@ async function forget(): Promise<void> {
 
 async function replay(): Promise<void> {
   const name = flag("--sink");
-  const cfg = readConfig();
-  const sinks = name ? cfg.sinks.filter((s) => s.name === name) : cfg.sinks;
-  if (!sinks.length) return out("  no such sink");
-  for (const s of sinks) {
-    if (has("--from-start")) new Cursors(state, s.name).write({});
+  const tools = flag("--tools");
+  if (tools !== undefined && !isToolsMode(tools)) {
+    out(`  ! --tools takes all, main or beat (got ${JSON.stringify(tools)}): nothing was sent`);
+    process.exitCode = 2;
+    return;
   }
-  const d = await flush(state, sinks, new Outbox(state), undefined, { force: true });
-  for (const [k, v] of Object.entries(d)) out(`  ${k}: ${v} event${v === 1 ? "" : "s"} delivered`);
+  const cfg = readConfig();
+  const chosen = name ? cfg.sinks.filter((s) => s.name === name) : cfg.sinks;
+  if (!chosen.length) return out("  no such sink");
+  // --tools is for this replay only: a receiver rebuilt from the outbox may want every
+  // tool event once, and go back to its own setting after.
+  const sinks = tools ? chosen.map((s) => ({ ...s, tools })) : chosen;
+  for (const s of sinks) {
+    if (has("--from-start")) {
+      new Cursors(state, s.name).write({});
+      new ToolClock(state, s.name).write({});
+    }
+  }
+  const thinned: Record<string, number> = {};
+  const d = await flush(state, sinks, new Outbox(state), undefined, { force: true, thinned });
+  for (const [k, v] of Object.entries(d)) {
+    const t = thinned[k] ?? 0;
+    out(
+      `  ${k}: ${v} event${v === 1 ? "" : "s"} delivered${t ? `, ${t} tool event${t === 1 ? "" : "s"} thinned (--tools all sends every one)` : ""}`,
+    );
+  }
 }
 
 type ControlHealth = {

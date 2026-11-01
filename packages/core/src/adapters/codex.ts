@@ -159,8 +159,13 @@ function rolloutMeta(file: string): Record<string, unknown> | null {
 /** A rollout named for a thread other than `id` (`rollout-<time>-<thread id>.jsonl`).
  *  A name of any other shape says nothing, so it is not taken for another thread's. */
 function ofAnotherThread(file: string, id: string): boolean {
+  const other = threadOf(file);
+  return !!other && other !== id.toLowerCase();
+}
+/** The thread a rollout is named for, lowercased; null for a name of any other shape. */
+function threadOf(file: string): string | null {
   const m = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i.exec(file);
-  return !!m?.[1] && m[1].toLowerCase() !== id.toLowerCase();
+  return m?.[1] ? m[1].toLowerCase() : null;
 }
 
 export const codex: Adapter = {
@@ -257,6 +262,19 @@ export const codex: Adapter = {
     const turn_id = typeof s.turn_id === "string" ? s.turn_id : undefined;
     const tool = validTool(s.tool_name) ? s.tool_name : undefined;
     const call_id = typeof s.tool_use_id === "string" ? s.tool_use_id : undefined;
+    // A subagent's hooks carry the parent's session_id (ADAPTERS.md, Threads): its own
+    // id where the payload names it, else the thread its rollout is named for. Without
+    // it a subagent's tool calls read as the main thread's (issue #208: a sink that
+    // thins subagents' tool events would be sent every one).
+    const thread = typeof s.transcript_path === "string" ? threadOf(s.transcript_path) : null;
+    const agent_id =
+      typeof s.agent_id === "string" && s.agent_id
+        ? s.agent_id
+        : typeof s.subagent_id === "string" && s.subagent_id
+          ? s.subagent_id
+          : thread && thread !== String(id).toLowerCase()
+            ? thread
+            : undefined;
     const ev = (type: string, data: Record<string, unknown>) => ({ type, data: prune(data), harnessEvent: event });
     const events: HookResult["events"] = [];
     switch (event) {
@@ -279,17 +297,30 @@ export const codex: Adapter = {
         );
         break;
       case "PreToolUse":
-        if (tool) events.push(ev("tool.started", { tool, call_id, turn_id, input: s.tool_input }));
+        if (tool) events.push(ev("tool.started", { tool, call_id, turn_id, agent_id, input: s.tool_input }));
         break;
       case "PostToolUse":
         if (tool)
           events.push(
-            ev("tool.ended", { tool, call_id, turn_id, ok: true, input: s.tool_input, output: s.tool_response }),
+            ev("tool.ended", {
+              tool,
+              call_id,
+              turn_id,
+              agent_id,
+              ok: true,
+              input: s.tool_input,
+              output: s.tool_response,
+            }),
           );
         break;
       case "PermissionRequest":
         events.push(
-          ev("attention.needed", { attention_id: call_id ?? `perm-${Date.now()}`, kind: "permission", tool }),
+          ev("attention.needed", {
+            attention_id: call_id ?? `perm-${Date.now()}`,
+            kind: "permission",
+            tool,
+            agent_id,
+          }),
         );
         break;
       case "Stop":

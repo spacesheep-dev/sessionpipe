@@ -4,13 +4,33 @@
 // 2 a.m. Two things now keep it in step: a sink is sent a subagent's tool events at
 // most one per session per minute (`tools`, folded at delivery: the outbox keeps
 // every event), and a drain starts at most one request a second per machine.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Cursors, type Event, Outbox, type SinkConfig, ulid } from "@sessionpipe/core";
+import { Cursors, type Event, Outbox, type SinkConfig, takeLock, takeNamedLock, ulid } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isToolsMode, sendTool, TOOL_FOLD_MS, ToolClock, toolsMode } from "../src/fold.js";
-import { type Clock, drain, flush, type Job, PACE_MS, runJob } from "../src/run.js";
+import {
+  type Clock,
+  drain,
+  enqueueJob,
+  flush,
+  type Job,
+  PACE_MS,
+  PASS_BUDGET_MS,
+  runJob,
+  sweepJobs,
+} from "../src/run.js";
 
 let tmp: string;
 beforeEach(() => {
@@ -58,18 +78,35 @@ describe("sendTool", () => {
     for (let i = 0; i < 5; i++) expect(sendTool(sub("tool.started", T0 + i), "all", clock, "k")).toBe(true);
     expect(clock).toEqual({});
   });
-  it("main: the main thread goes live; a subagent's tool events, the first of each minute", () => {
+  it("main: the main thread goes live; a subagent's: tool.ended only, the first of each minute", () => {
     const clock: Record<string, number> = {};
     expect(sendTool(ev("tool.started", T0), "main", clock, "k")).toBe(true);
     expect(sendTool(ev("tool.ended", T0 + 1), "main", clock, "k")).toBe(true);
     expect(sendTool(ev("tool.ended", T0 + 1, { agent_id: "" }), "main", clock, "k")).toBe(true);
-    expect(sendTool(sub("tool.started", T0 + 2), "main", clock, "k")).toBe(true);
-    expect(sendTool(sub("tool.ended", T0 + 3), "main", clock, "k")).toBe(false);
-    expect(sendTool(sub("tool.started", T0 + 2 + TOOL_FOLD_MS - 1), "main", clock, "k")).toBe(false);
+    // A thinned thread's tool.started never goes: tool.ended is what a receiver reads.
+    expect(sendTool(sub("tool.started", T0 + 2), "main", clock, "k")).toBe(false);
+    expect(clock).toEqual({});
+    expect(sendTool(sub("tool.ended", T0 + 3), "main", clock, "k")).toBe(true);
+    expect(sendTool(sub("tool.ended", T0 + 4), "main", clock, "k")).toBe(false);
+    expect(sendTool(sub("tool.ended", T0 + 3 + TOOL_FOLD_MS - 1), "main", clock, "k")).toBe(false);
     // Another session keeps its own minute.
-    expect(sendTool(sub("tool.started", T0 + 4), "main", clock, "other")).toBe(true);
-    expect(sendTool(sub("tool.ended", T0 + 2 + TOOL_FOLD_MS), "main", clock, "k")).toBe(true);
-    expect(clock).toEqual({ k: T0 + 2 + TOOL_FOLD_MS, other: T0 + 4 });
+    expect(sendTool(sub("tool.ended", T0 + 4), "main", clock, "other")).toBe(true);
+    expect(sendTool(sub("tool.ended", T0 + 3 + TOOL_FOLD_MS), "main", clock, "k")).toBe(true);
+    expect(clock).toEqual({ k: T0 + 3 + TOOL_FOLD_MS, other: T0 + 4 });
+  });
+  it("a regular cadence can't lock the minute onto tool.started: every kept event is a tool.ended", () => {
+    // A subagent running 5 s tools with 1 s between them, for ten minutes.
+    const clock: Record<string, number> = {};
+    const kept: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      for (const [type, at] of [
+        ["tool.started", T0 + i * 6000],
+        ["tool.ended", T0 + i * 6000 + 5000],
+      ] as const)
+        if (sendTool(sub(type, at), "main", clock, "k")) kept.push(type);
+    }
+    expect(kept).toHaveLength(10);
+    expect(new Set(kept)).toEqual(new Set(["tool.ended"]));
   });
   it("only tool events are thinned: turns, attention, subagents and files go as they come", () => {
     const clock: Record<string, number> = { k: T0 };
@@ -86,20 +123,46 @@ describe("sendTool", () => {
       "session.ended",
     ])
       expect(sendTool(ev(type, T0 + 1, { agent_id: "a1" }), "beat", clock, "k")).toBe(true);
-    expect(clock).toEqual({ k: T0 });
+  });
+  it("a thread's tool.ended after its permission prompt always goes: it shows the prompt was answered", () => {
+    const clock: Record<string, number> = {};
+    expect(sendTool(sub("tool.ended", T0), "main", clock, "k")).toBe(true);
+    // Subagent a1 asks; another subagent's tool.ended in the same minute stays thinned.
+    expect(sendTool(ev("attention.needed", T0 + 10_000, { agent_id: "a1" }), "main", clock, "k")).toBe(true);
+    expect(sendTool(ev("tool.ended", T0 + 15_000, { agent_id: "a2" }), "main", clock, "k")).toBe(false);
+    // One of a1's from before the prompt (reaching the outbox late) is no answer.
+    expect(sendTool(sub("tool.ended", T0 + 9_000), "main", clock, "k")).toBe(false);
+    // a1's next tool.ended goes, inside the minute, and the minute restarts there.
+    expect(sendTool(sub("tool.ended", T0 + 20_000), "main", clock, "k")).toBe(true);
+    expect(sendTool(sub("tool.ended", T0 + 25_000), "main", clock, "k")).toBe(false);
+    expect(clock).toEqual({ k: T0 + 20_000 });
+    // The main thread's prompt marks nothing in main mode (its tool events go anyway)…
+    expect(sendTool(ev("attention.needed", T0 + 30_000), "main", clock, "k")).toBe(true);
+    expect(clock).toEqual({ k: T0 + 20_000 });
+    // …and in beat mode it does, keyed on the main thread; a prompt timed by no clock counts from 0.
+    expect(sendTool({ ...ev("attention.needed", T0), time: "garbage" }, "beat", clock, "k")).toBe(true);
+    expect(sendTool(sub("tool.ended", T0 + 31_000), "beat", clock, "k")).toBe(false);
+    expect(sendTool(ev("tool.ended", T0 + 32_000), "beat", clock, "k")).toBe(true);
   });
   it("beat: the main thread's tool events are thinned too", () => {
     const clock: Record<string, number> = {};
-    expect(sendTool(ev("tool.started", T0), "beat", clock, "k")).toBe(true);
-    expect(sendTool(ev("tool.ended", T0 + 10), "beat", clock, "k")).toBe(false);
-    expect(sendTool(sub("tool.ended", T0 + 20), "beat", clock, "k")).toBe(false);
-    expect(sendTool(ev("tool.started", T0 + TOOL_FOLD_MS), "beat", clock, "k")).toBe(true);
+    expect(sendTool(ev("tool.started", T0), "beat", clock, "k")).toBe(false);
+    expect(sendTool(ev("tool.ended", T0 + 10), "beat", clock, "k")).toBe(true);
+    expect(sendTool(ev("tool.ended", T0 + 20), "beat", clock, "k")).toBe(false);
+    expect(sendTool(sub("tool.ended", T0 + 30), "beat", clock, "k")).toBe(false);
+    expect(sendTool(ev("tool.ended", T0 + 10 + TOOL_FOLD_MS), "beat", clock, "k")).toBe(true);
   });
-  it("a clock that went backwards sends, and the minute starts again from there", () => {
+  it("a little out of time order stays in the window; only a jump back by a window or more restarts it", () => {
     const clock: Record<string, number> = { k: T0 };
-    expect(sendTool(sub("tool.started", T0 - 5000), "main", clock, "k")).toBe(true);
-    expect(clock.k).toBe(T0 - 5000);
-    expect(sendTool(sub("tool.started", T0 - 4000), "main", clock, "k")).toBe(false);
+    expect(sendTool(sub("tool.ended", T0 - 5000), "main", clock, "k")).toBe(false);
+    expect(sendTool(sub("tool.ended", T0 - TOOL_FOLD_MS + 1), "main", clock, "k")).toBe(false);
+    expect(clock.k).toBe(T0);
+    expect(sendTool(sub("tool.ended", T0 - TOOL_FOLD_MS), "main", clock, "k")).toBe(true);
+    expect(clock.k).toBe(T0 - TOOL_FOLD_MS);
+    expect(sendTool(sub("tool.ended", T0 - TOOL_FOLD_MS + 4000), "main", clock, "k")).toBe(false);
+    // An event with no readable time goes, and moves nothing.
+    expect(sendTool({ ...sub("tool.ended", T0), time: "garbage" }, "main", clock, "k")).toBe(true);
+    expect(clock.k).toBe(T0 - TOOL_FOLD_MS);
   });
 });
 
@@ -141,18 +204,19 @@ describe("flush with a sink that thins tool events", () => {
     ]);
     const file = path.join(tmp, "out.jsonl");
     const sinks: SinkConfig[] = [{ name: "f", url: `file:${file}`, tier: 1, tools: "main" }];
+    outbox.append(ref, [sub("tool.ended", T0 + 5, 5)]);
     expect((await flush(tmp, sinks, outbox)).f).toBe(3);
-    expect(lines(file).map((e) => e.session.seq)).toEqual([0, 1, 3]);
+    expect(lines(file).map((e) => e.session.seq)).toEqual([0, 2, 3]);
     expect(new Cursors(tmp, "f").read()["claude-code/s"]).toBe(statSync(outbox.file(ref)).size);
     // The next run remembers the minute: a subagent's tool event 30 s later is skipped,
     // and the cursor still moves (nothing is sent, nothing waits).
-    outbox.append(ref, [sub("tool.ended", T0 + 30_000, 5)]);
+    outbox.append(ref, [sub("tool.ended", T0 + 30_000, 6)]);
     expect((await flush(tmp, sinks, outbox)).f).toBe(0);
     expect(new Cursors(tmp, "f").read()["claude-code/s"]).toBe(statSync(outbox.file(ref)).size);
-    outbox.append(ref, [sub("tool.ended", T0 + 61_000, 6), ev("turn.ended", T0 + 62_000, {}, "s", 7)]);
+    outbox.append(ref, [sub("tool.ended", T0 + 62_000, 7), ev("turn.ended", T0 + 63_000, {}, "s", 8)]);
     expect((await flush(tmp, sinks, outbox)).f).toBe(2);
-    expect(lines(file).map((e) => e.session.seq)).toEqual([0, 1, 3, 6, 7]);
-    expect(new ToolClock(tmp, "f").read()).toEqual({ "claude-code/s": T0 + 61_000 });
+    expect(lines(file).map((e) => e.session.seq)).toEqual([0, 2, 3, 7, 8]);
+    expect(new ToolClock(tmp, "f").read()).toEqual({ "claude-code/s": T0 + 62_000 });
   });
   it("a file sink is sent every tool event unless told otherwise", async () => {
     const outbox = new Outbox(tmp);
@@ -163,7 +227,7 @@ describe("flush with a sink that thins tool events", () => {
     const file = path.join(tmp, "all.jsonl");
     expect((await flush(tmp, [{ name: "f", url: `file:${file}`, tier: 1 }], outbox)).f).toBe(4);
   });
-  it("a receiver is sent a subagent's first tool event of the minute; a refused batch picks the same one again", async () => {
+  it("a receiver is sent a subagent's first tool.ended of the minute; a refused batch picks the same one again", async () => {
     const posts: Event[][] = [];
     let refuse = 1;
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -180,8 +244,8 @@ describe("flush with a sink that thins tool events", () => {
     expect((await flush(tmp, sinks, outbox)).r).toBe(0);
     expect(new ToolClock(tmp, "r").read()).toEqual({});
     expect((await flush(tmp, sinks, outbox)).r).toBe(1);
-    expect(posts.map((p) => p.map((e) => e.session.seq))).toEqual([[0], [0]]);
-    expect(new ToolClock(tmp, "r").read()).toEqual({ "claude-code/s": T0 });
+    expect(posts.map((p) => p.map((e) => e.session.seq))).toEqual([[1], [1]]);
+    expect(new ToolClock(tmp, "r").read()).toEqual({ "claude-code/s": T0 + 1000 });
   });
 });
 
@@ -306,6 +370,94 @@ describe("drain's pace: at most one request a second per machine", () => {
   });
 });
 
+describe("a worker's life: no pass starts that its deadline would end", () => {
+  const sinks: SinkConfig[] = [{ name: "r", url: "https://r.example", tier: 1, token: "t" }];
+  const more = () => path.join(tmp, "locks", "flush.more");
+  it("too little life left: the work stays marked, the lock is let go, and it is handed on", async () => {
+    const posts = stubReceiver();
+    const sim = simClock();
+    const outbox = new Outbox(tmp);
+    const ref = { harness: "claude-code", session: "s" };
+    outbox.append(ref, [ev("turn.ended", T0, {}, "s", 0)]);
+    let handed = 0;
+    const life = { clock: sim.clock, deadline: T0 + PASS_BUDGET_MS - 1, handoff: () => handed++ };
+    expect(await drain(tmp, sinks, outbox, ref, life)).toEqual({});
+    expect(posts).toHaveLength(0);
+    expect(handed).toBe(1);
+    expect(existsSync(more())).toBe(true);
+    expect(existsSync(path.join(tmp, "locks", "flush.lock"))).toBe(false);
+    // Without a handoff to call, the mark alone is left for the next worker.
+    expect(await drain(tmp, sinks, outbox, ref, { clock: sim.clock, deadline: T0 })).toEqual({});
+    // The next worker, with its life ahead of it, sends it.
+    expect(await drain(tmp, sinks, outbox, ref, { clock: sim.clock, deadline: T0 + 15_000 })).toEqual({ r: 1 });
+    expect(existsSync(more())).toBe(false);
+  });
+  it("a pass that fits runs; the one after it, marked by another worker, is handed on", async () => {
+    const posts = stubReceiver();
+    const sim = simClock();
+    const outbox = new Outbox(tmp);
+    const ref = { harness: "claude-code", session: "s" };
+    outbox.append(ref, [ev("turn.started", T0, {}, "s", 0)]);
+    let handed = 0;
+    const d = drain(tmp, sinks, outbox, ref, {
+      clock: sim.clock,
+      deadline: T0 + PASS_BUDGET_MS + 500,
+      handoff: () => handed++,
+    });
+    // Another worker's event while the first pass is on its way: it marks there is more.
+    outbox.append(ref, [ev("turn.ended", T0 + 1, {}, "s", 1)]);
+    expect(await drain(tmp, sinks, outbox, ref, { clock: sim.clock })).toBeNull();
+    sim.set(T0 + 600);
+    expect(await d).toEqual({ r: 1 });
+    expect(handed).toBe(1);
+    expect(posts.map((p) => p.map((e) => e.session.seq))).toEqual([[0]]);
+    expect(existsSync(more())).toBe(true);
+  });
+  it("a sweep marks each job's events for the drain running now, gives a busy session's job back within a second, and starts none it has no life for", async () => {
+    const config = process.env.SESSIONPIPE_CONFIG as string;
+    writeFileSync(
+      config,
+      JSON.stringify({ sinks: [{ name: "f", url: `file:${path.join(tmp, "o.jsonl")}`, tier: 1 }], harnesses: {} }),
+    );
+    const job = (session: string): Job => ({
+      harness: "claude-code",
+      event: "Stop",
+      argv: ["claude-code", "Stop"],
+      stdin: JSON.stringify({ session_id: session, cwd: tmp, hook_event_name: "Stop" }),
+      cwd: tmp,
+      env: {},
+      at: T0,
+    });
+    const FREE = "5b1c2d3e-0000-4000-8000-000000000001";
+    const BUSY = "5b1c2d3e-0000-4000-8000-000000000002";
+    const old = Date.now() / 1000 - 60;
+    const queue = (session: string) => {
+      const f = enqueueJob(tmp, job(session));
+      utimesSync(f, old, old);
+      return f;
+    };
+    // No life left for a job: nothing is claimed.
+    queue(FREE);
+    expect(await sweepJobs(tmp, 0, 20, 60_000, { deadline: Date.now() + PASS_BUDGET_MS })).toBe(0);
+    expect(readdirSync(path.join(tmp, "jobs"))).toHaveLength(1);
+    // A drain is running (its lock is held), and the second job's session is busy.
+    const flushLock = takeNamedLock(tmp, "flush");
+    const busy = takeLock(tmp, { harness: "claude-code", session: BUSY });
+    await new Promise((r) => setTimeout(r, 5));
+    queue(BUSY);
+    const started = Date.now();
+    const sweep = sweepJobs(tmp, 0, 20, 60_000);
+    await vi.waitFor(() => expect(existsSync(more())).toBe(true), { timeout: 900, interval: 20 });
+    // The first job's events are marked before the busy one has given up.
+    expect(Date.now() - started).toBeLessThan(900);
+    expect(await sweep).toBe(2);
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(readdirSync(path.join(tmp, "jobs")).filter((n) => n.endsWith(".json"))).toHaveLength(1);
+    busy?.();
+    flushLock?.();
+  });
+});
+
 /** A Claude Code workflow: one session, subagents each making thirty tool calls over
  *  three minutes, the main thread starting it and waiting. Every hook is a job, run in
  *  time order as its worker would; workers that find the drain busy leave their events
@@ -317,7 +469,9 @@ describe(`fan-out: ${AGENTS} subagents × 30 tool calls`, () => {
   const SESSION = "0c3e4a52-6f7b-4d0e-9a51-2b1f9b3f0c11";
   const CALLS = 30;
 
-  function jobs(): Job[] {
+  /** `jitter`: the jobs reach the outbox up to that far out of time order (workers take
+   *  the session's lock in lock order, not hook order); each event keeps its own time. */
+  function jobs(jitter = 0): Job[] {
     let seed = 208;
     const rnd = () => {
       seed = (seed * 1103515245 + 12345) % 2 ** 31;
@@ -360,15 +514,26 @@ describe(`fan-out: ${AGENTS} subagents × 30 tool calls`, () => {
       }
       hook(t + 4_000, "SubagentStop", { agent_id: agent, agent_type: "general" });
     }
-    // The main thread asks a question halfway, and the person answers it.
+    // The main thread asks a question halfway, and the person answers it; so does a
+    // subagent, whose next tool call is the answer.
     hook(90_000, "PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf build" } });
     tool(95_000);
+    hook(120_000, "PermissionRequest", {
+      tool_name: "Bash",
+      tool_input: { command: "git push" },
+      agent_id: "agent0",
+      agent_type: "general",
+    });
+    tool(125_000, "agent0");
     hook(200_000, "Stop", {});
-    return out.sort((a, b) => a.at - b.at);
+    out.sort((a, b) => a.at - b.at);
+    if (!jitter) return out;
+    const order = new Map(out.map((j) => [j, j.at + (rnd() * 2 - 1) * jitter]));
+    return out.sort((a, b) => (order.get(a) as number) - (order.get(b) as number));
   }
 
   /** Run every job; returns the requests the receiver got and the outbox's events. */
-  async function run(tools: SinkConfig["tools"], paced: boolean) {
+  async function run(tools: SinkConfig["tools"], paced: boolean, jitter = 0) {
     const state = mkdtempSync(path.join(tmp, "m-"));
     writeFileSync(
       process.env.SESSIONPIPE_CONFIG as string,
@@ -384,7 +549,7 @@ describe(`fan-out: ${AGENTS} subagents × 30 tool calls`, () => {
     const unpaced: Clock = { now: () => (far += 3_600_000), sleep: async () => {} };
     const clock = paced ? sim.clock : unpaced;
     const running: Promise<unknown>[] = [];
-    for (const j of jobs()) {
+    for (const j of jobs(jitter)) {
       await sim.wake(j.at);
       running.push(runJob(j, { state, now: j.at, clock }));
       await settle();
@@ -402,13 +567,14 @@ describe(`fan-out: ${AGENTS} subagents × 30 tool calls`, () => {
     const all = await run("all", true);
     const main = await run(undefined, true);
     const beat = await run("beat", true);
+    const shuffled = await run(undefined, true, 6000);
     const n = (r: { posts: Event[][] }) => r.posts.length;
     console.log(
       `fan-out (${AGENTS} subagents × ${CALLS} tool calls, ${before.all.length} events): 0.11.0 ${n(before)} requests · paced, tools all ${n(all)} · paced, tools main (the default) ${n(main)} · paced, tools beat ${n(beat)}`,
     );
     // The outbox kept every event in each run.
-    for (const r of [all, main, beat]) expect(r.all.length).toBe(before.all.length);
-    expect(before.all.filter((e) => e.type === "tool.started")).toHaveLength(AGENTS * CALLS + 5);
+    for (const r of [all, main, beat, shuffled]) expect(r.all.length).toBe(before.all.length);
+    expect(before.all.filter((e) => e.type === "tool.started")).toHaveLength(AGENTS * CALLS + 6);
     // 0.11.0: a request per hook that had something to send.
     expect(n(before)).toBeGreaterThan(AGENTS * CALLS);
     expect(n(all)).toBeLessThan(n(before) / 10);
@@ -434,9 +600,20 @@ describe(`fan-out: ${AGENTS} subagents × 30 tool calls`, () => {
       expect(main.delivered.filter((e) => e.type === type).length, type).toBe(
         main.all.filter((e) => e.type === type).length,
       );
-    // A subagent's tool calls: at most one per minute of the run, per session.
-    const subTools = main.delivered.filter((e) => e.type.startsWith("tool.") && e.data.agent_id);
-    expect(subTools.length).toBeLessThanOrEqual(5);
+    // A subagent's tool calls: a tool.ended at most once per minute of the run, per
+    // session, plus the one that answers its permission prompt; never a tool.started.
+    // The same when the hooks reach the outbox up to 6 s out of order.
+    for (const r of [main, shuffled]) {
+      const subTools = r.delivered.filter((e) => e.type.startsWith("tool.") && e.data.agent_id);
+      expect(subTools.every((e) => e.type === "tool.ended")).toBe(true);
+      expect(subTools.length).toBeLessThanOrEqual(5);
+      const ask = r.delivered.find((e) => e.type === "attention.needed" && e.data.agent_id === "agent0");
+      expect(ask).toBeDefined();
+      const answer = r.all
+        .filter((e) => e.type === "tool.ended" && e.data.agent_id === "agent0" && e.time > (ask as Event).time)
+        .sort((a, b) => a.session.seq - b.session.seq)[0];
+      expect(r.delivered.some((e) => e.id === answer?.id)).toBe(true);
+    }
     // Nothing went twice, and within the session seq only rose.
     const seqs = main.delivered.map((e) => e.session.seq);
     expect(new Set(seqs).size).toBe(seqs.length);

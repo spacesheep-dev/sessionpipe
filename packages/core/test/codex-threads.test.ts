@@ -194,8 +194,31 @@ describe("Codex threads that are not sessions of their own", () => {
     expect(inChild?.session.id).toBe(ROOT);
     expect(inChild?.events.map((e) => e.type)).toEqual(["tool.ended"]);
     expect(inChild?.transcript).toBeUndefined();
+    // Issue #208: the call is the subagent's, named for its thread, so a sink that thins
+    // subagents' tool events can tell it from the parent's own.
+    expect(inChild?.events[0]?.data.agent_id).toBe(CHILD.toLowerCase());
     expect(call(rollout(home, ROOT))?.transcript).toBe(rollout(home, ROOT));
+    expect(call(rollout(home, ROOT))?.events[0]?.data.agent_id).toBeUndefined();
     expect(call("/elsewhere/transcript.jsonl")?.transcript).toBe("/elsewhere/transcript.jsonl");
+    expect(call("/elsewhere/transcript.jsonl")?.events[0]?.data.agent_id).toBeUndefined();
+  });
+
+  it("names a subagent's tool calls and permission prompts by its own id when the payload carries one", () => {
+    const home = codexHome();
+    const run = (event: string, extra: Record<string, unknown>) =>
+      codex.fromHook(
+        hook(home, event, {
+          session_id: ROOT,
+          transcript_path: rollout(home, CHILD),
+          tool_name: "Bash",
+          tool_use_id: "exec-2",
+          tool_input: { command: "ls" },
+          ...extra,
+        }),
+      )?.events[0]?.data;
+    expect(run("PreToolUse", { agent_id: "agent-7" })?.agent_id).toBe("agent-7");
+    expect(run("PostToolUse", { subagent_id: "sub-7", tool_response: "" })?.agent_id).toBe("sub-7");
+    expect(run("PermissionRequest", {})?.agent_id).toBe(CHILD.toLowerCase());
   });
 
   it("backfills the root thread and a fork the person made, never a subagent", () => {

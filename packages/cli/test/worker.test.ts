@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { enqueueJob, MAX_TRIES, runJob, sweepJobs } from "../src/run.js";
+import { type DrainLife, drain, enqueueJob, MAX_TRIES, runJob, sweepJobs } from "../src/run.js";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn(), unref: vi.fn() }));
 vi.mock("node:child_process", async (orig) => ({
@@ -19,10 +19,10 @@ vi.mock("node:child_process", async (orig) => ({
 }));
 vi.mock("../src/run.js", async (orig) => {
   const m = await orig<typeof import("../src/run.js")>();
-  return { ...m, runJob: vi.fn(m.runJob), sweepJobs: vi.fn(m.sweepJobs) };
+  return { ...m, runJob: vi.fn(m.runJob), sweepJobs: vi.fn(m.sweepJobs), drain: vi.fn(m.drain) };
 });
 
-import { workerMain } from "../src/worker.js";
+import { DRAIN_ARG, WORKER_LIFE_MS, workerMain } from "../src/worker.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let tmp: string;
@@ -35,6 +35,8 @@ beforeEach(() => {
   spawned.unref.mockClear();
   vi.mocked(runJob).mockReset();
   vi.mocked(sweepJobs).mockReset();
+  vi.mocked(drain).mockReset();
+  vi.mocked(drain).mockResolvedValue({});
   vi.mocked(runJob).mockResolvedValue({ events: [], delivered: {} });
   vi.mocked(sweepJobs).mockResolvedValue(0);
 });
@@ -75,10 +77,41 @@ describe("the worker", () => {
     });
     await workerMain(argv(f));
     expect(seen).toEqual([`${path.basename(f)}.${process.pid}.running`]);
-    expect(runJob).toHaveBeenCalledWith(j, { claimed: `${f}.${process.pid}.running` });
+    const life = { deadline: expect.any(Number), handoff: expect.any(Function) };
+    expect(runJob).toHaveBeenCalledWith(j, { claimed: `${f}.${process.pid}.running`, ...life });
     expect(queue()).toEqual([]);
-    expect(sweepJobs).toHaveBeenCalledWith(tmp);
+    expect(sweepJobs).toHaveBeenCalledWith(tmp, undefined, undefined, undefined, life);
     expect(spawned.spawn).not.toHaveBeenCalled();
+  });
+
+  it("tells the drain and the sweep when it will be ended; a drain left marked starts one drainer, once", async () => {
+    const before = Date.now();
+    let life: DrainLife = {};
+    vi.mocked(runJob).mockImplementation(async (_j, o) => {
+      life = o as DrainLife;
+      return { events: [], delivered: {} };
+    });
+    await workerMain(argv(enqueueJob(tmp, job())));
+    expect(life.deadline).toBeGreaterThanOrEqual(before + WORKER_LIFE_MS);
+    expect(life.deadline).toBeLessThanOrEqual(Date.now() + WORKER_LIFE_MS);
+    life.handoff?.();
+    life.handoff?.();
+    expect(spawned.spawn).toHaveBeenCalledTimes(1);
+    expect(spawned.spawn).toHaveBeenCalledWith(process.execPath, ["/opt/sessionpipe/worker.js", DRAIN_ARG], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  });
+
+  it(`${DRAIN_ARG}: no job, it drains and sweeps under its own life; a drain that throws is swallowed`, async () => {
+    await workerMain(argv(DRAIN_ARG));
+    expect(runJob).not.toHaveBeenCalled();
+    const life = { deadline: expect.any(Number), handoff: expect.any(Function) };
+    expect(drain).toHaveBeenCalledWith(tmp, [], expect.anything(), undefined, life);
+    expect(sweepJobs).toHaveBeenCalledWith(tmp, undefined, undefined, undefined, life);
+    vi.mocked(drain).mockRejectedValue(new Error("boom"));
+    await expect(workerMain(argv(DRAIN_ARG))).resolves.toBeUndefined();
   });
 
   it("a job the lock held out gets a fresh worker, this script again, detached", async () => {

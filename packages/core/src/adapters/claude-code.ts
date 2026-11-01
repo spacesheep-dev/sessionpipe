@@ -228,6 +228,7 @@ export const claudeCode: Adapter = {
             kind: "permission",
             tool,
             message: tool ? `${tool}${describe(s.tool_input)}` : undefined,
+            agent_id,
           }),
         );
         break;
@@ -237,6 +238,7 @@ export const claudeCode: Adapter = {
             attention_id: `notif-${Date.now()}`,
             kind: notifKind(s.notification_type),
             message: typeof s.message === "string" ? s.message.slice(0, 200) : undefined,
+            agent_id,
           }),
         );
         break;

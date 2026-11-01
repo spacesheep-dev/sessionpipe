@@ -13,31 +13,59 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { stateDir } from "@sessionpipe/core";
-import { claimJob, MAX_TRIES, releaseJob, runJob, sweepJobs } from "./run.js";
+import { Outbox, readConfig, stateDir } from "@sessionpipe/core";
+import { claimJob, type DrainLife, drain, MAX_TRIES, releaseJob, runJob, sweepJobs } from "./run.js";
+
+/** How long a worker lives. */
+export const WORKER_LIFE_MS = 15_000;
+/** The argument that starts a worker with no job, to drain what another left marked. */
+export const DRAIN_ARG = "--drain";
+
+/** Start a detached worker: for a job file, or (DRAIN_ARG) only to drain. */
+function startWorker(script: string, arg: string): void {
+  const p = spawn(process.execPath, [script, arg], { detached: true, stdio: "ignore", windowsHide: true });
+  p.unref();
+}
 
 /** One worker run over `argv` as node received it ([node, worker.js, job]). Resolves
- *  once the job is done and the sweep is over; the process then exits 0. */
+ *  once the job is done and the sweep is over; the process then exits 0. A drain
+ *  that finds this worker's life too short for another pass leaves the work marked
+ *  and starts one fresh worker to take it over (at most one per worker). */
 export async function workerMain(argv: string[]): Promise<void> {
   const jobFile = argv[2];
   if (!jobFile) return;
-  const claimed = claimJob(jobFile);
-  if (!claimed) return;
-  const deadline = setTimeout(() => process.exit(0), 15_000);
+  const script = argv[1] as string;
+  let handedOff = false;
+  const life: DrainLife = {
+    deadline: Date.now() + WORKER_LIFE_MS,
+    handoff: () => {
+      if (handedOff) return;
+      handedOff = true;
+      startWorker(script, DRAIN_ARG);
+    },
+  };
+  const deadline = setTimeout(() => process.exit(0), WORKER_LIFE_MS);
   deadline.unref();
-  await runJob(claimed.job, { claimed: claimed.file })
+  if (jobFile === DRAIN_ARG) {
+    await drain(stateDir(), readConfig().sinks, new Outbox(stateDir()), undefined, life)
+      .then(() => sweepJobs(stateDir(), undefined, undefined, undefined, life))
+      .catch(() => {})
+      .finally(() => clearTimeout(deadline));
+    return;
+  }
+  const claimed = claimJob(jobFile);
+  if (!claimed) {
+    clearTimeout(deadline);
+    return;
+  }
+  await runJob(claimed.job, { claimed: claimed.file, ...life })
     .then((r) => {
       if (!r.requeued || (claimed.job.tries ?? 0) + 1 >= MAX_TRIES) return;
-      const p = spawn(process.execPath, [argv[1] as string, r.requeued], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      p.unref();
+      startWorker(script, r.requeued);
     })
     .catch(() => {})
     .finally(() => releaseJob(claimed.file))
-    .then(() => sweepJobs(stateDir()))
+    .then(() => sweepJobs(stateDir(), undefined, undefined, undefined, life))
     .catch(() => {})
     .finally(() => clearTimeout(deadline));
 }

@@ -4,12 +4,16 @@
 // machine ran out of them by 2 a.m. The outbox keeps every event; a sink's `tools`
 // setting says which of them it is sent:
 //   all   every tool.started / tool.ended (file and stdout sinks, by default)
-//   main  the main thread's tool events go live; a subagent's (data.agent_id set) at
-//         most one per session per minute (HTTP sinks, by default)
-//   beat  every tool event of a session at most one per minute
-// The first tool event of each minute goes, the rest of that minute is skipped (the
-// cursor still moves over them). Only tool events are thinned: turns, attention,
-// subagents, files and limits go as they come (PROTOCOL.md §4).
+//   main  the main thread's tool events go live; a subagent's (data.agent_id set) are
+//         thinned (HTTP sinks, by default)
+//   beat  every tool event of a session is thinned
+// A thinned stream is sent tool.ended only, and of those at most one per session per
+// minute, by the events' own time: tool.ended is what a receiver reads as "a tool ran"
+// (spacesheep reads nothing from tool.started), so the one event kept is never one it
+// throws away. One more is always sent: the asking thread's first tool.ended after its
+// attention.needed, the event that shows the prompt was answered (PROTOCOL.md §4,
+// attention.cleared). Only tool events are thinned: turns, attention, subagents, files
+// and limits go as they come.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type Event, type SinkConfig, safeId } from "@sessionpipe/core";
@@ -34,16 +38,40 @@ export function toolsMode(s: Pick<SinkConfig, "url" | "tools">): ToolsMode {
   return /^https?:\/\//.test(s.url) ? "main" : "all";
 }
 
+const agentOf = (e: Event): string => (typeof e.data.agent_id === "string" ? e.data.agent_id : "");
+/** Whether a sink in `mode` thins the tool events of the thread `agent` ("" = main). */
+const thins = (mode: ToolsMode, agent: string): boolean => mode === "beat" || (mode === "main" && agent !== "");
+/** The clock entry that says a thread of `key` is waiting on a prompt: its next
+ *  tool.ended goes whatever the window says. */
+const askKey = (key: string, agent: string): string => `${key}\u0000ask\u0000${agent}`;
+
 /** Whether a sink in `mode` is sent `e`. `clock` holds, per session (`key`), the time
  *  of the last tool event it was sent, and moves when this one is. Times are the
- *  events' own, so a backlog thins the same way it would have live. A clock that went
- *  backwards sends (and restarts the window) rather than skipping for a minute. */
+ *  events' own, so a backlog thins the same way it would have live. An event a little
+ *  out of time order (hooks reach the outbox in lock order, not hook order) falls in
+ *  the window like any other; only a jump back by a whole window or more (a clock set
+ *  back) sends and restarts it. */
 export function sendTool(e: Event, mode: ToolsMode, clock: Record<string, number>, key: string): boolean {
-  if (mode === "all" || (e.type !== "tool.started" && e.type !== "tool.ended")) return true;
-  if (mode === "main" && !(typeof e.data.agent_id === "string" && e.data.agent_id)) return true;
+  if (mode === "all") return true;
+  const agent = agentOf(e);
   const t = Date.parse(e.time);
+  if (e.type === "attention.needed") {
+    if (thins(mode, agent)) clock[askKey(key, agent)] = Number.isFinite(t) ? t : 0;
+    return true;
+  }
+  if ((e.type !== "tool.started" && e.type !== "tool.ended") || !thins(mode, agent)) return true;
+  if (e.type === "tool.started") return false;
+  if (!Number.isFinite(t)) return true;
+  const ask = askKey(key, agent);
+  // Only a tool.ended timed at or after the prompt answers it.
+  const asked = clock[ask];
+  if (asked !== undefined && t >= asked) {
+    delete clock[ask];
+    clock[key] = t;
+    return true;
+  }
   const last = clock[key];
-  if (last !== undefined && t >= last && t - last < TOOL_FOLD_MS) return false;
+  if (last !== undefined && t > last - TOOL_FOLD_MS && t < last + TOOL_FOLD_MS) return false;
   clock[key] = t;
   return true;
 }

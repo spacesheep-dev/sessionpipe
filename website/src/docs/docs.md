@@ -41,8 +41,9 @@ Adds a destination: an HTTPS receiver, a file, or stdout. For a receiver it read
 `/.well-known/sessionpipe`, caps the tier at the receiver's `max_tier`, stores the token and
 sends one heartbeat as a test. `--pii` turns on the PII pass for this sink. `--tools` says which
 tool events it is sent: `main` (the default for a receiver) sends the main thread's as they happen
-and a subagent's at most one per session per minute; `all` (the default for a file or stdout) sends
-every one; `beat` sends a session's at most one a minute. The local outbox keeps every event either
+and a subagent's finished calls at most one per session per minute (and the one that answers its
+permission prompt); `all` (the default for a file or stdout) sends every one; `beat` thins the main
+thread's the same way. `replay --tools all` sends every one once. The local outbox keeps every event either
 way. A receiver also gets at most one request a second from the machine, with everything that piled
 up meanwhile in it.
 
@@ -96,7 +97,9 @@ Reads the last N days of sessions from the agents' own files into the outbox.
 {{usage replay}}
 
 Sends what's waiting to a sink now, without waiting out a backoff. `--from-start` rewinds the
-sink's cursor first, so everything in the outbox goes again.
+sink's cursor first, so everything in the outbox goes again. `--tools all|main|beat` replaces the
+sink's tool-event setting for this replay only; the line it prints says how many tool events were
+thinned.
 
 {{usage forget}}
 

@@ -1471,6 +1471,34 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
     outbox.append({ harness: "claude-code", session: "s3" }, [event("session.heartbeat", {})]);
     expect((await run("replay", "--sink", "f")).lines).toEqual(["  f: 1 event delivered"]);
   });
+  it("replay says how many tool events a sink's setting thinned; --tools all sends every one, this once", async () => {
+    const rx = await receiver({ body: { accepted: 1 } });
+    const outbox = new Outbox(state);
+    const sub = (type: string) => event(type, { tool: "Bash", ok: true, agent_id: "a1" });
+    outbox.append({ harness: "claude-code", session: "s1" }, [
+      sub("tool.started"),
+      sub("tool.ended"),
+      sub("tool.started"),
+      sub("tool.ended"),
+    ]);
+    writeConfig({ sinks: [{ name: "rx", url: rx.url, tier: 1 }], harnesses: {} } as never);
+    expect((await run("replay", "--sink", "rx")).lines).toEqual([
+      "  rx: 1 event delivered, 3 tool events thinned (--tools all sends every one)",
+    ]);
+    expect((await run("replay", "--sink", "rx", "--from-start", "--tools", "all")).lines).toEqual([
+      "  rx: 4 events delivered",
+    ]);
+    expect(readConfig().sinks[0]?.tools).toBeUndefined();
+    // --from-start started the minute over: the next tool.ended goes, its tool.started doesn't.
+    outbox.append({ harness: "claude-code", session: "s1" }, [sub("tool.started"), sub("tool.ended")]);
+    expect((await run("replay", "--sink", "rx")).lines).toEqual([
+      "  rx: 1 event delivered, 1 tool event thinned (--tools all sends every one)",
+    ]);
+    const bad = await run("replay", "--tools", "some");
+    expect(bad.lines).toEqual(['  ! --tools takes all, main or beat (got "some"): nothing was sent']);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
+  });
 });
 
 describe("titles", () => {

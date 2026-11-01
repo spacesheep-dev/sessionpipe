@@ -35,13 +35,16 @@ machines by their id, so the pairing holds and its two cards become one.
 | 3 | + tool input and output |
 
 A tool call is two events (`tool.started`, `tool.ended`), and a workflow that runs a few
-hundred subagents fires thousands a minute. So a receiver is sent a subagent's tool
-events at most one per session per minute, the main thread's as they happen, and at
-most one request a second from this machine with everything that piled up in it.
-`--tools` on `sink add` changes the first: `all` sends every tool event (what a file or
-stdout sink gets by default), `main` is the default above for an HTTPS receiver, `beat`
-sends every session's tool events at most one a minute. The local outbox keeps every
-event whichever you pick; turns, prompts, attention and subagents are never thinned.
+hundred subagents fires thousands a minute. So a receiver is sent a subagent's finished
+tool calls (`tool.ended`) at most one per session per minute, plus the one that answers a
+subagent's permission prompt, the main thread's tool events as they happen, and at most
+one request a second from this machine with everything that piled up in it. `--tools` on
+`sink add` changes the first: `all` sends every tool event (what a file or stdout sink
+gets by default), `main` is the default above for an HTTPS receiver, `beat` thins the
+main thread's tool events the same way. The local outbox keeps every event whichever you
+pick; turns, prompts, attention and subagents are never thinned. `replay --tools all`
+sends every tool event once, for a receiver rebuilt from the outbox, and `replay` says
+how many it thinned.
 
 No telemetry. Secrets never leave (`secrets@1` runs above tier 0, always). Your
 server or none. Pre-release: the reference receiver is still being built; see the

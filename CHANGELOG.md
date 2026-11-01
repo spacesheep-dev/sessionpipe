@@ -5,6 +5,29 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (thinned tool events, issue #208)
+
+A daemon or hook from this release on thins the tool events it sends an HTTP receiver by
+default (PROTOCOL.md §4, *Thinned tool events*; the sink's `tools`, `main` unless the
+machine's owner set it). Additive on protocol 1, and every rule a receiver may already
+rely on still holds:
+
+- A subagent's tool calls (`data.agent_id` set) arrive as at most one `tool.ended` per
+  session per 60 s, and never as `tool.started`. The main thread's arrive as before.
+  `beat` (opt-in) thins the main thread's the same way. Nothing but `tool.*` is thinned.
+- A thread's first `tool.ended` after its `attention.needed` is always sent, so "the next
+  event that proves the prompt was resolved" (`attention.cleared`) still arrives.
+  `attention.needed` now carries `agent_id` when a subagent asked.
+- `seq` has gaps where events were thinned; a gap is never a lost event
+  (`conformance/delivery/25-seq-gap.json`). A receiver MUST NOT expect a `tool.ended` for
+  every `tool.started` or the reverse, nor count the tool events it got as the session's
+  tool calls.
+- A machine starts at most one request a second (HTTP.md §6); a receiver that limits
+  requests per machine SHOULD allow at least that.
+- A receiver that needs every tool event asks the machine's owner for `sink add <url>
+  --tools all`; `replay --tools all` re-sends them once.
+- Codex: a subagent's tool calls and permission prompts carry `agent_id` (ADAPTERS.md).
+
 ### For receivers (0.11.0)
 
 What a 0.11.0 daemon or hook sends, what it accepts, and how a receiver adopts it while

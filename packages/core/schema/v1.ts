@@ -219,6 +219,8 @@ export const EventData = z.object({
     kind: AttentionKind,
     tool: ToolName.optional(),
     message: z.string().max(200).optional(),
+    /** Set when a subagent asked. */
+    agent_id: z.string().max(128).optional(),
   }),
   "attention.cleared": Loose.extend({
     attention_id: z.string().max(128),

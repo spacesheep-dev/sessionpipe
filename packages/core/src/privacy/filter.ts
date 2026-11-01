@@ -44,7 +44,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "tool.started": { 1: ["tool", "call_id", "turn_id", "agent_id"], 3: ["input"] },
   "tool.ended": { 1: ["tool", "call_id", "turn_id", "agent_id", "ms", "ok", "error"], 3: ["input", "output"] },
   "files.changed": { 1: ["paths"] },
-  "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message"] },
+  "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message", "agent_id"] },
   "attention.cleared": { 0: ["attention_id", "how"] },
   "subagent.started": { 1: ["agent_id", "agent_type"] },
   "subagent.ended": { 1: ["agent_id", "agent_type"] },
