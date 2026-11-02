@@ -973,6 +973,14 @@ send → delivered time.
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
   until acked; a start the machine refuses `start_limit`, final at once.
+- `conformance/delivery/16`–`19` — receiver scenarios: a machine paired with no sink
+  token, its status refused without the `poll_key`, `pending` with it, `paired` once a
+  person approves, then 404 (§2; only for a receiver that declares
+  `control.open_pairing`); a well-known that names `control.session_tools` (§6); a
+  prompt's reply streamed as `progress` acks with `seq` rising, then `delivered`, and
+  the poll empty after (§10); a second pairing start naming the machine the first one
+  made, answered with that machine and a code, then `paired` once approved (§2,
+  renewal).
 - `conformance/delivery/20`–`22`: a start refused `permission`, final at once; a
   `delivered` with `applied`; a hello with `start`.
 - `conformance/delivery/23` — a receiver that sets `control.inherit` accepts a hello
