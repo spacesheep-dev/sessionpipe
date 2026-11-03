@@ -264,7 +264,13 @@ describe("a start's options are checked before anything is taken", { timeout: 30
       for (const permission of [mode, "safe", undefined] as const) {
         const q = await start(`claude-code:${NEW}`, permission ? { permission } : {});
         expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "permission", detail });
-        expect(outcomes(q.id)).toHaveLength(1);
+        // One refusal, never a run. The daemon may re-send the same ack if a long-poll
+        // re-serves the message before the first ack's POST lands (`recentAcks`:
+        // at-least-once, deduped by id at the receiver), so every final ack for it is
+        // this refusal and none is a delivery.
+        const finals = outcomes(q.id);
+        expect(finals.length).toBeGreaterThanOrEqual(1);
+        for (const a of finals) expect(a).toMatchObject({ outcome: "refused", code: "permission" });
       }
     }
     expect(runs).toEqual([]);
