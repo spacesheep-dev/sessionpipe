@@ -10,14 +10,18 @@ import os from "node:os";
 import path from "node:path";
 
 export type LocalRequest =
-  /** A waiter parks until a message for its session arrives. */
-  | { op: "wait"; session: string; pid?: number }
-  /** A Stop hook asks for a queued message (turn mode). */
-  | { op: "stop"; session: string; active: boolean }
+  /** A waiter parks until a message for its session arrives. `channel`: the waiter is
+   *  `sessionpipe channel`, which pushes the message into the session rather than handing
+   *  it to a turn that asked for it (CONTROL.md §8). */
+  | { op: "wait"; session: string; pid?: number; channel?: boolean }
+  /** A Stop hook asks for a queued message (turn mode). `mode` is the session's own
+   *  permission mode, as its payload reports it (CONTROL.md §6, The session's mode). */
+  | { op: "stop"; session: string; active: boolean; mode?: string }
   /** A PermissionRequest hook parks until a verified answer, or until it's released. */
   | { op: "permission"; session: string; attention: string; tool?: string }
-  /** The worker reports a hook event: turn state and attention closure. */
-  | { op: "event"; session: string; event: string; transcript?: string; cwd?: string }
+  /** The worker reports a hook event: turn state, attention closure, and the session's
+   *  own permission mode where its payload named one. */
+  | { op: "event"; session: string; event: string; transcript?: string; cwd?: string; mode?: string }
   /** `sessionpipe control status`. */
   | { op: "status" }
   /** `sessionpipe update` installed a new copy: restart onto it once nothing is in hand. */

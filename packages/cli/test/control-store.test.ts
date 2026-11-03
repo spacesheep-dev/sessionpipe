@@ -220,13 +220,56 @@ describe("acks not yet accepted", () => {
 describe("forks and aliases on disk", () => {
   it("state.json: the fork map, or nothing when it is missing or not a map", () => {
     const f = path.join(tmp, "state", "control", "state.json");
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
-    writeState(f, { copies: { a: "b" }, started: {} });
-    expect(readState(f)).toEqual({ started: {}, copies: { a: "b" } });
+    const copy = { id: "b", at: "2026-10-26T00:00:00.000Z", reason: "no lane reached it" };
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
+    writeState(f, { copies: { a: copy }, started: {}, modes: {}, parked: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: { a: copy } });
+    // Written in both shapes, so a daemon that only knows the id map can still roll back.
+    expect(JSON.parse(readFileSync(f, "utf8")) as { copies: unknown; copies_v2: unknown }).toMatchObject({
+      copies: { a: "b" },
+      copies_v2: { a: copy },
+    });
+    // The id alone is what daemons up to 0.10.0 wrote: a copy with nothing else known.
+    writeFileSync(f, JSON.stringify({ copies: { a: "b" } }));
+    expect(readState(f)).toEqual({
+      started: {},
+      modes: {},
+      parked: {},
+      copies: { a: { id: "b", at: "", reason: "" } },
+    });
+    writeFileSync(f, JSON.stringify({ copies: { a: 7, b: {}, c: { id: "" }, d: { id: "x" } } }));
+    expect(readState(f).copies).toEqual({ d: { id: "x", at: "", reason: "" } });
+    // A message written into a session's inbox that it hasn't taken: kept while the
+    // hold window is open, and only in the shape the daemon wrote.
+    const fresh = new Date().toISOString();
+    writeFileSync(
+      f,
+      JSON.stringify({
+        parked: {
+          "claude-code:a": { at: fresh, id: "01K6" },
+          "claude-code:old": { at: new Date(Date.now() - 400_000).toISOString(), id: "01K6" },
+          "claude-code:unparseable": { at: "whenever", id: "01K6" },
+          "claude-code:no-at": { id: "01K6" },
+          "claude-code:no-id": { at: fresh },
+          "claude-code:not-an-object": "01K6",
+        },
+      }),
+    );
+    expect(readState(f).parked).toEqual({ "claude-code:a": { at: fresh, id: "01K6" } });
+    writeFileSync(f, JSON.stringify({ parked: "none" }));
+    expect(readState(f).parked).toEqual({});
+    // The clock it is read against is the daemon's own.
+    writeFileSync(f, JSON.stringify({ parked: { "claude-code:a": { at: fresh, id: "01K6" } } }));
+    expect(readState(f, Date.now() + 400_000).parked).toEqual({});
+    // The modes each session's hooks reported: a word, or not kept at all.
+    writeFileSync(f, JSON.stringify({ modes: { a: "plan", b: 7, c: "not a mode at all!" } }));
+    expect(readState(f).modes).toEqual({ a: "plan" });
+    writeFileSync(f, JSON.stringify({ modes: "plan" }));
+    expect(readState(f).modes).toEqual({});
     writeFileSync(f, JSON.stringify({ copies: "b" }));
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));
-    expect(readState(f)).toEqual({ started: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
     // What each started session runs with: a known level, and a model only when well-formed.
     writeFileSync(
       f,

@@ -54,6 +54,7 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "ask status": "ask status (on or off, the daemon, the agents it can ask, the folders they may run in)",
     "ask setup":
       "ask setup [--remove] (write the section into ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, or take it out)",
+    channel: "channel [--session claude-code:<id>] [--name N] (Claude Code runs it as a channel, with --channels)",
     worker: "worker <job-file> (internal: process one queued job)",
     hook: "hook (internal: harnesses run dist/hook.js directly)",
     version: "version (print the installed version)",
