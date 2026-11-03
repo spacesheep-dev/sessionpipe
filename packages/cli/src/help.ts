@@ -47,6 +47,13 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "pool order": "pool order <id|email>… (the complete order)",
     "pool refresh": "pool refresh [<id|email>] (read usage from the vendor now)",
     wait: "wait [--session <harness>:<id>]",
+    ask: 'ask <agent|harness:id> "<task>" [--cwd DIR] [--permission read|safe] [--model M] [--json] [--quiet] (or: ask on|off|status|setup)',
+    "ask on":
+      "ask on [--no-service] [--yes] (sessions here may ask another agent; the daemon runs even with no receiver; the person's command, --yes from inside a session)",
+    "ask off": "ask off (no session here may ask another agent)",
+    "ask status": "ask status (on or off, the daemon, the agents it can ask, the folders they may run in)",
+    "ask setup":
+      "ask setup [--remove] (write the section into ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, or take it out)",
     worker: "worker <job-file> (internal: process one queued job)",
     hook: "hook (internal: harnesses run dist/hook.js directly)",
     version: "version (print the installed version)",

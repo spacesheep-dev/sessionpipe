@@ -151,6 +151,25 @@ account's numbers arrive as `limits.observed` with `account_id`, so a receiver s
 every account's room. Opt-in only, credentials in the machine's own secrets store and
 sent only to the vendor ([the pool](packages/cli/README.md#the-pool-several-claude-accounts-one-session-that-keeps-going),
 [CONTROL.md §6 `pool`](spec/CONTROL.md#pool)).
+### Agents that ask agents
+
+A session can hand a task to another agent on the same machine and get the answer
+back: `sessionpipe ask codex "review the diff on this branch"` runs Codex headlessly,
+waits, and prints its reply on stdout, so Claude Code can use Codex for a review, Codex
+can ask Gemini, and any harness with a shell can use any other. The request never
+leaves the machine: it goes over the daemon's local socket (the one `wait` uses), the
+daemon runs the agent in an allowed folder at `safe` (`--permission read` narrows it;
+never wider than the machine's mode, whatever that is), caps it as it caps a `start`,
+and stops a chain at two deep. Both sessions' events say what
+happened (`delegation.started` / `delegation.ended` on the asker, `delegated_by` on
+the answerer), so a receiver shows the lineage. `sessionpipe ask on` turns it on, with
+or without a receiver; `sessionpipe ask setup` tells Claude Code and Codex the command
+exists, in their own instruction files, since hooks never inject anything.
+
+```sh
+sessionpipe ask on                                        # once; the daemon runs as a service
+sessionpipe ask codex "review the diff on this branch"    # from inside any session; the answer is stdout
+```
 
 ## Three promises
 

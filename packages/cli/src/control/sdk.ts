@@ -9,6 +9,7 @@
 // Measured (P1 spike 4, Claude Code 2.1.286): first token 1.5 s cold, 1.1 s warm;
 // zero turns while idle; but ~300 MB resident per held session, so the daemon
 // closes one that has been idle for ten minutes and a later message resumes it.
+import { withoutLineage } from "@sessionpipe/core";
 import type { RunLevel, StartPermission } from "@sessionpipe/core/control";
 import type { SdkHost, SdkSession } from "./daemon.js";
 
@@ -51,6 +52,7 @@ export async function loadSdk(o: {
       permission,
       model,
       allowedTools,
+      env,
     }: {
       session: string;
       cwd: string;
@@ -58,6 +60,8 @@ export async function loadSdk(o: {
       model?: string;
       configDir?: string;
       allowedTools?: string[];
+      /** Over the process's own: an ask's lineage for the session's hooks (CONTROL.md §13). */
+      env?: Record<string, string>;
     }): SdkSession {
       const queue: unknown[] = [];
       let wake: (() => void) | null = null;
@@ -79,7 +83,8 @@ export async function loadSdk(o: {
           ...(model ? { model } : {}),
           ...(allowedTools?.length ? { allowedTools } : {}),
           ...(o.claudeBin ? { pathToClaudeCodeExecutable: o.claudeBin } : {}),
-          env: { ...(o.env ?? process.env), SESSIONPIPE_CONTROL_JOB: "1" },
+          // Ours without the lineage this process may carry, then the session's own (jobEnv).
+          env: { ...withoutLineage(o.env ?? process.env), ...env, SESSIONPIPE_CONTROL_JOB: "1" },
         },
       });
       const waiting: { resolve: (v: { reply: string; error?: string }) => void }[] = [];

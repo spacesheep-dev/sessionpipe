@@ -178,6 +178,29 @@ a signed `pool` command; turning it on or off, removing or reordering accounts, 
 finishing a sign-in need a fresh confirm with your passkey or device key, never a day
 grant alone. `sessionpipe uninstall` runs `pool off` first.
 
+### Agents that ask agents
+
+A session can hand a task to another agent on this machine and get the answer back:
+`sessionpipe ask codex "review the diff on this branch"` runs Codex headlessly, waits,
+and prints its reply on stdout (the child's id and progress on stderr), so Claude Code
+can use Codex for a review, Codex can ask Gemini, and any harness with a shell can use
+any other. The request never leaves the machine: it goes over the daemon's local socket
+(the one `wait` uses), the daemon runs the agent in an allowed folder at `safe` (or
+`read`; never wider than the machine's mode), caps it as it caps a start, and stops a
+chain at two deep. Both
+sessions' events say what happened (`delegation.started` / `delegation.ended` on the
+asker, `delegated_by` on the answerer). A receiver can do the same from outside with
+`reply_to` on a `start` or a `prompt`: the answer comes back into that session as a
+message. `sessionpipe ask on` turns it on, with or without a receiver; `sessionpipe ask
+setup` tells Claude Code and Codex the command exists, in their own instruction files,
+since hooks never inject anything.
+
+```sh
+sessionpipe ask on                                        # once; the daemon runs as a service
+sessionpipe ask codex "review the diff on this branch"    # from inside any session; the answer is stdout
+sessionpipe ask status                                    # on or off, the daemon, the agents it can ask
+```
+
 ## Updates
 
 The control daemon keeps its own copy current. About a minute after it starts, and then

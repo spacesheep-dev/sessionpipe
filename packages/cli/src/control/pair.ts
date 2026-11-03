@@ -19,6 +19,7 @@ import { KEY_TYPES, type TrustedKey, verifyEnrollment } from "@sessionpipe/core/
 import type { Exec } from "@sessionpipe/core/service";
 import * as core from "@sessionpipe/core/service";
 import {
+  askOn,
   type ControlConfig,
   type ControlMode,
   controlState,
@@ -154,6 +155,10 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     files: true,
     // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
     key_types: [...KEY_TYPES],
+    // Whether sessions here may ask another agent (§13), and that a start or a prompt
+    // may carry `reply_to` (§6, Handoff): a receiver offers a handoff only where it may.
+    ask: askOn(cfg),
+    handoff: true,
   };
   /** One pairing code from the receiver. `machine` names the row a previous code
    *  made, so a renewal adds no second machine. */
