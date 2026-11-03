@@ -447,6 +447,29 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
     }
   });
 
+  it("a turn the daemon itself runs still parks its prompt: nobody is at a terminal there", async () => {
+    const d = await daemon(sock, () => ({ op: "decision", behavior: "allow", id: "a1" }));
+    try {
+      await perm(
+        { tool_name: "Bash", tool_input: { command: "cp a b" }, prompt_id: "p2" },
+        { SESSIONPIPE_CONTROL_JOB: "1" },
+      );
+      expect(d.asked).toEqual([
+        {
+          op: "permission",
+          session: `claude-code:${SID}`,
+          attention: attention("p2", "Bash", { command: "cp a b" }),
+          tool: "Bash",
+        },
+      ]);
+      expect(out).toEqual([
+        `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } })}\n`,
+      ]);
+    } finally {
+      await d.close();
+    }
+  });
+
   it("a deny carries the owner's message, or the default one", async () => {
     let reply: unknown = { op: "decision", behavior: "deny", message: "Not that.", id: "d1" };
     const d = await daemon(sock, () => reply);

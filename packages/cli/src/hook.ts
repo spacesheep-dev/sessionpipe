@@ -164,7 +164,12 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
    *  goes wrong (no daemon, a timeout) prints nothing: the harness carries on as usual. */
   function controlAsk(stdin: string): Promise<string | null> | null {
     if (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest")) return null;
-    if (env.SESSIONPIPE_CONTROL_JOB) return null; // a headless turn the daemon itself runs
+    // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
+    // asks at its Stop: the daemon hands that session its next message itself. Its
+    // permission prompts do park: nobody is at a terminal there, so the owner's signed
+    // answer is the only one it can get (a session started at edits, auto or inherit
+    // asks before a Bash).
+    if (env.SESSIONPIPE_CONTROL_JOB && event === "Stop") return null;
     const sock = socketPath(state, env);
     if (
       process.platform === "win32"
