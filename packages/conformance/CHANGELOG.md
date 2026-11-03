@@ -1,5 +1,15 @@
 # @sessionpipe/conformance
 
+## 0.13.0
+
+No changes in this release.
+
+## 0.12.0
+
+### Minor Changes
+
+- 6e4890b: A session waiting on its own background work no longer reads idle on a receiver until the work ends (#153). `turn.ended.background` leaves out sessionpipe's own waiter (`sessionpipe wait`, which ends only when a message arrives, and so held every reachable session at "working"), `subagent.ended` carries `background`, the count once that subagent is out of it, and PROTOCOL.md §4 says a receiver SHOULD keep such a session as working until its next `turn.ended` or `session.ended`, not until the next event, which was always the workflow's own. Fixtures: `harness/claude-code/stop-waiter` (recorded on 2.1.312) and `subagent-stop`.
+
 ## 0.11.0
 
 No changes in this release.

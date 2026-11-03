@@ -108,13 +108,14 @@ async function daemon(sock: string, reply: (req: Record<string, unknown>) => unk
 }
 
 describe("the hook writes one job and spawns the worker", () => {
-  it("the job carries argv, stdin, the six env keys and nothing else; the worker is detached", async () => {
+  it("the job carries argv, stdin, the seven env keys and nothing else; the worker is detached", async () => {
     const env = {
       CLAUDE_CODE_HOST_SESSION_ID: "host-1",
       CLAUDE_CONFIG_DIR: "/c",
       CLAUDE_PROJECT_DIR: "/p",
       CODEX_HOME: "/x",
       GEMINI_CLI_HOME: "/g",
+      SESSIONPIPE_ASKED_BY: "codex:0199a8c0-1111-7000-8000-000000000001",
       SESSIONPIPE_LAUNCHED_BY: "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
       HOME: "/not/copied",
     };
@@ -129,7 +130,7 @@ describe("the hook writes one job and spawns the worker", () => {
       cwd: process.cwd(),
       ppid: process.ppid,
     });
-    expect(Object.keys(job?.env ?? {})).toHaveLength(6);
+    expect(Object.keys(job?.env ?? {})).toHaveLength(7);
     const jobFile = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
     expect(spawned.spawn).toHaveBeenCalledWith(process.execPath, [path.resolve(here, "../src/worker.js"), jobFile], {
       detached: true,
@@ -373,6 +374,14 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
       expect(d.asked[1]).toEqual({ op: "stop", session: `claude-code:${SID}`, active: false });
       expect(out).toHaveLength(1);
       expect(jobs()).toHaveLength(2);
+      // The session's own permission mode rides along when the payload names one
+      // (CONTROL.md §6, The session's mode); a value of another shape is not a mode.
+      await run(["claude-code", "Stop"], claude({ permission_mode: "bypassPermissions" }));
+      expect(d.asked[2]).toMatchObject({ op: "stop", mode: "bypassPermissions" });
+      await run(["claude-code", "Stop"], claude({ permissionMode: "plan" }));
+      expect(d.asked[3]).toMatchObject({ op: "stop", mode: "plan" });
+      await run(["claude-code", "Stop"], claude({ permission_mode: "a mode with spaces" }));
+      expect(d.asked[4]).not.toHaveProperty("mode");
     } finally {
       await d.close();
     }
@@ -442,6 +451,29 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
       const t = timing()[0] as { ms: number; control_wait_ms: number; spawned: boolean };
       expect(t.spawned).toBe(true);
       expect(t.control_wait_ms).toBeGreaterThanOrEqual(0);
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("a turn the daemon itself runs still parks its prompt: nobody is at a terminal there", async () => {
+    const d = await daemon(sock, () => ({ op: "decision", behavior: "allow", id: "a1" }));
+    try {
+      await perm(
+        { tool_name: "Bash", tool_input: { command: "cp a b" }, prompt_id: "p2" },
+        { SESSIONPIPE_CONTROL_JOB: "1" },
+      );
+      expect(d.asked).toEqual([
+        {
+          op: "permission",
+          session: `claude-code:${SID}`,
+          attention: attention("p2", "Bash", { command: "cp a b" }),
+          tool: "Bash",
+        },
+      ]);
+      expect(out).toEqual([
+        `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } })}\n`,
+      ]);
     } finally {
       await d.close();
     }

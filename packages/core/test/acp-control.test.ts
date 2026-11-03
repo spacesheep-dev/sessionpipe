@@ -463,3 +463,15 @@ describe("one agent, driven", () => {
     });
   });
 });
+
+describe("a launcher script the agent can't be run through (#165)", () => {
+  it("startAcp says so instead of spawning it", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-acp-shim-"));
+    const bat = path.join(dir, "codex-acp.bat");
+    writeFileSync(bat, "@echo off\r\nsomething %*\r\n");
+    expect(await startAcp(base({ bin: bat, args: [] }))).toEqual({
+      failed: expect.stringMatching(/^couldn't start Codex: codex-acp\.bat is a launcher script /),
+    });
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

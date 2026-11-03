@@ -8,20 +8,27 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_MODES,
   claudeEnv,
   claudeLogin,
   cmpVersion,
   detectCaps,
   findClaude,
   findTranscript,
+  homeSettings,
+  hookMode,
   isUuid,
   liveProcess,
   loginCommand,
   loginHint,
   modeFlags,
+  modeRank,
+  NO_HOME_SETTINGS,
+  offeredLevels,
   parseAuthStatus,
   parseCaps,
   parseResult,
+  peerClass,
   recentlyWritten,
   runClaude,
   sessionFolder,
@@ -129,16 +136,68 @@ describe("capabilities and mode flags", () => {
     () => {
       const ok = script(path.join(tmp, "caps-ok"), `printf '%s' '${HELP.replace(/'/g, "")}'`);
       expect(detectCaps(ok).fork).toBe(true);
+      expect(detectCaps(ok)).not.toHaveProperty("unread");
       const bad = script(path.join(tmp, "caps-bad"), "echo '  --fork-session  x'\nexit 1");
       expect(detectCaps(bad)).toMatchObject({ fork: true, hasMode: false });
       expect(detectCaps(path.join(tmp, "caps-none")).fork).toBe(false);
+      // A failing run that still printed its modes is a read.
+      const printed = script(path.join(tmp, "caps-printed"), `printf '%s' '${HELP.replace(/'/g, "")}'\nexit 1`);
+      expect(detectCaps(printed)).toMatchObject({ hasMode: true, modes: expect.arrayContaining(["auto", "dontAsk"]) });
+      expect(detectCaps(printed)).not.toHaveProperty("unread");
     },
   );
+  it.runIf(process.platform !== "win32")(
+    "a --help that times out, or fails before it lists its modes, is unread, never a claude with no modes (#152)",
+    () => {
+      // The Intel's daemon started 82 s after a reboot, beside 28 other Claude Code
+      // processes: its --help took longer than the timeout, and nothing was printed.
+      const slow = script(path.join(tmp, "caps-slow"), "exec sleep 5");
+      expect(detectCaps(slow, 200)).toEqual({
+        hasMode: false,
+        modes: [],
+        promptsNone: false,
+        fork: false,
+        stream: false,
+        unread: "`caps-slow --help` timed out after 0.2 s",
+      });
+      const failed = script(path.join(tmp, "caps-failed"), "echo '  --fork-session  x'\nexit 1");
+      expect(detectCaps(failed)).toMatchObject({ fork: true, unread: "`caps-failed --help` failed" });
+      expect(detectCaps(path.join(tmp, "caps-missing")).unread).toBe("`caps-missing --help` failed");
+    },
+  );
+  it("caps whose --help couldn't be read refuse every level but inherit, and say why", () => {
+    const unread = {
+      hasMode: false,
+      modes: [],
+      promptsNone: false,
+      fork: false,
+      unread: "`claude --help` timed out after 30 s",
+    };
+    // Auto was refused as a mode this Claude Code lacks, and safe ran with no flag at all,
+    // so the settings' defaultMode decided.
+    for (const level of ["read", "safe", "edits", "auto"] as const)
+      expect(modeFlags(level, unread)).toEqual({
+        error:
+          "this machine couldn't read its Claude Code's options (`claude --help` timed out after 30 s); try again in a minute",
+      });
+    expect(modeFlags("inherit", unread)).toEqual({ args: [] });
+    // And no start is offered: an offered safe would be taken and run with no flag.
+    for (const mode of ["safe", "auto", "inherit"] as const) expect(offeredLevels(mode, unread)).toEqual([]);
+  });
 });
 
 describe("env, login and hints", () => {
-  it("claudeEnv drops the in-session markers and names the account's config dir", () => {
-    const base = { PATH: "/bin", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CONFIG_DIR: "/acct" };
+  it("claudeEnv drops the in-session markers and any lineage, and names the account's config dir", () => {
+    const base = {
+      PATH: "/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CONFIG_DIR: "/acct",
+      // A daemon started from inside an asked session: none of this is the child's.
+      SESSIONPIPE_ASKED_BY: "codex:a1",
+      SESSIONPIPE_ASK_CHAIN: "codex:a1",
+      SESSIONPIPE_LAUNCHED_BY: "codex:a1",
+    };
     expect(claudeEnv(undefined, base)).toEqual({
       PATH: "/bin",
       CLAUDE_CONFIG_DIR: "/acct",
@@ -278,5 +337,116 @@ describe("the result line", () => {
     expect(r.stdout).toBe('{"type":"result","result":"ok"}');
     const all = await runClaude(bin, [], { cwd: tmp, env: process.env, onLine: () => {}, keep: () => true });
     expect(all.stdout).toBe('{"type":"result","result":"ok"}');
+  });
+});
+
+describe("an npm claude.cmd shim (#165)", () => {
+  // What `npm install -g @anthropic-ai/claude-code` leaves on Windows: a .cmd that node
+  // refuses to spawn without a shell. Its script is run under this node instead.
+  const dir = path.join(tmp, "npm-shim");
+  const cli = path.join(dir, "node_modules", "@anthropic-ai", "claude-code", "cli.js");
+  mkdirSync(path.dirname(cli), { recursive: true });
+  writeFileSync(
+    cli,
+    `const a = process.argv.slice(2).join(" ");
+if (a === "--help") process.stdout.write(${JSON.stringify(HELP)});
+else if (a === "auth status --json") process.stdout.write('{"loggedIn":true,"authMethod":"claude.ai"}');
+else process.exit(9);
+`,
+  );
+  const shim = path.join(dir, "claude.cmd");
+  writeFileSync(
+    shim,
+    `@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\n"%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n`,
+  );
+  it("detectCaps reads its --help, and claudeLogin its auth status, with no shell", async () => {
+    expect(detectCaps(shim)).toMatchObject({ hasMode: true, fork: true, modes: expect.arrayContaining(["auto"]) });
+    expect(await claudeLogin(shim, undefined, { PATH: process.env.PATH })).toEqual({
+      loggedIn: true,
+      method: "claude.ai",
+    });
+  });
+  it("a .cmd that names no script is asked through a shell, and a failed answer is no login", async () => {
+    const bare = path.join(dir, "bare.cmd");
+    writeFileSync(bare, "exit 1\r\n");
+    expect(detectCaps(bare)).toMatchObject({ hasMode: false });
+    expect(await claudeLogin(bare, undefined, { PATH: process.env.PATH })).toEqual({ loggedIn: null });
+  });
+});
+
+describe("the mode a session's own hooks report", () => {
+  it("hookMode takes either spelling of a known mode, from the payload's own field", () => {
+    expect(hookMode({ permission_mode: "bypassPermissions" })).toBe("bypassPermissions");
+    expect(hookMode({ permissionMode: "acceptEdits" })).toBe("acceptEdits");
+    // Both spellings: Claude Code's hook field wins over its transcript's.
+    expect(hookMode({ permission_mode: "plan", permissionMode: "auto" })).toBe("plan");
+    expect(hookMode({ permission_mode: "sudo" })).toBeNull();
+    expect(hookMode({ permission_mode: 7 })).toBeNull();
+    expect(hookMode({ tool_input: { text: "permission_mode: bypassPermissions" } })).toBeNull();
+    expect(hookMode({})).toBeNull();
+    expect(hookMode(null)).toBeNull();
+    expect(hookMode("default")).toBeNull();
+  });
+  it("peerClass: bypass, prompting, or no class at all", () => {
+    expect(peerClass("bypassPermissions")).toBe("bypass");
+    for (const m of ["default", "manual", "dontAsk", "acceptEdits"]) expect(peerClass(m)).toBe("prompting");
+    // `plan`'s class depends on a capability and a TTY this code can't see; `auto` is
+    // neither; nothing recorded is neither.
+    for (const m of ["plan", "auto", "nonsense", null, undefined]) expect(peerClass(m)).toBeNull();
+  });
+  it("homeSettings reads the three keys something acts on, under permissions or at the top level", () => {
+    const dir = path.join(tmp, "home-settings");
+    mkdirSync(dir, { recursive: true });
+    const write = (j: unknown) => writeFileSync(path.join(dir, "settings.json"), JSON.stringify(j));
+    // No file, a file that isn't JSON, a file that isn't an object.
+    expect(homeSettings(path.join(tmp, "no-such-home"))).toEqual(NO_HOME_SETTINGS);
+    writeFileSync(path.join(dir, "settings.json"), "{ broken");
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write([1, 2]);
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write(null);
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({});
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({ permissions: "nope" });
+    expect(homeSettings(dir)).toEqual(NO_HOME_SETTINGS);
+    write({ permissions: { defaultMode: "nonsense" } });
+    expect(homeSettings(dir).defaultMode).toBeNull();
+    write({ permissions: { defaultMode: 7 } });
+    expect(homeSettings(dir).defaultMode).toBeNull();
+    write({ permissions: { defaultMode: "bypassPermissions" } });
+    expect(homeSettings(dir)).toEqual({
+      defaultMode: "bypassPermissions",
+      disableAutoMode: false,
+      disableBypass: false,
+    });
+    write({ permissions: { disableAutoMode: "disable", disableBypassPermissionsMode: "disable" } });
+    expect(homeSettings(dir)).toMatchObject({ disableAutoMode: true, disableBypass: true });
+    // Written by hand at the top level, which is where Claude Code's older docs put them.
+    write({ disableAutoMode: "disable", disableBypassPermissionsMode: "disable" });
+    expect(homeSettings(dir)).toMatchObject({ disableAutoMode: true, disableBypass: true });
+    write({ permissions: { disableAutoMode: true } });
+    expect(homeSettings(dir).disableAutoMode).toBe(false);
+    // No config dir named: this account's own home.
+    const home = path.join(tmp, "as-home");
+    mkdirSync(path.join(home, ".claude"), { recursive: true });
+    writeFileSync(
+      path.join(home, ".claude", "settings.json"),
+      JSON.stringify({ permissions: { defaultMode: "plan" } }),
+    );
+    expect(homeSettings(undefined, home).defaultMode).toBe("plan");
+  });
+  it("modeRank is what a turn may do without being asked, and an unknown mode is nowhere", () => {
+    expect(modeRank("plan")).toBeLessThan(modeRank("acceptEdits"));
+    expect(modeRank("acceptEdits")).toBeLessThan(modeRank("auto"));
+    expect(modeRank("auto")).toBeLessThan(modeRank("bypassPermissions"));
+    // Manual, default and dontAsk share a step: none of them lets anything through that
+    // needs approval, so none is wider than the others.
+    expect(modeRank("dontAsk")).toBe(modeRank("default"));
+    expect(modeRank("manual")).toBe(modeRank("default"));
+    expect(modeRank("nonsense")).toBe(-1);
+    expect(modeRank(null)).toBe(-1);
+    expect(modeRank(undefined)).toBe(-1);
+    expect(CLAUDE_MODES).toContain("dontAsk");
   });
 });

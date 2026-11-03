@@ -5,7 +5,7 @@
 // the proof verifies here. Also the service files (launchd / systemd) that keep the
 // daemon running, and `control off`.
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
 import path from "node:path";
 import {
   acpControl,
@@ -19,6 +19,7 @@ import { KEY_TYPES, type TrustedKey, verifyEnrollment } from "@sessionpipe/core/
 import type { Exec } from "@sessionpipe/core/service";
 import * as core from "@sessionpipe/core/service";
 import {
+  askOn,
   type ControlConfig,
   type ControlMode,
   controlState,
@@ -154,6 +155,10 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     files: true,
     // And device keys (CONTROL.md §2): an app offers one only to a machine that says so.
     key_types: [...KEY_TYPES],
+    // Whether sessions here may ask another agent (§13), and that a start or a prompt
+    // may carry `reply_to` (§6, Handoff): a receiver offers a handoff only where it may.
+    ask: askOn(cfg),
+    handoff: true,
   };
   /** One pairing code from the receiver. `machine` names the row a previous code
    *  made, so a renewal adds no second machine. */
@@ -332,6 +337,14 @@ export function installService(o: {
   const logDir = controlState(o.env);
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const log = path.join(logDir, "daemon.log");
+  // launchd and systemd create this file themselves, with whatever the umask says. It
+  // sits beside the nonces and the acks, which are 0600 (CONTROL.md §8), and it holds
+  // message ids, session ids and folder paths — so it is created here, private, before
+  // the service can make a readable one.
+  try {
+    closeSync(openSync(log, "a", 0o600));
+    chmodSync(log, 0o600);
+  } catch {}
   const r = core.installService({
     ...spec({ node: o.node, cli: o.cli, logDir }),
     ...(o.exec ? { exec: o.exec } : {}),

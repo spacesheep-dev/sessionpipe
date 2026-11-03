@@ -15,6 +15,14 @@ import { ask, socketPath } from "./control/local.js";
 
 /** A Claude Code session id (the same test as core's notClaudeCode). */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A permission mode as a hook payload spells it (core's `hookMode`, repeated because
+ *  this file imports nothing but node builtins). Claude Code writes `permission_mode`;
+ *  `permissionMode` is the spelling its transcript records use, taken too. */
+const MODE_SHAPE = /^[A-Za-z]{1,40}$/;
+const modeOf = (s: Record<string, unknown>): string | undefined => {
+  const v = typeof s.permission_mode === "string" ? s.permission_mode : s.permissionMode;
+  return typeof v === "string" && MODE_SHAPE.test(v) ? v : undefined;
+};
 
 /** The two streams the hook touches: stdin once, whole; stdout for an answer. */
 export interface HookIO {
@@ -114,6 +122,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         // Devin's payload names no folder at all; this is the only thing that does.
         "DEVIN_PROJECT_DIR",
         "GEMINI_CLI_HOME",
+        // The session the control daemon ran this one for (PROTOCOL.md §3 delegated_by).
+        "SESSIONPIPE_ASKED_BY",
         "SESSIONPIPE_CONTROL_JOB",
         // The launcher a script named for a session it starts (PROTOCOL.md §3 launched_by).
         "SESSIONPIPE_LAUNCHED_BY",
@@ -164,7 +174,12 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
    *  goes wrong (no daemon, a timeout) prints nothing: the harness carries on as usual. */
   function controlAsk(stdin: string): Promise<string | null> | null {
     if (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest")) return null;
-    if (env.SESSIONPIPE_CONTROL_JOB) return null; // a headless turn the daemon itself runs
+    // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
+    // asks at its Stop: the daemon hands that session its next message itself. Its
+    // permission prompts do park: nobody is at a terminal there, so the owner's signed
+    // answer is the only one it can get (a session started at edits, auto or inherit
+    // asks before a Bash).
+    if (env.SESSIONPIPE_CONTROL_JOB && event === "Stop") return null;
     const sock = socketPath(state, env);
     if (
       process.platform === "win32"
@@ -189,10 +204,19 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // nothing but node builtins.
     if (typeof s.transcript_path !== "string" && !UUID.test(id)) return null;
     const session = `claude-code:${id}`;
+    // The session's own permission mode, in its own words. Every Claude Code hook
+    // payload carries it, and it is the only place a mode the person chose at the
+    // keyboard can be read from (CONTROL.md §6, The session's mode): the daemon records
+    // it, and the in-place lane and a relaunch's narrowing both rest on it. Taken as a
+    // shape, not as a value — the daemon knows the modes it acts on; this file imports
+    // nothing but node builtins.
+    const mode = modeOf(s);
     if (event === "Stop")
-      return ask(sock, { op: "stop", session, active: s.stop_hook_active === true }, 300).then((r) =>
-        r?.op === "block" ? JSON.stringify({ decision: "block", reason: r.reason }) : null,
-      );
+      return ask(
+        sock,
+        { op: "stop", session, active: s.stop_hook_active === true, ...(mode ? { mode } : {}) },
+        300,
+      ).then((r) => (r?.op === "block" ? JSON.stringify({ decision: "block", reason: r.reason }) : null));
     // The attention id the adapter puts on attention.needed (claude-code.ts), so the
     // receiver's Allow / Deny names this very prompt.
     const tool =

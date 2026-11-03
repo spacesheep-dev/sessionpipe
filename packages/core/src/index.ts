@@ -5,12 +5,37 @@ export * as claudePool from "./adapters/claude-code-pool.js";
 export * from "./adapters/index.js";
 export { type Config, DEFAULT_CONFIG, machineName, readConfig, type SinkConfig, writeConfig } from "./config.js";
 export { type EventContext, makeEvent } from "./events.js";
-export { LAUNCHED_BY_ENV, launchedBy, readHook } from "./launched-by.js";
-export { Cursors, Outbox, type OutboxRef, processAlive, takeLock, takeNamedLock, waitNamedLock } from "./outbox.js";
+export {
+  ASK_CHAIN_ENV,
+  DELEGATED_BY_ENV,
+  delegatedBy,
+  LAUNCHED_BY_ENV,
+  LINEAGE_ENV,
+  launchedBy,
+  readHook,
+  withoutLineage,
+} from "./launched-by.js";
+export {
+  Cursors,
+  Outbox,
+  type OutboxRef,
+  processAlive,
+  takeLock,
+  takeNamedLock,
+  waitNamedLock,
+} from "./outbox.js";
 export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.js";
 export * from "./privacy/index.js";
 export { gitFacts, stripCredentials } from "./readers/git.js";
-export { isInjected, pairTurns, readAntigravity, readClaude, readCodex, readGemini } from "./readers/transcripts.js";
+export {
+  isInjected,
+  pairTurns,
+  peerAsk,
+  readAntigravity,
+  readClaude,
+  readCodex,
+  readGemini,
+} from "./readers/transcripts.js";
 export { shortId } from "./short-id.js";
 export * from "./sinks/index.js";
 export type * from "./types.js";

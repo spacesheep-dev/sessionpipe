@@ -5,6 +5,124 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.13.0)
+
+What a 0.13.0 daemon or hook sends and accepts beyond 0.12.0. Everything is additive on
+protocol 1, and a receiver sees each capability in the machine's hello before it may use
+it.
+
+- **Hello and pairing request say `ask` and `handoff`** (CONTROL.md §2). `ask` is whether
+  sessions on that machine may ask another agent (`sessionpipe ask`, §13: on unless the
+  person turned it off); `handoff: true` says a `start` or a `prompt` may carry
+  `reply_to`. A machine that says neither is 0.12.0 or older: send it no `reply_to`.
+- **`reply_to` on a `start` or a `prompt`** (CONTROL.md §3.1, §6 *Handoff*): `<harness>:<id>`
+  of a session on the same machine, never the command's own `session`, inside the signed
+  bytes. The command runs and is acked exactly as before, one final ack; after a
+  `delivered` ack the machine delivers the reply into `reply_to` as a message framed
+  `Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>):`,
+  through its normal prompt routing, never wider than `reply_to`'s own mode. On any other
+  kind, malformed, or naming the command's own session: `bad_fields` (vectors `165`–`169`).
+  A `reply_to` the machine can't place when the command arrives (no such session there,
+  or one outside its allowlist) makes the command no handoff: it runs and is acked as
+  usual, nothing is relayed, and no event is emitted on that session. The relay is not
+  a command: it is not acked and never relayed further.
+- **Two event types on the asking session** (PROTOCOL.md §4, tier 0):
+  `delegation.started` (`ask_id`, `via`: `ask` · `handoff`, `harness`, `to?`; tier 1 adds
+  `text`, ≤ 200 chars) and `delegation.ended` (`ask_id`, `to?`, `ok`, `ms`, `error?`,
+  `relayed?`: `delivered` · `unsupported` · `failed`; tier 2 adds `reply`, ≤ 20 000 chars).
+  They travel through the session's own outbox with its own `seq`. For a handoff,
+  `delegation.started` comes when the machine takes the command (`to` is the command's
+  session) and `delegation.ended` after its final ack; a command whose final ack isn't
+  `delivered` relays nothing, and its `delegation.ended` has `ok: false` and no `relayed`.
+  For an ask that starts a new Codex or ACP session, `to` is the id the daemon minted, the
+  name the child's own events go by.
+- **`session.delegated_by`** (PROTOCOL.md §3, tier 0): `<harness>:<id>` of the session this
+  one was started or resumed for, on every event of the child, from `SESSIONPIPE_ASKED_BY`
+  the way `launched_by` comes from `SESSIONPIPE_LAUNCHED_BY`. Lineage across harnesses,
+  never authority: join it with `delegation.*.to`, and never read it as a subagent.
+- **Nothing a receiver sends can start an ask.** It arrives on the daemon's local socket
+  only (CONTROL.md §13); a receiver learns of it through the events.
+- **Delivery mode `inbox`** (CONTROL.md §6, §6.3), between `turn` and `api`. A message
+  for a session a live Claude Code holds open is written into that session's own local
+  inbox, so the turn runs in that process, in the mode the person left it in, in the
+  window or thread they are already looking at — where today it is answered by a copy.
+  A hello lists `inbox` in `modes` where the mode exists; an ack's `mode` is `inbox`
+  where it was used, with the session's own reply. A receiver shows that answer as the
+  session's own, never as a copy's; one that doesn't know the value sees an unknown
+  `mode` on a final ack that carries the reply anyway.
+- **`failed` with `code: "held"`** (CONTROL.md §6.3, §10). The message was written into
+  the session's own inbox and that session did not take it: no turn of its own began, or
+  the turn that began was asked for by something else. Nothing was duplicated and no
+  other mode was tried. **A receiver MUST NOT redeliver it**: the mode stays shut for
+  that session while the message it wrote can still be released, so the same words again
+  would put two copies of them in one place and a released hold would deliver both.
+  Conformance `delivery/25`.
+- **`refused` with `code: "ambiguous_home"`** (CONTROL.md §5, §6.1). One session id is
+  filed in more than one of the harness's accounts on that machine and none — or more
+  than one — holds it open, so the machine cannot tell which account the message is for.
+  `detail` names the accounts by their directory name. Nothing ran.
+- **`refused` with `code: "copy_limit"`** (CONTROL.md §5, §6 `prompt`). The machine has
+  made the copies it makes in a day. A copy replays a whole conversation, so machines cap
+  them; `detail` says so in words, and at a cap of zero says the machine makes none.
+- **Ack `copy_of`** (CONTROL.md §6 `prompt`, §10), a `SessionRef`: this answer came from
+  a **copy** of the session the command named, not from it. A `fork`'s ack carries the
+  copy in `session` and the original here, and its `detail` may name the mode the copy's
+  own turn ran in. A receiver shows whose answer the person is reading. Conformance
+  `delivery/27`.
+- **Event field `injected`** (PROTOCOL.md; optional, tier 2) on `turn.transcript` and
+  `turn.progress`: the turn's ask reached the session from somewhere other than its own
+  keyboard — another session on that computer handed it over, which is how the `inbox`
+  mode reaches a session. The words are the person's; the arrival was not. It says of a
+  turn's ask what `turn.started.injected` says of a prompt, and like it is never a claim
+  that no person is behind the ask. Absent means a turn asked for where the session runs.
+
+- **A channel delivers in place too** (CONTROL.md §8). `sessionpipe channel` is a Claude
+  Code channel (its `--channels` MCP mechanism, the way the Telegram plugin reaches a
+  session) that parks as the session's waiter and pushes each message into the live
+  session, in its own thread and permission mode, as the person's own words; the daemon
+  reads the answer back from the transcript as for any waiter. A channel is used only
+  while the session is idle, and before `inbox`; its delivery is proven by the turn it
+  causes, and a channel message the session began no turn for is acked `failed` with
+  `code: "held"` like an inbox write (conformance `delivery/28`). A receiver sees the
+  reply as the session's own, acked `mode: "waiter"`; a channel's ask is `injected`.
+- **An `inbox` answer is a teammate's, to the session.** Claude Code tells the model a
+  message arriving through its inbox came from another Claude session, not its user, so
+  the session won't change its permission settings, CLAUDE.md or configuration for one,
+  or take one as the person's approval of a pending prompt (CONTROL.md §6.3). A receiver
+  SHOULD say so beside an answer acked `mode: "inbox"`.
+
+Adopting 0.13.0 while machines still run 0.12.0:
+
+- Offer a handoff (`reply_to`) only for a machine whose latest hello says `handoff: true`;
+  an older machine refuses the command `bad_fields`, since its field set is closed.
+- Read an absent `ask` or `handoff` as "not on this machine", an absent `delegated_by` as
+  unknown, and keep a `delegation.*` event you don't know as you keep any other type.
+- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.13.0's
+  `sessionpipe-core/control` and its vectors (`165`–`169` are new).
+
+
+### For receivers (0.12.0)
+
+What a 0.12.0 daemon or hook sends beyond 0.11.0: one reading in PROTOCOL.md §4, and one
+optional field. Nothing a receiver has to adopt; the rest of 0.12.0 (Windows `.cmd` shims,
+a permission prompt in a turn the daemon runs, a socket test) changes nothing on the wire.
+
+- **A session waiting on its own background work stays "working" until its next
+  `turn.ended`** (PROTOCOL.md §4, the `turn.ended` and `subagent.ended` rows; issue #153).
+  The `turn.ended` row said a receiver MAY show such a session as working "until its next
+  event"; the next event was always the work's own (a `subagent.started` seconds after the
+  Stop), so a session that had handed its turn to a background workflow read idle while the
+  workflow ran. It now says SHOULD, until the session's next `turn.ended` or
+  `session.ended`, and that `subagent.*` and a subagent's tool events are not the session
+  waking. Two things from the sender help: `subagent.ended` MAY carry `background`, the
+  count once that subagent is out of it (`schemas/v1/event-data.json`; fixture
+  `harness/claude-code/subagent-stop`), so a receiver sees the count fall to 0 before the
+  next turn; and `turn.ended.background` no longer counts sessionpipe's own waiter
+  (`sessionpipe wait`, CONTROL.md §8; fixture `harness/claude-code/stop-waiter`), which
+  ends only when a message arrives and so held every reachable session at "working".
+  Additive: a receiver that ignores the new field, or still drops the reading at the next
+  event, keeps working as before.
+
 ### For receivers (0.11.0)
 
 What a 0.11.0 daemon or hook sends, what it accepts, and how a receiver adopts it while
@@ -211,6 +329,24 @@ Adopting 0.10.0 while machines still run 0.9.0:
 
 ### Protocol changes
 
+- Control: **a session asks another agent, and a handoff brings the answer back**
+  (CONTROL.md §2, §3.1, §6 *Handoff*, new §13; PROTOCOL.md §3, §4, §5; PRIVACY.md §1;
+  still Draft). `sessionpipe ask <harness|session> "<text>"` reaches the machine's daemon
+  on its local socket, never through a receiver; the daemon checks, in order, that asking
+  is on, that the agent is one it can run headlessly or a session it can reach, the folder
+  allowlist, the depth (two deep at most), loops and the start caps, each with its code
+  (`ask_off` · `harness` · `folder` · `depth` · `loop` · `start_limit` · `bad_fields`), runs
+  the child at `safe` (or `read`), never wider than the machine's mode, frames the task so the model answers in
+  place, and sets `SESSIONPIPE_ASKED_BY` and `SESSIONPIPE_ASK_CHAIN` in the child's
+  environment. A `prompt` or a `start` MAY carry `reply_to`, a session on the same
+  machine that gets the answer as a message once the command's turn ends, through the
+  normal routing and never wider; the verifier takes it on those two kinds only, never
+  the command's own session. Two event types on the asking session, `delegation.started`
+  and `delegation.ended` (tier 0; `text` at 1, `reply` at 2), and one session field,
+  `delegated_by`, read by the hook like `launched_by`. Hello and pairing request gain
+  `ask` and `handoff`. Schemas: `control-command` gains `reply_to`, `control-hello` and
+  `control-pair` gain `ask` and `handoff`, `event` gains `session.delegated_by`,
+  `event-data` the two types. Five new control vectors (`165`–`169`).
 - Control: **device keys** (CONTROL.md §2, §3.2, §5, §11; HTTP.md §1; still Draft). An
   app whose web view can't run WebAuthn (a desktop or phone app) signs with a P-256
   key held in hardware and verified each use: `{id, alg: -7, spki, type: "device",

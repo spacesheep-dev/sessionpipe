@@ -11,11 +11,13 @@ import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } fr
 import os from "node:os";
 import path from "node:path";
 import { levelRank, type RunLevel, START_PERMISSIONS, type StartPermission } from "../control/verify.js";
+import { withoutLineage } from "../launched-by.js";
 import {
   isExe,
   JOB_TIMEOUT_MS,
   type Login,
   type Mode,
+  probe,
   type RunOptions,
   type RunResult,
   runHeadless,
@@ -87,6 +89,10 @@ export interface Caps {
   /** `--output-format stream-json` with `--include-partial-messages`: the answer can be
    *  forwarded as it is written. Optional so older callers' literals still type. */
   stream?: boolean;
+  /** Why `claude --help` couldn't be read, when it couldn't: it timed out (a machine still
+   *  starting up), or failed without listing `--permission-mode`. Such caps say nothing
+   *  about this Claude Code's modes, so they are never read as "it has none". */
+  unread?: string;
 }
 
 export function parseCaps(help: string): Caps {
@@ -113,10 +119,13 @@ const LEVEL_MODE: Record<Exclude<StartPermission, "safe">, string> = {
  *  Auto: Claude Code's own auto mode. Inherit: none, so the turn starts in the mode
  *  Claude Code picks by itself here, its settings' `permissions.defaultMode` (a resume
  *  too: Claude Code never restores a session's earlier mode). A level this Claude Code
- *  has no mode for is a refusal, never another level. Never bypassPermissions — no path
- *  here writes it. */
+ *  has no mode for is a refusal, never another level, and so is every level but inherit
+ *  while its --help can't be read (safe would otherwise run with no flag at all). Never
+ *  bypassPermissions — no path here writes it. */
 export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { error: string } {
   if (level === "inherit") return { args: [] };
+  if (caps.unread)
+    return { error: `this machine couldn't read its Claude Code's options (${caps.unread}); try again in a minute` };
   if (level === "auto" && !caps.modes.includes("auto"))
     return { error: "this machine is in auto mode, but its Claude Code has no auto permission mode" };
   if (level !== "safe") {
@@ -141,8 +150,11 @@ export function modeFlags(level: RunLevel, caps: Caps): { args: string[] } | { e
 export const ceilingLevel = (mode: Mode): StartPermission => (mode === "inherit" ? "safe" : mode);
 
 /** The levels a start may ask Claude Code for on a machine in `mode`: never above its
- *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always). */
+ *  ceiling, and each only where `claude --help` lists the mode it maps to (safe always).
+ *  None while that --help couldn't be read: an offered safe would be taken and then run
+ *  with no permission flag at all. */
 export function offeredLevels(mode: Mode, caps: Caps): StartPermission[] {
+  if (caps.unread) return [];
   return START_PERMISSIONS.filter(
     (l) => levelRank(l) <= levelRank(ceilingLevel(mode)) && (l === "safe" || caps.modes.includes(LEVEL_MODE[l])),
   );
@@ -190,9 +202,10 @@ export function claudeArgs(o: {
 }
 
 /** The env a headless turn runs with: ours, minus the markers that make Claude Code
- *  think it runs inside another session, with CLAUDE_CONFIG_DIR naming the account. */
+ *  think it runs inside another session and minus any lineage this process inherited
+ *  (jobEnv), with CLAUDE_CONFIG_DIR naming the account. */
 export function claudeEnv(configDir?: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const e = { ...env };
+  const e = withoutLineage(env);
   for (const k of [
     "CLAUDECODE",
     "CLAUDE_CODE_SESSION_ID",
@@ -236,11 +249,14 @@ export function parseAuthStatus(stdout: string | null | undefined): Login {
  *  service on a Mac nobody is logged in to, or from an ssh shell, so a headless turn
  *  started there dies with "please run /login". */
 export function claudeLogin(bin: string, configDir?: string, env: NodeJS.ProcessEnv = process.env): Promise<Login> {
+  // Through `probe`: a .cmd shim (an npm install on Windows) can't be spawned bare, and
+  // execFile's synchronous throw would reject this promise and take doctor down with it.
+  const c = probe(bin, ["auth", "status", "--json"]);
   return new Promise((resolve) => {
     execFile(
-      bin,
-      ["auth", "status", "--json"],
-      { encoding: "utf8", timeout: 20_000, env: claudeEnv(configDir, env), maxBuffer: 256 * 1024 },
+      c.file,
+      c.args,
+      { encoding: "utf8", timeout: 20_000, env: claudeEnv(configDir, env), maxBuffer: 256 * 1024, shell: c.shell },
       // `auth status` may exit non-zero when signed out; its JSON still says so.
       (_err, stdout) => resolve(parseAuthStatus(stdout)),
     );
@@ -263,20 +279,29 @@ export function loginHint(configDir: string | undefined, platform: NodeJS.Platfo
   return `Claude Code (${shown}) isn't signed in on this machine: run ${login} there.`;
 }
 
-export function detectCaps(bin: string): Caps {
-  let help = "";
+/** What `claude --help` lists. A run that fails still counts when it printed its
+ *  `--permission-mode` line; one that didn't (a timeout on a machine still starting up,
+ *  most often) is `unread`, never a Claude Code with no modes. */
+export function detectCaps(bin: string, timeoutMs = 30_000): Caps {
+  const c = probe(bin, ["--help"]); // a claude.cmd shim can't be spawned bare (#165)
   try {
-    help = execFileSync(bin, ["--help"], {
-      encoding: "utf8",
-      timeout: 30_000,
-      env: claudeEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    return parseCaps(
+      execFileSync(c.file, c.args, {
+        encoding: "utf8",
+        timeout: timeoutMs,
+        env: claudeEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 4 * 1024 * 1024,
+        shell: c.shell,
+      }),
+    );
   } catch (e) {
-    help = String((e as { stdout?: string })?.stdout || "");
+    const err = e as { stdout?: string; code?: string };
+    const caps = parseCaps(String(err?.stdout || ""));
+    if (caps.hasMode) return caps;
+    const why = err?.code === "ETIMEDOUT" ? `timed out after ${timeoutMs / 1000} s` : "failed";
+    return { ...caps, unread: `\`${path.basename(bin)} --help\` ${why}` };
   }
-  return parseCaps(help);
 }
 
 export interface Transcript {
@@ -285,25 +310,69 @@ export interface Transcript {
   project: string;
 }
 
-/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir. */
-export function findTranscript(session: string, dirs: string[]): Transcript | null {
-  if (!UUID_RE.test(session)) return null;
-  for (const dir of dirs) {
-    let projects: import("node:fs").Dirent[] = [];
+/** <config dir>/projects/<folder>/<session>.jsonl in one Claude Code config dir. */
+function transcriptIn(session: string, dir: string): Transcript | null {
+  let projects: import("node:fs").Dirent[] = [];
+  try {
+    projects = readdirSync(path.join(dir, "projects"), { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const p of projects) {
+    if (!p.isDirectory()) continue;
+    const file = path.join(dir, "projects", p.name, `${session}.jsonl`);
     try {
-      projects = readdirSync(path.join(dir, "projects"), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const p of projects) {
-      if (!p.isDirectory()) continue;
-      const file = path.join(dir, "projects", p.name, `${session}.jsonl`);
-      try {
-        if (statSync(file).isFile()) return { file, configDir: dir, project: p.name };
-      } catch {}
-    }
+      if (statSync(file).isFile()) return { file, configDir: dir, project: p.name };
+    } catch {}
   }
   return null;
+}
+
+/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir. */
+export function findTranscript(session: string, dirs: readonly string[]): Transcript | null {
+  if (!UUID_RE.test(session)) return null;
+  for (const dir of dirs) {
+    const t = transcriptIn(session, dir);
+    if (t) return t;
+  }
+  return null;
+}
+
+/** Every config dir that holds this session's transcript, in the order given. One
+ *  session id can be filed in several accounts: a transcript copied between homes, the
+ *  same id resumed under another account. There were six such ids on one Mac in
+ *  October 2026, and picking the first — which is what reading one home does — put a
+ *  message into an account that was signed out. */
+export function findTranscripts(session: string, dirs: readonly string[]): Transcript[] {
+  if (!UUID_RE.test(session)) return [];
+  const out: Transcript[] = [];
+  for (const dir of dirs) {
+    const t = transcriptIn(session, dir);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/** Which Claude Code account a session belongs to, when more than one has its
+ *  transcript: the one whose own `sessions/` says a live process holds it. `ambiguous`
+ *  is a refusal rather than a guess — it names every account that has the transcript,
+ *  and in `live` the ones holding it open, which is none of them or more than one. Both
+ *  are named by their directory name alone, since an ack travels to the receiver. Null
+ *  when no account has the session at all. */
+export type HomeChoice = { transcript: Transcript } | { ambiguous: string[]; live: string[] };
+
+const homeName = (t: Transcript) => path.basename(t.configDir);
+
+export function resolveHome(session: string, dirs: readonly string[]): HomeChoice | null {
+  const all = findTranscripts(session, dirs);
+  if (!all.length) return null;
+  if (all.length === 1) return { transcript: all[0] as Transcript };
+  const live = all.filter((t) => liveRecords(session, t.configDir).length > 0);
+  if (live.length === 1) return { transcript: live[0] as Transcript };
+  return {
+    ambiguous: [...new Set(all.map(homeName))].sort(),
+    live: [...new Set(live.map(homeName))].sort(),
+  };
 }
 
 const projectName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -382,27 +451,211 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** One live Claude Code process's registry row, `<config>/sessions/<pid>.json`, as the
+ *  in-place `inbox` lane needs it (spec/CONTROL.md §6.3). Every session that registers
+ *  files one — a terminal window, the desktop app and a claude.ai bridge worker alike,
+ *  all of them `kind: "interactive"`; a `-p` one-shot's row is not one of those. */
+export interface LiveRecord {
+  /** The config dir this row was read from: the lane never crosses accounts. */
+  configDir: string;
+  file: string;
+  pid: number;
+  /** Claude Code's own local inbox for this process, or null when it published none. */
+  socket: string | null;
+  /** 1 is the only inbox protocol this code speaks; anything else is refused. */
+  peerProtocol: number | null;
+  /** The process's start time as the registry spells it (UTC), so a recycled pid can be
+   *  told from the process that filed the row. */
+  procStart: string | null;
+  status: string | null;
+  /** `interactive` for a session the harness holds open for the person. */
+  kind: string | null;
+  entrypoint: string | null;
+  /** `<pid>.<sha>.key`, 0600: where the inbox's auth token lives (needed off macOS). */
+  keyFile: string | null;
+}
+
+const registryRow = (file: string, configDir: string, j: Record<string, unknown>): LiveRecord => {
+  const pid = Number(j.pid ?? path.basename(file).slice(0, -5));
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  let keyFile: string | null = null;
+  try {
+    // Claude Code's own spelling: `<pid>.<64 hex>.key`, 0600, beside the registry row.
+    const want = new RegExp(`^${pid}\\.[0-9a-f]{64}\\.key$`);
+    const hit = readdirSync(path.dirname(file)).find((n) => want.test(n));
+    if (hit) keyFile = path.join(path.dirname(file), hit);
+  } catch {}
+  return {
+    configDir,
+    file,
+    pid,
+    socket: str(j.messagingSocketPath),
+    peerProtocol: typeof j.peerProtocol === "number" ? j.peerProtocol : null,
+    procStart: str(j.procStart),
+    status: str(j.status),
+    kind: str(j.kind),
+    entrypoint: str(j.entrypoint),
+    keyFile,
+  };
+};
+
+/** Every live registry row for this session, across the config dirs given. A row whose
+ *  pid is gone is not one: the file outlives the process. */
+export function liveRecords(session: string, dirs: string | readonly string[]): LiveRecord[] {
+  const out: LiveRecord[] = [];
+  for (const dir of typeof dirs === "string" ? [dirs] : dirs) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(path.join(dir, "sessions")).filter((n) => /^\d+\.json$/.test(n));
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      const file = path.join(dir, "sessions", n);
+      let j: Record<string, unknown>;
+      try {
+        j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (String(j.sessionId) !== session) continue;
+      const row = registryRow(file, dir, j);
+      if (pidAlive(row.pid)) out.push(row);
+    }
+  }
+  return out;
+}
+
+/** The ONE live process that holds this session, or null. Two rows — two accounts, or
+ *  two processes in one — is a refusal rather than a guess: a lane that writes into a
+ *  live session has to know which process it is writing to (spec/CONTROL.md §6.3). */
+export function liveRecord(session: string, dirs: string | readonly string[]): LiveRecord | null {
+  const all = liveRecords(session, dirs);
+  return all.length === 1 ? (all[0] as LiveRecord) : null;
+}
+
 /** A Claude Code process holds this session right now: its registry file,
  *  <config>/sessions/<pid>.json, names it and the pid is alive (interactive and
  *  Agent SDK sessions both file one). */
 export function liveProcess(session: string, configDir: string): boolean {
-  let names: string[] = [];
+  return liveRecords(session, configDir).length > 0;
+}
+
+/** Claude Code's own permission modes, by how much a turn may do in them without being
+ *  asked about (its own order, 2.1.310). `plan` writes nothing at all. `default`,
+ *  `manual` and `dontAsk` share a step: none of them lets anything through that needs
+ *  approval — the first two ask the person, `dontAsk` refuses instead. `acceptEdits`
+ *  writes files; `auto` runs most things; `bypassPermissions` asks about nothing.
+ *
+ *  Used to tell one mode from another and to compare two, never to pick one. -1 is "not
+ *  a mode this code knows", which compares below everything. */
+export const MODE_RANK: Record<string, number> = {
+  plan: 0,
+  default: 1,
+  manual: 1,
+  dontAsk: 1,
+  acceptEdits: 2,
+  auto: 3,
+  bypassPermissions: 4,
+};
+export const CLAUDE_MODES = Object.keys(MODE_RANK);
+export const modeRank = (m: string | null | undefined): number => (m && m in MODE_RANK ? (MODE_RANK[m] as number) : -1);
+
+/** The permission mode a hook payload reports for its own session, or null. Claude Code
+ *  writes `permission_mode` on every hook payload; `permissionMode` is the spelling its
+ *  transcript records use, and is read too so one reader serves both.
+ *
+ *  This is the only place a mode the person chose at the keyboard can be read from: a
+ *  session's registry row doesn't carry it, and the transcript names it only on turns
+ *  that happen to record one. hook.ts repeats the shape test, because it imports nothing
+ *  but node builtins. */
+export function hookMode(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as { permission_mode?: unknown; permissionMode?: unknown };
+  const v = typeof p.permission_mode === "string" ? p.permission_mode : p.permissionMode;
+  return typeof v === "string" && CLAUDE_MODES.includes(v) ? v : null;
+}
+
+/** The permission class Claude Code's own inbox checks a sender's declared class
+ *  against (2.1.310): `bypassPermissions` is `bypass`; a mode that prompts before it
+ *  acts is `prompting`. `plan` is neither — its class there depends on a capability and
+ *  a TTY this code cannot see — and nor is `auto`, nor a mode nothing has recorded, so
+ *  those get no in-place lane at all (spec/CONTROL.md §6.3). */
+export function peerClass(mode: string | null | undefined): "bypass" | "prompting" | null {
+  if (mode === "bypassPermissions") return "bypass";
+  if (mode === "default" || mode === "manual" || mode === "dontAsk" || mode === "acceptEdits") return "prompting";
+  return null;
+}
+
+/** One Claude Code account's permission settings, user scope only
+ *  (`<config dir>/settings.json`): a folder's own settings may tighten these but never
+ *  loosen them, and a managed policy may tighten them further. Only the three keys
+ *  something here acts on.
+ *
+ *  Reading user scope alone can overstate how wide a home is, never understate it, and
+ *  everything that reads this treats a wider answer as a reason NOT to act (the inbox
+ *  lane needs the machine's class to equal the session's own; a narrowing is re-asserted
+ *  only where the home's default is at least as wide). */
+export interface HomeSettings {
+  /** `permissions.defaultMode`: what a session with no flag starts in. Null: not said,
+   *  or the file could not be read. */
+  defaultMode: string | null;
+  /** `disableAutoMode: "disable"`: asking for auto mode quietly gives Manual instead. */
+  disableAutoMode: boolean;
+  /** `disableBypassPermissionsMode: "disable"`: this home cannot be in bypass at all. */
+  disableBypass: boolean;
+}
+
+export const NO_HOME_SETTINGS: HomeSettings = { defaultMode: null, disableAutoMode: false, disableBypass: false };
+
+export function homeSettings(configDir: string | undefined, home = os.homedir()): HomeSettings {
+  const file = path.join(configDir ?? path.join(home, ".claude"), "settings.json");
+  let j: Record<string, unknown>;
   try {
-    names = readdirSync(path.join(configDir, "sessions")).filter((n) => /^\d+\.json$/.test(n));
+    j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
   } catch {
-    return false;
+    return { ...NO_HOME_SETTINGS };
   }
-  for (const n of names) {
-    try {
-      const j = JSON.parse(readFileSync(path.join(configDir, "sessions", n), "utf8")) as {
-        sessionId?: unknown;
-        pid?: unknown;
-      };
-      if (String(j.sessionId) !== session) continue;
-      if (pidAlive(Number(j.pid ?? n.slice(0, -5)))) return true;
-    } catch {}
-  }
-  return false;
+  if (!j || typeof j !== "object" || Array.isArray(j)) return { ...NO_HOME_SETTINGS };
+  const p = (j.permissions && typeof j.permissions === "object" ? j.permissions : {}) as Record<string, unknown>;
+  // Both spellings: Claude Code reads these two under `permissions`, and settings
+  // written by hand (and its own older docs) put them at the top level.
+  const off = (k: string) => j[k] === "disable" || p[k] === "disable";
+  return {
+    defaultMode: typeof p.defaultMode === "string" && CLAUDE_MODES.includes(p.defaultMode) ? p.defaultMode : null,
+    disableAutoMode: off("disableAutoMode"),
+    disableBypass: off("disableBypassPermissionsMode"),
+  };
+}
+
+/** The `--permission-mode` a relaunch of ONE session re-asserts, or null for no flag at
+ *  all (spec/CONTROL.md §6 `prompt`). Only a narrowing the session itself chose, and
+ *  only where it is one:
+ *
+ *  - `plan` always: nothing this harness has is narrower, so it cannot widen anything;
+ *  - `dontAsk` and `acceptEdits` where the account's own default is at least as wide
+ *    (`MODE_RANK`), so a re-assertion is never wider than what the machine itself does
+ *    with no flag. Settings that can't be read mean it isn't re-asserted;
+ *  - everything else — `default`, `manual`, `auto`, `bypassPermissions`, nothing
+ *    recorded — is no flag, and the account's own default decides.
+ *
+ *  The default it compares against is the account's own (`permissions.defaultMode`, user
+ *  scope). A folder's settings or a managed policy may narrow that further, invisibly
+ *  here; both narrow what the re-asserted mode can actually do too, so the comparison
+ *  errs on the side of asking.
+ *
+ *  It never returns `auto` or `bypassPermissions`: the two values a setting can quietly
+ *  turn into something else, and the two this code must never write. `auto` is the
+ *  incident this came from — it asks for a mode that `disableAutoMode` turns into Manual,
+ *  so a session that recorded it gets no flag and the account's default instead.
+ *
+ *  No flag is not neutral. On a fleet whose accounts default to bypass it is the widest
+ *  outcome there is, which is why a narrowing the person chose has to be said again. */
+export function relaunchMode(recorded: string | null | undefined, home: HomeSettings): string | null {
+  if (recorded === "plan") return recorded;
+  if ((recorded === "dontAsk" || recorded === "acceptEdits") && modeRank(home.defaultMode) >= modeRank(recorded))
+    return recorded;
+  return null;
 }
 
 /** Written in the last 90 s, and not by a job of ours. */
