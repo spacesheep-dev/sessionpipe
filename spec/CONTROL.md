@@ -72,7 +72,8 @@ credential: without the `poll_key` nobody is handed the machine's token.
 The pairing request and every hello MAY carry the machine's allowed `folders` and its
 `mode` (`safe`: nothing that needs approval runs unattended; `auto`: the harness's auto
 mode; `inherit`: no permission flag, so each harness starts in its own default on the
-machine, as the person's own sessions there do), so a receiver can offer a folder
+machine, as the person's own sessions there do — with one exception, §6 `prompt`, where
+a relaunch may say again the narrowing a session itself chose), so a receiver can offer a folder
 picker for a new session, and `files: true` when the machine takes attachments on a
 `start` (§6), and `prompt_files: true` when it takes them on a `prompt` too. They are
 informational: the machine checks its own list again (§5 step 6). The mode, like the
@@ -92,6 +93,15 @@ A machine that does not say `files: true` may predate attachments and start the
 session without them, so a receiver SHOULD NOT send it a `start` with `files`; one that
 does not say `prompt_files: true` refuses a `prompt` with `files` (`bad_fields`), so a
 receiver SHOULD NOT send it one.
+
+They MAY also carry `handoff: true`, when the machine takes `reply_to` on a `prompt` or a
+`start` (§6, *Handoff*), and `ask`, whether sessions on this machine may ask another
+agent through its daemon (§13). Both are informational. A machine that does not say
+`handoff: true` predates it and refuses a command with `reply_to` (`bad_fields`), so a
+receiver MUST NOT send it one. `ask` is the person's switch at the machine
+(`sessionpipe ask on|off`); a receiver can neither start an ask nor change it, and only
+shows what the machine said. A receiver that sees neither field treats the machine as
+one that predates both.
 
 And they MAY carry `start`: for each harness in `harnesses` that takes options on a
 `start`, what it takes ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):
@@ -266,15 +276,16 @@ The device writes the command as a JSON string, `cmd`, and signs those exact byt
 | `pool_account` | `pool`: an account's id as the hello lists it, or a pending sign-in's id, `[A-Za-z0-9._:-]{1,128}`. Required by `enable`, `disable`, `remove` and `login.complete`; optional on `refresh`; `bad_fields` on any other action. |
 | `pool_order` | `pool`, `order` only, required there: 1 – **20** account ids, no repeats. |
 | `pool_code` | `pool`, `login.complete` only, required there: what the person pasted back from the sign-in page (`code#state`), 1 – **512** characters, no line feed or carriage return. |
+| `reply_to` | `start` and `prompt`, optional: `<harness>:<id>` of a session on the same machine that gets the answer as a message once the command's turn ends (§6, *Handoff*). The id follows its adapter's rule, as `session` does. Never the command's own `session`. Anything else is `bad_fields`. |
 | `nonce` | 22 – **64** base64url characters (at least 16 random bytes). |
 | `iat` | Epoch milliseconds on the signing device's clock, an integer. |
 
 Each kind carries the fields of this table that name it, and `v`, `t`, `machine`, `kind`,
 `session`, `nonce`, `iat` and `note`; any other field (one this table doesn't list
-included) makes the command malformed (`bad_fields`): `files` on any kind but `start`
-and `prompt`, `permission` or `model` on any kind but `start`, and a `pool_*` field on
-any kind but `pool` (or on a `pool` whose action doesn't take it), included. The whole
-string is at most **48 000** characters (the text, JSON-escaped, and the rest).
+included) makes the command malformed (`bad_fields`): `files` or `reply_to` on any kind
+but `start` and `prompt`, `permission` or `model` on any kind but `start`, and a `pool_*`
+field on any kind but `pool` (or on a `pool` whose action doesn't take it), included. The
+whole string is at most **48 000** characters (the text, JSON-escaped, and the rest).
 
 **Permission levels.** A `start` MAY say how much the new session may do without anyone
 approving it:
@@ -408,9 +419,9 @@ A refusal is acked `refused` with a `code`: the verifier's (`malformed`,
 `not_a_command`, `wrong_machine`, `unknown_kind`, `bad_session`, `bad_fields`,
 `bad_nonce`, `too_old`, `future`, `unsigned`, `untrusted_key`, `bad_assertion`,
 `bad_grant`, `outside_grant`, `bad_csig`, `replay`, `nonce_store`) or the machine's
-(`folder`, `no_attention`, `no_session`, `start_limit`, `permission`, `model`, and for a
-`pool` command `confirm_required`, `pool_account`, `pool_order`, `pool_off`, §6). A daemon up
-to 0.9.0 sends `mode` where this document says `permission`.
+(`folder`, `no_attention`, `no_session`, `ambiguous_home`, `start_limit`, `copy_limit`,
+`permission`, `model`, and for a `pool` command `confirm_required`, `pool_account`,
+`pool_order`, `pool_off`, §6). A daemon up to 0.9.0 sends `mode` where this document says `permission`.
 
 The reference verifier is `sessionpipe-core/control` (WebCrypto only; the same file
 runs in a Worker, a browser and Node). A receiver SHOULD run it on arrival as an early
@@ -426,15 +437,143 @@ used:
 | Mode | When | Harnesses | While waiting |
 |------|------|-----------|---------------|
 | `sdk` | The daemon started the session itself (Agent SDK streaming input) and still holds it | Claude Code | 0 turns |
-| `waiter` | The session runs `sessionpipe wait` in the background (§8) | Claude Code | 0 turns, no network |
+| `waiter` | The session runs `sessionpipe wait` in the background, or was started with `sessionpipe channel` as its channel and is **idle** (§8) | Claude Code | 0 turns, no network |
 | `turn` | The session is mid-turn: the message lands at its next Stop | Claude Code, Codex, Gemini CLI (AfterAgent), Cursor, Copilot CLI, Droid, Kiro | 0 turns |
+| `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3) | Claude Code | 0 turns |
 | `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
 | `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`), an ACP agent that can reopen a session (`session/load`) | cold start |
-| `fork` | Live and idle, with no waiter | Claude Code (`--fork-session`) | cold start |
+| `fork` | Live and idle, with no mode above it | Claude Code (`--fork-session`) | cold start |
 
 Nothing fits: acked `unsupported`. **Never two writers on one transcript**: a session a
-live process holds is never resumed; it gets a fork, and later messages to it go to
-the same fork.
+live process holds is never resumed; it gets an in-place mode or a fork, and later
+messages to it go to the same copy.
+
+Two rules hold across the in-place modes:
+
+- **A message never chooses a permission mode.** In an in-place mode no mode is picked
+  at all: the turn is the session's own, in whatever mode the person left it in. A
+  daemon MUST NOT change a session's permission mode in order to deliver a message, and
+  MUST NOT declare to a session a permission class other than the machine's own.
+- **The mode is chosen before the first byte, and one message is never delivered
+  twice.** Vetting and class resolution happen up front; once a byte has been written to
+  a session the message is committed, whatever the session then does with it. A daemon
+  MUST NOT fall through to another mode after writing, and MUST NOT retry. A second
+  attempt needs a new signed command from the person, with a new nonce.
+
+### 6.1 Homes
+
+A session id can be filed in more than one of a harness's accounts (Claude Code: one
+`projects/` tree per config dir). The machine resolves which account a message is for
+from the session itself: the one whose own live-session registry says a process holds it.
+Nothing live, or more than one live, is acked `refused` with code `ambiguous_home`, whose
+`detail` says which of the two it is, names the accounts that have the transcript and,
+where more than one is live, which ones — all by their directory name and never by path.
+A guess there put a message into an account that was signed out.
+
+### 6.2 The session's mode
+
+Some decisions below need the permission mode a live session is actually running in. A
+machine MUST read that from what the session itself reports — every Claude Code hook
+payload carries `permission_mode` — and MUST NOT infer it from the machine's own
+settings or from a flag it once passed. The reference daemon keeps the latest value per
+session in its own state, outside every harness account, under no other lock than its
+single event loop, and writes nothing when the value hasn't changed.
+
+A mode can be changed at the keyboard without recording anything, so what is stored and
+what is true can disagree. A daemon MUST treat that as the ordinary case rather than as
+an error: the confirmation in §6.3 is what settles it.
+
+### 6.3 `inbox`
+
+Claude Code publishes a local inbox for each live session in its own session registry,
+and takes one JSON line on it: a `user` frame that becomes a real prompt in that
+process. The writer is the daemon's alone — it is not part of any library's public
+surface and no command line exposes it.
+
+Before writing, a daemon MUST check all of:
+
+- the machine has such an inbox at all: Claude Code publishes none on Windows, where a
+  message takes a cold mode instead. A daemon SHOULD say so before it reads anything
+  else, since nothing it could read there would change the answer;
+- exactly **one** live registry record across the harness's accounts (two is a refusal,
+  not a guess) for the session this would write to — which is the **copy** where the
+  session the command named has one (§6 `prompt`), since that is where its messages go;
+  the hold, the watcher and the confirming row are then the copy's too, in the account
+  §6.1 resolved;
+- the record's inbox protocol is the one the daemon speaks;
+- the record says the live process is one of the harness's own interactive sessions — a
+  registry record is a file any process of that uid can write;
+- the session's folder, resolved from the session itself as §5 step 6 requires, is on
+  the machine's allowlist (which is checked before any mode is chosen, for every kind);
+- the socket is a socket, owned by the daemon's own uid;
+- the process is alive and its start time matches the record's, compared in one time
+  zone — a registry that writes UTC and a `ps` that answers in local time disagree by
+  hours and every delivery reads as a recycled pid;
+- the record says the session is **idle** (a session mid-turn takes `turn` instead);
+- the session's own permission mode (§6.2) resolves to a class this mode can name, and
+  that class is the machine's own (below);
+- the command's signed `iat` is at most **120 s** from now, in either direction — judged
+  by the **signed** time and never by the envelope's `at`, which the receiver writes and
+  does not sign, and as an absolute age because §5 step 4 admits a command dated up to
+  five minutes ahead, which would otherwise stretch this window to seven;
+- and, where the inbox vets a sender by a key rather than by uid (everywhere but macOS),
+  that the key is readable.
+
+Any of these failing means the mode does not apply, and the message goes to whatever
+rung is next — which is a refusal to write, not a refusal to deliver. A receiver SHOULD
+set `expires_at` no further out than the freshness window for a session it expects to be
+reached this way. Every one of these checks, and every other reason not to write, is
+made BEFORE the mode is chosen, so that a reason found late cannot end a message on a
+mode it never used.
+
+**The class the machine declares is its own, never the target's.** The sender states a
+permission class in the message; the receiving session takes one whose class matches its
+own and silently parks one that does not. A daemon that echoed the target's class back
+would leave that check with nothing to compare. The machine's class is `bypass` only
+where the person set the machine to name no mode at all (`inherit`, §2) and the
+resolved account's own default is a mode with permission prompts off and is allowed to
+be; every other machine is `prompting`. A daemon MUST NOT widen its own class to make a
+delivery fit, and MUST NOT use this mode where the two classes differ. Declaring buys
+delivery, never escalation: the receiving session still applies its own permission
+settings, and a peer can grant it nothing.
+
+The message travels in the receiver's canonical envelope. A daemon MUST build it in the
+receiver's own attribute order and MUST confirm that what it built reads back as what it
+meant before sending — the receiver parses an envelope by rebuilding it, so anything
+that does not round-trip is parked unread rather than refused out loud. A body that
+would close the envelope early is a message this mode cannot carry, and that too is
+found before the mode is chosen. The envelope carries who the message is from, as the
+receiver's own host, cleaned to what can sit in an attribute and read as a name; it
+carries no claim the machine cannot vouch for. The frame is sent at the lowest priority
+the inbox offers, so the message becomes a turn of its own rather than joining one in
+flight, and it carries a mark identifying the message.
+
+**A write is not delivery, and a turn is not proof by itself.** The daemon MUST confirm
+within a short window (8 s here) that the session began a turn **for this message** —
+the row the harness writes for that turn says which message asked for it — and MUST NOT
+treat any other turn begun in that window as the confirmation: a message written and
+parked while the person typed something of their own would otherwise be acked
+delivered, and the answer to THEIR words sent back as the answer to this one.
+Unconfirmed, it is acked `failed` with code `held` and says plainly that the message was
+sent, may be held, and was not duplicated. It MUST NOT try another mode.
+
+**The session reads it as a teammate's request, not the person's.** Claude Code tells the
+model that a message arriving this way came from another Claude session, not from its
+user, and to act on it within its own permission settings: never to edit those settings,
+CLAUDE.md or its configuration because one asked, and never to take one as the person's
+approval of a pending prompt (2.1.314; a live session asked this way to write CLAUDE.md
+declined, and said why). The words are still the person's, and the mode still reaches
+every live session — the Claude app's included — in its own thread and mode. A receiver
+SHOULD tell the person, with an answer acked `mode: inbox`, that the session took the
+message as a teammate's request. Where a session has a channel (§8), the message goes there
+instead, as the person's own words.
+
+A message the session has not taken may still be released to it later, so for as long as
+that can happen (300 s, the receiving inbox's own hold) the mode stays shut for that
+session: a daemon MUST NOT write a second message into an inbox where one of its own is
+still unconfirmed, and MUST remember that across its own restart — an update restarts it,
+and the window outlives the process. Otherwise the obvious thing to do — send it again —
+puts two copies of the person's words in one place, and a released hold delivers both.
 
 ### `prompt`
 
@@ -460,13 +599,54 @@ files are on disk before the waiter or the Stop hook hands the text over. A file
 fails is acked `failed` with code `file`, nothing written for it is kept, and the
 message is not delivered.
 
-In the in-place modes (`waiter`, `turn`) the session answers in its own turn, so the
-daemon acks `taken` when it hands the message over and follows the session's own
+In the in-place modes (`waiter`, `turn`, `inbox`) the session answers in its own turn, so
+the daemon acks `taken` when it hands the message over and follows the session's own
 transcript until that turn ends; the final `delivered` ack carries the turn's text as
 its `reply`, so the person reads the answer where they asked. A turn that doesn't end
 within 30 minutes is acked `delivered` without one. The framed message tells the model
 its answer goes back by itself, so it never reaches for a command to send it (a real
 session invented one, 2026-10-01).
+
+**A cold mode (`resume`, `fork`) re-asserts a narrowing the session chose, and names
+nothing else.** The machine's mode is the person's own choice at that machine and the
+only thing that picks a permission flag (§2); `inherit` passes none, so the harness
+starts in its own default there. But no flag is not neutral: where an account's default
+is a mode with permission prompts off, no flag is the widest outcome there is, and a
+session the person had narrowed themselves would quietly come back wider. So for a
+session the machine did not start, on a machine that names no mode of its own, a daemon
+MAY pass the narrowing the session itself was last in, read from what the session
+reported (§6.2) and never from a flag it once asked for:
+
+| The session's own last mode | The flag on a relaunch |
+|---|---|
+| `plan` | that one: nothing the harness has is narrower |
+| `dontAsk`, `acceptEdits` | that one, where the account's own default is at least as wide; otherwise none |
+| `default`, `manual`, `auto`, `bypassPermissions`, nothing recorded | none |
+
+A daemon MUST NOT emit `auto` or `bypassPermissions` this way — the two values a setting
+can quietly turn into something else — and MUST NOT re-assert anything wider than what
+the machine itself does with no flag. "At least as wide" is read against the account's
+own default (Claude Code: `permissions.defaultMode`, user scope); a folder's settings or
+a managed policy may narrow that further, and they narrow what the re-asserted mode can
+do as well, so the comparison errs on the side of asking. A session the person put in
+Manual (`default` or `manual`) comes back at the account's own default, knowingly: a hook
+payload cannot tell a mode they chose from one nobody chose. A session the machine started keeps the options its
+start recorded (**Options** below), which this does not touch. Where a machine's mode
+asks for a mode the harness's own settings turn off (`auto` where auto is disabled), the
+turn still runs and the ack SHOULD say what it ran in instead and what would fix it. The
+ack's `detail` MAY name the mode the new turn's own record shows — which is what it ran
+in, rather than what was asked for.
+
+A `fork` answers from a **copy**, not from the session the command named, and the person
+is owed that fact: the ack names the copy in `session` and the original in `copy_of`, and
+the message itself SHOULD tell the copy that it is one, so it does not carry on the
+original's work. A copy is a leaf: later messages for that session resume the copy, and a
+copy is never itself copied. A machine MAY cap how many copies it makes in a day (each
+replays a whole conversation) and refuses beyond that `copy_limit`, with a reason. Where
+the harness has a contract for copying a session something else still holds — Claude
+Code's `CLAUDE_CODE_RESUME_SOURCE_ALIVE` — a daemon MUST use it, or the copy claims the
+original's transcript pointer and the delivered turn re-enters the person's own
+conversation unseen.
 
 ### `permission.answer`
 
@@ -653,6 +833,45 @@ confirm where the machine will want it, and MUST show which machine it is for. N
 command adds an account's credential from the receiver's side: `login.complete` carries
 a one-time code the vendor issued to the person, and the exchange happens on the
 machine.
+### Handoff (`reply_to`)
+
+A `prompt` or a `start` MAY name `reply_to` (§3.1): a session on the same machine
+that gets the answer. "Ask Codex for a second opinion and bring it back here" is one
+command. The command runs exactly as it would without the field, and its acks are
+unchanged: exactly one final ack, with the reply where this section puts it. After
+that final `delivered` ack the daemon delivers the reply into `reply_to` as a
+message, through the modes above (the first that fits; `reply_to`'s folder on the
+allowlist, §5 step 6; never a resume of a session a live process holds), framed:
+
+```
+Answer from <harness>:<short id> (sessionpipe handoff, asked via <receiver host>):
+
+<reply>
+```
+
+`<short id>` is the answering session's short id (PROTOCOL.md §3) and `<receiver host>`
+the host of the receiver that carried the command. The machine places `reply_to` when
+the command arrives, as it places the session of any `prompt` (§5 step 6): a session it
+does not know, or one in a folder its allowlist excludes, makes the command no handoff
+at all — it runs and is acked as usual, nothing is relayed, and no event is written on
+that session, since a signer's say-so is no reason to write to a session the machine
+does not have or will not touch. The relay is not a command: it is
+not acked, it is never relayed further, and `reply_to` is read from the signed bytes
+and nowhere else. Its fate lives in the events (PROTOCOL.md §4): when the daemon
+takes the command it emits on `reply_to` a `delegation.started` with `via: "handoff"`
+and `to` the command's session, and when it is done a `delegation.ended` whose
+`relayed` says `delivered`, `unsupported` (no mode fits `reply_to`, or its folder is
+no longer allowed) or `failed`; `delegation.started` is emitted only for a `reply_to`
+the machine placed. A command whose final ack is not `delivered` relays nothing;
+its `delegation.ended` has `ok: false`, the ack's `code` or `detail` as `error`, and no
+`relayed`. The session that answers carries `delegated_by: <reply_to>` on its events
+(PROTOCOL.md §3), so a receiver can draw the lineage.
+
+`cancel` and `permission.answer` never carry `reply_to`. A machine says it takes the
+field with `handoff: true` in its hello (§2); a receiver MUST NOT send `reply_to` to a
+machine that does not, and such a machine refuses the command `bad_fields`. The
+machine MUST deliver the relay at the mode its rules give `reply_to` and never wider:
+a handoff moves an answer, not a permission.
 
 ## 7. Attention lifecycle
 
@@ -664,7 +883,7 @@ from its `attention.needed` until its `attention.cleared` or the session's next 
 event, whichever comes first. A receiver SHOULD show the Allow / Deny pair only while
 the attention is open.
 
-## 8. The waiter (`sessionpipe wait`)
+## 8. The waiter (`sessionpipe wait`, `sessionpipe channel`)
 
 A session that should be reachable in place runs, as a **background** command,
 `sessionpipe wait --session <harness>:<id>`. It connects to the daemon's local socket
@@ -680,6 +899,28 @@ A harness may stop a background command at a deadline of its own (Claude Code 2.
 such stop wakes the session once, so the waiter SHOULD be started with the longest
 timeout the harness allows.
 
+A Claude Code session can instead be started with **`sessionpipe channel`** as a Claude
+Code channel (an MCP server the session's command line names after `--channels` or
+`--dangerously-load-development-channels`). It parks on the same socket as that session's
+waiter, says so (`channel: true`), and never exits: each message it is handed goes into
+the session as a channel notification, which the session takes as the person's own words,
+in its own thread and permission mode. Three rules make it safe:
+
+- **Only an idle session.** Claude Code folds a channel message that arrives during a turn
+  into that turn, where the model need not answer it (on 2.1.314 it didn't), so a daemon
+  MUST NOT hand a channel a message while the session is mid-turn: the turn's Stop takes it
+  (`turn`).
+- **Proven like an inbox write.** Claude Code acknowledges nothing a channel sends, and
+  drops a notification in silence where it didn't register the channel: a session started
+  with `--print` (as every session the Claude app starts is) or through the Agent SDK, both
+  of which ignore the flags, or an organization with channels turned off. A daemon MUST
+  confirm within §6.3's window that the session began a turn for this message — the row
+  that turn writes carries the message's id on its `<channel>` tag — and otherwise acks it
+  `failed` with code `held`, tries no other mode, and hands that channel no further
+  message: whatever it is handed next would be lost the same way.
+- **Only where it can be one.** `sessionpipe channel` MUST NOT park in a session that isn't
+  interactive, whatever its command line names.
+
 ## 9. Hook output
 
 The hook path writes nothing a harness acts on (PROTOCOL.md, SECURITY.md), with one
@@ -691,7 +932,9 @@ hook waits or prints.
 ## 10. Acks
 
 `POST {control}/ack` with [`control-ack.json`](https://sessionpipe.org/schema/v1/control-ack.json):
-`{"acks":[{"id","outcome","at","mode?","session?","code?","detail?","reply?","applied?"}]}`.
+`{"acks":[{"id","outcome","at","mode?","session?","copy_of?","code?","detail?","reply?","applied?"}]}`.
+`copy_of` says the answer came from a copy of the session the command named, not from it
+(§6 `prompt`).
 
 | Outcome | Meaning |
 |---------|---------|
@@ -700,7 +943,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
 | `unsupported` | No path for this kind on this harness. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -716,14 +959,16 @@ send → delivered time.
   every verifier must reach (§5), and enrollment proofs (§2); `66`–`89` are a
   `start`'s `files` (§3.1); `91`–`106` are a `start`'s options and the closed field
   set, `107`–`108` a `start` in a folder under `~` (§3.1), `109`–`110` `files` on a
-  `prompt`, and `111`–`136` device keys (§2, §3.2): signatures for each purpose,
+  `prompt`, `111`–`136` device keys (§2, §3.2): signatures for each purpose,
   purposes and rp ids swapped, WebAuthn fields where they don't belong, a device key
   a machine stored as a passkey, and `key.add` and enrollment of device keys, valid
   and broken; `137`–`164` the `pool` command (§6): every action valid, then a coding
   session named, no action, an unknown action, each action with another's field or
   without its own, an order too long, empty or repeating, a code with a line feed or
-  too long, pool fields on a prompt, and an order swapped after signing. The reference
-  verifier and every receiver that pre-checks MUST agree with all of them.
+  too long, pool fields on a prompt, and an order swapped after signing; and `165`–`169`
+  a handoff's `reply_to` (§3.1, §6): valid on a `prompt` and a `start`, on a `cancel`,
+  malformed, and naming the command's own session. The reference verifier and every
+  receiver that pre-checks MUST agree with all of them.
 - `conformance/delivery/09`–`15` — receiver scenarios: a prompt polled and acked
   `delivered`; a message that expires unpolled; a double ack; a permission answer acked
   with its mode; a cancel acked `unsupported`; a message redelivered on every poll
@@ -734,6 +979,13 @@ send → delivered time.
   whose `mode` is `inherit` (§2).
 - `conformance/delivery/24` — a hello with `pool` (§2): on, three accounts in order,
   one current, one limited with `until`, one disabled.
+- `conformance/delivery/25`–`27` — a prompt delivered in place through the session's own
+  inbox and acked `delivered` with `mode: "inbox"`; one written into that inbox that the
+  session never took, acked `failed` with code `held` once and never retried (§6.3); and
+  a copy's ack, naming the copy in `session` and the session the person addressed in
+  `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
+- `conformance/delivery/28` — a prompt handed to a session's channel that began no turn
+  for it, acked `failed` with code `held` once and never redelivered (§8).
 
 ## 12. Status
 
@@ -742,3 +994,83 @@ lists `control` in its capabilities only when it serves this whole document —
 pairing, the per-machine poll and acks — and declares `control.signing`. The draft this
 replaces (a per-session poll trusting the bearer token) was never implemented by any
 sender or receiver.
+
+## 13. Asking another agent (`sessionpipe ask`)
+
+A session MAY hand a task to another agent on the same machine and get the answer
+back: `sessionpipe ask <harness|session> "<text>"`. Claude Code can ask Codex for a
+review, Codex can ask Gemini, any harness with a shell can ask any other. The daemon
+runs it, caps it, and the whole thing is visible as events.
+
+**Local only.** The request reaches the daemon on its **local socket** (§8: a Unix
+socket in the state directory, mode `0600`; a named pipe on Windows), never through a
+receiver. The trust boundary is the waiter's and the hooks': a process of the
+person's own user on this machine. No command carries an ask, and nothing a receiver
+sends can start one. A receiver learns only that asking is on (`ask` in the hello, §2).
+The wire between the command and the daemon, like the waiter's, is the daemon's
+business and not part of this protocol.
+
+**The request** names the agent to ask — a `harness` this machine can run headlessly
+(§6 `start`), or an existing `<harness>:<id>` to continue — and carries the text
+(1 – **20 000** characters, not all whitespace, as §3.1), the folder it runs in
+(absolute; the caller's by default), the asking session as `<harness>:<id>` when the
+caller knows it (Claude Code and Codex put their session id in a session's
+environment), and its chain: every session that asked on the way here, outermost
+first, from the caller's own environment (below). It MAY name `permission` (`read` or
+`safe`) and `model`, as a `start` does.
+
+**The daemon checks, in order**, and refuses with a code:
+
+| Code | When |
+|------|------|
+| `ask_off` | Asking is off on this machine. It is on by default; `sessionpipe ask off` turns it off and `on` back on. |
+| `harness` | The harness is not one this machine can run headlessly, or the session is not one it can deliver a prompt to. |
+| `folder` | The folder is not on the machine's allowlist (§5 step 6). |
+| `depth` | The chain already has two sessions: A may ask B, B may ask C, C MUST NOT ask. The daemon counts for itself as well, from the asks it has in hand (the one waiting on the asker, the one waiting on that one's asker), so a session that cleared its environment is no shallower. |
+| `loop` | The target session is the asker, one of the sessions in its chain, or a session that is itself waiting on an ask the daemon has in hand (its turn ends only when that answer is back). Counted under the names the daemon knows the sessions by: a Codex session asked under its start's name and asking under its own id is one session. |
+| `start_limit` | The machine's caps on starts (§6 `start`) are reached — they count an ask's start as a receiver's, and the headless slot is the same slot — or the asker, or the session asked, already has three asks in hand. |
+| `bad_fields` | Anything else out of shape. |
+
+**The child** runs at `safe`, or at `read` when the ask names it, and never wider than
+the machine's `mode`: an ask is a model's doing, not the person's, so a machine the
+person put in `edits` or `auto` for their receivers runs an asked agent at `safe` all
+the same, and an ask can no more turn approval off than a command can (§3.1). An
+existing session runs the ask under the same cap, narrower than its own level and
+never wider; an ACP agent, which takes no level (§6), runs as the machine's mode says.
+A new session is started as a `start` would be, an existing one gets the text
+as a `prompt` would (§6, the first mode that fits), with one more paragraph framing it,
+so the model knows where the task came from and that its answer goes back by itself:
+
+```
+<text>
+
+(Asked by <harness>:<id> on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)
+```
+
+The child's environment carries `SESSIONPIPE_ASKED_BY=<harness>:<id>` (the asker) and
+`SESSIONPIPE_ASK_CHAIN=<chain…,asker>` (comma-joined). Its hooks read the first and
+stamp `delegated_by` on every event of the child (PROTOCOL.md §3); a nested ask reads
+the second and carries the chain, which is how `depth` and `loop` are counted. Both
+are inherited like any environment, so a session that is not the child itself MUST
+reset them, as it resets `SESSIONPIPE_LAUNCHED_BY`.
+
+**The answer** is the child's reply, as a `delivered` ack would carry it (§10), written
+to the caller when the turn ends; the daemon MAY hand over progress before that, as
+`progress` acks do. A refusal names its code; a failure says what went wrong. The ask
+is visible on the asking session, when it is known, as `delegation.started` with
+`via: "ask"` and `delegation.ended` (PROTOCOL.md §4), emitted by the daemon through
+the session's own outbox and sinks, with its own `seq`, so a receiver shows which
+session asked which, how long it took and (at tier 2) what came back.
+
+**At the terminal**, `sessionpipe ask` keeps the two streams apart so a model can read
+the answer and nothing else: the child's id and any progress go to **stderr**, the
+answer alone to **stdout**, exit `0`; a refusal or a failure goes to stderr with exit
+`1`; a usage error exits `2`, as `sessionpipe wait` does. `--json` prints
+`{ask_id, session, reply, ms}` instead. With no daemon answering on the socket it says
+what to run (`sessionpipe ask on`) and exits `1`.
+
+**How a session learns the command.** `sessionpipe ask setup` writes a short section
+into the harness's own instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
+saying the command exists, which agents are installed, and that a session MUST NOT use
+it to send its own reply. That is the person's file and the person's choice; the hook
+path still never injects anything (§9, SECURITY.md).

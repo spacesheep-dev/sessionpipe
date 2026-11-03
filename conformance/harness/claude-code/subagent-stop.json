@@ -35,7 +35,8 @@
       },
       "data": {
         "agent_id": "adae41131ac7691bb",
-        "agent_type": "Explore"
+        "agent_type": "Explore",
+        "background": 0
       }
     }
   ]

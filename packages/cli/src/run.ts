@@ -17,6 +17,7 @@ import {
   adapterByName,
   Cursors,
   capTail,
+  claudeControl,
   type DataOf,
   type DeliveryResult,
   type Event,
@@ -59,6 +60,14 @@ async function tellDaemon(
 ): Promise<void> {
   const sock = socketPath(state);
   if (process.platform !== "win32" && !existsSync(sock)) return;
+  // The session's own permission mode, where its payload names one (CONTROL.md §6, The
+  // session's mode): the daemon records it per session, and an in-place lane and a
+  // relaunch's narrowing both rest on it. Read from the top-level field, never matched
+  // out of the payload's text, so a tool input that quotes one cannot set it.
+  let mode: string | null = null;
+  try {
+    mode = claudeControl.hookMode(JSON.parse(job.stdin));
+  } catch {}
   await ask(
     sock,
     {
@@ -67,6 +76,7 @@ async function tellDaemon(
       event: job.event,
       ...(cwd ? { cwd } : {}),
       ...(transcript ? { transcript } : {}),
+      ...(mode ? { mode } : {}),
     },
     300,
   );
@@ -235,15 +245,18 @@ export const PROGRESS_MS = 20_000;
 export function openTurn(
   read: TranscriptRead,
   o: { base: number; prompt?: string | undefined; at: number },
-): { turn: number; user: string; assistant: string; at: number } | null {
+): { turn: number; user: string; assistant: string; at: number; injected?: true } | null {
   const last = read.turns[read.turns.length - 1];
-  const fresh = (user: string, at: number) => ({
+  const fresh = (user: string, at: number, injected?: true) => ({
     turn: o.base + read.turns.length,
     user: user.slice(0, MAX_TURN_SIDE),
     assistant: "",
     at,
+    ...(injected ? { injected: true as const } : {}),
   });
-  if (read.open) return fresh(read.open.user, read.open.at);
+  // A turn still running says the same about its ask as the finished one will: the board
+  // would otherwise show the person's relayed words as typed here until the turn ends.
+  if (read.open) return fresh(read.open.user, read.open.at, read.open.injected);
   // The prompt the hook just reported, unless the transcript already has its reply.
   // Text the person never typed (a task notification, another session's message) opens
   // no turn: the readers skip it, so that turn would never be delivered, and its
@@ -255,15 +268,17 @@ export function openTurn(
     turn: o.base + read.turns.length - 1,
     user: last.user.slice(0, MAX_TURN_SIDE),
     assistant: capTail(last.assistant, MAX_TURN_SIDE),
+    ...(last.injected ? { injected: true as const } : {}),
     at: last.at,
   };
 }
 const MAX_TURN_SIDE = 20_000;
 /** What session.attended is read from, the desktop app's link included, and session.launched_by
- *  (hook.ts picks all four): the job's own, never the worker's. */
+ *  and delegated_by (hook.ts picks all five): the job's own, never the worker's. */
 const JOB_OWN_ENV = [
   "CLAUDE_CODE_SESSION_ATTENDED",
   "CLAUDE_CODE_HOST_SESSION_ID",
+  "SESSIONPIPE_ASKED_BY",
   "SESSIONPIPE_CONTROL_JOB",
   "SESSIONPIPE_LAUNCHED_BY",
 ];
@@ -391,6 +406,7 @@ export async function runJob(
       ...(cwdRaw ? { cwd: tilde(cwdRaw) } : {}),
       ...(r.session.model ? { model: r.session.model } : {}),
       ...(r.session.launched_by ? { launched_by: r.session.launched_by } : {}),
+      ...(r.session.delegated_by ? { delegated_by: r.session.delegated_by } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
     for (const a of r.events) {
@@ -457,7 +473,13 @@ export async function runJob(
             {
               type: "turn.transcript",
               harnessEvent: job.event,
-              data: { turn: turnNo++, user: t.user, assistant: t.assistant, at: new Date(t.at).toISOString() },
+              data: {
+                turn: turnNo++,
+                user: t.user,
+                assistant: t.assistant,
+                at: new Date(t.at).toISOString(),
+                ...(t.injected ? { injected: true as const } : {}),
+              },
             },
             {
               harness: { name: job.harness, ...(version ? { version } : {}) },

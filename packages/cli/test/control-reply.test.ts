@@ -4,12 +4,125 @@ import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { answerIn, awaitAnswer, transcriptEnd } from "../src/control/reply.js";
-import { kindPath, routePrompt } from "../src/control/route.js";
+import { answerIn, awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "../src/control/reply.js";
+import { channelMark, kindPath, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
   rec({ type: "assistant", message: { stop_reason: stop, content }, ...extra });
+
+describe("firstAsk: which message the turn that just began is for", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-firstask-"));
+  const file = path.join(tmp, "t.jsonl");
+  const MARK = "message 01K6ABCDEF12";
+  /** The rows a delivery's turn gains, written after `from`. */
+  const after = (...lines: string[]) => {
+    writeFileSync(file, "head\n");
+    const from = transcriptEnd(file);
+    appendFileSync(file, lines.map((l) => `${l}\n`).join(""));
+    return from;
+  };
+  const peerRow = (o: Record<string, unknown> = {}, text = `… ${MARK} …`) =>
+    rec({ type: "user", isMeta: true, origin: { kind: "peer", ...o }, message: { content: [{ type: "text", text }] } });
+
+  it("is the peer row carrying this message's own mark", () => {
+    expect(firstAsk(file, after(peerRow()), MARK)).toBe("ours");
+    // The parsed body the harness records counts too, and a string content.
+    expect(firstAsk(file, after(peerRow({ body: `… ${MARK} …` }, "nothing here")), MARK)).toBe("ours");
+    expect(
+      firstAsk(file, after(rec({ type: "user", origin: { kind: "peer" }, message: { content: `… ${MARK} …` } })), MARK),
+    ).toBe("ours");
+    // A block with no text of its own is not where the mark is.
+    expect(
+      firstAsk(
+        file,
+        after(
+          rec({
+            type: "user",
+            origin: { kind: "peer" },
+            message: { content: [{ type: "image" }, { type: "text", text: `… ${MARK} …` }] },
+          }),
+        ),
+        MARK,
+      ),
+    ).toBe("ours");
+  });
+
+  it("is the channel row whose tag names this message's id", () => {
+    const ID = "01K6ABCDEF1234567890ABCDEF";
+    const channelRow = (id: string) =>
+      rec({
+        type: "user",
+        isMeta: true,
+        origin: { kind: "channel", server: "sessionpipe" },
+        message: { content: `<channel source="sessionpipe" via="spacesheep.dev" message_id="${id}">\nhi\n</channel>` },
+      });
+    expect(firstAsk(file, after(channelRow(ID)), channelMark(ID))).toBe("ours");
+    // Another message's row, or a typed one quoting the tag, is not this message's.
+    expect(firstAsk(file, after(channelRow("01K6OTHER")), channelMark(ID))).toBe("other");
+    expect(firstAsk(file, after(rec({ type: "user", message: { content: channelMark(ID) } })), channelMark(ID))).toBe(
+      "other",
+    );
+  });
+
+  it("is `other` for any turn this message did not cause", () => {
+    expect(firstAsk(file, after(rec({ type: "user", origin: { kind: "human" } })), MARK)).toBe("other");
+    // Another local process's message: a peer row without this message's mark.
+    expect(firstAsk(file, after(peerRow({}, "someone else's words")), MARK)).toBe("other");
+    expect(firstAsk(file, after(rec({ type: "user" })), MARK)).toBe("other");
+  });
+
+  it("is nothing yet while no row says: an unfinished line, no rows at all, only rows that aren't asks", () => {
+    writeFileSync(file, "head\n");
+    expect(firstAsk(file, transcriptEnd(file), MARK)).toBeNull();
+    expect(firstAsk(file, 0, MARK)).toBeNull();
+    // A line still being written has no newline yet, so there is no row to read.
+    const from = after();
+    appendFileSync(file, '{"type":"user"');
+    expect(firstAsk(file, from, MARK)).toBeNull();
+    expect(
+      firstAsk(
+        file,
+        after(
+          "",
+          "not json",
+          rec({ type: "assistant", message: { content: [] } }),
+          rec({ type: "user", isSidechain: true, origin: { kind: "peer" } }),
+          rec({ type: "user", isCompactSummary: true }),
+          rec({ type: "user", repeatsCompactSummary: true }),
+          rec({ type: "user", toolUseResult: {}, origin: { kind: "human" } }),
+          rec({ type: "user", message: { content: [{ type: "tool_result" }] } }),
+        ),
+        MARK,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("ranInMode: what the turn a relaunch ran actually ran in", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-ranin-"));
+  const file = path.join(tmp, "t.jsonl");
+  it("is the last mode a row after `from` records, and nothing from before it", () => {
+    writeFileSync(file, `${rec({ type: "user", permissionMode: "plan" })}\n`);
+    const from = transcriptEnd(file);
+    expect(ranInMode(file, from)).toBeNull();
+    appendFileSync(
+      file,
+      [
+        "not json",
+        rec({ type: "user", permissionMode: "acceptEdits" }),
+        rec({ type: "user", permissionMode: "bypassPermissions", isSidechain: true }),
+        rec({ type: "user", permissionMode: 7 }),
+        rec({ type: "user", permissionMode: "not a mode at all!" }),
+        rec({ type: "assistant", message: { content: [] } }),
+      ]
+        .map((l) => `${l}\n`)
+        .join(""),
+    );
+    expect(ranInMode(file, from)).toBe("acceptEdits");
+    expect(ranInMode(path.join(tmp, "none.jsonl"), 0)).toBeNull();
+  });
+});
 
 describe("answerIn", () => {
   it("is the turn's text once it ends; tool steps and subagents are not the answer", () => {
@@ -27,6 +140,24 @@ describe("answerIn", () => {
   });
   it("skips lines that aren't JSON", () => {
     expect(answerIn(["{", asst("end_turn", [{ type: "text", text: "ok" }])])).toEqual({ done: true, text: "ok" });
+  });
+  it("reads past a thinking record that ends the turn to the text written after it", () => {
+    // How Claude Code 2.1.314 wrote a turn the model thought about first: one message,
+    // two records, both end_turn (a live session on the Intel, 2026-10-30).
+    const id = "msg_011CgZPu17RdACuTWfUt8AuK";
+    const think = rec({
+      type: "assistant",
+      message: { id, stop_reason: "end_turn", content: [{ type: "thinking", thinking: "" }] },
+    });
+    const text = rec({
+      type: "assistant",
+      message: { id, stop_reason: "end_turn", content: [{ type: "text", text: "BUSY-OK-1" }] },
+    });
+    expect(answerIn([think])).toEqual({ done: false, text: "" });
+    expect(answerIn([think, text])).toEqual({ done: true, text: "BUSY-OK-1" });
+    // A turn whose last message is all thinking has ended once anything else follows it.
+    const after = rec({ type: "system", subtype: "turn_duration" });
+    expect(answerIn([think, after])).toEqual({ done: true, text: "" });
   });
 });
 
@@ -49,7 +180,11 @@ describe("awaitAnswer", () => {
     const f = path.join(dir, "t.jsonl");
     writeFileSync(f, "");
     appendFileSync(f, `${asst("end_turn", [{ type: "tool_use", name: "Edit" }])}\n`);
+    // What Claude Code writes once a turn is over: the end is seen, not waited out.
+    appendFileSync(f, `${rec({ type: "system", subtype: "turn_duration" })}\n`);
+    const t0 = Date.now();
     expect(await awaitAnswer(f, 0, { timeoutMs: 3000, pollMs: 20 })).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1500);
   });
   it("gives up after its timeout when the turn never ends", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
@@ -67,9 +202,11 @@ describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
       sdk: false,
       waiter: false,
       midTurn: false,
+      inbox: false,
       live: false,
       known: true,
       canFork: false,
+      copied: false,
     };
     expect(routePrompt({ ...view, api: true })).toEqual({ mode: "api" });
     expect(routePrompt({ ...view, api: false })).toHaveProperty("unsupported");

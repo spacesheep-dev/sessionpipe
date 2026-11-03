@@ -27,11 +27,13 @@ import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
+import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
 import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { loadSdk } from "./sdk.js";
 import {
+  askOn,
   type ControlConfig,
   type ControlMode,
   controlFile,
@@ -46,7 +48,8 @@ export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR
   sessionpipe control mode auto|safe|inherit        (how sessions run when you message them)
   sessionpipe control folders [add|remove DIR…]     (where sessions you message may run)
   sessionpipe control status | keys [remove <id>] | off [<receiver>] | run
-  sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)`;
+  sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)
+  sessionpipe channel [--session claude-code:<id>] [--name N]  (Claude Code runs this as a channel)`;
 
 const MODE_TEXT = `  auto    Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's
           own safety check stops what looks dangerous. Pick this to get work done from your phone.
@@ -289,10 +292,13 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
     }
     case "off": {
       const c = await off({ out, ...(argv[2] ? { url: argv[2] } : {}) });
-      // The service runs the pool too: while the pool is on, Claude Code here depends on it.
+      // The service runs the pool too (while the pool is on, Claude Code here depends on it),
+      // and asking turned on by hand keeps the daemon for its socket (CONTROL.md §13).
       if (c && !c.receivers.length) {
         if (readPool().on)
           out("  The daemon's service stays: the pool is on (`sessionpipe pool off` first to remove it).");
+        else if (c.ask === true)
+          out("  The daemon stays: sessions here may still ask another agent (`sessionpipe ask off` removes it).");
         else uninstallService();
       }
       return;
@@ -317,8 +323,14 @@ export function enabledHarnesses(harnesses: Record<string, { enabled?: boolean }
     .filter((n) => /^[a-z][a-z0-9-]{0,40}$/.test(n));
 }
 
+/** How long a `claude --help` that couldn't be read stands before it is asked again. */
+const UNREAD_RETRY_MS = 60_000;
+
 async function runDaemon(out: (s?: string) => void, distDir: string): Promise<void> {
   const paired = readControl();
+  // With no receiver the daemon still serves `sessionpipe ask` on the local socket
+  // (CONTROL.md §13), and the pool; only with both off is there nothing for it to do.
+  const asking = !!paired && askOn(paired);
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
   let d: ControlDaemon | null = null;
   const upstream = testUpstream(process.env);
@@ -342,9 +354,13 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     ...(upstream ? { upstream } : {}),
   });
   if (upstream) log(`pool requests go to ${upstream} (SESSIONPIPE_POOL_UPSTREAM, tests only)`);
-  if (!paired?.receivers.length) {
+  if (!paired?.receivers.length && !asking) {
     if (!pool.config.on) {
-      out("control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)");
+      out(
+        paired
+          ? "control isn't paired on this machine and asking is off; nothing to do (`sessionpipe control pair <receiver>` or `sessionpipe ask on`)"
+          : "control isn't paired on this machine; nothing to do (`sessionpipe control pair <receiver>`)",
+      );
       return;
     }
     log("the pool is on; control isn't paired (`sessionpipe control pair <receiver>` adds messages)");
@@ -355,12 +371,19 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     mode: "safe",
     receivers: [],
   };
-  let claude: { bin: string; caps: ReturnType<typeof detectCaps>; sig: string } | null = null;
+  // What `claude --help` lists, read once per binary. A --help that couldn't be read (a
+  // machine still starting up) is asked again a minute later: kept, it would refuse every
+  // message until a restart.
+  let claude: { bin: string; caps: ReturnType<typeof detectCaps>; sig: string; at: number } | null = null;
   const claudeNow = () => {
     const bin = findClaude();
     if (!bin) return null;
     const sig = `${bin}:${existsSync(bin) ? realpathSync(bin) : ""}`;
-    if (claude?.sig !== sig) claude = { bin, caps: detectCaps(bin), sig };
+    if (claude?.sig !== sig || (claude.caps.unread && Date.now() - claude.at >= UNREAD_RETRY_MS)) {
+      const caps = detectCaps(bin);
+      if (caps.unread) log(`${caps.unread}; asking again in a minute`);
+      claude = { bin, caps, sig, at: Date.now() };
+    }
     return claude;
   };
   const sdk = await loadSdk({ claudeBin: findClaude(), env: process.env, log });
@@ -489,6 +512,39 @@ export async function waitMain(argv: string[], out: (s?: string) => void): Promi
     return;
   }
   out(await waitForMessage(session));
+}
+
+/** The process as `sessionpipe channel` uses it. Stdout is the MCP connection, so
+ *  anything said to the person goes to stderr. */
+export const channelIo = {
+  input: (): NodeJS.ReadableStream => process.stdin,
+  write: (s: string): void => void process.stdout.write(s),
+  err: (s: string): void => void process.stderr.write(s),
+  exit: (code: number): void => process.exit(code),
+};
+
+/** `sessionpipe channel`. `--name` is the name the server was added under, if not
+ *  `sessionpipe`: the session's `--channels` list names it so. It ends when Claude Code
+ *  closes the server, whether or not a wait is parked on the daemon. */
+export async function channelMain(
+  argv: string[],
+  io: typeof channelIo,
+  parent: () => string[] = parentArgv,
+): Promise<void> {
+  const i = argv.indexOf("--session");
+  const session = waitSession(i >= 0 ? argv[i + 1] : undefined);
+  if (!session) {
+    io.err("sessionpipe channel: which session? Claude Code sets CLAUDE_CODE_SESSION_ID for the servers it runs.\n");
+    return io.exit(2);
+  }
+  const n = argv.indexOf("--name");
+  const name = (n >= 0 && argv[n + 1]) || "sessionpipe";
+  await runChannel(session, io.input(), io.write, {
+    version: VERSION,
+    registered: () => namedAsChannel(parent(), name),
+    log: (line) => io.err(`${line}\n`),
+  });
+  io.exit(0);
 }
 
 /** Give a sink the key a receiver handed over at pairing. A sink for the receiver that

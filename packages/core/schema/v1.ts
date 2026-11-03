@@ -31,6 +31,8 @@ export const KNOWN_TYPES = [
   "subagent.ended",
   "context.compacted",
   "limits.observed",
+  "delegation.started",
+  "delegation.ended",
   "native",
 ] as const;
 
@@ -54,6 +56,8 @@ export const TYPE_TIER: Record<(typeof KNOWN_TYPES)[number], 0 | 1 | 2 | 3> = {
   "subagent.ended": 1,
   "context.compacted": 1,
   "limits.observed": 1,
+  "delegation.started": 0,
+  "delegation.ended": 0,
   native: 3,
 };
 
@@ -114,6 +118,14 @@ export const Session = z.object({
     .string()
     .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
     .optional(),
+  /** `<harness>:<id>` of the session this one answers: the machine's daemon started or
+   *  resumed it for that session's ask, or for a handoff (CONTROL.md §6, §13), and the
+   *  child's environment says so. On every event of the child. Lineage across
+   *  harnesses, as `parent_id` is within one; never authority, never a subagent. */
+  delegated_by: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+    .optional(),
 });
 
 export const Privacy = z.object({
@@ -167,7 +179,9 @@ export const EventData = z.object({
       .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/, "a bare word, at most 40 characters")
       .optional(),
     /** True when the prompt text is a block the harness wrote rather than words a person
-     *  typed; never a claim that no person caused the turn. */
+     *  typed; never a claim that no person caused the turn. `injected` on
+     *  turn.transcript says the same of a turn's ask, for the other way an ask arrives
+     *  from somewhere other than this session's own keyboard (CONTROL.md §6.3). */
     injected: z.boolean().optional(),
   }),
   "turn.ended": Loose.extend({
@@ -184,6 +198,13 @@ export const EventData = z.object({
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),
     at: Rfc3339,
+    /** The ask reached the session from somewhere other than its own keyboard: another
+     *  local session handed it over or a channel pushed it, the two ways a control
+     *  daemon reaches a session in place (CONTROL.md §6.3, §8). The words are the
+     *  person's; the arrival was not. Absent means a turn asked for where the session
+     *  runs. Like turn.started's `injected`, and never a claim that no person is behind
+     *  the ask. */
+    injected: z.literal(true).optional(),
   }),
   /** The turn still running: its prompt and what the assistant has said so far. A
    *  later turn.progress for the same turn replaces it; the turn.transcript with the
@@ -193,6 +214,10 @@ export const EventData = z.object({
     user: z.string().max(20_000),
     assistant: z.string().max(20_000),
     at: Rfc3339,
+    /** As on turn.transcript: the ask reached the session from somewhere other than its
+     *  own keyboard. A running turn says it too, or a board would show the person's
+     *  relayed words as typed there until the turn ends. */
+    injected: z.literal(true).optional(),
   }),
   "tool.started": Loose.extend({
     tool: ToolName,
@@ -225,7 +250,12 @@ export const EventData = z.object({
     how: z.enum(["answered", "cancelled", "timeout", "unknown"]),
   }),
   "subagent.started": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
-  "subagent.ended": Loose.extend({ agent_id: z.string().max(128), agent_type: z.string().max(128).optional() }),
+  "subagent.ended": Loose.extend({
+    agent_id: z.string().max(128),
+    agent_type: z.string().max(128).optional(),
+    /** Background work still in flight once this subagent is out of it, counted as `turn.ended.background` is. Absent when the harness doesn't say. */
+    background: z.int().min(0).optional(),
+  }),
   "context.compacted": Loose.extend({ trigger: z.enum(["manual", "auto"]) }),
   /** The account's usage limits as the harness last reported them: one per window. */
   "limits.observed": Loose.extend({
@@ -234,6 +264,38 @@ export const EventData = z.object({
     /** The account the numbers belong to, as `session.account_id` spells it, when the
      *  session was served by another account than its own (the pool, CONTROL.md §2). */
     account_id: z.string().max(128).optional(),
+  }),
+  /** The daemon on this machine took an ask from this session (CONTROL.md §13), or a
+   *  command with `reply_to` naming it (§6). On the asking session, with its own seq. */
+  "delegation.started": Loose.extend({
+    ask_id: Ulid,
+    via: z.enum(["ask", "handoff"]),
+    /** The agent asked. */
+    harness: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+    /** The session that answers, once known: at once for a handoff or an ask to an
+     *  existing session; for a new session, when the harness reveals its id. */
+    to: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+      .optional(),
+    /** Tier 1: what was asked, cut to 200 characters, redacted. */
+    text: z.string().max(200).optional(),
+  }),
+  /** The asked agent's turn ended, or the ask failed before one. */
+  "delegation.ended": Loose.extend({
+    ask_id: Ulid,
+    to: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/)
+      .optional(),
+    ok: z.boolean(),
+    ms: z.int().min(0),
+    /** When not ok: why, in at most 200 characters. */
+    error: z.string().max(200).optional(),
+    /** A handoff only: whether the answer reached `reply_to`. */
+    relayed: z.enum(["delivered", "unsupported", "failed"]).optional(),
+    /** Tier 2: the answer, redacted. */
+    reply: z.string().max(20_000).optional(),
   }),
   native: Loose,
 });
@@ -284,7 +346,7 @@ export const KeyTypes = z
   .array(z.enum(["passkey", "device"]))
   .min(1)
   .max(2);
-export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+export const DeliveryMode = z.enum(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
 /** How much a started session may do without anyone approving it (CONTROL.md §3.1),
  *  narrowest first. Closed: nothing is wider than `auto`. */
 export const StartPermission = z.enum(["read", "safe", "edits", "auto"]);
@@ -375,6 +437,10 @@ export const ControlCommand = z.object({
     .max(512)
     .regex(/^[^\r\n]+$/, "one line")
     .optional(),
+  /** start, prompt: a session on the same machine that gets the answer as a message
+   *  once the command's turn ends (CONTROL.md §6, a handoff). Never the command's own
+   *  session. Send it only to a machine whose hello says `handoff`. */
+  reply_to: SessionRef.optional(),
   /** At least 16 random bytes, base64url. */
   nonce: z.string().regex(/^[A-Za-z0-9_-]{22,64}$/),
   /** Epoch ms, the signing device's clock. */
@@ -478,9 +544,14 @@ export const ControlAck = z.object({
         mode: DeliveryMode.optional(),
         /** The session that took it, when not the one named (a fork's copy, a started session). */
         session: SessionRef.optional(),
-        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`);
+        /** The answer came from a COPY of the session the command named, which this
+         *  names: the person is owed the fact that their words went somewhere else. */
+        copy_of: SessionRef.optional(),
+        /** refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`,
+         *  `ambiguous_home` when one session id is filed in several of the harness's accounts);
          *  failed: `file` when a start's attachment couldn't be fetched, checked or written,
-         *  `model` when the harness wouldn't run the start's model. */
+         *  `model` when the harness wouldn't run the start's model, `held` when a message was
+         *  written into a live session's own inbox and that session didn't take it (§6.3). */
         code: z
           .string()
           .regex(/^[a-z_]{1,40}$/)
@@ -541,6 +612,12 @@ export const ControlPairStart = z.object({
   /** The kinds of key this machine takes (unique; absent means `["passkey"]`). A
    *  client offers a device key only to a machine that lists `device`. */
   key_types: KeyTypes.optional(),
+  /** Sessions on this machine may ask another agent through its daemon (CONTROL.md
+   *  §13). Informational: a receiver can neither start an ask nor switch it. */
+  ask: z.boolean().optional(),
+  /** The machine takes `reply_to` on a prompt or a start (CONTROL.md §6). One that
+   *  doesn't say so refuses it: a receiver SHOULD NOT send it one. */
+  handoff: z.boolean().optional(),
 });
 
 /** The receiver's answer: where the person confirms, and the digits both screens show. */
@@ -655,6 +732,10 @@ export const ControlHello = z.object({
   /** The machine's account pool, when its daemon has one; sent again the moment the
    *  pool changes. A hello without it is a daemon that predates the pool. */
   pool: ControlHelloPool.optional(),
+  /** As in control-pair.json; read again for every hello, so `sessionpipe ask off` shows. */
+  ask: z.boolean().optional(),
+  /** As in control-pair.json. */
+  handoff: z.boolean().optional(),
 });
 
 export const WellKnown = z.object({

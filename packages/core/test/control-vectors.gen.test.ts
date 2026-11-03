@@ -1123,6 +1123,47 @@ describe.runIf(WRITE)("write control vectors", () => {
         );
       }
     }
+    // --- a handoff's reply_to (CONTROL.md §3.1, §6): 165–169, after the pool ---
+    const handoff: Vector[] = [];
+    {
+      const A = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"; // the session that asked
+      const hv = (name: string, description: string, s: SignedCommand, expect: Vector["expect"]) =>
+        handoff.push({ name, description, input: { signed: s, ...base() }, expect });
+      hv(
+        "valid-prompt-reply-to",
+        "A message for a Codex session whose answer goes to a Claude Code session on the same machine: a handoff.",
+        await signed(pk, day, commandStr({ session: NEW_CODEX, text: "Review the diff on this branch", reply_to: A })),
+        { ok: true, via: "grant", kind: "prompt" },
+      );
+      hv(
+        "valid-start-reply-to",
+        "A new Codex session whose answer goes to the Claude Code session that asked for it.",
+        await signed(
+          pk,
+          day,
+          start(undefined, { session: NEW_CODEX, text: "Review the diff on this branch", reply_to: A }),
+        ),
+        { ok: true, via: "grant", kind: "start" },
+      );
+      hv(
+        "reply-to-on-cancel",
+        "Only a prompt or a start carries a reply_to.",
+        await signed(pk, day, commandStr({ kind: "cancel", text: undefined, reply_to: A })),
+        { ok: false, code: "bad_fields" },
+      );
+      hv(
+        "reply-to-malformed",
+        "A reply_to that is not a session ref by the adapter's rule (a Claude Code id that isn't a UUID).",
+        await signed(pk, day, commandStr({ session: NEW_CODEX, reply_to: "claude-code:not-a-uuid" })),
+        { ok: false, code: "bad_fields" },
+      );
+      hv(
+        "reply-to-own-session",
+        "A reply_to naming the command's own session: an answer is never handed back to the session that gave it.",
+        await signed(pk, day, commandStr({ reply_to: A })),
+        { ok: false, code: "bad_fields" },
+      );
+    }
 
     mkdirSync(dir, { recursive: true });
     const names = new Set<string>();
@@ -1135,6 +1176,7 @@ describe.runIf(WRITE)("write control vectors", () => {
       ...out.slice(files),
       ...device,
       ...pool,
+      ...handoff,
     ];
     for (const v of all) {
       do n++;

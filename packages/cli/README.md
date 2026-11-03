@@ -72,15 +72,34 @@ is missing or doesn't match, the session doesn't start.
 
 One daemon per computer holds one long-poll per receiver and delivers each message the
 cheapest way the session allows: to `sessionpipe wait` parked in the session's
-background (in place, ~60 ms, no network), at the session's next Stop if it is
-mid-turn, through the Agent SDK for a session it started (if the SDK is installed), or
-as a headless `claude -p --resume` (a `--fork-session` copy when a live process holds
-it). A session stays reachable in place with zero idle turns by running, as a
-background command with the longest timeout it can (Claude Code: raise
-`BASH_MAX_TIMEOUT_MS`, else a background command is stopped after 2 hours at most):
+background (in place, ~60 ms, no network), at the session's next Stop if it is mid-turn,
+through its channel if it has one (below), into the live session's own inbox if it is
+idle (every Claude Code session on macOS and Linux has one, the Claude app's included;
+the session reads such a message as a teammate's request, so it won't change its
+settings or CLAUDE.md for it), through the Agent SDK for a session it started (if the
+SDK is installed), or as a headless `claude -p --resume` (a `--fork-session` copy when a
+live process holds it and nothing else reaches it). A session stays reachable in place
+with zero idle turns by running, as a background command with the longest timeout it can
+(Claude Code: raise `BASH_MAX_TIMEOUT_MS`, else a background command is stopped after 2
+hours at most):
 
 ```sh
 sessionpipe wait            # Claude Code: the session id comes from CLAUDE_CODE_SESSION_ID
+```
+
+Or let Claude Code keep the waiter for you, the way its Telegram plugin reaches a
+session: `sessionpipe channel` is a Claude Code channel (an MCP server that pushes
+messages in). It parks for its session the whole time the session runs, and each message
+sent while the session is idle arrives in the session's own thread, in the terminal and
+in the Claude app, as a message from `sessionpipe`, in the session's own permission
+mode, and the session reads it as your own words. Channels are a research preview: a
+channel that isn't on Anthropic's allowlist loads only with
+`--dangerously-load-development-channels`, which asks once at startup, and a session the
+Claude app starts through `claude remote-control` can't be given one yet.
+
+```sh
+claude mcp add --scope user sessionpipe -- sessionpipe channel
+claude --dangerously-load-development-channels server:sessionpipe
 ```
 
 The waiter and next-Stop modes work in any Claude Code session that runs your hooks,
@@ -177,6 +196,29 @@ the daemon reads the result when it starts. From a receiver, the same actions ar
 a signed `pool` command; turning it on or off, removing or reordering accounts, and
 finishing a sign-in need a fresh confirm with your passkey or device key, never a day
 grant alone. `sessionpipe uninstall` runs `pool off` first.
+
+### Agents that ask agents
+
+A session can hand a task to another agent on this machine and get the answer back:
+`sessionpipe ask codex "review the diff on this branch"` runs Codex headlessly, waits,
+and prints its reply on stdout (the child's id and progress on stderr), so Claude Code
+can use Codex for a review, Codex can ask Gemini, and any harness with a shell can use
+any other. The request never leaves the machine: it goes over the daemon's local socket
+(the one `wait` uses), the daemon runs the agent in an allowed folder at `safe` (or
+`read`; never wider than the machine's mode), caps it as it caps a start, and stops a
+chain at two deep. Both
+sessions' events say what happened (`delegation.started` / `delegation.ended` on the
+asker, `delegated_by` on the answerer). A receiver can do the same from outside with
+`reply_to` on a `start` or a `prompt`: the answer comes back into that session as a
+message. `sessionpipe ask on` turns it on, with or without a receiver; `sessionpipe ask
+setup` tells Claude Code and Codex the command exists, in their own instruction files,
+since hooks never inject anything.
+
+```sh
+sessionpipe ask on                                        # once; the daemon runs as a service
+sessionpipe ask codex "review the diff on this branch"    # from inside any session; the answer is stdout
+sessionpipe ask status                                    # on or off, the daemon, the agents it can ask
+```
 
 ## Updates
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // sessionpipe: install once, hook everything, choose per sink what leaves.
 //   connect · install · uninstall · sink add|list|remove|test · secrets · status ·
-//   doctor · tail · backfill · forget · replay · update · hook · worker
+//   doctor · tail · backfill · forget · replay · update · control · wait · ask · hook · worker
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -41,9 +41,10 @@ import {
   tilde,
   writeConfig,
 } from "@sessionpipe/core";
+import { ASK_HELP, askMain } from "./ask.js";
 import { connectFolders, connectTier, tierArg } from "./connect.js";
 import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
-import { CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
+import { CONTROL_HELP, channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
 import { ask, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
@@ -177,6 +178,13 @@ async function command(cmd: string): Promise<void> {
       return poolMain(args, out, distDir);
     case "wait":
       return waitMain(args, out);
+    case "ask": {
+      const code = await askMain(args, { out, err: (s) => void process.stderr.write(s) }, { distDir });
+      if (code) process.exitCode = code;
+      return;
+    }
+    case "channel":
+      return channelMain(args, channelIo);
     case "hook":
       out("sessionpipe hook is dist/hook.js; harnesses run it directly");
       return;
@@ -208,6 +216,7 @@ Usage:
   sessionpipe titles [on|off|refresh] (on: name Claude Code sessions as claude.ai does; off by default)
 ${CONTROL_HELP}
 ${POOL_HELP}
+${ASK_HELP}
 
 Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
 }
