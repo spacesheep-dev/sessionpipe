@@ -229,6 +229,11 @@ Writes a short section into every Claude Code `CLAUDE.md` and Codex's `AGENTS.md
 `<!-- sessionpipe ask -->` markers, so a session knows the command exists; `--remove` takes it
 out byte for byte. Hooks still inject nothing.
 
+{{usage channel}}
+
+The same reach, as a Claude Code channel: run it with `--channels` and a message arrives in
+the live session's own thread and permission mode, the way the app's other channels do.
+
 ### Self-update
 
 {{usage update}}

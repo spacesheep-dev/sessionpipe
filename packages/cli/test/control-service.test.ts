@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -15,7 +16,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlMain } from "../src/control/cli.js";
 import { pair, serviceFiles } from "../src/control/pair.js";
-import { readControl } from "../src/control/store.js";
+import { controlState, readControl } from "../src/control/store.js";
 import { stableNode } from "../src/runtime.js";
 
 vi.mock("node:child_process", async (original) => ({
@@ -143,6 +144,11 @@ describe.skipIf(process.platform === "win32")("POSIX control service paths", () 
               expect(execFileSync).toHaveBeenCalledWith("systemctl", ["--user", "daemon-reload"], expect.anything());
             }
             expect(body).not.toMatch(/_npx|\/Cellar\//);
+            // The log the service writes to is this user's alone, like the nonces and
+            // the acks beside it: it holds message ids, session ids and folder paths.
+            const logFile = path.join(controlState(), "daemon.log");
+            expect(existsSync(logFile)).toBe(true);
+            expect(statSync(logFile).mode & 0o777).toBe(0o600);
           });
         }
       }
