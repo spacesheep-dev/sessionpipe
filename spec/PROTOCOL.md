@@ -72,7 +72,7 @@ blanks an earlier full value.
 | Field | Rule |
 |-------|------|
 | `id` | The harness's own session id; ≤ 128 chars of `[A-Za-z0-9._:-]`. |
-| `seq` | Integer ≥ 0, monotonic per (harness, session) per sender. With `harness.name` and `session.id` it is the deduplication key. Order of arrival is not guaranteed; `seq` is the order. |
+| `seq` | Integer ≥ 0, monotonic per (harness, session) per sender. With `harness.name` and `session.id` it is the deduplication key. Order of arrival is not guaranteed; `seq` is the order. A receiver sees gaps: the events a sink's tier leaves out, and the tool events a sender thins (§4); a gap is never a lost event. |
 | `machine` | A name for the sending machine: the hostname unless the person configured one. A sender MUST NOT guess it; an empty field beats a wrong one. |
 | `cwd` | The folder the session started in. The home directory is written `~`. |
 | `repo` | The `origin` remote as a URL with any credentials stripped. |
@@ -106,7 +106,7 @@ Per-type `data` shapes are normative in
 | type | tier | data | Fires when |
 |------|:----:|------|------------|
 | `session.started` | 0 | `source`: `startup` · `resume` · `clear` · `compact` · `fork` · `unknown` | The harness's session-start hook; for Antigravity, the first `PreInvocation` of a conversation. |
-| `session.heartbeat` | 0 | — | At most once per 60 s while a turn is running, for sinks **below tier 1** (which get no tool events). Lets a tier-0 receiver show "working". |
+| `session.heartbeat` | 0 | — | At most once per 60 s while a turn is running, for sinks **below tier 1** (which get no tool events). Lets a tier-0 receiver show "working". A sink at tier 1 or above is sent tool events instead; thinned (§4), a session whose tools keep finishing still sends a `tool.ended` at least once a window plus the time to the next call that finishes. |
 | `session.ended` | 0 | `reason`: `clear` · `logout` · `exit` · `other` | The harness's session-end hook. Four harnesses never fire one (ADAPTERS.md); a receiver infers "done" from silence and MUST present that as its own reading. |
 | `session.backfill` | 0 | `started_at`, `last_at`, `turns?` | One per historical session found in local files at install. `seq` is 0 and the session block carries what the files say. Sent again, with the session's next `seq`, when the machine learns a better name for a session it already sent (`sessionpipe titles on`: the name a harness's own service gave it); a receiver applies its session block as it does any event's. |
 | `session.forgotten` | 0 | — | The person ran `sessionpipe forget`. A receiver MUST delete everything it holds for the session and answer as for any accepted event. |
@@ -117,7 +117,7 @@ Per-type `data` shapes are normative in
 | `tool.started` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?` (set when a subagent made the call); tier 3 adds `input` | Pre-tool hook. OPTIONAL for senders whose harness has none. |
 | `tool.ended` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?`, `ms?`, `ok`, `error?`; tier 3 adds `input`, `output` (each ≤ 64 KB) | Post-tool hook. A tool name is `[A-Za-z0-9_.:-]{1,120}`; MCP tools keep the harness's own spelling. |
 | `files.changed` | 1 | `paths[]` (repo-relative or `~`-relative) | File-edit hooks (Cursor, Kiro, Goose), or paths lifted from a write tool's input. |
-| `attention.needed` | 0 | `attention_id`, `kind`: `permission` · `question` · `elicitation` · `idle` · `error`; tier 1 adds `tool`, `message` (redacted, ≤ 200) | PermissionRequest, Notification, permission.asked. Tier-0 receivers learn "needs you" without the words. |
+| `attention.needed` | 0 | `attention_id`, `kind`: `permission` · `question` · `elicitation` · `idle` · `error`; tier 1 adds `tool`, `message` (redacted, ≤ 200), `agent_id` (set when a subagent asked) | PermissionRequest, Notification, permission.asked. Tier-0 receivers learn "needs you" without the words. |
 | `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool ran, a turn ended), or a control answer. |
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?`; `subagent.ended` adds `background?` (integer) | Subagent hooks; the subagent's own events carry `session.parent_id`. `background` is the work still in flight once this subagent is out of it, counted as `turn.ended` counts it, so a receiver holding the session as waiting on its work learns the count fell before the session's next turn. Absent when the harness doesn't say. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
@@ -136,6 +136,35 @@ Rules for all types:
 - `attention_id`, `turn_id`, `call_id`, `agent_id` are opaque strings the sender
   chooses; when the harness provides one (`tool_use_id`, `prompt_id`) it SHOULD be
   used as is.
+- **Thinned tool events.** A harness fires a hook per tool call, and a session that
+  runs a few hundred subagents fires thousands a minute (sessionpipe issue #208: 97 243
+  events by 10 a.m., 87 % of them subagents' tool calls). A sender MAY thin a sink's tool
+  events, for a subagent's calls (`agent_id` set; the main thread's all go) or for every
+  call of the session. A thinned thread is sent no `tool.started`, and of its
+  `tool.ended` events the first by `time` that is at least 60 s from the last one the
+  session was sent; the window restarts there. An event a little out of time order falls
+  in the window like any other. Whatever the window says, the sender MUST send a
+  thread's first `tool.ended` timed at or after its `attention.needed` (which then
+  carries that `agent_id`): it is the event that shows the prompt was answered
+  (`attention.cleared`, above). A sender that thins MUST NOT thin any other type (turns,
+  attention, subagents, files, limits, sessions all go as they come). So a session whose
+  tools keep finishing is seen to work at least once a window plus the time to the next
+  call that finishes. What is thinned is a delivery choice per sink, never what the
+  sender records: it keeps every event. A receiver, which can't tell a thinned sink from
+  another:
+  - MUST NOT read a `seq` gap as a lost event;
+  - MUST NOT expect a `tool.ended` for every `tool.started`, or the reverse: a call's
+    `call_id` may be seen once, or not at all;
+  - MAY read a session's `tool.ended` as a sign that it is working and that an open
+    prompt was answered, and MUST NOT present the number it got as the number of tool
+    calls the session made.
+
+  Thinning is the receiver's to ask for, never done on nobody's say-so: a receiver that
+  wants it says `tools` in its well-known file (HTTP.md §1), and a sender that reads
+  nothing there sends every tool event, so a receiver that reads a subagent's tool
+  calls keeps them across a sender's upgrade. The reference client's setting is the
+  sink's `tools`: `all` (every tool event), `main` (a subagent's thinned), `beat` (all of
+  them thinned); unset, it is what the receiver's file says, else `all`.
 - **Who started a turn.** `turn.started.submitted_by` is the harness's **own** word for
   who submitted the prompt (Claude Code: `user` · `sdk` · `system` · `loop_wakeup` ·
   `schedule_wakeup` · `poll_event`). It is a different vocabulary from
@@ -196,6 +225,8 @@ receiver's well-known file declares `max_tier`; the sender uses the lower.
 1. **Never lose, never duplicate.** The outbox is append-only; a sink's cursor
    advances only on a 2xx; every event carries `seq`; a receiver deduplicates on
    (harness.name, session.id, session.seq). An outage costs delay, never an event.
+   A tool event a sink is configured not to be sent (§4, thinned tool events) is
+   skipped by that choice, and stays in the outbox.
 2. **Secrets never leave.** `secrets@1` runs on every string above tier 0 before an
    event reaches the outbox, and cannot be turned off per sink.
 3. **The hook path is invisible.** The process a harness spawns reads stdin, writes

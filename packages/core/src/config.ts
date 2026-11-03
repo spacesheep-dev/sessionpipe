@@ -21,10 +21,20 @@ export interface SinkConfig {
   /** The token (and secret) live in this store instead of in this file; the client
    *  reads them from it when it sends. */
   token_in?: "keychain" | "secret-service";
-  /** Learned from the receiver's well-known file; re-read daily. */
+  /** Learned from the receiver's well-known file (`sink add`, `connect`; read again by a
+   *  worker once a day): its tier cap, and the tool events it asked for. */
   max_tier?: Tier;
+  receiver_tools?: "all" | "main" | "beat";
   well_known_at?: string;
+  /** When a worker last tried to read it again, whether or not the read went through. */
+  well_known_checked_at?: string;
   paused?: string;
+  /** Which tool events this sink is sent (issue #208): `all`; `main`, a subagent's at
+   *  most one per session per minute; `beat`, every tool event at most one per session
+   *  per minute. Unset: what the receiver's well-known file asked for (`receiver_tools`),
+   *  else `all`, so no receiver's view changes unless it asked. The outbox keeps every
+   *  event either way. */
+  tools?: "all" | "main" | "beat";
 }
 
 export interface Config {

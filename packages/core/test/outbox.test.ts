@@ -465,7 +465,7 @@ describe("locks", () => {
     utimesSync(f, t, t);
     const release = takeNamedLock(tmp, "aged", 60_000);
     expect(release).not.toBeNull();
-    expect(readFileSync(f, "utf8")).toBe(String(process.pid));
+    expect(readFileSync(f, "utf8")).toMatch(new RegExp(`^${process.pid} [0-9a-f]{16}$`));
     release?.();
     expect(existsSync(f)).toBe(false);
     expect(() => release?.()).not.toThrow();

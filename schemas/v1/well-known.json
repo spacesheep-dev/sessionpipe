@@ -72,6 +72,14 @@
         "max_bytes"
       ]
     },
+    "tools": {
+      "type": "string",
+      "enum": [
+        "all",
+        "main",
+        "beat"
+      ]
+    },
     "control": {
       "type": "object",
       "properties": {

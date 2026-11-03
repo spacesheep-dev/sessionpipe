@@ -3,6 +3,8 @@
 // <state>/outbox/<harness>/<session>.jsonl, a per-session seq counter, a per-sink
 // cursor that moves only when the sink acknowledged, and a per-session lock so two
 // workers never interleave. Never lose, never duplicate.
+
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -293,23 +295,52 @@ export function takeLock(root: string, ref: OutboxRef, staleMs = 5 * 60_000): ((
 }
 
 /** A named lock under <root>/locks, held by one process at a time: the file names
- *  its pid. Stale once that process is gone, or after `staleMs`. */
+ *  its pid and a nonce. Stale once that process is gone, or after `staleMs`. A stale
+ *  lock is taken over by renaming it aside first: of two workers that both judged it
+ *  stale, one rename wins, and one that moved a fresh lock instead (another worker's,
+ *  made in between) puts it back and stands down. The release deletes the file only
+ *  while it is still this taker's, so a lock taken over can't be wiped by its old
+ *  holder. Two holders at once used to mean two drains reading the same cursors and
+ *  sending the same batch (issue #208's one-request-a-second pace rests on one). */
 export function takeNamedLock(root: string, name: string, staleMs = 5 * 60_000): (() => void) | null {
   const dir = path.join(root, "locks");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const f = path.join(dir, `${name}.lock`);
+  const nonce = randomBytes(8).toString("hex");
+  const mine = `${process.pid} ${nonce}`;
+  let body: string | null = null;
   try {
-    if (Date.now() - statSync(f).mtimeMs > staleMs || !processAlive(Number(readFileSync(f, "utf8")))) unlinkSync(f);
-    else return null;
-  } catch {}
+    body = readFileSync(f, "utf8");
+    const stale = Date.now() - statSync(f).mtimeMs > staleMs || !processAlive(Number(body.split(" ")[0]));
+    if (!stale) return null;
+  } catch {
+    body = null;
+  }
+  if (body !== null) {
+    const aside = `${f}.${process.pid}.${nonce}.stale`;
+    try {
+      renameSync(f, aside);
+    } catch {
+      return null;
+    }
+    // The aside name is this call's own: nobody else reads or removes it.
+    const moved = readFileSync(aside, "utf8");
+    unlinkSync(aside);
+    if (moved !== body) {
+      try {
+        writeFileSync(f, moved, { flag: "wx" });
+      } catch {}
+      return null;
+    }
+  }
   try {
-    writeFileSync(f, String(process.pid), { flag: "wx" });
+    writeFileSync(f, mine, { flag: "wx" });
   } catch {
     return null;
   }
   return () => {
     try {
-      unlinkSync(f);
+      if (readFileSync(f, "utf8") === mine) unlinkSync(f);
     } catch {}
   };
 }

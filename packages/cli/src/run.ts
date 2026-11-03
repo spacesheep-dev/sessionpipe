@@ -49,6 +49,7 @@ import {
 } from "@sessionpipe/core";
 import { aliasFile, readAliases, receiverIdOf } from "./control/aliases.js";
 import { ask, socketPath } from "./control/local.js";
+import { sendTool, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
 import { HttpSink } from "./http-sink.js";
 import { sinkWithSecrets } from "./secrets.js";
 
@@ -140,7 +141,13 @@ export function releaseJob(claimed: string | undefined): void {
  *  worker lives, `abandonedMs`) goes back to the queue, then every queued job older
  *  than `olderThanMs` (younger ones belong to the worker their hook just spawned)
  *  is claimed and run. Every worker sweeps before it exits. */
-export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20, abandonedMs = 60_000): Promise<number> {
+export async function sweepJobs(
+  state: string,
+  olderThanMs = 3000,
+  limit = 20,
+  abandonedMs = 60_000,
+  o: DrainLife = {},
+): Promise<number> {
   const jobs = jobsDir(state);
   let names: string[] = [];
   try {
@@ -160,7 +167,14 @@ export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20, a
     } catch {}
   }
   let ran = 0;
+  // The jobs' events go to the outbox one by one and the sinks drain once at the end:
+  // a drain per job would wait out the machine's pace (PACE_MS) once per job. Each job
+  // that appended something marks flush.more, so a drain already running sends it in
+  // its next pass instead of leaving it behind the rest of the sweep. A job whose
+  // session is busy waits SWEEP_LOCK_WAIT_MS, not a hook's 6 s, and goes back to the
+  // queue; no job starts once the worker's life is too short for the drain after it.
   for (const n of queued.sort().slice(0, limit)) {
+    if (o.deadline !== undefined && Date.now() + SWEEP_LOCK_WAIT_MS + PASS_BUDGET_MS > o.deadline) break;
     const f = path.join(jobs, n);
     try {
       if (Date.now() - statSync(f).mtimeMs < olderThanMs) continue;
@@ -170,13 +184,15 @@ export async function sweepJobs(state: string, olderThanMs = 3000, limit = 20, a
     const c = claimJob(f);
     if (!c) continue;
     try {
-      await runJob(c.job, { state, claimed: c.file });
+      const r = await runJob(c.job, { state, claimed: c.file, drain: false, lockWaitMs: SWEEP_LOCK_WAIT_MS });
+      if (r.events.length) markMore(state);
     } catch {
     } finally {
       releaseJob(c.file);
     }
     ran++;
   }
+  if (ran) await drain(state, readConfig().sinks, new Outbox(state), undefined, o);
   return ran;
 }
 
@@ -289,7 +305,16 @@ const JOB_OWN_ENV = [
  *  outbox or the job is back in the queue (`requeued` names its new file). */
 export async function runJob(
   job: Job,
-  opts: { state?: string; now?: number; claimed?: string; lockWaitMs?: number } = {},
+  opts: {
+    state?: string;
+    now?: number;
+    claimed?: string;
+    lockWaitMs?: number;
+    /** false: the events go to the outbox and the sinks are left for the caller to drain. */
+    drain?: boolean;
+    /** The drain's clock (pacing); tests stand in a simulated one. */
+    clock?: Clock;
+  } & DrainLife = {},
 ): Promise<{ events: Event[]; delivered: Record<string, number>; requeued?: string }> {
   const state = opts.state ?? stateDir();
   const cfg = readConfig();
@@ -537,7 +562,14 @@ export async function runJob(
   // found the lock taken meanwhile left its events and a `flush.more` mark, and this
   // drain sends them.
   if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
-  const delivered = (await drain(state, cfg.sinks, outbox, ref)) ?? {};
+  const delivered =
+    opts.drain === false
+      ? {}
+      : ((await drain(state, cfg.sinks, outbox, ref, {
+          ...(opts.clock ? { clock: opts.clock } : {}),
+          ...(opts.deadline !== undefined ? { deadline: opts.deadline } : {}),
+          ...(opts.handoff ? { handoff: opts.handoff } : {}),
+        })) ?? {});
   return { events, delivered };
 }
 
@@ -593,6 +625,82 @@ export async function appendObserved(
   return e;
 }
 
+/** What the drain reads the time from and waits with; tests stand in a simulated one. */
+export interface Clock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+const REAL_CLOCK: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+
+/** A pass of the drain starts at least this long after the machine's last request to
+ *  a receiver (issue #208): under a few hundred subagents a receiver gets one request
+ *  a second with everything that piled up, not one per hook. A lone event goes at once. */
+export const PACE_MS = 1000;
+/** <state>/locks/flush.sent: when this machine last sent a request to a receiver
+ *  (epoch ms), written as the request leaves. Every worker reads the same file. */
+const sentFile = (state: string): string => path.join(state, "locks", "flush.sent");
+function lastSent(state: string): number {
+  try {
+    // Unreadable text is NaN, and a NaN wait waits for nothing.
+    return Number(readFileSync(sentFile(state), "utf8"));
+  } catch {
+    return 0;
+  }
+}
+function noteSent(state: string, at: number): void {
+  try {
+    mkdirSync(path.dirname(sentFile(state)), { recursive: true, mode: 0o700 });
+    writeFileSync(sentFile(state), String(at), { mode: 0o600 });
+  } catch {}
+}
+
+/** Whether a receiver (an HTTP sink not paused and not in backoff) has outbox bytes
+ *  past its cursor: the pass that follows may send it a request. Bytes it will skip
+ *  (a thinned tool event) count too; reading them is the pass's job. */
+function waitingForReceiver(state: string, sinkConfigs: SinkConfig[], outbox: Outbox, now: number): boolean {
+  const receivers = sinkConfigs.filter(
+    (s) => !s.paused && /^https?:\/\//.test(s.url) && !((readBackoff(state, s.name)?.until ?? 0) > now),
+  );
+  if (!receivers.length) return false;
+  const refs = outbox.sessions();
+  for (const s of receivers) {
+    const cursors = new Cursors(state, s.name);
+    const c = cursors.read();
+    for (const ref of refs) {
+      try {
+        if (statSync(outbox.file(ref)).size > (c[cursors.key(ref)] ?? 0)) return true;
+      } catch {}
+    }
+  }
+  return false;
+}
+
+/** How long a worker's life must still run for a pass of the drain to start: the
+ *  pace's wait (≤ PACE_MS) and a round trip. A worker that has less leaves the work
+ *  marked (flush.more) and hands it on (DrainLife.handoff) rather than be ended by its
+ *  deadline mid-pass, holding events nobody else knows to send. */
+export const PASS_BUDGET_MS = 3000;
+/** How long a swept job waits for its session's lock before it goes back to the queue. */
+const SWEEP_LOCK_WAIT_MS = 1000;
+
+/** A worker's remaining life, for the drain and the sweep. Both unset: no limit. */
+export interface DrainLife {
+  /** When the process will be ended (epoch ms, on the drain's clock). */
+  deadline?: number;
+  /** Called, with the flush lock released, when work is left marked for another
+   *  worker because this one's life is too short for it (worker.ts starts a drainer). */
+  handoff?: () => void;
+}
+
+const moreFile = (state: string): string => path.join(state, "locks", "flush.more");
+/** Tell the worker draining now (if any) that the outbox has more for it. */
+function markMore(state: string): void {
+  try {
+    mkdirSync(path.dirname(moreFile(state)), { recursive: true, mode: 0o700 });
+    writeFileSync(moreFile(state), "", { mode: 0o600 });
+  } catch {}
+}
+
 /** One worker drains a machine's sinks at a time (the `flush` lock). Another whose
  *  events are in the outbox meanwhile marks that there is more and leaves them to
  *  it (null: nothing sent by this one). The one draining looks for the mark after
@@ -600,29 +708,44 @@ export async function appendObserved(
  *  in its next pass or with the worker that appended them, never wait for a later
  *  hook. Under a flood of hook events this is one uploader sending full batches,
  *  not one per event, all refused together (mordast, 2026-10-14: 828 refusals in
- *  two minutes, 5 192 jobs queued). */
+ *  two minutes, 5 192 jobs queued). A pass that would follow the machine's last
+ *  request by less than PACE_MS first waits out the rest, holding the lock: the
+ *  workers that arrive meanwhile only mark that there is more, and the pass sends
+ *  everything they appended. A pass starts only while the worker's life has
+ *  PASS_BUDGET_MS left; otherwise the mark stays and the work is handed on. */
 export async function drain(
   state: string,
   sinkConfigs: SinkConfig[],
   outbox: Outbox,
   first?: { harness: string; session: string },
+  o: { clock?: Clock } & DrainLife = {},
 ): Promise<Record<string, number> | null> {
-  const more = path.join(state, "locks", "flush.more");
+  const clock = o.clock ?? REAL_CLOCK;
+  const more = moreFile(state);
   let release = takeNamedLock(state, "flush");
   if (!release) {
-    try {
-      writeFileSync(more, "", { mode: 0o600 });
-    } catch {}
+    markMore(state);
     release = takeNamedLock(state, "flush");
     if (!release) return null;
   }
   const delivered: Record<string, number> = {};
   for (;;) {
+    if (o.deadline !== undefined && clock.now() + PASS_BUDGET_MS > o.deadline) {
+      markMore(state);
+      release();
+      o.handoff?.();
+      return delivered;
+    }
     try {
-      unlinkSync(more);
-    } catch {}
-    try {
-      for (const [k, v] of Object.entries(await flush(state, sinkConfigs, outbox, first)))
+      // Never more than PACE_MS: a stamp in the future (a clock set back) can't park it.
+      // A pass with nothing for a receiver (a file sink's events, a cursor already at
+      // the end) doesn't wait at all.
+      const wait = Math.min(PACE_MS, lastSent(state) + PACE_MS - clock.now());
+      if (wait > 0 && waitingForReceiver(state, sinkConfigs, outbox, clock.now())) await clock.sleep(wait);
+      try {
+        unlinkSync(more);
+      } catch {}
+      for (const [k, v] of Object.entries(await flush(state, sinkConfigs, outbox, first, { clock })))
         delivered[k] = (delivered[k] ?? 0) + v;
     } finally {
       release();
@@ -694,12 +817,19 @@ export async function flush(
   sinkConfigs: SinkConfig[],
   outbox: Outbox,
   first?: { harness: string; session: string },
-  o: { /** Try a sink in backoff anyway (`sessionpipe replay`). */ force?: boolean } = {},
+  o: {
+    /** Try a sink in backoff anyway (`sessionpipe replay`). */ force?: boolean;
+    /** Stamps the machine's last request (drain's pace). */ clock?: Clock;
+    /** Counts, per sink, the tool events it was configured not to be sent (`replay`). */
+    thinned?: Record<string, number>;
+  } = {},
 ): Promise<Record<string, number>> {
   const delivered: Record<string, number> = {};
+  const clock = o.clock ?? REAL_CLOCK;
   const sinks = buildSinks(sinkConfigs, {
     locked: (name) => log(state, `sink ${name}: its token is in a keychain this process can't read; left for later`),
   });
+  const modes = new Map(sinkConfigs.map((s) => [s.name, toolsMode(s)]));
   const refs = outbox.sessions();
   if (first) {
     const k = `${first.harness}/${safeId(first.session)}`;
@@ -738,6 +868,13 @@ export async function flush(
     }
     const cursors = new Cursors(state, sink.name);
     const c = cursors.read();
+    // Issue #208: the tool events this sink is not sent are skipped here, the cursor
+    // moving over them. The clock moves with the cursor, only once a batch went
+    // through, so a refused batch's tool event is chosen again next time.
+    const mode = modes.get(sink.name) as ToolsMode; // buildSinks names each sink after its config
+    const tools = new ToolClock(state, sink.name);
+    let clockNow = mode === "all" ? {} : tools.read();
+    let clockNext = { ...clockNow };
     let sent = 0;
     let stalled = false;
     // Pull filtered events session by session into one batch; remember where each
@@ -751,6 +888,7 @@ export async function flush(
     // refusal: the cursor stays, and the halves that went through are sent again
     // next time (the receiver counts them as duplicates).
     const deliver = async (events: Event[]): Promise<DeliveryResult> => {
+      if (sink instanceof HttpSink) noteSent(state, clock.now());
       const res = await sink.send(events);
       if (res.ok || res.action !== "split") return res;
       if (events.length === 1) {
@@ -781,11 +919,17 @@ export async function flush(
         rejected: [...(a.rejected ?? []), ...(b.rejected ?? [])],
       };
     };
+    const commitClock = (): void => {
+      if (mode === "all" || JSON.stringify(clockNext) === JSON.stringify(clockNow)) return;
+      tools.write(clockNext);
+      clockNow = { ...clockNext };
+    };
     const send = async (): Promise<boolean> => {
       if (!batch.length) {
         Object.assign(c, pending);
         pending = {};
         cursors.write(c);
+        commitClock();
         return true;
       }
       const res = await deliver(batch);
@@ -801,6 +945,7 @@ export async function flush(
         if (res.action !== "drop") {
           batch = [];
           pending = {};
+          clockNext = { ...clockNow };
           return false;
         }
       } else if (backoff) {
@@ -810,6 +955,7 @@ export async function flush(
       sent += batch.length;
       Object.assign(c, pending);
       cursors.write(c);
+      commitClock();
       batch = [];
       pending = {};
       return true;
@@ -825,7 +971,9 @@ export async function flush(
         if (!events.length) break;
         for (const e of events) {
           const f = filterEvent(e, sink.tier, sink.pii, { home: os.homedir() });
-          if (f) batch.push(f);
+          if (!f) continue;
+          if (sendTool(f, mode, clockNext, cursors.key(ref))) batch.push(f);
+          else if (o.thinned) o.thinned[sink.name] = (o.thinned[sink.name] ?? 0) + 1;
         }
         offset = next;
         pending[cursors.key(ref)] = offset;

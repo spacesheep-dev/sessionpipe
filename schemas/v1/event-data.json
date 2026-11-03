@@ -308,6 +308,10 @@
         "message": {
           "type": "string",
           "maxLength": 200
+        },
+        "agent_id": {
+          "type": "string",
+          "maxLength": 128
         }
       },
       "required": [

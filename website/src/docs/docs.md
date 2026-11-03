@@ -39,7 +39,14 @@ byte-identical. The outbox stays under the state folder and is pruned after 30 d
 
 Adds a destination: an HTTPS receiver, a file, or stdout. For a receiver it reads
 `/.well-known/sessionpipe`, caps the tier at the receiver's `max_tier`, stores the token and
-sends one heartbeat as a test. `--pii` turns on the PII pass for this sink.
+sends one heartbeat as a test. `--pii` turns on the PII pass for this sink. `--tools` says which
+tool events it is sent: `all` (the default) sends every one; `main` sends the main thread's as they
+happen and a subagent's finished calls at most one per session per minute (and the one that answers
+its permission prompt); `beat` thins the main thread's the same way. Left unset, a sink sends what
+the receiver's well-known file asks for (`tools`), read again once a day, so a receiver that meters
+requests gets `main` without anyone touching the machine. `replay --tools all` sends every one once. The local outbox keeps every event either
+way. A receiver also gets at most one request a second from the machine, with everything that piled
+up meanwhile in it.
 
 {{usage sink list}}
 
@@ -91,8 +98,9 @@ Reads the last N days of sessions from the agents' own files into the outbox.
 {{usage replay}}
 
 Sends what's waiting to a sink now, without waiting out a backoff. `--from-start` rewinds the
-sink's cursor first, so everything in the outbox goes again. Runs under the drain's lock, as
-`forget` does.
+sink's cursor first, so everything in the outbox goes again. `--tools all|main|beat` replaces the
+sink's tool-event setting for this replay only; the line it prints says how many tool events were
+thinned. Runs under the drain's lock, as `forget` does.
 
 {{usage forget}}
 
