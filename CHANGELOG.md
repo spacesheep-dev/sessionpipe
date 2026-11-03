@@ -5,16 +5,16 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
-### For receivers (0.12.0)
+### For receivers (0.13.0)
 
-What a 0.12.0 daemon or hook sends and accepts beyond 0.11.0. Everything is additive on
+What a 0.13.0 daemon or hook sends and accepts beyond 0.12.0. Everything is additive on
 protocol 1, and a receiver sees each capability in the machine's hello before it may use
 it.
 
 - **Hello and pairing request say `ask` and `handoff`** (CONTROL.md §2). `ask` is whether
   sessions on that machine may ask another agent (`sessionpipe ask`, §13: on unless the
   person turned it off); `handoff: true` says a `start` or a `prompt` may carry
-  `reply_to`. A machine that says neither is 0.11.0 or older: send it no `reply_to`.
+  `reply_to`. A machine that says neither is 0.12.0 or older: send it no `reply_to`.
 - **`reply_to` on a `start` or a `prompt`** (CONTROL.md §3.1, §6 *Handoff*): `<harness>:<id>`
   of a session on the same machine, never the command's own `session`, inside the signed
   bytes. The command runs and is acked exactly as before, one final ack; after a
@@ -42,21 +42,6 @@ it.
   never authority: join it with `delegation.*.to`, and never read it as a subagent.
 - **Nothing a receiver sends can start an ask.** It arrives on the daemon's local socket
   only (CONTROL.md §13); a receiver learns of it through the events.
-- **A session waiting on its own background work stays "working" until its next
-  `turn.ended`** (PROTOCOL.md §4, the `turn.ended` and `subagent.ended` rows; issue #153).
-  The `turn.ended` row said a receiver MAY show such a session as working "until its next
-  event"; the next event was always the work's own (a `subagent.started` seconds after the
-  Stop), so a session that had handed its turn to a background workflow read idle while the
-  workflow ran. It now says SHOULD, until the session's next `turn.ended` or
-  `session.ended`, and that `subagent.*` and a subagent's tool events are not the session
-  waking. Two things from the sender help: `subagent.ended` MAY carry `background`, the
-  count once that subagent is out of it (`schemas/v1/event-data.json`; fixture
-  `harness/claude-code/subagent-stop`), so a receiver sees the count fall to 0 before the
-  next turn; and `turn.ended.background` no longer counts sessionpipe's own waiter
-  (`sessionpipe wait`, CONTROL.md §8; fixture `harness/claude-code/stop-waiter`), which
-  ends only when a message arrives and so held every reachable session at "working".
-  Additive: a receiver that ignores the new field, or still drops the reading at the next
-  event, keeps working as before.
 - **Delivery mode `inbox`** (CONTROL.md §6, §6.3), between `turn` and `api`. A message
   for a session a live Claude Code holds open is written into that session's own local
   inbox, so the turn runs in that process, in the mode the person left it in, in the
@@ -106,15 +91,37 @@ it.
   or take one as the person's approval of a pending prompt (CONTROL.md §6.3). A receiver
   SHOULD say so beside an answer acked `mode: "inbox"`.
 
-Adopting 0.12.0 while machines still run 0.11.0:
+Adopting 0.13.0 while machines still run 0.12.0:
 
 - Offer a handoff (`reply_to`) only for a machine whose latest hello says `handoff: true`;
   an older machine refuses the command `bad_fields`, since its field set is closed.
 - Read an absent `ask` or `handoff` as "not on this machine", an absent `delegated_by` as
   unknown, and keep a `delegation.*` event you don't know as you keep any other type.
-- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.12.0's
+- A receiver that pre-checks commands with a copy of the verifier re-vendors 0.13.0's
   `sessionpipe-core/control` and its vectors (`165`–`169` are new).
 
+
+### For receivers (0.12.0)
+
+What a 0.12.0 daemon or hook sends beyond 0.11.0: one reading in PROTOCOL.md §4, and one
+optional field. Nothing a receiver has to adopt; the rest of 0.12.0 (Windows `.cmd` shims,
+a permission prompt in a turn the daemon runs, a socket test) changes nothing on the wire.
+
+- **A session waiting on its own background work stays "working" until its next
+  `turn.ended`** (PROTOCOL.md §4, the `turn.ended` and `subagent.ended` rows; issue #153).
+  The `turn.ended` row said a receiver MAY show such a session as working "until its next
+  event"; the next event was always the work's own (a `subagent.started` seconds after the
+  Stop), so a session that had handed its turn to a background workflow read idle while the
+  workflow ran. It now says SHOULD, until the session's next `turn.ended` or
+  `session.ended`, and that `subagent.*` and a subagent's tool events are not the session
+  waking. Two things from the sender help: `subagent.ended` MAY carry `background`, the
+  count once that subagent is out of it (`schemas/v1/event-data.json`; fixture
+  `harness/claude-code/subagent-stop`), so a receiver sees the count fall to 0 before the
+  next turn; and `turn.ended.background` no longer counts sessionpipe's own waiter
+  (`sessionpipe wait`, CONTROL.md §8; fixture `harness/claude-code/stop-waiter`), which
+  ends only when a message arrives and so held every reachable session at "working".
+  Additive: a receiver that ignores the new field, or still drops the reading at the next
+  event, keeps working as before.
 
 ### For receivers (0.11.0)
 
