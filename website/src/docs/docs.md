@@ -91,12 +91,14 @@ Reads the last N days of sessions from the agents' own files into the outbox.
 {{usage replay}}
 
 Sends what's waiting to a sink now, without waiting out a backoff. `--from-start` rewinds the
-sink's cursor first, so everything in the outbox goes again.
+sink's cursor first, so everything in the outbox goes again. Runs under the drain's lock, as
+`forget` does.
 
 {{usage forget}}
 
 Asks every sink to delete one session (a `session.forgotten` event), then removes it from the
-local outbox.
+local outbox and from every sink's cursor, so a session that goes on is sent from its start.
+Both wait for a running drain (up to 10 s); past that they change nothing, say so and exit 1.
 
 ### Session names
 

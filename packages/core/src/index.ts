@@ -23,7 +23,15 @@ export {
   readHook,
   withoutLineage,
 } from "./launched-by.js";
-export { Cursors, Outbox, type OutboxRef, processAlive, takeLock, takeNamedLock } from "./outbox.js";
+export {
+  Cursors,
+  Outbox,
+  type OutboxRef,
+  processAlive,
+  takeLock,
+  takeNamedLock,
+  waitNamedLock,
+} from "./outbox.js";
 export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.js";
 export * from "./privacy/index.js";
 export { gitFacts, stripCredentials } from "./readers/git.js";
