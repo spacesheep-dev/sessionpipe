@@ -34,6 +34,18 @@ machines by their id, so the pairing holds and its two cards become one.
 | 2 | + your prompts and the assistant's text, redacted |
 | 3 | + tool input and output |
 
+A tool call is two events (`tool.started`, `tool.ended`), and a workflow that runs a few
+hundred subagents fires thousands a minute. So a receiver is sent a subagent's finished
+tool calls (`tool.ended`) at most one per session per minute, plus the one that answers a
+subagent's permission prompt, the main thread's tool events as they happen, and at most
+one request a second from this machine with everything that piled up in it. `--tools` on
+`sink add` picks the first: `all` sends every tool event (the default), `main` is what a
+receiver that meters requests asks for in its well-known file and is used where it does,
+`beat` thins the main thread's tool events the same way. The local outbox keeps every event whichever you
+pick; turns, prompts, attention and subagents are never thinned. `replay --tools all`
+sends every tool event once, for a receiver rebuilt from the outbox, and `replay` says
+how many it thinned.
+
 No telemetry. Secrets never leave (`secrets@1` runs above tier 0, always). Your
 server or none. Pre-release: the reference receiver is still being built; see the
 [roadmap](https://github.com/spacesheep-dev/sessionpipe/blob/main/ROADMAP.md).
@@ -305,7 +317,7 @@ names and meanings as `doctor --json`:
 |---|---|
 | `version`, `machine`, `state`, `config` | Strings; state and config are absolute paths. |
 | `harnesses` | Object keyed by harness name; each value is an array of `{file, state, note?}` hook checks. `file` uses `~` for home, as doctor does. Includes detected **or configured** harnesses. |
-| `sinks` | Array of `{name, url, tier, max_tier, pii, control, paused, pending_sessions}`. `tier` is the configured tier; the effective tier is `min(tier, max_tier ?? 3)`. `max_tier` and `paused` are `null` when unset. No token or secret is included. |
+| `sinks` | Array of `{name, url, tier, max_tier, pii, tools, control, paused, pending_sessions}`. `tier` is the configured tier; the effective tier is `min(tier, max_tier ?? 3)`. `max_tier` and `paused` are `null` when unset. `tools` is which tool events the sink is sent (`all`, `main`, `beat`), its default resolved. No token or secret is included. |
 | `timing` | `{n, p50, p95}` from the last 100 local hook timings, in milliseconds; `null` when unavailable. |
 | `update` | Doctor's update summary: `{auto, off, last_check, latest, last_error, pending, updated, failed}`. `auto` is boolean; absent details are `null`. |
 | `jobs` | Number of entries waiting in the local jobs directory; zero when absent. |

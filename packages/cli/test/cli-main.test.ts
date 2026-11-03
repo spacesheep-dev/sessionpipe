@@ -799,7 +799,7 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     });
     expect(cfg().sinks[0]?.well_known_at).toMatch(/^\d{4}-/);
     const list = await run("sink", "list");
-    expect(list.text).toContain("tier 3 (capped 1) pii");
+    expect(list.text).toContain("tier 3 (capped 1) pii · tools all");
     await run("sink", "add", "stdout");
     await run("sink", "add", `file:${path.join(tmp, "events.jsonl")}`, "--name", "disk", "--tier", "9");
     await run("sink", "add", `file:${path.join(tmp, "more.jsonl")}`);
@@ -828,6 +828,51 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     expect(cfg().sinks).toEqual([]);
   });
 
+  it("--tools says which tool events a sink is sent; it stays when the sink is added again without it", async () => {
+    const rx = await receiver();
+    // The receiver's well-known file says nothing about tool events: every one, as before.
+    const add = await run("sink", "add", rx.url, "--tier", "1", "--name", "rx");
+    expect(add.text).toContain("tool events: every tool call (--tools main: a subagent's at most one a minute)");
+    expect(cfg().sinks[0]?.tools).toBeUndefined();
+    await run("sink", "add", rx.url, "--tier", "1", "--name", "rx", "--tools", "beat");
+    expect(cfg().sinks[0]?.tools).toBe("beat");
+    const again = await run("sink", "add", rx.url, "--tier", "2", "--name", "rx");
+    expect(again.text).toContain("tool events: at most one tool call a minute per session");
+    expect(cfg().sinks[0]).toMatchObject({ tier: 2, tools: "beat" });
+    expect((await run("sink", "list")).text).toContain("tier 2 · tools beat");
+    const bad = await run("sink", "add", rx.url, "--name", "rx", "--tools", "some");
+    expect(bad.text).toContain('--tools takes all, main or beat (got "some"): nothing was changed');
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
+    expect(cfg().sinks[0]).toMatchObject({ tier: 2, tools: "beat" });
+    await run("sink", "add", "stdout", "--tier", "1", "--tools", "all");
+    expect((await run("sink", "list")).text).toMatch(/stdout .*tier 1 · tools all/);
+    const file = await run("sink", "add", `file:${path.join(tmp, "t.jsonl")}`, "--tier", "1", "--name", "disk");
+    expect(file.text).toContain("tool events: every tool call (--tools main: a subagent's at most one a minute)");
+    // A tier-0 sink is sent no tool events: nothing to say about them.
+    const quiet = await run("sink", "add", rx.url, "--tier", "0", "--name", "quiet");
+    expect(quiet.text).not.toContain("tool events:");
+    expect((await run("sink", "list")).text).not.toMatch(/quiet .*tools/);
+  });
+
+  it("a receiver that asks for thinned tool events in its well-known file gets them, unless the owner says otherwise", async () => {
+    const rx = await receiver({ wellKnown: { max_tier: 3, tools: "main" } });
+    const { text } = await run("sink", "add", rx.url, "--tier", "2", "--token", "tok");
+    expect(text).toContain("the receiver asks for tool events `main` (--tools all keeps every one)");
+    expect(text).toContain("tool events: the main thread's tool calls as they happen");
+    expect(cfg().sinks[0]).toMatchObject({ receiver_tools: "main" });
+    expect(cfg().sinks[0]).not.toHaveProperty("tools");
+    // The owner's own choice is kept, and the receiver's ask is no news then.
+    const all = await run("sink", "add", rx.url, "--tier", "2", "--token", "tok", "--tools", "all");
+    expect(all.text).not.toContain("the receiver asks for");
+    expect(all.text).toContain("tool events: every tool call");
+    expect(cfg().sinks[0]).toMatchObject({ tools: "all", receiver_tools: "main" });
+    // A receiver that says nothing is sent every tool event, as before this release.
+    const quiet = await receiver({ wellKnown: { max_tier: 3 } });
+    const q = await run("sink", "add", quiet.url, "--tier", "2", "--token", "tok", "--name", "quiet");
+    expect(q.text).toContain("tool events: every tool call");
+    expect(cfg().sinks.find((s) => s.name === "quiet")).not.toHaveProperty("receiver_tools");
+  });
   it("a receiver without a readable well-known file is added anyway, at the tier asked for", async () => {
     const rx = await receiver({ wellKnownStatus: 404 });
     const bad = await run("sink", "add", rx.url, "--tier", "2");
@@ -1194,7 +1239,18 @@ describe.skipIf(process.platform === "win32")("status", () => {
       state,
       config,
       harnesses: {},
-      sinks: [{ name: "rx", tier: 2, max_tier: null, pii: false, control: false, paused: null, pending_sessions: 0 }],
+      sinks: [
+        {
+          name: "rx",
+          tier: 2,
+          max_tier: null,
+          pii: false,
+          tools: "all",
+          control: false,
+          paused: null,
+          pending_sessions: 0,
+        },
+      ],
       timing: null,
       control: null,
       jobs: 0,
@@ -1735,6 +1791,36 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
     held?.();
     expect((await run("replay", "--from-start")).lines).toEqual(["  rx: 1 event delivered"]);
     expect(takeNamedLock(state, "flush")).not.toBeNull();
+  });
+
+  it("replay says how many tool events a sink's setting thinned; --tools all sends every one, this once", async () => {
+    const rx = await receiver({ body: { accepted: 1 } });
+    const outbox = new Outbox(state);
+    const sub = (type: string) => event(type, { tool: "Bash", ok: true, agent_id: "a1" });
+    outbox.append({ harness: "claude-code", session: "s1" }, [
+      sub("tool.started"),
+      sub("tool.ended"),
+      sub("tool.started"),
+      sub("tool.ended"),
+    ]);
+    // A receiver that asked for thinned tool events (its well-known file said `main`).
+    writeConfig({ sinks: [{ name: "rx", url: rx.url, tier: 1, receiver_tools: "main" }], harnesses: {} } as never);
+    expect((await run("replay", "--sink", "rx")).lines).toEqual([
+      "  rx: 1 event delivered, 3 tool events thinned (--tools all sends every one)",
+    ]);
+    expect((await run("replay", "--sink", "rx", "--from-start", "--tools", "all")).lines).toEqual([
+      "  rx: 4 events delivered",
+    ]);
+    expect(readConfig().sinks[0]?.tools).toBeUndefined();
+    // --from-start started the minute over: the next tool.ended goes, its tool.started doesn't.
+    outbox.append({ harness: "claude-code", session: "s1" }, [sub("tool.started"), sub("tool.ended")]);
+    expect((await run("replay", "--sink", "rx")).lines).toEqual([
+      "  rx: 1 event delivered, 1 tool event thinned (--tools all sends every one)",
+    ]);
+    const bad = await run("replay", "--tools", "some");
+    expect(bad.lines).toEqual(['  ! --tools takes all, main or beat (got "some"): nothing was sent']);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
   });
 });
 

@@ -37,6 +37,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
 | `auth` | `bearer` only in v1. |
 | `endpoints` | Paths relative to the origin, or absolute URLs. |
 | `batch` | The largest request the receiver takes. A sender MUST NOT exceed either bound. Defaults when absent: 50 / 262 144. |
+| `tools` | Optional: the tool events the receiver would rather be sent (PROTOCOL.md §4, *Thinned tool events*): `all` (every one, what an absent field means), `main` (a subagent's thinned to at most one `tool.ended` per session per minute), `beat` (every session's thinned so). A sender SHOULD honour it unless the sink's owner chose otherwise, and SHOULD read it again at least daily; a sender that predates the field sends every tool event. A receiver that meters requests per machine SHOULD say `main`. |
 | `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `signing.key_types`: OPTIONAL, the kinds of key the receiver stores and carries whole (`passkey`, `device`; CONTROL.md §2); absent means `["passkey"]`. `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). `inherit`: OPTIONAL; `true` when it shows a machine whose `mode` is `inherit` as that, on its pairing page and wherever it shows the mode, and never as `safe` or `auto`; a daemon pairs in `inherit` mode only with a receiver that says so. ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
 
 Schema: [`well-known.json`](https://sessionpipe.org/schema/v1/well-known.json).
@@ -155,6 +156,13 @@ as though it never existed.
   backlog for the next worker.
 - A sender MUST send `session.*` and `turn.*` events of one session in `seq` order
   within a batch; across batches order is best effort.
+- A sender SHOULD start at most one request a second per machine, and send in it
+  everything that arrived while it waited: a busy machine is then one request a
+  second with a full batch, not one per hook (sessionpipe issue #208). A lone event
+  still goes at once, and the full batches of a backlog MAY follow one another. A
+  receiver that limits requests per machine SHOULD allow at least one a second.
+- A sender MAY thin a sink's tool events (PROTOCOL.md §4): the `seq` of one session
+  then has gaps, which a receiver accepts like any other.
 
 ## 7. Delivery scenarios (conformance)
 
@@ -171,6 +179,7 @@ The runner sends and expects, in this order; each is a fixture under
 | auth | a wrong bearer (`auth: "wrong"` in the fixture) | 401 |
 | unknown-type | `type: "x.y"` | 202, stored, retrievable |
 | forget | `session.forgotten`, then a read | 202, then nothing |
+| seq-gap | a batch with gaps in `seq` and a `tool.started` with no `tool.ended` (a thinned sink, PROTOCOL.md §4), then one of its events again | 202, `accepted` = n; then 202, `duplicates` = 1 |
 | control | a queued prompt, a poll, an ack | 200 with the message; 204 after the ack |
 | control-expired | a message that expires unpolled | 204 |
 | control-double-ack | the same ack twice | 202, 202 |

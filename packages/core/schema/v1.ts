@@ -244,6 +244,8 @@ export const EventData = z.object({
     kind: AttentionKind,
     tool: ToolName.optional(),
     message: z.string().max(200).optional(),
+    /** Set when a subagent asked. */
+    agent_id: z.string().max(128).optional(),
   }),
   "attention.cleared": Loose.extend({
     attention_id: z.string().max(128),
@@ -749,6 +751,12 @@ export const WellKnown = z.object({
     native: z.string().optional(),
   }),
   batch: z.object({ max_events: z.int().min(1).max(50), max_bytes: z.int().min(1024).max(262_144) }),
+  /** The tool events the receiver would rather be sent (PROTOCOL.md §4, *Thinned tool
+   *  events*): `all`, every one (what an absent field means); `main`, a subagent's thinned
+   *  to at most one `tool.ended` per session per minute; `beat`, every session's thinned
+   *  so. A sender honours it unless the sink's owner chose otherwise; a sender that
+   *  predates the field sends every tool event. */
+  tools: z.enum(["all", "main", "beat"]).optional(),
   control: z
     .object({
       wait_max_s: z.int().min(1).max(60),

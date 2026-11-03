@@ -5,6 +5,32 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.13.1)
+
+A receiver can now ask a machine to thin the tool events it is sent (PROTOCOL.md §4,
+*Thinned tool events*): `tools: "main"` in its well-known file (HTTP.md §1), read at
+`sink add` and `connect` and again by a worker once a day. **A receiver that says nothing
+is sent every tool event, as before** — nothing changes on a machine's upgrade unless the
+receiver asked, or the machine's owner set the sink's `tools`. Additive on protocol 1, and
+every rule a receiver may already rely on still holds; where it asked:
+
+- A subagent's tool calls (`data.agent_id` set) arrive as at most one `tool.ended` per
+  session per 60 s, and never as `tool.started`. The main thread's arrive as before.
+  `beat` (opt-in) thins the main thread's the same way. Nothing but `tool.*` is thinned.
+- A thread's first `tool.ended` after its `attention.needed` is always sent, so "the next
+  event that proves the prompt was resolved" (`attention.cleared`) still arrives.
+  `attention.needed` now carries `agent_id` when a subagent asked.
+- `seq` has gaps where events were thinned; a gap is never a lost event
+  (`conformance/delivery/29-seq-gap.json`). A receiver MUST NOT expect a `tool.ended` for
+  every `tool.started` or the reverse, nor count the tool events it got as the session's
+  tool calls.
+- A machine starts at most one request a second (HTTP.md §6); a receiver that limits
+  requests per machine SHOULD allow at least that.
+- A receiver that asked for `main` and later needs every tool event says `all` (or drops
+  the field); the machine reads the file again within a day. `replay --tools all` re-sends
+  them once.
+- Codex: a subagent's tool calls and permission prompts carry `agent_id` (ADAPTERS.md).
+
 ### For receivers (0.13.0)
 
 What a 0.13.0 daemon or hook sends and accepts beyond 0.12.0. Everything is additive on
