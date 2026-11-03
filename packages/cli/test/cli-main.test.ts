@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { adapterByName, makeEvent, Outbox, readConfig, takeLock, writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { askMain } from "../src/ask.js";
 import { controlMain, waitMain } from "../src/control/cli.js";
 import { moveControlSecrets } from "../src/control/store.js";
 import { HttpSink } from "../src/http-sink.js";
@@ -85,6 +86,10 @@ vi.mock("../src/control/cli.js", async (original) => ({
   ...(await original<typeof import("../src/control/cli.js")>()),
   controlMain: vi.fn(async () => {}),
   waitMain: vi.fn(async () => {}),
+}));
+vi.mock("../src/ask.js", async (original) => ({
+  ...(await original<typeof import("../src/ask.js")>()),
+  askMain: vi.fn(async () => 0),
 }));
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -287,6 +292,23 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     expect(controlMain).toHaveBeenCalledWith(["control", "status"], expect.any(Function), realDist);
     await run("wait", "--session", "claude-code:x");
     expect(waitMain).toHaveBeenCalledWith(["wait", "--session", "claude-code:x"], expect.any(Function));
+    // `ask` answers with an exit code of its own: 0 leaves the process's alone, anything else is kept.
+    await run("ask", "codex", "hi");
+    expect(askMain).toHaveBeenCalledWith(
+      ["ask", "codex", "hi"],
+      { out: expect.any(Function), err: expect.any(Function) },
+      { distDir: realDist },
+    );
+    expect(process.exitCode).toBeUndefined();
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    vi.mocked(askMain).mockImplementationOnce(async (_argv, io) => {
+      io.err("sessionpipe ask: refused\n");
+      return 1;
+    });
+    await run("ask", "codex", "no");
+    expect(stderr).toHaveBeenCalledWith("sessionpipe ask: refused\n");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("a failing command says why on stderr and exits 1", async () => {
