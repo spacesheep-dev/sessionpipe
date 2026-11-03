@@ -52,10 +52,24 @@ export function connectFolders(o: {
   return picked.length ? { folders: picked, from: "recent" } : { folders: [], from: "none" };
 }
 
+/** `--tier N` from the command line: digits, held to 0–3 (`--tier 9` is 3), or `fallback`
+ *  when there is no --tier. A value left off or not written in digits (`--tier` last,
+ *  `--tier one`, `--tier 1.5`, `--tier 0x2`, `--tier --name x`) is refused: stored, it
+ *  became a tier no event can carry (`null`, or 1.5 where the schema takes an integer). */
+export function tierArg(argv: readonly string[], fallback: 0 | 1 | 2 | 3): 0 | 1 | 2 | 3 {
+  const i = argv.indexOf("--tier");
+  if (i < 0) return fallback;
+  const v = argv[i + 1] ?? "";
+  const n = /^-?\d+$/.test(v.trim()) ? Number(v) : Number.NaN;
+  if (Number.isNaN(n)) throw new Error(`--tier takes 0, 1, 2 or 3${v ? `, not "${v}"` : ""}`);
+  return Math.max(0, Math.min(3, n)) as 0 | 1 | 2 | 3;
+}
+
 /** The tier `connect` reports at: --tier when given; otherwise 2 (what a session board
  *  needs: the asks and the answers, secrets removed), never lowering a sink set higher. */
-export function connectTier(flag: string | undefined, current: number | undefined): 0 | 1 | 2 | 3 {
-  if (flag !== undefined && flag !== "")
-    return Math.max(0, Math.min(3, Math.trunc(Number(flag)) || 0)) as 0 | 1 | 2 | 3;
-  return Math.max(2, Math.min(3, current ?? 0)) as 2 | 3;
+export function connectTier(flag: 0 | 1 | 2 | 3 | undefined, current: number | undefined): 0 | 1 | 2 | 3 {
+  if (flag !== undefined) return flag;
+  // Math.trunc: a stored 2.5 (an older `sink add --tier 2.5`) is kept as 2, not written
+  // back or handed to `control pair` as 2.5; a stored tier that is not a number counts as 0.
+  return Math.max(2, Math.min(3, Math.trunc(Number(current) || 0))) as 2 | 3;
 }

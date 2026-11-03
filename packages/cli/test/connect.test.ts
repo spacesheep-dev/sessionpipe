@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { readConfig } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectFolders, connectTier, isBroad } from "../src/connect.js";
+import { connectFolders, connectTier, isBroad, tierArg } from "../src/connect.js";
 import { adoptSinkToken } from "../src/control/cli.js";
 import { ensureLinger } from "../src/control/pair.js";
 
@@ -79,8 +79,30 @@ describe("tier", () => {
     expect(connectTier(undefined, undefined)).toBe(2);
     expect(connectTier(undefined, 0)).toBe(2);
     expect(connectTier(undefined, 3)).toBe(3);
-    expect(connectTier("0", 3)).toBe(0);
-    expect(connectTier("9", 0)).toBe(3);
+    expect(connectTier(0, 3)).toBe(0);
+    expect(connectTier(3, 0)).toBe(3);
+  });
+  it("a stored tier that is not a whole number is kept as the whole number below it", () => {
+    expect(connectTier(undefined, 2.5)).toBe(2);
+    expect(connectTier(undefined, 3.5)).toBe(3);
+  });
+  it("a stored tier that is not a number counts as none: 2", () => {
+    expect(connectTier(undefined, "two" as unknown as number)).toBe(2);
+    expect(connectTier(undefined, null as unknown as number)).toBe(2);
+  });
+  it("--tier takes a whole number, held to 0–3; one left off or not whole is refused", () => {
+    expect(tierArg(["sink", "add", "stdout"], 1)).toBe(1);
+    expect(tierArg(["--tier", "2"], 0)).toBe(2);
+    expect(tierArg(["--tier", "9"], 0)).toBe(3);
+    expect(tierArg(["--tier", "-1"], 0)).toBe(0);
+    expect(() => tierArg(["--tier"], 0)).toThrow(/^--tier takes 0, 1, 2 or 3$/);
+    expect(() => tierArg(["--tier", " "], 0)).toThrow('--tier takes 0, 1, 2 or 3, not " "');
+    expect(() => tierArg(["--tier", "one"], 0)).toThrow('--tier takes 0, 1, 2 or 3, not "one"');
+    expect(() => tierArg(["--tier", "1.5"], 0)).toThrow('not "1.5"');
+    for (const v of ["0x2", "1e0", "2.0", "+2", "Infinity"])
+      expect(() => tierArg(["--tier", v], 0)).toThrow(`not "${v}"`);
+    expect(tierArg(["--tier", " 2 "], 0)).toBe(2);
+    expect(() => tierArg(["--tier", "--name", "x"], 0)).toThrow('not "--name"');
   });
 });
 

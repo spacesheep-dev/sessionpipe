@@ -43,7 +43,7 @@ import {
   writeConfig,
 } from "@sessionpipe/core";
 import { ASK_HELP, askMain } from "./ask.js";
-import { connectFolders, connectTier } from "./connect.js";
+import { connectFolders, connectTier, tierArg } from "./connect.js";
 import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
 import { CONTROL_HELP, channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
@@ -162,6 +162,11 @@ async function command(cmd: string): Promise<void> {
     );
     return usage ? out(usage) : help();
   }
+  // A --tier that is not a whole number stops these commands here, before any work: an npx
+  // re-run, a hook written, a sink stored. `sink add`, `install --sink`, `connect`,
+  // `control pair` and `tail` read it; their sibling subcommands refuse it too, rather than
+  // ignore a typo. Other commands ignore --tier, as before.
+  if (["connect", "install", "sink", "control", "tail"].includes(cmd)) tierArg(args, 0);
   switch (cmd) {
     case "connect":
       return connect();
@@ -427,7 +432,7 @@ async function connect(): Promise<void> {
   const host = new URL(url).host;
   const name = machineName(cfg, os.hostname());
   const before = cfg.sinks.find((x) => x.url.replace(/\/$/, "") === url);
-  const tier = connectTier(flag("--tier"), before?.tier);
+  const tier = connectTier(has("--tier") ? tierArg(args, 0) : undefined, before?.tier);
   out(`  Connecting ${name} to ${host}.`);
 
   // 1. The hooks, for every agent on this machine (and every Claude Code account).
@@ -1270,7 +1275,7 @@ async function doctor(): Promise<void> {
 
 /** Follow the local outbox: one event per line, filtered to a tier. The zero-server demo. */
 async function tail(): Promise<void> {
-  const tier = Math.max(0, Math.min(3, Number(flag("--tier") ?? 1))) as Tier;
+  const tier: Tier = tierArg(args, 1);
   const onlySession = flag("--session");
   const onlyHarness = flag("--harness");
   const outbox = new Outbox(state);
