@@ -85,6 +85,12 @@ function raw(): Promise<{ s: net.Socket; got: () => string; closed: () => boolea
   });
 }
 const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+/** Until a raw client has a whole line back, or two seconds: a fixed wait read a partial
+ *  reply on a slow CI runner and failed JSON.parse ("Unexpected end of JSON input"). */
+async function lineBack(c: { got: () => string }): Promise<string> {
+  for (let i = 0; i < 100 && !c.got().includes("\n"); i++) await settle(20);
+  return c.got();
+}
 
 beforeAll(async () => {
   rx = new FakeReceiver();
@@ -135,8 +141,7 @@ describe.runIf(unix)("frames on the socket", () => {
     await settle();
     expect(slow.closed()).toBe(false);
     slow.s.write('tus"}\n');
-    await settle();
-    expect(JSON.parse(slow.got().trim())).toMatchObject({ op: "status" });
+    expect(JSON.parse((await lineBack(slow)).trim())).toMatchObject({ op: "status" });
     // A line that never ends is cut off at 64 KiB.
     const flood = await raw();
     flood.s.write("x".repeat(70 * 1024));
