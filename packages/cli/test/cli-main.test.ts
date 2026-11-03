@@ -1863,7 +1863,10 @@ describe.skipIf(process.platform === "win32")("a harness config the system won't
     const full = await run("install", "--claude-code", "--sink", "stdout", "--tier", "1", "--backfill", "0");
     expect(full.text).toMatch(/! claude-code: .*settings\.json — can't write it \(EACCES\); not touched/);
     expect(cfg().harnesses["claude-code"]).toEqual({ enabled: true, created: [settings()] });
-    expect(process.exitCode).toBeUndefined();
+    // The one harness asked for was left alone, so nothing was hooked: exit 1 (#185), said.
+    expect(full.text).toMatch(/Nothing was hooked/);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it("uninstall: a file it can't write is said so and left; the other harnesses' hooks still come out", async () => {
