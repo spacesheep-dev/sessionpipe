@@ -223,7 +223,10 @@ export function buildSinks(sinks: SinkConfig[], o: { locked?: (name: string) => 
       o.locked?.(raw.name);
       continue;
     }
-    const tier = Math.min(s.tier, s.max_tier ?? 3) as 0 | 1 | 2 | 3;
+    // Math.trunc: a tier of 1.5 that an older `sink add --tier 1.5` stored sends as 1.
+    // `|| 0`: a sink with no tier (a hand edit) sends at 0, not as a `tier: null` no
+    // receiver takes.
+    const tier = Math.trunc(Math.min(Number(s.tier) || 0, s.max_tier ?? 3)) as 0 | 1 | 2 | 3;
     if (s.url === "stdout") out.push(new StdoutSink(s.name, tier, !!s.pii));
     else if (s.url.startsWith("file:"))
       out.push(new FileSink(s.name, s.url.slice(5).replace(/^~(?=\/|$)/, os.homedir()), tier, !!s.pii));

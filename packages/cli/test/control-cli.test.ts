@@ -235,8 +235,10 @@ describe("control pair", () => {
     await run("pair", RX, "--no-service", "--tier", "1");
     expect(said()).toContain("added (tier 1: tool activity, no conversation text)");
     writeConfig({ sinks: [], harnesses: {} });
-    await run("pair", RX, "--no-service", "--tier", "nan");
-    expect(readConfig().sinks[0]?.tier).toBe(0);
+    await expect(run("pair", RX, "--no-service", "--tier", "nan")).rejects.toThrow(
+      '--tier takes 0, 1, 2 or 3, not "nan"',
+    );
+    expect(readConfig().sinks).toEqual([]);
   });
 
   it("adoptSinkToken works on a named config file too", () => {

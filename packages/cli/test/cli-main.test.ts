@@ -810,6 +810,24 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     expect((cfg().sinks.find((s) => s.name === "big") as { endpoints?: unknown }).endpoints).toBeUndefined();
   });
 
+  it("a --tier left off or not a whole number is refused, and no sink is stored", async () => {
+    const file = `file:${path.join(tmp, "t.jsonl")}`;
+    for (const tier of [["--tier"], ["--tier", "one"], ["--tier", "1.5"], ["--tier", "--name", "x"]]) {
+      const r = await run("sink", "add", file, ...tier);
+      expect(r.err).toHaveBeenCalledWith(expect.stringMatching(/^sessionpipe: --tier takes 0, 1, 2 or 3/));
+      expect(r.exit).toHaveBeenCalledWith(1);
+    }
+    const install = await run("install", "--sink", file, "--tier", "two");
+    expect(install.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "two"\n');
+    expect(install.lines).toEqual([]);
+    for (const argv of [["connect", "r.invalid"], ["control", "pair", "r.invalid"], ["tail"]]) {
+      const r = await run(...argv, "--tier", "x");
+      expect(r.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "x"\n');
+      expect(r.lines).toEqual([]);
+    }
+    expect(cfg().sinks).toEqual([]);
+  });
+
   it("a receiver without a readable well-known file is added anyway, at the tier asked for", async () => {
     const rx = await receiver({ wellKnownStatus: 404 });
     const bad = await run("sink", "add", rx.url, "--tier", "2");
