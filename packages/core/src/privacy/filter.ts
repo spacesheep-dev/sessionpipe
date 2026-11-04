@@ -49,7 +49,7 @@ const DATA_ALLOW: Record<string, Partial<Record<Tier, string[]>>> = {
   "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message", "agent_id"] },
   "attention.cleared": { 0: ["attention_id", "how"] },
   "subagent.started": { 1: ["agent_id", "agent_type"] },
-  "subagent.ended": { 1: ["agent_id", "agent_type"] },
+  "subagent.ended": { 1: ["agent_id", "agent_type", "background"] },
   "context.compacted": { 1: ["trigger"] },
   "limits.observed": { 1: ["windows", "plan", "account_id"] },
   "delegation.started": { 0: ["ask_id", "via", "harness", "to"], 1: ["text"] },
