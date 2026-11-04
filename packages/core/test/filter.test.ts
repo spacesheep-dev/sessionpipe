@@ -54,6 +54,15 @@ describe("filterEvent", () => {
       error: "overloaded",
     });
   });
+  it("a subagent's end keeps the background count it restates (PROTOCOL.md §4, #153)", () => {
+    const end = base({
+      type: "subagent.ended",
+      harness: { name: "claude-code", event: "SubagentStop" },
+      data: { agent_id: "a1", agent_type: "Explore", background: 0 },
+    });
+    expect(filterEvent(end, 0, false)).toBeNull();
+    expect(filterEvent(end, 1, false)!.data).toEqual({ agent_id: "a1", agent_type: "Explore", background: 0 });
+  });
   it("redacts above tier 0 and records the ruleset", () => {
     const t3 = filterEvent(base({}), 3, false)!;
     expect((t3.data.input as { command: string }).command).toBe(`export DB_PASSWORD=${REDACTED}`);
@@ -111,7 +120,7 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "session.backfill": { 0: ["started_at", "last_at", "turns"] },
   "session.forgotten": {},
   "turn.started": { 0: ["turn_id", "submitted_by", "injected"], 1: ["prompt_chars"] },
-  "turn.ended": { 0: ["turn_id", "reason", "ms"], 1: ["error"] },
+  "turn.ended": { 0: ["turn_id", "reason", "ms", "background"], 1: ["error"] },
   "turn.transcript": { 2: ["turn", "user", "assistant", "at", "injected"] },
   "turn.progress": { 2: ["turn", "user", "assistant", "at", "injected"] },
   "tool.started": { 1: ["tool", "call_id", "turn_id", "agent_id"], 3: ["input"] },
@@ -120,7 +129,7 @@ const SPEC: Record<string, Partial<Record<Tier, string[]>>> = {
   "attention.needed": { 0: ["attention_id", "kind"], 1: ["tool", "message", "agent_id"] },
   "attention.cleared": { 0: ["attention_id", "how"] },
   "subagent.started": { 1: ["agent_id", "agent_type"] },
-  "subagent.ended": { 1: ["agent_id", "agent_type"] },
+  "subagent.ended": { 1: ["agent_id", "agent_type", "background"] },
   "context.compacted": { 1: ["trigger"] },
   "limits.observed": { 1: ["windows", "plan", "account_id"] },
   "delegation.started": { 0: ["ask_id", "via", "harness", "to"], 1: ["text"] },
@@ -136,6 +145,7 @@ const EVERY_KEY: Record<string, unknown> = {
   turn_id: "t1",
   prompt_chars: 12,
   ms: 5,
+  background: 2,
   error: "boom",
   turn: 1,
   user: "u",
