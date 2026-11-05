@@ -524,9 +524,15 @@ describe("the service that keeps the daemon running", () => {
     if (process.platform !== "win32")
       expect(e).toEqual({ PATH: shellPath, SESSIONPIPE_CLAUDE: path.join(bin, "claude") });
     expect(serviceEnv({})).toEqual({});
-    const f = serviceFiles({ node: "/n", cli: "/c.js", logDir: "/log", home: "/h", env: e });
-    expect(f.plist.text).toContain(`<key>PATH</key><string>${shellPath}</string>`);
-    expect(f.unit.text).toContain(`Environment="PATH=${shellPath}"`);
+    // Both files carry it (the unit's quoting escapes a backslash, so a POSIX path here).
+    const posix = { PATH: "/opt/nvm/bin:/usr/bin:/bin", SESSIONPIPE_CLAUDE: "/opt/nvm/bin/claude" };
+    const f = serviceFiles({ node: "/n", cli: "/c.js", logDir: "/log", home: "/h", env: posix });
+    expect(f.plist.text).toContain(
+      "<key>PATH</key><string>/opt/nvm/bin:/usr/bin:/bin</string><key>SESSIONPIPE_CLAUDE</key><string>/opt/nvm/bin/claude</string>",
+    );
+    expect(f.unit.text).toContain(
+      'Environment="PATH=/opt/nvm/bin:/usr/bin:/bin"\nEnvironment="SESSIONPIPE_CLAUDE=/opt/nvm/bin/claude"',
+    );
     // Written on install, from the environment the command runs in.
     const r = installService({ node: "/n", cli: "/c.js", env: { ...env, PATH: shellPath }, exec, platform: "darwin" });
     expect(r).toContain("launchd agent");
