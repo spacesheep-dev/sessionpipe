@@ -581,6 +581,11 @@ export const HarnessAccount = z.object({
   /** What to call an account that has no email: a Claude Code home that runs on
    *  another API is named by its endpoint's host (`api.z.ai`). */
   name: z.string().min(1).max(200).optional(),
+  /** Whether the harness's command line is signed in to this account as the daemon
+   *  sees it (`claude auth status`): false means a message resumed headlessly would fail
+   *  with "run claude auth login", so a receiver can say so before anyone sends one.
+   *  Absent when the daemon can't tell, or predates the field. */
+  signed_in: z.boolean().optional(),
 });
 
 /** `POST {control}/pair`, sent with the person's sink token from their own terminal —

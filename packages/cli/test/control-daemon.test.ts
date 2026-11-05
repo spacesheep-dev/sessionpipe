@@ -974,6 +974,96 @@ describe.runIf(unix)("attachments on a start (CONTROL.md §6)", () => {
     expect(rx.hellos.find((h) => h.files === true)?.key_types).toEqual(["passkey", "device"]);
   });
 
+  it("hello says per account whether the command line is signed in, from claude auth status, and logs a change once", async () => {
+    writeFileSync(
+      path.join(configDir, ".claude.json"),
+      JSON.stringify({ oauthAccount: { accountUuid: "acct-cli", emailAddress: "me@example.com" } }),
+    );
+    const logs: string[] = [];
+    const hello = async (): Promise<Record<string, unknown>> => {
+      for (let i = 0; i < 100 && !rx.hellos.some((h) => Array.isArray(h.accounts)); i++)
+        await new Promise((r) => setTimeout(r, 20));
+      return rx.hellos.find((h) => Array.isArray(h.accounts)) as Record<string, unknown>;
+    };
+    let answer: boolean | null = false;
+    let asked = 0;
+    // A fresh daemon per answer (a function of its own: `d` narrows to null in one scope).
+    const restart = async (o: Parameters<typeof startDaemon>[0]): Promise<void> => {
+      await d?.stop();
+      d = null;
+      rx.hellos.length = 0;
+      await startDaemon(o);
+    };
+    await startDaemon({
+      login: async () => {
+        asked++;
+        return { loggedIn: answer };
+      },
+      extra: { log: (l: string) => logs.push(l) },
+    });
+    expect((await hello()).accounts).toEqual([
+      { harness: "claude-code", id: "acct-cli", email: "me@example.com", signed_in: false },
+    ]);
+    expect(logs.filter((l) => l.includes("isn't signed in as me@example.com"))).toHaveLength(1);
+    // The answer is the one a resume would get, from the same cache: no second ask within 30 s.
+    const q = await rx.send({ session: SESSION, text: "summarize" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "failed" });
+    expect(asked).toBe(1);
+    // Signed in: said so, and the log says it once.
+    answer = true;
+    await restart({ login: async () => ({ loggedIn: answer }), extra: { log: (l: string) => logs.push(l) } });
+    expect((await hello()).accounts).toEqual([
+      { harness: "claude-code", id: "acct-cli", email: "me@example.com", signed_in: true },
+    ]);
+    expect(logs.filter((l) => l === "claude is signed in as me@example.com")).toHaveLength(1);
+    // Can't tell (no answer, or no claude to ask): nothing is said.
+    await restart({ login: async () => ({ loggedIn: null }) });
+    expect((await hello()).accounts).toEqual([{ harness: "claude-code", id: "acct-cli", email: "me@example.com" }]);
+    await restart({ login: async () => ({ loggedIn: false }), extra: { claude: () => null } });
+    expect((await hello()).accounts).toEqual([{ harness: "claude-code", id: "acct-cli", email: "me@example.com" }]);
+    // One account in three dirs: a dir that can't say leaves the no standing, signed in
+    // from any dir is signed in, and no dir is asked once its account said yes. An account named by its API host is said by that
+    // name; another harness's account passes through untouched.
+    const dirA = path.join(tmp, "home-a");
+    const dirB = path.join(tmp, "home-b");
+    const dirC = path.join(tmp, "home-c");
+    const dirD = path.join(tmp, "home-d");
+    for (const [dir, id] of [
+      [dirA, "acct-two"],
+      [dirB, "acct-two"],
+      [dirC, "acct-three"],
+      [dirD, "acct-two"],
+    ] as const) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: id } }));
+    }
+    const answers: Record<string, boolean | null> = { [dirA]: false, [dirD]: null, [dirB]: true, [dirC]: false };
+    const askedDirs: string[] = [];
+    await restart({
+      login: async (dir) => {
+        askedDirs.push(dir ?? "");
+        return { loggedIn: answers[dir ?? ""] ?? null };
+      },
+      extra: {
+        claudeDirs: () => [dirA, dirD, dirB, dirC, dirB],
+        accounts: () => [
+          { harness: "claude-code", id: "acct-two" },
+          { harness: "claude-code", id: "acct-three", name: "api.z.ai" },
+          { harness: "codex", id: "acct-two" },
+        ],
+        log: (l: string) => logs.push(l),
+      },
+    });
+    expect((await hello()).accounts).toEqual([
+      { harness: "claude-code", id: "acct-two", signed_in: true },
+      { harness: "claude-code", id: "acct-three", name: "api.z.ai", signed_in: false },
+      { harness: "codex", id: "acct-two" },
+    ]);
+    expect(askedDirs).toEqual([dirA, dirD, dirB, dirC]);
+    expect(logs.filter((l) => l === "claude is signed in as acct-two")).toHaveLength(1);
+    expect(logs.filter((l) => l.startsWith("claude isn't signed in as api.z.ai"))).toHaveLength(1);
+  });
+
   it("a second session in the same folder: the .gitignore is already there and stays as it is", async () => {
     await startDaemon();
     mkdirSync(path.join(project, ".sessionpipe"));

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { claudeFacts } from "../src/adapters/claude-code.js";
-import { claudeAccounts } from "../src/adapters/index.js";
+import { claudeAccountDirs, claudeAccounts } from "../src/adapters/index.js";
 
 let home: string;
 const login = (file: string, oauthAccount: unknown) => {
@@ -61,6 +61,17 @@ describe("claudeAccounts", () => {
       path.join(home, d),
     );
     expect(claudeAccounts(dirs, home)).toEqual([{ harness: "claude-code", id: "acct-1", email: "me@example.com" }]);
+  });
+  it("claudeAccountDirs: each dir with its account, for a question asked per dir (hello's signed_in)", () => {
+    login(path.join(home, ".claude.json"), { accountUuid: "acct-1", emailAddress: "me@example.com" });
+    login(path.join(home, ".claude-again", ".claude.json"), { accountUuid: "acct-1" });
+    login(path.join(home, ".claude-work", ".claude.json"), { accountUuid: "acct-2", emailAddress: "me@work.example" });
+    const dirs = [".claude", ".claude-again", ".claude-work", ".claude-none"].map((d) => path.join(home, d));
+    expect(claudeAccountDirs(dirs, home)).toEqual([
+      { id: "acct-1", dir: dirs[0] },
+      { id: "acct-1", dir: dirs[1] },
+      { id: "acct-2", dir: dirs[2] },
+    ]);
   });
   it("keeps an id whose file has no usable email", () => {
     login(path.join(home, ".claude.json"), { accountUuid: "acct-1", emailAddress: "not an email" });

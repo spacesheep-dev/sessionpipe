@@ -2,7 +2,7 @@
   "name": "control-hello-pool",
   "spec": "CONTROL.md §2 pool, §6 pool",
   "capability": "control",
-  "note": "A hello with pool (on, harness, accounts in the machine's order with status, current, until, limited_by and the idle poll's windows) fits control-hello.json and is accepted. The receiver keeps it per machine and shows the pool from it, never from its own guess; a hello without pool is a daemon that predates the pool, for which it offers no pool controls. (What the receiver stored is its own to check; this scenario holds it to accepting the hello.)",
+  "note": "A hello with pool (on, harness, accounts in the machine's order with status, current, until, limited_by and the idle poll's windows) and with signed_in on an account (§2 accounts) fits control-hello.json and is accepted. The receiver keeps it per machine and shows the pool from it, never from its own guess; a hello without pool is a daemon that predates the pool, for which it offers no pool controls. (What the receiver stored is its own to check; this scenario holds it to accepting the hello.)",
   "steps": [
     {
       "hello": {
@@ -23,7 +23,8 @@
             {
               "harness": "claude-code",
               "id": "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-              "email": "a@example.com"
+              "email": "a@example.com",
+              "signed_in": true
             }
           ],
           "pool": {

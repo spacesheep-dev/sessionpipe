@@ -17,7 +17,7 @@ export const adapterByName = (name: string): Adapter | undefined => ADAPTERS.fin
 export * as acpControl from "./acp-control.js";
 export { AG_STALE_PRETOOL, antigravityAnswer } from "./antigravity.js";
 export * as antigravityControl from "./antigravity-control.js";
-export { claudeAccounts, claudeDirs, notClaudeCode } from "./claude-code.js";
+export { claudeAccountDirs, claudeAccounts, claudeDirs, notClaudeCode } from "./claude-code.js";
 export * as claudeControl from "./claude-code-control.js";
 export * as codexControl from "./codex-control.js";
 export { DEVIN_EVENTS, devinConfigDir, devinDataDir, readDevinChain } from "./devin.js";

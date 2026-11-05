@@ -5,6 +5,14 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.13.3)
+
+A hello's `accounts` entries MAY carry `signed_in` (CONTROL.md §2): whether the
+harness's command line is signed in to that account as the daemon sees it. A receiver
+that sees `false` SHOULD say "run `claude auth login` on <machine>" before a message is
+sent, where it used to learn that from the first message's failed ack. Absent means
+unknown, never signed out. Fixture: `delivery/24` carries it.
+
 ### For receivers (0.13.1)
 
 A receiver can now ask a machine to thin the tool events it is sent (PROTOCOL.md §4,
