@@ -657,6 +657,17 @@ export function claudeAccounts(dirs: string[], home = homeDir()): HarnessAccount
   }
   return out;
 }
+/** Each config dir with the account it is signed in as, for whoever asks the harness a
+ *  question per dir (control's hello asks `claude auth status` for each). Dirs naming
+ *  nobody are left out. */
+export function claudeAccountDirs(dirs: string[], home = homeDir()): { id: string; dir: string }[] {
+  const out: { id: string; dir: string }[] = [];
+  for (const d of dirs) {
+    const l = claudeLogin(d, home);
+    if (l) out.push({ id: l.id, dir: d });
+  }
+  return out;
+}
 const LINK_RE = /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+$/;
 function transcriptLink(records: Record<string, unknown>[]): string | null {
   for (let i = records.length - 1; i >= 0; i--) {

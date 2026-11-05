@@ -144,6 +144,16 @@ included). The daemon reads the accounts again for every hello, so a new sign-in
 named without pairing again. A receiver MUST NOT treat them as anything but a label:
 nothing on the machine is checked against them.
 
+An account MAY also carry `signed_in` (boolean): whether the harness's command line is
+signed in to it as the daemon sees it (`claude auth status` for Claude Code, asked at
+most every ten minutes, again 30 s after a no). A session the Claude app signed in
+through the app runs fine in its window while the command line the daemon resumes with
+has no login of its own; without this a receiver learned that from the first message's
+failed ack ("run `claude auth login`", §10). With `signed_in: false` a receiver SHOULD
+say so on the machine or the session before a message is sent, naming that command and
+the machine. Absent when the daemon can't tell (no `claude` found, no answer) or
+predates the field; a receiver treats absent as unknown, never as signed out.
+
 A hello MAY carry `pool`: the machine's **account pool** (§6 `pool`), several accounts
 of one harness behind the daemon so a session keeps going when one account's limit is
 reached ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)):

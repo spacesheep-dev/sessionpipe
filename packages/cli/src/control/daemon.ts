@@ -23,6 +23,7 @@ import path from "node:path";
 import {
   acpControl,
   antigravityControl,
+  claudeAccountDirs,
   claudeAccounts,
   claudeControl,
   codexControl,
@@ -578,6 +579,8 @@ export class ControlDaemon {
   private readonly procWaiters: (() => void)[] = [];
   /** configDir → the last login answer and when (a yes is kept 10 minutes, a no 30 s). */
   private readonly logins = new Map<string, { at: number; login: Login }>();
+  /** account id → the `signed_in` the log last said, so a change is said once. */
+  private readonly signedInSaid = new Map<string, boolean>();
   /** Intake paused for an update: the long-polls end and wait for this. */
   private paused: { until: Promise<void>; go: () => void } | null = null;
   /** Poll answers whose messages are being read and handed out. */
@@ -1233,7 +1236,7 @@ export class ControlDaemon {
       // Every ACP agent's turn is acked `api` (§6).
       ...(harnesses.some((h) => acpControl.acpAgent(h)) ? (["api"] as const) : []),
     ];
-    const accounts = this.accounts();
+    const accounts = await this.signedInMarked(this.accounts());
     const start = this.startOptions(harnesses);
     for (const r of this.cfg.receivers) {
       const body = {
@@ -1633,6 +1636,51 @@ export class ControlDaemon {
     } catch {
       return [];
     }
+  }
+
+  /** Each Claude Code account's `signed_in` for hello: what `claude auth status` says
+   *  for its config dir (the answer a resume would get, cached as `signedIn` caches it),
+   *  so a receiver can say "run claude auth login on <machine>" before a message is
+   *  sent, not in its failed ack. An account signed in from any of its dirs is signed in;
+   *  one the daemon can't ask (no claude, no answer) is left unsaid. A change is logged.
+   *  (2026-11-05: sessions in the Claude app sign in through the app, and the command
+   *  line the daemon resumes with had no login of its own; the first message found out.) */
+  private async signedInMarked(accounts: HarnessAccount[]): Promise<HarnessAccount[]> {
+    const login = this.deps.login;
+    if (!login || !accounts.length || !this.deps.claude()) return accounts;
+    const states = new Map<string, boolean | null>();
+    for (const { id, dir } of claudeAccountDirs(this.deps.claudeDirs())) {
+      const was = states.get(id);
+      if (was === true) continue;
+      const is = await this.loginState(dir, () => login(dir));
+      if (is !== null || was === undefined) states.set(id, is);
+    }
+    return accounts.map((a) => {
+      const is = a.harness === "claude-code" ? states.get(a.id) : undefined;
+      if (is === undefined || is === null) return a;
+      const who = a.email ?? a.name ?? a.id;
+      if (this.signedInSaid.get(a.id) !== is) {
+        this.signedInSaid.set(a.id, is);
+        this.deps.log(
+          is
+            ? `claude is signed in as ${who}`
+            : `claude isn't signed in as ${who} as the daemon sees it: a message to a session of that account would fail until \`claude auth login\` is run here`,
+        );
+      }
+      return { ...a, signed_in: is };
+    });
+  }
+
+  /** One harness account's login as `signedIn` reads it, with the answer itself. */
+  private async loginState(key: string, ask: () => Promise<Login>): Promise<boolean | null> {
+    const now = this.deps.now();
+    const hit = this.logins.get(key);
+    let login = hit && now - hit.at < (hit.login.loggedIn === false ? 30_000 : 600_000) ? hit.login : null;
+    if (!login) {
+      login = await ask().catch((): Login => ({ loggedIn: null }));
+      this.logins.set(key, { at: now, login });
+    }
+    return login.loggedIn;
   }
 
   /** The harnesses this machine can run a message in, for hello: at most
@@ -2289,14 +2337,7 @@ export class ControlDaemon {
 
   /** One harness account's login, asked at most every 10 minutes (30 s after a no). */
   private async signedIn(key: string, ask: () => Promise<Login>): Promise<boolean> {
-    const now = this.deps.now();
-    const hit = this.logins.get(key);
-    let login = hit && now - hit.at < (hit.login.loggedIn === false ? 30_000 : 600_000) ? hit.login : null;
-    if (!login) {
-      login = await ask().catch((): Login => ({ loggedIn: null }));
-      this.logins.set(key, { at: now, login });
-    }
-    return login.loggedIn !== false;
+    return (await this.loginState(key, ask)) !== false;
   }
 
   /** Null when a Codex or Antigravity run may go ahead; otherwise what to tell the person. */

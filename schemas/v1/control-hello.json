@@ -92,6 +92,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "signed_in": {
+            "type": "boolean"
           }
         },
         "required": [
