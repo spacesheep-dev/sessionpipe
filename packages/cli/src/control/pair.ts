@@ -10,6 +10,7 @@ import path from "node:path";
 import {
   acpControl,
   claudeAccounts,
+  claudeControl,
   claudeDirs,
   drivableHarnesses,
   type HarnessAccount,
@@ -313,16 +314,35 @@ export { type Exec, ensureLinger } from "@sessionpipe/core/service";
 /** The daemon's service: `<node> <cli> control run`, logging to the state dir. Both files
  *  restart it when it exits non-zero; an update exits UPDATE_EXIT (75) to come back on
  *  the new code. SESSIONPIPE_SERVICE tells the daemon which manager that is. */
-const spec = (o: { node: string; cli: string; logDir: string; home?: string }) => ({
+const spec = (o: { node: string; cli: string; logDir: string; home?: string; env?: Record<string, string> }) => ({
   label: LABEL,
   unit: UNIT,
   description: DESCRIPTION,
   argv: [o.node, o.cli, "control", "run"],
   logPath: path.join(o.logDir, "daemon.log"),
   ...(o.home ? { home: o.home } : {}),
+  ...(o.env ? { env: o.env } : {}),
 });
 
-export function serviceFiles(o: { node: string; cli: string; logDir: string; home?: string }) {
+/** What the service file carries beside SESSIONPIPE_SERVICE: the PATH of the shell that
+ *  paired (launchd's and systemd's own is a bare /usr/bin:/bin, where a `claude` under nvm
+ *  or Homebrew is not), and the `claude` that shell could see, pinned for the daemon as
+ *  SESSIONPIPE_CLAUDE (a path that stops existing is skipped and looked for again). */
+export function serviceEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (env.PATH) out.PATH = env.PATH;
+  const claude = claudeControl.findClaude(env);
+  if (claude) out.SESSIONPIPE_CLAUDE = claude;
+  return out;
+}
+
+export function serviceFiles(o: {
+  node: string;
+  cli: string;
+  logDir: string;
+  home?: string;
+  env?: Record<string, string>;
+}) {
   return core.serviceFiles(spec(o));
 }
 
@@ -346,7 +366,7 @@ export function installService(o: {
     chmodSync(log, 0o600);
   } catch {}
   const r = core.installService({
-    ...spec({ node: o.node, cli: o.cli, logDir }),
+    ...spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env) }),
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });

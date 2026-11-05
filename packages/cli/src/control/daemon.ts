@@ -73,6 +73,7 @@ import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./loca
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
 import {
+  CLAUDE_NOT_FOUND,
   COPY_NOTE,
   channelMark,
   type DeliveryMode,
@@ -2080,6 +2081,7 @@ export class ControlDaemon {
       live,
       known: !!t,
       canFork: !!claude?.caps.fork,
+      installed: !!claude,
       // A message for a session that already has a copy goes to that copy; when the copy
       // is live too the person is told, rather than handed a copy of a copy.
       copied: !!this.state.copies[ref.id],
@@ -2436,8 +2438,7 @@ export class ControlDaemon {
     if (acpControl.acpAgent(harness as string)) return this.resumeAcp(r, id, cmd, place, sent);
     if (harness !== "claude-code") return this.resumeDriven(r, id, cmd, place, sent);
     const claude = this.deps.claude();
-    if (!claude)
-      return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
+    if (!claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
     const ref = parseSessionRef(cmd.session)!;
     const dir = place.transcript?.configDir;
     const home = homeSettings(dir);
@@ -2783,8 +2784,7 @@ export class ControlDaemon {
         detail: "that new session's id is already taken",
       });
     const claude = this.deps.sdk ? null : this.deps.claude();
-    if (!this.deps.sdk && !claude)
-      return this.finish(r, id, { outcome: "failed", detail: "Claude Code isn't installed on this machine" });
+    if (!this.deps.sdk && !claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
     const signedOut = await this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
     // The flags this level needs, checked once more before anything is taken: a run with

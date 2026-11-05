@@ -302,6 +302,8 @@ describe("control run", () => {
     writeFileSync(claude, "");
     await run();
     expect(loadSdk).toHaveBeenCalledWith(expect.objectContaining({ claudeBin: null }));
+    // No claude at start is said once, in words, with what to do (2026-11-05).
+    expect(out.at(-1)).toMatch(/Claude Code not found on this computer: .*SESSIONPIPE_CLAUDE/);
     const { deps } = daemon();
     expect(deps.claude()).toBeNull();
     expect(await deps.login?.("/cfg")).toEqual({ loggedIn: null });
@@ -329,7 +331,7 @@ describe("control run", () => {
     expect(deps.onRestart?.()).toBe(true);
     deps.onLostSocket?.();
     expect(process.exit).toHaveBeenCalledWith(0);
-    expect(out.at(-1)).toBeUndefined();
+    expect(out.filter((l) => l.includes("Claude Code not found"))).toHaveLength(1);
   });
 
   it("asks a claude --help that couldn't be read again a minute later, and says so (#152)", async () => {

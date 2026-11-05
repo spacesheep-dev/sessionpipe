@@ -32,6 +32,7 @@ import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
 import { ControlDaemon, DaemonRunning } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
+import { CLAUDE_NOT_FOUND } from "./route.js";
 import { loadSdk } from "./sdk.js";
 import {
   askOn,
@@ -389,6 +390,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     }
     return claude;
   };
+  if (!findClaude()) log(CLAUDE_NOT_FOUND);
   const sdk = await loadSdk({ claudeBin: findClaude(), env: process.env, log });
   let updater: AutoUpdater | null = null;
   d = new ControlDaemon(cfg, controlState(), socketPath(stateDir()), {

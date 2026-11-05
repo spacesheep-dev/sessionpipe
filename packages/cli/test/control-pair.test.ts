@@ -17,6 +17,7 @@ import {
   type PairOptions,
   pair,
   removeKey,
+  serviceEnv,
   serviceFiles,
   uninstallService,
   withoutInherit,
@@ -512,6 +513,27 @@ describe("the service that keeps the daemon running", () => {
     expect(f.unit.path).toBe(path.join("/h", ".config", "systemd", "user", "sessionpipe-control.service"));
     expect(f.unit.text).toContain('ExecStart="/opt/a&b/node" "/x/\\"cli\\".js" "control" "run"');
     expect(serviceFiles({ node: "n", cli: "c", logDir: "l" }).plist.path.startsWith(home)).toBe(true);
+  });
+
+  it("the service file carries the pairing shell's PATH and the claude it could see (launchd's own PATH is bare)", () => {
+    const bin = path.join(home, "nvm-bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+    const shellPath = `${bin}:/usr/bin:/bin`;
+    const e = serviceEnv({ PATH: shellPath });
+    if (process.platform !== "win32")
+      expect(e).toEqual({ PATH: shellPath, SESSIONPIPE_CLAUDE: path.join(bin, "claude") });
+    expect(serviceEnv({})).toEqual({});
+    const f = serviceFiles({ node: "/n", cli: "/c.js", logDir: "/log", home: "/h", env: e });
+    expect(f.plist.text).toContain(`<key>PATH</key><string>${shellPath}</string>`);
+    expect(f.unit.text).toContain(`Environment="PATH=${shellPath}"`);
+    // Written on install, from the environment the command runs in.
+    const r = installService({ node: "/n", cli: "/c.js", env: { ...env, PATH: shellPath }, exec, platform: "darwin" });
+    expect(r).toContain("launchd agent");
+    const plist = readFileSync(path.join(home, "Library", "LaunchAgents", "org.sessionpipe.control.plist"), "utf8");
+    expect(plist).toContain(`<key>PATH</key><string>${shellPath}</string>`);
+    if (process.platform !== "win32")
+      expect(plist).toContain(`<key>SESSIONPIPE_CLAUDE</key><string>${path.join(bin, "claude")}</string>`);
   });
 
   it("darwin: bootstraps into the gui domain, or the user domain when nobody is at the screen", () => {

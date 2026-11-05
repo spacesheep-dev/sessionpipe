@@ -32,6 +32,7 @@ import {
   recentlyWritten,
   runClaude,
   sessionFolder,
+  versionManagerBins,
 } from "../src/adapters/claude-code-control.js";
 
 // Several cases spawn a shell; under a full parallel run that can take seconds.
@@ -88,6 +89,58 @@ describe("finding claude", () => {
       expect(findClaude({ PATH: path.join(tmp, "bin"), SESSIONPIPE_CLAUDE: path.join(tmp, "missing") }, home)).toBe(
         bin,
       );
+    },
+  );
+  it.runIf(process.platform !== "win32")(
+    "a node version manager's folders come after the installers' and before the app: nvm's newest node, fnm, volta, asdf",
+    () => {
+      const home = path.join(tmp, "vm-home");
+      const empty = path.join(tmp, "vm-empty");
+      mkdirSync(empty, { recursive: true });
+      const env = { PATH: empty };
+      expect(versionManagerBins(env, home)).toEqual([path.join(home, ".volta", "bin")]);
+      const app = script(
+        path.join(
+          home,
+          "Library",
+          "Application Support",
+          "Claude",
+          "claude-code",
+          "2.0.0",
+          "claude.app",
+          "Contents",
+          "MacOS",
+          "claude",
+        ),
+        "",
+      );
+      expect(findClaude(env, home)).toBe(app);
+      const asdf = script(path.join(home, ".asdf", "installs", "nodejs", "22.1.0", "bin", "claude"), "");
+      expect(findClaude(env, home)).toBe(asdf);
+      const volta = script(path.join(home, ".volta", "bin", "claude"), "");
+      expect(findClaude(env, home)).toBe(volta);
+      const fnm = script(
+        path.join(home, ".local", "share", "fnm", "node-versions", "v20.0.0", "installation", "bin", "claude"),
+        "",
+      );
+      expect(findClaude(env, home)).toBe(fnm);
+      const old = script(path.join(home, ".nvm", "versions", "node", "v9.11.2", "bin", "claude"), "");
+      expect(findClaude(env, home)).toBe(old);
+      const nvm = script(path.join(home, ".nvm", "versions", "node", "v22.1.0", "bin", "claude"), "");
+      mkdirSync(path.join(home, ".nvm", "versions", "node", "notes"), { recursive: true });
+      expect(findClaude(env, home)).toBe(nvm);
+      // The variables the managers set name their folders instead.
+      const nvmDir = script(path.join(tmp, "nvm-elsewhere", "versions", "node", "v24.0.0", "bin", "claude"), "");
+      expect(findClaude({ ...env, NVM_DIR: path.join(tmp, "nvm-elsewhere") }, home)).toBe(nvmDir);
+      expect(findClaude({ ...env, NVM_DIR: path.join(tmp, "nowhere") }, home)).toBe(fnm);
+      expect(
+        versionManagerBins(
+          { ...env, FNM_DIR: path.join(tmp, "f"), VOLTA_HOME: path.join(tmp, "v"), ASDF_DATA_DIR: path.join(tmp, "a") },
+          home,
+        ).slice(-1),
+      ).toEqual([path.join(tmp, "v", "bin")]);
+      const local = script(path.join(home, ".local", "bin", "claude"), "");
+      expect(findClaude(env, home)).toBe(local);
     },
   );
 });

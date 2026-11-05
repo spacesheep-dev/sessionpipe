@@ -40,6 +40,34 @@ export const cmpVersion = (a: string, b: string) => {
 
 /** The `claude` to run: on PATH, else where the installers put it, else the newest
  *  copy the desktop app ships. Null when this machine has none. */
+/** The bin folders of the node version managers (nvm, fnm, volta, asdf), newest node
+ *  first within each, in the folders they use by default or the ones their variables name. */
+export function versionManagerBins(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string[] {
+  const out: string[] = [];
+  const versions = (dir: string, tail: string[]): void => {
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((n) => /^v?\d+(\.\d+)*$/.test(n));
+    } catch {
+      return;
+    }
+    for (const n of names.sort((a, b) => cmpVersion(a.replace(/^v/, ""), b.replace(/^v/, ""))).reverse())
+      out.push(path.join(dir, n, ...tail));
+  };
+  versions(path.join(env.NVM_DIR || path.join(home, ".nvm"), "versions", "node"), ["bin"]);
+  const fnmDirs = env.FNM_DIR
+    ? [env.FNM_DIR]
+    : [
+        path.join(home, "Library", "Application Support", "fnm"),
+        path.join(home, ".local", "share", "fnm"),
+        path.join(home, ".fnm"),
+      ];
+  for (const d of fnmDirs) versions(path.join(d, "node-versions"), ["installation", "bin"]);
+  out.push(path.join(env.VOLTA_HOME || path.join(home, ".volta"), "bin"));
+  versions(path.join(env.ASDF_DATA_DIR || path.join(home, ".asdf"), "installs", "nodejs"), ["bin"]);
+  return out;
+}
+
 export function findClaude(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
   if (env.SESSIONPIPE_CLAUDE && isExe(env.SESSIONPIPE_CLAUDE)) return env.SESSIONPIPE_CLAUDE;
   const names = process.platform === "win32" ? ["claude.exe", "claude.cmd"] : ["claude"];
@@ -54,6 +82,10 @@ export function findClaude(env: NodeJS.ProcessEnv = process.env, home = os.homed
     "/usr/local/bin/claude",
   ])
     if (isExe(p)) return p;
+  // A node version manager's folders: launchd and systemd start the daemon with a bare
+  // PATH, and a `claude` that `npm install -g` put under nvm was never found that way
+  // (2026-11-05: "can't copy it (no --fork-session)" for a Claude Code that had the flag).
+  for (const d of versionManagerBins(env, home)) if (isExe(path.join(d, "claude"))) return path.join(d, "claude");
   const app = path.join(home, "Library", "Application Support", "Claude", "claude-code");
   let versions: string[] = [];
   try {

@@ -25,7 +25,7 @@ import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
-import { routePrompt } from "../src/control/route.js";
+import { CLAUDE_NOT_FOUND, routePrompt } from "../src/control/route.js";
 import { type ControlConfig, readControl } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -205,6 +205,13 @@ describe("routing (CONTROL.md §6)", () => {
     // A session that already has a copy is not copied again, and is told which it is.
     expect(routePrompt({ ...base, live: true, copied: true })).toEqual({
       unsupported: "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
+    });
+    // No binary at all reads as no capabilities; it is said as such, not blamed on the flag.
+    expect(routePrompt({ ...base, live: true, canFork: false, installed: false })).toEqual({
+      unsupported: CLAUDE_NOT_FOUND,
+    });
+    expect(routePrompt({ ...base, live: true, canFork: false, installed: true })).toEqual({
+      unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
     });
     expect(routePrompt({ ...base, live: true, canFork: false })).toEqual({
       unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
