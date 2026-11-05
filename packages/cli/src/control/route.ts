@@ -137,10 +137,12 @@ export function frameInbox(text: string, receiver: string, id: string): string {
   return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${inboxMark(id)}):\n\n${text}`;
 }
 
-/** Said with a message a copy of a session is answering, so the model knows the person
- *  is not reading this conversation: a copy is not the thread they are looking at. */
+/** Said with a message a copy of a session is answering, so the model knows its reply is
+ *  the only part the person sees, while its work is as real as the original's. The first
+ *  note said "nothing you do here appears in it … don't carry on the original's work", and
+ *  a copy asked to change a page answered that a copy can't publish (2026-11-05). */
 export const COPY_NOTE =
-  "You are a copy of that session, started to answer this message: the conversation above is a replay, the original session is somewhere else, and nothing you do here appears in it. Answer the message and stop; don't carry on the original's work.";
+  "You are a copy of that session, started because the original is open in a window, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's window: say what you did, then stop.";
 
 /** A new session's first message: the person's words first, where they come from after.
  *  Claude Code names a session from the start of its first message, so a header in front
