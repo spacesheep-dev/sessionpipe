@@ -22,6 +22,7 @@ import { claudeControl } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
+import { CLAUDE_NOT_FOUND } from "../src/control/route.js";
 import { type ControlConfig, readControl, writeState } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -391,12 +392,12 @@ describe.runIf(unix)("headless runs", () => {
     const q = await rx.send({ session: SESSION, text: "resume" });
     expect(await rx.waitAck(q.id)).toMatchObject({
       outcome: "failed",
-      detail: "Claude Code isn't installed on this machine",
+      detail: CLAUDE_NOT_FOUND,
     });
     const s = await rx.send({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "start" });
     expect(await rx.waitAck(s.id)).toMatchObject({
       outcome: "failed",
-      detail: "Claude Code isn't installed on this machine",
+      detail: CLAUDE_NOT_FOUND,
     });
   });
 

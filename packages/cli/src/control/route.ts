@@ -23,6 +23,9 @@ export interface SessionView {
   known: boolean;
   /** This Claude Code can copy a session (`--fork-session`); no other harness can. */
   canFork: boolean;
+  /** The harness's binary was found at all (Claude Code only; absent means yes). A
+   *  missing binary reads as no capabilities, which used to be blamed on `--fork-session`. */
+  installed?: boolean;
   /** It already has a copy, which is where its messages go: a copy is a leaf and is
    *  never itself copied (§6 `prompt`). */
   copied: boolean;
@@ -62,10 +65,16 @@ const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
 
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
  *  session gets an in-place lane or a fork, never a resume. */
+/** Said when no `claude` can be found: at daemon start, in a failed ack, and where a
+ *  missing binary would otherwise read as a Claude Code without `--fork-session`. */
+export const CLAUDE_NOT_FOUND =
+  "Claude Code not found on this computer: no `claude` on the daemon's PATH or in the usual folders (nvm, fnm, volta, asdf, Homebrew, ~/.local/bin, the desktop app). Run `sessionpipe connect` again from a shell where `claude` works, or set SESSIONPIPE_CLAUDE to its path in the daemon's service file";
+
 export function routePrompt(s: SessionView): Route {
   for (const mode of DELIVERY_LADDER) if (FITS[mode](s)) return { mode };
   if (!HEADLESS.has(s.harness)) return { unsupported: `no idle delivery for ${s.harness} yet` };
   if (!s.known) return { refused: "no_session" };
+  if (s.harness === "claude-code" && s.installed === false) return { unsupported: CLAUDE_NOT_FOUND };
   return {
     unsupported:
       s.harness === "claude-code"
