@@ -38,8 +38,9 @@ describe("buf", () => {
   it("a binary that isn't there is an error; a failed lint says buf's words", () => {
     // Without a shell (every platform but Windows), spawning a path that isn't there is ENOENT.
     expect(() => build({ root, buf: path.join(root, "no-such-buf"), platform: "linux" })).toThrow(/ENOENT/);
-    // On a Mac, buf.cmd through a shell is what Windows would run: the shell reports it missing.
-    expect(() => build({ root, platform: "win32", env: process.env })).toThrow(/buf build failed/);
+    // Windows runs buf.cmd through a shell; from a root with no node_modules the shell reports it missing, on every OS.
+    const bare = mkdtempSync(path.join(os.tmpdir(), "sp-doors-bare-"));
+    expect(() => build({ root: bare, protoDir, platform: "win32", env: process.env })).toThrow(/buf build failed/);
     const dir = mkdtempSync(path.join(os.tmpdir(), "sp-doors-lint-"));
     writeFileSync(path.join(dir, "buf.yaml"), "version: v2\nmodules:\n  - path: .\nlint:\n  use:\n    - COMMENTS\n");
     writeFileSync(path.join(dir, "x.proto"), 'syntax = "proto3";\npackage x.v1;\nmessage Uncommented {}\n');
