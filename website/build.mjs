@@ -427,7 +427,7 @@ for (const [pathname, file, title, description] of specs) {
   const files = readdirSync(path.join(root, "schemas/v1"))
     .filter((f) => f.endsWith(".json"))
     .sort();
-  const body = `${specNav("/schema/")}<article class="prose"><h1>JSON Schemas, v1</h1><p>Generated from the reference implementation's types (<code>packages/core/schema/v1.ts</code>); these URLs are the schemas' <code>$id</code>s. Served as <code>application/json</code>.</p><ul>${files.map((f) => `<li><a href="/schema/v1/${f}">/schema/v1/${f}</a></li>`).join("")}</ul></article>`;
+  const body = `${specNav("/schema/")}<article class="prose"><h1>JSON Schemas, v1</h1><p>Generated from the protocol's definition (<code>proto/sessionpipe/v1/*.proto</code>); these URLs are the schemas' <code>$id</code>s. Served as <code>application/json</code>.</p><ul>${files.map((f) => `<li><a href="/schema/v1/${f}">/schema/v1/${f}</a></li>`).join("")}</ul></article>`;
   write(
     "/schema/",
     page({

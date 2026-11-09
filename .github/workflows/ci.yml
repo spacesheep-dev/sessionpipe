@@ -37,7 +37,7 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
-      - name: Schemas in sync with the Zod source
+      - name: proto/ lints and schemas/v1 is what it generates
         run: npm run schemas -- --check
       - name: Unit tests (vitest)
         run: npm test
@@ -76,6 +76,29 @@ jobs:
             fi
           done
           exit $missing
+
+  proto-additive:
+    name: A proto change is additive
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: buf breaking against the base (spec/VERSIONING.md: the protocol integer stays 1)
+        working-directory: proto
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if git cat-file -e "$base:proto/buf.yaml" 2>/dev/null; then
+            ../node_modules/.bin/buf breaking --against "../.git#ref=$base,subdir=proto"
+          else
+            echo "the base has no proto/ yet; nothing to compare"
+          fi
 
   spec-fixture:
     name: A spec change carries a fixture

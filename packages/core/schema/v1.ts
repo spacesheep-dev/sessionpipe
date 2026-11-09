@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// The one source for the protocol's shapes. schemas/v1/*.json are GENERATED from
-// this file (`npm run schemas`); core's runtime types are inferred from it with
-// type-only imports, so zod never enters the zero-dependency bundle. Prose lives in
+// The protocol's shapes as Zod, for this package's runtime parsing and its inferred
+// types. The SOURCE is proto/sessionpipe/v1/*.proto (RFC 0001): schemas/v1/*.json are
+// generated from the proto, and tools/doors/test/parity.test.ts holds this file equal
+// to it, schema by schema, until the generated types replace it (RFC 0001 step 2). A
+// change starts in the .proto; this file follows in the same commit. Zod never enters
+// the zero-dependency bundle: core's types import it type-only. Prose lives in
 // spec/PROTOCOL.md; a rule that is not encoded here is a MUST in words only.
 import { z } from "zod";
 

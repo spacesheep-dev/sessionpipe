@@ -11,6 +11,14 @@
       "@sessionpipe/core/version": ["./packages/core/src/version.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "tools/*/src/**/*.ts",
+    "tools/*/test/**/*.ts",
+    "scripts/lib/*.d.mts"
+  ],
   "exclude": ["**/dist/**", "**/node_modules/**"]
 }
