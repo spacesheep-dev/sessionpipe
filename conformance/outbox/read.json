@@ -1,0 +1,340 @@
+{
+  "$comment": "spec/OUTBOX.md §3: byte-level read cases. `file` is the session file's text (UTF-8); each read gives `from` and expects `events` and the new `offset`; `maxEvents` per read, else the case's.",
+  "cases": [
+    {
+      "name": "two whole lines, read from the start",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":1},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            },
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 1
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 448
+        }
+      ]
+    },
+    {
+      "name": "a partial trailing line is left for the next read",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n{\"protocol\":1,\"id\":\"",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 224
+        }
+      ]
+    },
+    {
+      "name": "a blank line is skipped and its byte consumed",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":1},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            },
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 1
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 449
+        }
+      ]
+    },
+    {
+      "name": "a corrupt whole line is skipped and its bytes consumed",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n{not json\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":1},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            },
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 1
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 458
+        }
+      ]
+    },
+    {
+      "name": "offsets count bytes, not characters",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"turn.transcript\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{\"user\":\"h\\u00e9llo \\u2014 \\u65e5\\u672c\\u8a9e \\ud83d\\udc11\",\"assistant\":\"ok\"}}\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":1},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "turn.transcript",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {
+                "user": "héllo — 日本語 🐑",
+                "assistant": "ok"
+              }
+            }
+          ],
+          "offset": 297,
+          "maxEvents": 1
+        },
+        {
+          "from": 297,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 1
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 521
+        }
+      ]
+    },
+    {
+      "name": "a read from past the end returns the offset given",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 229,
+          "events": [],
+          "offset": 229
+        }
+      ]
+    },
+    {
+      "name": "maxEvents stops a read; the next continues from the offset",
+      "file": "{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":0},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":1},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n{\"protocol\":1,\"id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"type\":\"session.heartbeat\",\"time\":\"2026-09-28T00:00:00.000Z\",\"tier\":0,\"harness\":{\"name\":\"codex\"},\"session\":{\"id\":\"s1\",\"seq\":2},\"privacy\":{\"rulesets\":[],\"pii\":false},\"data\":{}}\n",
+      "maxEvents": 500,
+      "reads": [
+        {
+          "from": 0,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 0
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            },
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 1
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 448,
+          "maxEvents": 2
+        },
+        {
+          "from": 448,
+          "events": [
+            {
+              "protocol": 1,
+              "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "type": "session.heartbeat",
+              "time": "2026-09-28T00:00:00.000Z",
+              "tier": 0,
+              "harness": {
+                "name": "codex"
+              },
+              "session": {
+                "id": "s1",
+                "seq": 2
+              },
+              "privacy": {
+                "rulesets": [],
+                "pii": false
+              },
+              "data": {}
+            }
+          ],
+          "offset": 672
+        }
+      ]
+    }
+  ]
+}
