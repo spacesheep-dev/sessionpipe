@@ -1,0 +1,1609 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.3",
+  "cases": {
+    "permission-request.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "devin",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "attention_id": "call_4cacae907cc44b68b7e451c4#f350663945f14ca1ac2c4de34fbadc57",
+          "kind": "permission",
+          "tool": "exec"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true,
+          "input": {
+            "command": "head -1 sample.txt"
+          },
+          "output": "Output from command in shell e4cfe5:\nalpha-token-marker-42\n\n\nExit code: 0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "devin",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "ok": true,
+          "input": {
+            "command": "head -1 sample.txt"
+          },
+          "output": "Output from command in shell e4cfe5:\nalpha-token-marker-42\n\n\nExit code: 0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "input": {
+            "command": "head -1 sample.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "devin",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "tool": "exec",
+          "call_id": "call_e4ee5fa9d8e744d18ac42d8e#42f1582708a345a09d67f3e7324bcede",
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "input": {
+            "command": "head -1 sample.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "devin",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start-resume.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "scientific-roquefort",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "devin",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "fluttering-steam",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "devin",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "devin",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "frill-vulture",
+          "seq": 0,
+          "cwd": "/tmp/rec/devin-proj"
+        },
+        "data": {
+          "turn_id": "715ae593-e501-4349-b11f-ed487c21047f",
+          "prompt_chars": 59
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}

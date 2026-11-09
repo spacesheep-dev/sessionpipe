@@ -9,6 +9,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { envelope } from "./lib/envelope.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const walk = (d) =>
@@ -32,7 +33,6 @@ if (!existsSync(schemaMod)) {
 }
 const S = await import(pathToFileURL(schemaMod).href);
 
-const WILD = { id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", time: "2026-09-28T00:00:00.000Z", tier: 0, seq: 0 };
 let failed = 0;
 const rows = [];
 for (const f of harness) {
@@ -44,15 +44,7 @@ for (const f of harness) {
   // An empty `expect` is a payload the adapter must report nothing for; check 2 holds it to that.
   if (!Array.isArray(fx.expect)) problems.push("expect missing");
   for (const [i, e] of (fx.expect ?? []).entries()) {
-    const ev = {
-      protocol: 1,
-      ...e,
-      id: e.id === "*" ? WILD.id : e.id,
-      time: e.time === "*" ? WILD.time : e.time,
-      tier: e.tier === "*" ? (S.TYPE_TIER[e.type] ?? 0) : e.tier,
-      session: { ...e.session, seq: e.session?.seq === "*" ? WILD.seq : e.session?.seq },
-      privacy: e.privacy ?? { rulesets: ["secrets@1"], pii: false },
-    };
+    const ev = envelope(e, S.TYPE_TIER);
     const r = S.Event.safeParse(ev);
     if (!r.success)
       problems.push(

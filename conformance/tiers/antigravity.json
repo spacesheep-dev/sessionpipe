@@ -1,0 +1,1694 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.3",
+  "cases": {
+    "post-tool-use-error.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-named.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1",
+          "input": {
+            "CommandLine": "npm test",
+            "Cwd": "/Users/dev/projects/app"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "run_command",
+          "ok": false,
+          "error": "command exited with status 1",
+          "input": {
+            "CommandLine": "npm test",
+            "Cwd": "/Users/dev/projects/app"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-invocation-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.heartbeat",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-invocation.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "source": "unknown"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-invocation.json#1": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreInvocation"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-stale.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file",
+          "input": {
+            "AbsolutePath": "/Users/dev/projects/app/README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "antigravity",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "tool": "view_file",
+          "input": {
+            "AbsolutePath": "/Users/dev/projects/app/README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-error.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "antigravity",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "6f1c2a9e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+          "seq": 0,
+          "model": "gemini-3-pro"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}

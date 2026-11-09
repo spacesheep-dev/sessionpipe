@@ -1,0 +1,2665 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.3",
+  "cases": {
+    "after-agent.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "after-tool-error-2.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}",
+          "input": {
+            "absolute_path": "/Users/dev/projects/app/missing.txt"
+          },
+          "output": {
+            "error": {
+              "message": "File not found",
+              "type": "ENOENT"
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "read_file",
+          "ok": false,
+          "error": "{\"message\":\"File not found\",\"type\":\"ENOENT\"}",
+          "input": {
+            "absolute_path": "/Users/dev/projects/app/missing.txt"
+          },
+          "output": {
+            "error": {
+              "message": "File not found",
+              "type": "ENOENT"
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "after-tool-error.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1",
+          "input": {
+            "command": "cat missing.txt"
+          },
+          "output": "cat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": false,
+          "error": "Command exited with code 1",
+          "input": {
+            "command": "cat missing.txt"
+          },
+          "output": "cat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "after-tool.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true,
+          "input": {
+            "command": "ls"
+          },
+          "output": "a.txt\nb.txt\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "AfterTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "ok": true,
+          "input": {
+            "command": "ls"
+          },
+          "output": "a.txt\nb.txt\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "before-agent.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeAgent"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "prompt_chars": 29
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "before-tool.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "BeforeTool"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "tool": "run_shell_command",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "notification-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "question",
+          "message": "Confirm the plan?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "notification.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Allow run_shell_command: rm -rf dist?"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-compress-manual.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "manual"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-compress.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "context.compacted",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "PreCompress"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "trigger": "auto"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start-resume.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "gemini-cli",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "a3f2c1d0-5e6b-4f7a-9c8d-1e2f3a4b5c6d",
+          "seq": 0,
+          "cwd": "/Users/dev/projects/app"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}
