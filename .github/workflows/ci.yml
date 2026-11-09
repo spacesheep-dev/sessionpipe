@@ -90,7 +90,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: buf breaking against the base (spec/VERSIONING.md: the protocol integer stays 1)
+      - name: buf breaking against the base, so a change on the wire is additive (spec/VERSIONING.md)
         working-directory: proto
         run: |
           base="${{ github.event.pull_request.base.sha }}"
