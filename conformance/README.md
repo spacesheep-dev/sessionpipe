@@ -4,6 +4,12 @@
   recorded from **real** hook payloads (secrets scrubbed; `npm run fixture-scan` gates it).
   `"*"` in an expected event is a wildcard for `id` and `time`. An empty `expect` is a
   payload the adapter reports nothing for (Codex's ephemeral threads).
+- `tiers/<harness>.json` — what `filterEvent` returns for every expected event above at tiers 0–3, with and
+  without PII, recorded ONCE from the published sessionpipe-core 0.13.3 (`scripts/tier-goldens.mjs`,
+  docs/rfcs/decisions/003); `packages/core/test/tier-goldens.test.ts` holds the tree to it.
+- `outbox/read.json` — byte-level read cases for the sender's outbox files (spec/OUTBOX.md §3): a partial
+  trailing line, a blank line, a corrupt line, multibyte text. Run by `packages/core/test/outbox-vectors.test.ts`;
+  a second implementation of the client runs the same file.
 - `redaction/secrets.json`, `redaction/pii.json` — `[{ in, out }]` vectors for the rulesets.
 - `short-id.json` — `{ harness, id, short_id }` vectors for a session's short id (spec/PROTOCOL.md §3):
   what a receiver shows and searches by must reach these.

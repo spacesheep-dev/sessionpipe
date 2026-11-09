@@ -1,0 +1,5034 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.3",
+  "cases": {
+    "permission-request-bash-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-17af3749ab63d37e",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash echo hi > out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "permission-request-bash.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "claude-code",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "attention_id": "perm-1bb18c870624a063",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash cat /nonexistent-file-xyz"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-agent.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 5,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 5,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 5,
+          "ok": true,
+          "input": {
+            "description": "List files in working directory",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "subagent_type": "Explore"
+          },
+          "output": {
+            "isAsync": true,
+            "status": "async_launched",
+            "agentId": "adae41131ac7691bb",
+            "description": "List files in working directory",
+            "resolvedModel": "claude-haiku-4-5-20251001",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "outputFile": "/private/tmp/claude-501/-Users-mmakarov--local-state-sessionpipe-record-ws2/ed6c7665-589f-40c7-b7b4-e38ee662b7bc/tasks/adae41131ac7691bb.output",
+            "canReadOutputFile": true
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 5,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 5,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 5,
+          "ok": true,
+          "input": {
+            "description": "List files in working directory",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "subagent_type": "Explore"
+          },
+          "output": {
+            "isAsync": true,
+            "status": "async_launched",
+            "agentId": "adae41131ac7691bb",
+            "description": "List files in working directory",
+            "resolvedModel": "claude-haiku-4-5-20251001",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "outputFile": "/private/tmp/claude-501/-Users-mmakarov--local-state-sessionpipe-record-ws2/ed6c7665-589f-40c7-b7b4-e38ee662b7bc/tasks/adae41131ac7691bb.output",
+            "canReadOutputFile": true
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-bash-2.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true,
+          "input": {
+            "command": "ls -la /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "description": "List all files in the working directory with details"
+          },
+          "output": {
+            "stdout": "total 8\ndrwxr-xr-x  4 mmakarov  staff  128 Sep 27 20:44 .\ndrwxr-xr-x  9 mmakarov  staff  288 Sep 27 20:44 ..\ndrwxr-xr-x  9 mmakarov  staff  288 Sep 27 20:44 .git\n-rw-r--r--  1 mmakarov  staff    6 Sep 27 20:44 README.md",
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+            "noOutputExpected": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "ms": 16,
+          "ok": true,
+          "input": {
+            "command": "ls -la /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "description": "List all files in the working directory with details"
+          },
+          "output": {
+            "stdout": "total 8\ndrwxr-xr-x  4 mmakarov  staff  128 Sep 27 20:44 .\ndrwxr-xr-x  9 mmakarov  staff  288 Sep 27 20:44 ..\ndrwxr-xr-x  9 mmakarov  staff  288 Sep 27 20:44 .git\n-rw-r--r--  1 mmakarov  staff    6 Sep 27 20:44 README.md",
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+            "noOutputExpected": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-bash.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 466,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 466,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 466,
+          "ok": true,
+          "input": {
+            "command": "ls",
+            "description": "List files in current directory"
+          },
+          "output": {
+            "stdout": "README.md",
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+            "noOutputExpected": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 466,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 466,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 466,
+          "ok": true,
+          "input": {
+            "command": "ls",
+            "description": "List files in current directory"
+          },
+          "output": {
+            "stdout": "README.md",
+            "stderr": "",
+            "interrupted": false,
+            "isImage": false,
+            "noOutputExpected": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-read.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 6,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 6,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "ms": 6,
+          "ok": true,
+          "input": {
+            "file_path": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md"
+          },
+          "output": {
+            "type": "text",
+            "file": {
+              "filePath": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md",
+              "content": "hello\n",
+              "numLines": 2,
+              "startLine": 1,
+              "totalLines": 2
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 6,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 6,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "ms": 6,
+          "ok": true,
+          "input": {
+            "file_path": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md"
+          },
+          "output": {
+            "type": "text",
+            "file": {
+              "filePath": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md",
+              "content": "hello\n",
+              "numLines": 2,
+              "startLine": 1,
+              "totalLines": 2
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-agent.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "input": {
+            "description": "List files in working directory",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "subagent_type": "Explore"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Agent",
+          "call_id": "toolu_017oLmiTcF9euCiKM71oNAmf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "input": {
+            "description": "List files in working directory",
+            "prompt": "List all files in the current working directory /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "subagent_type": "Explore"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-bash-2.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "input": {
+            "command": "cat /nonexistent-file-xyz",
+            "description": "Try to read a file that doesn't exist"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01XgvaVvRXd7f7jrjP92v5ho",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "input": {
+            "command": "cat /nonexistent-file-xyz",
+            "description": "Try to read a file that doesn't exist"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-bash-3.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "input": {
+            "command": "echo hi > out.txt",
+            "description": "Write text to a file"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_01FMVourvM1NsveTZphW2ry4",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "input": {
+            "command": "echo hi > out.txt",
+            "description": "Write text to a file"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-bash-4.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "input": {
+            "command": "ls -la /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "description": "List all files in the working directory with details"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_014seN9J9Vd2tEpJ5hBNMYkZ",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "agent_id": "adae41131ac7691bb",
+          "input": {
+            "command": "ls -la /Users/mmakarov/.local/state/sessionpipe/record/ws2",
+            "description": "List all files in the working directory with details"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-bash.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "input": {
+            "command": "ls",
+            "description": "List files in current directory"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "toolu_013DRPrVtDMVkX2NHpLV2vSf",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "input": {
+            "command": "ls",
+            "description": "List files in current directory"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-read.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "input": {
+            "file_path": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "toolu_01AZ8E5WcSBygrxBND6VCVPg",
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "input": {
+            "file_path": "/Users/mmakarov/.local/state/sessionpipe/record/ws2/README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start-launched-by.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+          "seq": 0,
+          "cwd": "/Users/user/sessionpipe/record/ws",
+          "launched_by": "claude-code:0c7f3a1e-2b4d-4e6f-8a90-1b2c3d4e5f60"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-background.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "4e960f0a-fc94-4b51-a223-9c810563a481",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "736712d6-71a4-4ea1-958c-5f1a98f078c8",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-failure.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "aeeb688d-9834-46c0-a6b0-2418ec276222",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws3"
+        },
+        "data": {
+          "turn_id": "04dece82-efb1-4791-aee2-6a5a6af24788",
+          "reason": "error",
+          "error": "server_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-waiter.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "03334c75-6849-4e22-a66d-39bc9147bd57",
+          "seq": 0,
+          "cwd": "/Users/me/rec/ws"
+        },
+        "data": {
+          "turn_id": "6d978276-280d-4832-b204-31d222d67117",
+          "reason": "stop",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "reason": "stop",
+          "background": 1
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "subagent-start.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "subagent.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStart"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "subagent-stop.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "subagent.ended",
+        "harness": {
+          "name": "claude-code",
+          "event": "SubagentStop"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "agent_id": "adae41131ac7691bb",
+          "agent_type": "Explore",
+          "background": 0
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit-2.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "3db1ccd3-51bb-4cff-8427-faa965420e04",
+          "injected": true,
+          "prompt_chars": 1015
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit-injected.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "f40b8a7f-bc3e-47b2-815a-ea30975a245e",
+          "seq": 0,
+          "cwd": "/Users/dev/.local/state/sessionpipe/record/ws"
+        },
+        "data": {
+          "turn_id": "f1858118-96d3-4fad-bcb4-fe66a1ad9985",
+          "injected": true,
+          "prompt_chars": 406
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-4865-8967-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "claude-code",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+          "seq": 0,
+          "cwd": "/Users/mmakarov/.local/state/sessionpipe/record/ws2"
+        },
+        "data": {
+          "turn_id": "5e6e20e7-82a4-[phone]-b2c9adae76c4",
+          "prompt_chars": 299
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}

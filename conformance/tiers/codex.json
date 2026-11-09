@@ -1,0 +1,1965 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.3",
+  "cases": {
+    "post-tool-use-2.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "cat README.md"
+          },
+          "output": "hello\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "cat README.md"
+          },
+          "output": "hello\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-3.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "printf hi > out.txt"
+          },
+          "output": "zsh:1: operation not permitted: out.txt\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "printf hi > out.txt"
+          },
+          "output": "zsh:1: operation not permitted: out.txt\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "ls"
+          },
+          "output": "README.md\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "codex",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "ok": true,
+          "input": {
+            "command": "ls"
+          },
+          "output": "README.md\n"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-2.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-5635-4062-8890-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "cat README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-12dafd8d-[phone]-38522dc03366",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "cat README.md"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-3.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "printf hi > out.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-67d2cc4e-cc55-4744-9a92-07e73e6e1450",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "printf hi > out.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "codex",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "exec-0a5cc433-9ac0-4db5-b7de-8e89c0338578",
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "codex",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws"
+        },
+        "data": {
+          "reason": "other"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "codex",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "codex",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "codex",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65",
+          "seq": 0,
+          "cwd": "/private/tmp/claude-501/-Users-mmakarov-spacesheep/7a42d90e-8d27-45a0-b353-a9b496f19454/scratchpad/rec/ws",
+          "model": "gpt-6-astra"
+        },
+        "data": {
+          "turn_id": "01a0e5c5-5bf6-7233-8f1a-2c5e4d560849",
+          "prompt_chars": 147
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}
