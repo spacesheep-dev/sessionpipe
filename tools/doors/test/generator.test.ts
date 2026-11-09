@@ -36,7 +36,8 @@ const message = (d: Descriptors, name: string) => d.message(name);
 
 describe("buf", () => {
   it("a binary that isn't there is an error; a failed lint says buf's words", () => {
-    expect(() => build({ root, buf: path.join(root, "no-such-buf") })).toThrow(/ENOENT/);
+    // Without a shell (every platform but Windows), spawning a path that isn't there is ENOENT.
+    expect(() => build({ root, buf: path.join(root, "no-such-buf"), platform: "linux" })).toThrow(/ENOENT/);
     // On a Mac, buf.cmd through a shell is what Windows would run: the shell reports it missing.
     expect(() => build({ root, platform: "win32", env: process.env })).toThrow(/buf build failed/);
     const dir = mkdtempSync(path.join(os.tmpdir(), "sp-doors-lint-"));
