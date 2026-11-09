@@ -18,7 +18,7 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "schemas": "node scripts/schemas.mjs",
+    "schemas": "node tools/doors/schemas.mjs",
     "conformance": "node scripts/conformance-fixtures.mjs",
     "fixture-scan": "node scripts/fixture-scan.mjs",
     "bench:hook": "node scripts/bench-hook.mjs",
@@ -30,6 +30,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@bufbuild/buf": "1.75.0",
+    "@bufbuild/protobuf": "2.17.0",
     "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.4",
     "@vitest/coverage-v8": "^5.0.3",

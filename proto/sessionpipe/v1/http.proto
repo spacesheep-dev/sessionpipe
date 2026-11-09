@@ -1,0 +1,256 @@
+// The HTTP binding (spec/HTTP.md): the well-known file, the batch a sender posts and the
+// receiver's answers. schemas/v1/well-known.json, batch.json, batch-response.json and error.json
+// are generated from this file.
+syntax = "proto3";
+
+package sessionpipe.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "sessionpipe/v1/events.proto";
+import "sessionpipe/v1/options.proto";
+
+// The capabilities this spec names. A receiver may announce others (`WellKnown.capabilities` is a
+// pattern), which a sender it predates ignores.
+enum Capability {
+  // None.
+  CAPABILITY_UNSPECIFIED = 0;
+  // Takes events. Required of every receiver.
+  CAPABILITY_EVENTS = 1;
+  // Accepts `session.backfill`.
+  CAPABILITY_BACKFILL = 2;
+  // Honours `session.forgotten`.
+  CAPABILITY_FORGET = 3;
+  // Serves the control endpoint.
+  CAPABILITY_CONTROL = 4;
+  // Serves the native lane.
+  CAPABILITY_NATIVE = 5;
+}
+
+// How a sender signs in to a receiver.
+enum Auth {
+  // None.
+  AUTH_UNSPECIFIED = 0;
+  // `Authorization: Bearer <token>`, the only scheme in v1.
+  AUTH_BEARER = 1;
+}
+
+// Which tool events a receiver would rather be sent (PROTOCOL.md §4, *Thinned tool events*).
+enum ToolEvents {
+  // Not said: every tool event.
+  TOOL_EVENTS_UNSPECIFIED = 0;
+  // Every one.
+  TOOL_EVENTS_ALL = 1;
+  // A subagent's thinned to at most one `tool.ended` per session per minute.
+  TOOL_EVENTS_MAIN = 2;
+  // Every session's thinned so.
+  TOOL_EVENTS_BEAT = 3;
+}
+
+// The kinds of key a machine or a receiver handles (CONTROL.md §2). Absent: passkeys only.
+enum KeyType {
+  // None.
+  KEY_TYPE_UNSPECIFIED = 0;
+  // A WebAuthn passkey.
+  KEY_TYPE_PASSKEY = 1;
+  // A device key an app holds in hardware.
+  KEY_TYPE_DEVICE = 2;
+}
+
+// `POST {events}`: 1 to `batch.max_events` events, at most `batch.max_bytes` bytes.
+message Batch {
+  // The events, in order.
+  repeated Event events = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 50
+    }
+  ];
+}
+
+// One event the receiver will never store.
+message Rejected {
+  // The event's id.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // Why, in the receiver's words.
+  string reason = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 200
+  ];
+}
+
+// The 202 answer to a batch. `accepted + duplicates + rejected.length` equals the number sent.
+message BatchResponse {
+  // Stored.
+  int32 accepted = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.gte = 0
+  ];
+  // Already had.
+  int32 duplicates = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.gte = 0
+  ];
+  // Never to be stored, each with its reason.
+  repeated Rejected rejected = 3 [(google.api.field_behavior) = REQUIRED];
+  // The well-known value again, so a sender learns a lowered cap without a discovery round trip.
+  int32 max_tier = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 0
+      lte: 3
+    }
+  ];
+}
+
+// A 4xx body: why the receiver refused.
+message ErrorResponse {
+  // A word a sender branches on (`unsupported_protocol`, `tier_above_max`).
+  string reason = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 200
+  ];
+  // `unsupported_protocol`: the protocol integers the receiver accepts.
+  repeated int32 supported = 2;
+  // `tier_above_max`: the receiver's maximum.
+  int32 max_tier = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 3
+  }];
+}
+
+// Where the receiver's endpoints are: paths relative to the origin, or absolute URLs.
+message Endpoints {
+  // The events endpoint.
+  string events = 1 [(google.api.field_behavior) = REQUIRED];
+  // The control endpoint, when `capabilities` lists `control`.
+  string control = 2;
+  // The native lane, when `capabilities` lists `native`.
+  string native = 3;
+}
+
+// The largest request the receiver takes.
+message BatchLimits {
+  // Events per batch; 50 when absent.
+  int32 max_events = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 1
+      lte: 50
+    }
+  ];
+  // Bytes per batch; 262 144 when absent.
+  int32 max_bytes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 1024
+      lte: 262144
+    }
+  ];
+}
+
+// How commands are signed: the WebAuthn rp id keys are enrolled for, and the algorithms.
+message Signing {
+  // The rp id.
+  string rp_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 253
+    }
+  ];
+  // The COSE algorithms accepted: -7 (ES256), -257 (RS256).
+  repeated int32 algs = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      items: {
+        int32: {
+          in: [
+            -7,
+            -257
+          ]
+        }
+      }
+    }
+  ];
+  // The kinds of key the receiver stores and carries whole (CONTROL.md §2). Absent means `["passkey"]`.
+  repeated KeyType key_types = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 2
+  }];
+}
+
+// The receiver's control channel, required when `capabilities` lists `control`.
+message ControlInfo {
+  // The longest long-poll it will hold.
+  int32 wait_max_s = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 1
+      lte: 60
+    }
+  ];
+  // Pairing may start with no token: the person approves the link signed in.
+  bool open_pairing = 2;
+  // MCP servers (`mcp__<server>`) a session answering this receiver's message may
+  // use without asking. MCP servers only: a daemon ignores anything else.
+  repeated string session_tools = 3 [(buf.validate.field).repeated = {
+    max_items: 8
+    items: {
+      string: {pattern: "^mcp__[A-Za-z0-9_-]{1,64}$"}
+    }
+  }];
+  // How commands are signed.
+  Signing signing = 4 [(google.api.field_behavior) = REQUIRED];
+  // Informational: the receiver accepts `files` on a start and serves `GET {control}/files/{sha256}`.
+  bool files = 5;
+  // The receiver shows a machine in `inherit` mode as that, never as safe or auto.
+  // A daemon pairs in, or switches to, `inherit` only with receivers that say so.
+  bool inherit = 6;
+}
+
+// `GET /.well-known/sessionpipe`: what the receiver takes.
+message WellKnown {
+  // The protocol integers the receiver accepts.
+  repeated int32 protocol = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      items: {
+        int32: {gte: 1}
+      }
+    }
+  ];
+  // The highest tier it will store. A sender caps its sink's tier at this value.
+  int32 max_tier = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 0
+      lte: 3
+    }
+  ];
+  // `events` is required; the rest are Capability's words, or a receiver's own.
+  repeated string capabilities = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.items.string.pattern = "^[a-z][a-z0-9-]*$"
+  ];
+  // The schemes it takes; `["bearer"]` when absent.
+  repeated Auth auth = 4 [(sessionpipe.v1.default_json) = "[\"bearer\"]"];
+  // Where its endpoints are.
+  Endpoints endpoints = 5 [(google.api.field_behavior) = REQUIRED];
+  // The largest request it takes.
+  BatchLimits batch = 6 [(google.api.field_behavior) = REQUIRED];
+  // The tool events the receiver would rather be sent (PROTOCOL.md §4, *Thinned tool
+  // events*): `all`, every one (what an absent field means); `main`, a subagent's thinned
+  // to at most one `tool.ended` per session per minute; `beat`, every session's thinned
+  // so. A sender honours it unless the sink's owner chose otherwise; a sender that
+  // predates the field sends every tool event.
+  ToolEvents tools = 7;
+  // Its control channel.
+  ControlInfo control = 8;
+}

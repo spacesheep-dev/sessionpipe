@@ -13,7 +13,7 @@ npm run build        # esbuild bundles + declarations, per package
 npm test             # vitest
 npm run lint         # Biome
 npm run typecheck    # tsc --noEmit
-npm run schemas      # regenerate schemas/v1 from packages/core/schema/v1.ts
+npm run schemas      # buf lint, then regenerate schemas/v1 from proto/sessionpipe/v1/*.proto
 ```
 
 Node ≥ 20. CI runs all of the above on Node 20 / 22 / 24 × Linux / macOS / Windows,

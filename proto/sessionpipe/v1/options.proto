@@ -1,0 +1,47 @@
+// sessionpipe's own options: the few facts a field's type and its validation rules can't say.
+// Everything else the generators need is derived from the messages, their comments and their
+// buf.validate rules.
+syntax = "proto3";
+
+package sessionpipe.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// A string with a shape of its own, beyond a pattern.
+enum Format {
+  // No format.
+  FORMAT_UNSPECIFIED = 0;
+  // RFC 3339 in UTC with millisecond precision: `2026-09-28T00:00:00.000Z`.
+  FORMAT_DATE_TIME = 1;
+  // An absolute URL.
+  FORMAT_URI = 2;
+}
+
+extend google.protobuf.FieldOptions {
+  // The string's format (JSON Schema `format`).
+  Format format = 53001;
+  // The field may be sent as JSON `null`, which means the same as leaving it out.
+  bool nullable = 53002;
+  // What a reader takes when the field is absent, as JSON text (`["bearer"]`).
+  string default_json = 53003;
+}
+
+extend google.protobuf.MessageOptions {
+  // Extra keys a sender adds are kept and forwarded (an event's `data`). Without it, extra keys
+  // are dropped by a reader that normalises; with `strict`, they are refused.
+  bool open = 53010;
+  // Refuse a key the message doesn't name (a signature, a key record): a kind added later is
+  // refused by every reader that predates it.
+  bool strict = 53011;
+  // Exactly one of its fields' shapes, carried bare: the JSON is the chosen field's message
+  // itself, with no key naming which one. The fields' names are for people reading the proto.
+  bool either = 53012;
+  // The lowest privacy tier that carries this event type (spec/PRIVACY.md). On a data message.
+  int32 tier = 53013;
+}
+
+extend google.protobuf.EnumValueOptions {
+  // The word on the wire when it isn't the value's name in lowercase without its prefix
+  // (`first-ask`, `permission.answer`).
+  string word = 53020;
+}

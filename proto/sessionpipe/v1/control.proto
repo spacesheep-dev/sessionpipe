@@ -1,0 +1,1014 @@
+// The control channel (spec/CONTROL.md): the signed command, how a receiver carries it, the
+// machine's acks, pairing and the hello. schemas/v1/control*.json are generated from this file.
+syntax = "proto3";
+
+package sessionpipe.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "sessionpipe/v1/events.proto";
+import "sessionpipe/v1/http.proto";
+import "sessionpipe/v1/options.proto";
+
+// What a command asks the machine to do.
+enum ControlKind {
+  // None.
+  CONTROL_KIND_UNSPECIFIED = 0;
+  // A message for the next turn.
+  CONTROL_KIND_PROMPT = 1;
+  // An answer to an open permission.
+  CONTROL_KIND_PERMISSION_ANSWER = 2 [(sessionpipe.v1.word) = "permission.answer"];
+  // Stop the turn.
+  CONTROL_KIND_CANCEL = 3;
+  // Start a new session headlessly.
+  CONTROL_KIND_START = 4;
+  // Trust a new device's key.
+  CONTROL_KIND_KEY_ADD = 5 [(sessionpipe.v1.word) = "key.add"];
+  // Change the machine's account pool.
+  CONTROL_KIND_POOL = 6;
+}
+
+// What a `pool` command asks of the machine's account pool (CONTROL.md §6 `pool`).
+enum PoolAction {
+  // None.
+  POOL_ACTION_UNSPECIFIED = 0;
+  // Point every Claude Code on the machine at the pool.
+  POOL_ACTION_ON = 1;
+  // Remove exactly what `on` wrote.
+  POOL_ACTION_OFF = 2;
+  // Turn an account on.
+  POOL_ACTION_ENABLE = 3;
+  // Turn an account off.
+  POOL_ACTION_DISABLE = 4;
+  // Remove an account.
+  POOL_ACTION_REMOVE = 5;
+  // Set the order of every account.
+  POOL_ACTION_ORDER = 6;
+  // Read usage from the vendor now.
+  POOL_ACTION_REFRESH = 7;
+  // Begin a sign-in.
+  POOL_ACTION_LOGIN_BEGIN = 8 [(sessionpipe.v1.word) = "login.begin"];
+  // Finish a sign-in with what the person pasted back.
+  POOL_ACTION_LOGIN_COMPLETE = 9 [(sessionpipe.v1.word) = "login.complete"];
+}
+
+// How a delivered message reached the session.
+enum DeliveryMode {
+  // None.
+  DELIVERY_MODE_UNSPECIFIED = 0;
+  // Through the harness's SDK.
+  DELIVERY_MODE_SDK = 1;
+  // A waiter (`sessionpipe wait`) handed it to the turn.
+  DELIVERY_MODE_WAITER = 2;
+  // At the turn boundary, through the Stop hook.
+  DELIVERY_MODE_TURN = 3;
+  // Written into the session's own inbox.
+  DELIVERY_MODE_INBOX = 4;
+  // Through the harness's API.
+  DELIVERY_MODE_API = 5;
+  // The session was resumed headlessly with it.
+  DELIVERY_MODE_RESUME = 6;
+  // A fork of the session was resumed with it.
+  DELIVERY_MODE_FORK = 7;
+}
+
+// How much a started session may do without anyone approving it (CONTROL.md §3.1),
+// narrowest first. Closed: nothing is wider than `auto`.
+enum StartPermission {
+  // None.
+  START_PERMISSION_UNSPECIFIED = 0;
+  // Read only.
+  START_PERMISSION_READ = 1;
+  // Nothing that needs approval runs unattended.
+  START_PERMISSION_SAFE = 2;
+  // Edits allowed.
+  START_PERMISSION_EDITS = 3;
+  // The harness's auto mode.
+  START_PERMISSION_AUTO = 4;
+}
+
+// What a start ran with, or gets by default: a level, or `inherit` (no permission flag,
+// the harness's own default) on a machine the person put in inherit mode. Never a
+// command's `permission`.
+enum RunLevel {
+  // None.
+  RUN_LEVEL_UNSPECIFIED = 0;
+  // Read only.
+  RUN_LEVEL_READ = 1;
+  // Nothing that needs approval runs unattended.
+  RUN_LEVEL_SAFE = 2;
+  // Edits allowed.
+  RUN_LEVEL_EDITS = 3;
+  // The harness's auto mode.
+  RUN_LEVEL_AUTO = 4;
+  // No permission flag: the harness's own default.
+  RUN_LEVEL_INHERIT = 5;
+}
+
+// The machine's mode: what a messaged session may do.
+enum MachineMode {
+  // None.
+  MACHINE_MODE_UNSPECIFIED = 0;
+  // Nothing that needs approval runs unattended.
+  MACHINE_MODE_SAFE = 1;
+  // The harness's auto mode.
+  MACHINE_MODE_AUTO = 2;
+  // No permission flag, each harness's own default there.
+  MACHINE_MODE_INHERIT = 3;
+}
+
+// A permission's answer.
+enum Decision {
+  // None.
+  DECISION_UNSPECIFIED = 0;
+  // Let the tool run.
+  DECISION_ALLOW = 1;
+  // Refuse it.
+  DECISION_DENY = 2;
+}
+
+// Where a pairing stands.
+enum PairStatus {
+  // None.
+  PAIR_STATUS_UNSPECIFIED = 0;
+  // The person hasn't confirmed yet.
+  PAIR_STATUS_PENDING = 1;
+  // Confirmed; `key` and `proof` are set.
+  PAIR_STATUS_PAIRED = 2;
+  // The code expired.
+  PAIR_STATUS_EXPIRED = 3;
+}
+
+// What became of a message. `progress` (not final): the answer so far, whole, in `reply`, with a
+// rising `seq`. `taken` (not final): verified and being delivered. Every other outcome is final.
+enum ControlOutcome {
+  // None.
+  CONTROL_OUTCOME_UNSPECIFIED = 0;
+  // The answer so far.
+  CONTROL_OUTCOME_PROGRESS = 1;
+  // Verified and being delivered.
+  CONTROL_OUTCOME_TAKEN = 2;
+  // It reached the session.
+  CONTROL_OUTCOME_DELIVERED = 3;
+  // `expires_at` passed first.
+  CONTROL_OUTCOME_EXPIRED = 4;
+  // The machine can't do this.
+  CONTROL_OUTCOME_UNSUPPORTED = 5;
+  // It tried and failed.
+  CONTROL_OUTCOME_FAILED = 6;
+  // The verifier or the machine's own rules said no.
+  CONTROL_OUTCOME_REFUSED = 7;
+}
+
+// Where a pooled account stands.
+enum PoolAccountStatus {
+  // None.
+  POOL_ACCOUNT_STATUS_UNSPECIFIED = 0;
+  // Has room.
+  POOL_ACCOUNT_STATUS_READY = 1;
+  // Every window the pool watches is used up until `until`.
+  POOL_ACCOUNT_STATUS_LIMITED = 2;
+  // Needs the person (sign in again).
+  POOL_ACCOUNT_STATUS_ERROR = 3;
+  // Turned off by the person.
+  POOL_ACCOUNT_STATUS_DISABLED = 4;
+}
+
+// A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
+// (`GET {control}/files/{sha256}`); the signed hash is what the machine checks.
+// Beyond this shape the verifier also checks: the name's length after NFC, names
+// unique case-insensitively, and the sizes adding up to at most 50 MiB.
+message ControlFile {
+  // Written as is (NFC) into the session's folder: no slash, backslash or control
+  // character, not starting with a dot.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 200
+      pattern: "^[^./\\\\\\x00-\\x1f\\x7f][^/\\\\\\x00-\\x1f\\x7f]*$"
+    }
+  ];
+  // Media type, `type/subtype` (case-insensitive).
+  string type = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 100
+      pattern: "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$"
+    }
+  ];
+  // Bytes: 1 to 25 MiB.
+  int64 size = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64 = {
+      gte: 1
+      lte: 26214400
+    }
+  ];
+  // SHA-256 of the bytes, base64url without padding.
+  string sha256 = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{43}$"
+  ];
+}
+
+// A passkey enrolled on a machine: credential id, COSE alg, SPKI.
+message PasskeyKey {
+  option (sessionpipe.v1.strict) = true;
+  // The credential id, base64url.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 16
+      max_len: 1400
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // The COSE algorithm: -7 (ES256) or -257 (RS256).
+  int32 alg = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      in: [
+        -7,
+        -257
+      ]
+    }
+  ];
+  // The public key, SPKI base64url.
+  string spki = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+}
+
+// A device key an app holds in hardware (CONTROL.md §2 "Device keys"), which names
+// itself by its SPKI's SHA-256 and says how it is held.
+message DeviceKey {
+  option (sessionpipe.v1.strict) = true;
+  // SHA-256 of the SPKI bytes, base64url without padding.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{43}$"
+  ];
+  // Always -7 (ES256).
+  int32 alg = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.const = -7
+  ];
+  // The public key, SPKI base64url.
+  string spki = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // Always `device`.
+  string type = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.const = "device"
+  ];
+  // The private key was made in a hardware key store and never leaves it.
+  string store = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.const = "hardware"
+  ];
+  // The store will not sign without verifying the person, every time.
+  string uv = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.const = "each-use"
+  ];
+}
+
+// A key enrolled on a machine, closed: a passkey, or a device key. A machine refuses any other
+// field or value, so a kind added later is refused by every machine that predates it.
+message ControlKey {
+  option (sessionpipe.v1.either) = true;
+  // A passkey.
+  PasskeyKey passkey = 1;
+  // A device key.
+  DeviceKey device = 2;
+}
+
+// The signed command, as the device writes it. The machine verifies the EXACT string
+// it received (control.json `cmd`) and never re-serializes it.
+message ControlCommand {
+  // Always 1.
+  int32 v = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.const = 1
+  ];
+  // Always `sessionpipe.control`.
+  string t = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.const = "sessionpipe.control"
+  ];
+  // The machine's id: `m_` and 16 to 40 base64url characters.
+  string machine = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^m_[A-Za-z0-9_-]{16,40}$"
+  ];
+  // What it asks.
+  ControlKind kind = 4 [(google.api.field_behavior) = REQUIRED];
+  // `<harness>:<id>`; the id follows its adapter's rule (Claude Code: a UUID).
+  string session = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+  ];
+  // prompt, start: the message for the model.
+  string text = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 20000
+  }];
+  // permission.answer: the attention_id being answered.
+  string for = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  // permission.answer: the answer.
+  Decision decision = 8;
+  // Shown to the model beside a decision.
+  string note = 9 [(buf.validate.field).string.max_len = 2000];
+  // start: the folder the new session runs in: absolute, or `~` / `~/…` under the
+  // home of the user the machine's daemon runs as, as events write it.
+  string cwd = 10 [(buf.validate.field).string.max_len = 1024];
+  // key.add (session `sessionpipe:keys`): the new device's key (a passkey or a device
+  // key, control-key.json), which the machine trusts once a key it already trusts
+  // signed this command.
+  ControlKey key = 11;
+  // key.add: what the person calls the device.
+  string name = 12 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+  // start, prompt: 1–10 files, together at most 50 MiB, downloaded and checked by hash
+  // before the session starts or the message is delivered. On a prompt, only to a
+  // machine whose hello says `prompt_files`.
+  repeated ControlFile files = 13 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 10
+  }];
+  // start only: the level the new session runs at, at most the machine's mode. Send
+  // it only to a machine whose hello advertises it for the harness (`start`).
+  StartPermission permission = 14;
+  // start only: the model the harness runs, passed as one argument: never a leading dash. As
+  // `permission`: only when advertised.
+  string model = 15 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+  }];
+  // pool (session `sessionpipe:pool`): what to do with the machine's account pool.
+  // Each action takes exactly the fields CONTROL.md §6 `pool` lists for it.
+  PoolAction pool_action = 16;
+  // enable, disable, remove, login.complete (the pending sign-in's id); refresh MAY.
+  string pool_account = 17 [(buf.validate.field).string.pattern = "^[A-Za-z0-9._:-]{1,128}$"];
+  // order: every account of the pool, once each, in the order wanted.
+  repeated string pool_order = 18 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 20
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9._:-]{1,128}$"}
+    }
+  }];
+  // login.complete: what the person pasted back from the sign-in page (`code#state`), one line.
+  string pool_code = 19 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 512
+    pattern: "^[^\\r\\n]+$"
+  }];
+  // start, prompt: a session on the same machine that gets the answer as a message
+  // once the command's turn ends (CONTROL.md §6, a handoff). Never the command's own
+  // session. Send it only to a machine whose hello says `handoff`.
+  string reply_to = 20 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // At least 16 random bytes, base64url.
+  string nonce = 21 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{22,64}$"
+  ];
+  // Epoch ms, the signing device's clock.
+  int64 iat = 22 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64.gte = 1
+  ];
+}
+
+// A day grant's signed string: a passkey vouches for a device key for ≤ 24 h.
+message ControlGrant {
+  // Always 1.
+  int32 v = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.const = 1
+  ];
+  // Always `sessionpipe.grant`.
+  string t = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.const = "sessionpipe.grant"
+  ];
+  // The day key: P-256 SPKI, base64url.
+  string pub = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // Epoch ms when it was signed.
+  int64 iat = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64.gte = 1
+  ];
+  // Epoch ms when it expires.
+  int64 exp = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64.gte = 1
+  ];
+  // The receiver's WebAuthn rp id (well-known control.signing.rp_id).
+  string rp = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 253
+    }
+  ];
+}
+
+// A WebAuthn assertion: credential id, authenticatorData, clientDataJSON, signature.
+message ControlAssertion {
+  // The credential id, base64url.
+  string cred = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // authenticatorData, base64url.
+  string ad = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // clientDataJSON, base64url.
+  string cd = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // The signature, base64url.
+  string sig = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+}
+
+// A device key's signature (CONTROL.md §3.2): its id and 64 bytes r‖s over
+// `sessionpipe.device.v1⏎<purpose>⏎<rp id>⏎<challenge>`. Nothing else. The shape
+// only, like an assertion's: the machine reads the key from its own record and checks
+// the rest (a 43-character id, exactly 64 bytes), so a carrier never decides a kind.
+message ControlDeviceSignature {
+  option (sessionpipe.v1.strict) = true;
+  // The key's id.
+  string cred = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // 64 bytes r‖s, base64url without padding.
+  string sig = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+}
+
+// A passkey's assertion over sha256(str), with the grant's string.
+message GrantAssertion {
+  // The credential id, base64url.
+  string cred = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // authenticatorData, base64url.
+  string ad = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // clientDataJSON, base64url.
+  string cd = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // The signature, base64url.
+  string sig = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // The grant's string (ControlGrant as signed).
+  string str = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2000
+    }
+  ];
+}
+
+// A device key's signature over the grant's string, with the string.
+message GrantDeviceSignature {
+  option (sessionpipe.v1.strict) = true;
+  // The key's id.
+  string cred = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // 64 bytes r‖s, base64url without padding.
+  string sig = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      pattern: "^[A-Za-z0-9_-]*$"
+    }
+  ];
+  // The grant's string (ControlGrant as signed).
+  string str = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2000
+    }
+  ];
+}
+
+// The grant vouching for a day key: its string plus the passkey's assertion over
+// sha256(str), or a device key's signature over it (CONTROL.md §3.2).
+message Grant {
+  option (sessionpipe.v1.either) = true;
+  // By a passkey.
+  GrantAssertion assertion = 1;
+  // By a device key.
+  GrantDeviceSignature device = 2;
+}
+
+// One signature: a passkey assertion, or a device key's signature.
+message Proof {
+  option (sessionpipe.v1.either) = true;
+  // By a passkey.
+  ControlAssertion assertion = 1;
+  // By a device key.
+  ControlDeviceSignature device = 2;
+}
+
+// One message as a receiver carries it: its own envelope around the signed bytes.
+message ControlMessage {
+  // The receiver's id for this message; the ack key. Not signed: the nonce inside cmd is.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // The command string, exactly as signed (≤ 48 000 characters).
+  string cmd = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 48000
+    }
+  ];
+  // The day key's ECDSA P-256 / SHA-256 signature over cmd: raw r‖s, base64url.
+  string csig = 3 [
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]*$",
+    (sessionpipe.v1.nullable) = true
+  ];
+  // The grant vouching for the day key.
+  Grant grant = 4 [(sessionpipe.v1.nullable) = true];
+  // Instead of csig + grant: one passkey assertion (or device signature) over sha256(cmd).
+  Proof confirm = 5 [(sessionpipe.v1.nullable) = true];
+  // The receiver's clock.
+  string at = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // After this the machine MUST NOT act and acks `expired`; at most 24 h after `at`.
+  string expires_at = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+}
+
+// `GET {control}`: the messages waiting for the machine.
+message ControlPoll {
+  // The messages, oldest first.
+  repeated ControlMessage messages = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// taken, delivered of a start: the options it ran with (`model` only when one was
+// asked for). A receiver shows this, never what was asked.
+message Applied {
+  option (sessionpipe.v1.strict) = true;
+  // The level it ran at.
+  RunLevel permission = 1;
+  // The model it ran.
+  string model = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 100
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+  }];
+}
+
+// What became of one message.
+message Ack {
+  // The message's id.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // The outcome.
+  ControlOutcome outcome = 2 [(google.api.field_behavior) = REQUIRED];
+  // The machine's clock.
+  string at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // delivered: how it reached the session.
+  DeliveryMode mode = 4;
+  // The session that took it, when not the one named (a fork's copy, a started session).
+  string session = 5 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // The answer came from a COPY of the session the command named, which this
+  // names: the person is owed the fact that their words went somewhere else.
+  string copy_of = 6 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // refused: the verifier's code, or the machine's own (`folder`, `no_attention`, `busy`,
+  // `ambiguous_home` when one session id is filed in several of the harness's accounts);
+  // failed: `file` when a start's attachment couldn't be fetched, checked or written,
+  // `model` when the harness wouldn't run the start's model, `held` when a message was
+  // written into a live session's own inbox and that session didn't take it (§6.3).
+  string code = 7 [(buf.validate.field).string.pattern = "^[a-z_]{1,40}$"];
+  // A sentence for the person.
+  string detail = 8 [(buf.validate.field).string.max_len = 500];
+  // resume / fork / start: the agent's reply, redacted by the secrets ruleset.
+  string reply = 9 [(buf.validate.field).string.max_len = 20000];
+  // progress only: rises with every progress ack for this id; a receiver keeps the highest.
+  int32 seq = 10 [(buf.validate.field).int32.gte = 0];
+  // What a start ran with.
+  Applied applied = 11;
+}
+
+// `POST {control}/ack`: what became of the messages.
+message ControlAck {
+  // One per message.
+  repeated Ack acks = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.min_items = 1
+  ];
+}
+
+// A harness account signed in on the machine: the id `session.account_id` carries,
+// and the email it signs in with, so a receiver the person paired with can name the
+// account rather than show an id. Only pair and hello carry it, never an event.
+message HarnessAccount {
+  // The harness.
+  string harness = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}$"
+  ];
+  // The account's id.
+  string id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
+  ];
+  // The email it signs in with.
+  string email = 3 [(buf.validate.field).string.max_len = 254];
+  // What to call an account that has no email: a Claude Code home that runs on
+  // another API is named by its endpoint's host (`api.z.ai`).
+  string name = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 200
+  }];
+  // Whether the harness's command line is signed in to this account as the daemon
+  // sees it (`claude auth status`): false means a message resumed headlessly would fail
+  // with "run claude auth login", so a receiver can say so before anyone sends one.
+  // Absent when the daemon can't tell, or predates the field.
+  bool signed_in = 5;
+}
+
+// `POST {control}/pair`, sent with the person's sink token from their own terminal —
+// or, where the receiver declares `control.open_pairing`, with no token and a
+// `poll_key` (CONTROL.md §2).
+message ControlPairStart {
+  // Open pairing: a random secret only this terminal knows. Status polls present it
+  // as their bearer; the receiver keeps only a hash.
+  string poll_key = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{22,128}$"];
+  // Set when adding a key to a machine already paired.
+  string machine = 2 [(buf.validate.field).string.pattern = "^m_[A-Za-z0-9_-]{16,40}$"];
+  // The machine's name.
+  string name = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 80
+    }
+  ];
+  // The harnesses it can drive.
+  repeated string harnesses = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      max_items: 20
+      items: {
+        string: {pattern: "^[a-z][a-z0-9-]{0,39}$"}
+      }
+    }
+  ];
+  // The delivery modes it offers.
+  repeated DeliveryMode modes = 5 [(google.api.field_behavior) = REQUIRED];
+  // sessionpipe's version.
+  string version = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 40
+  ];
+  // The folders the machine lets sessions run in, for the receiver's "new session"
+  // picker. Informational: the machine checks its own list again.
+  repeated string folders = 7 [(buf.validate.field).repeated = {
+    max_items: 50
+    items: {
+      string: {max_len: 1024}
+    }
+  }];
+  // safe: nothing that needs approval runs unattended; auto: the harness's auto mode;
+  // inherit: no permission flag, each harness's own default there. Chosen at the machine.
+  MachineMode mode = 8;
+  // The harness accounts signed in here, so the receiver's board can name each
+  // `session.account_id` (CONTROL.md §2).
+  repeated HarnessAccount accounts = 9 [(buf.validate.field).repeated.max_items = 20];
+  // The machine takes `files` on a start (downloads, checks and writes them). A
+  // machine that doesn't say so may ignore them: a receiver SHOULD NOT send it files.
+  bool files = 10;
+  // The kinds of key this machine takes (unique; absent means `["passkey"]`). A
+  // client offers a device key only to a machine that lists `device`.
+  repeated KeyType key_types = 11 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 2
+  }];
+  // Sessions on this machine may ask another agent through its daemon (CONTROL.md
+  // §13). Informational: a receiver can neither start an ask nor switch it.
+  bool ask = 12;
+  // The machine takes `reply_to` on a prompt or a start (CONTROL.md §6). One that
+  // doesn't say so refuses it: a receiver SHOULD NOT send it one.
+  bool handoff = 13;
+}
+
+// The receiver's answer: where the person confirms, and the digits both screens show.
+message ControlPairStarted {
+  // The machine's id.
+  string machine = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^m_[A-Za-z0-9_-]{16,40}$"
+  ];
+  // The pairing code.
+  string code = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{6,32}$"
+  ];
+  // Where the person confirms.
+  string url = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_URI
+  ];
+  // Six digits the terminal and the receiver's page both show.
+  string check = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^\\d{6}$"
+  ];
+  // When the code expires.
+  string expires_at = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+}
+
+// `GET {control}/pair?code=…` once the person confirmed. The machine verifies `proof`
+// over sha256("sessionpipe.pair:<machine>:<code>") before it trusts `key`.
+message ControlPaired {
+  // Where the pairing stands.
+  PairStatus status = 1 [(google.api.field_behavior) = REQUIRED];
+  // The key approved, whole: a device key keeps its type, store and uv.
+  ControlKey key = 2;
+  // The key's proof: a passkey assertion, or a device signature for purpose `pair`.
+  Proof proof = 3;
+  // The machine's own bearer for polls, acks and hello: opens nothing else. Minted
+  // once, at the first pairing of a machine.
+  string token = 4 [(buf.validate.field).string = {
+    min_len: 16
+    max_len: 256
+  }];
+  // Optional: a key for the events lane (`sink add`), so the receiver's session board
+  // shows this machine without a second step. Handed over once.
+  string sink_token = 5 [(buf.validate.field).string = {
+    min_len: 16
+    max_len: 256
+  }];
+  // Optional: who approved, in the receiver's words (a @handle), so the terminal can
+  // say whose passkey it now trusts.
+  string account = 6 [(buf.validate.field).string.max_len = 200];
+}
+
+// One account in the machine's pool, as its hello lists it (CONTROL.md §2 `pool`).
+// `id` is the string `session.account_id` and `limits.observed.account_id` carry, so
+// a receiver joins the three without a map. The email travels only here.
+message PoolAccount {
+  // The account's id.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9._:-]{1,128}$"
+  ];
+  // The email it signs in with.
+  string email = 2 [(buf.validate.field).string.max_len = 254];
+  // What the person calls it, when they named it.
+  string label = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 80
+  }];
+  // Whether it is on.
+  bool enabled = 4 [(google.api.field_behavior) = REQUIRED];
+  // Where it stands.
+  PoolAccountStatus status = 5 [(google.api.field_behavior) = REQUIRED];
+  // Serving new sessions right now. At most one account says so.
+  bool current = 6;
+  // limited: when it has room again, where the machine knows.
+  string until = 7 [(sessionpipe.v1.format) = FORMAT_DATE_TIME];
+  // The account's freshest numbers, as limits.observed would carry them: from the
+  // idle usage poll when no session asked recently, since an idle account's numbers
+  // ride on no session and would reach no receiver otherwise.
+  repeated LimitWindow windows = 8 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 8
+  }];
+  // limited or error only: what took the account out. A window's id (`seven_day`), or
+  // `rejected` (the vendor's status) or `error` (sign in again) for the non-window causes.
+  string limited_by = 9 [(buf.validate.field).string.pattern = "^[a-z0-9_]{1,64}$"];
+}
+
+// The machine's account pool (CONTROL.md §2 `pool`): present in EVERY hello of a daemon
+// that knows the pool (`on: false`, `accounts: []` when nothing is set up), so a
+// receiver tells "no pool" from "an old daemon"; `accounts` in the machine's order.
+message ControlHelloPool {
+  // Whether the pool serves sessions.
+  bool on = 1 [(google.api.field_behavior) = REQUIRED];
+  // The harness the pool serves. Only `claude-code` today.
+  string harness = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}$"
+  ];
+  // The accounts, in the machine's order.
+  repeated PoolAccount accounts = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 20
+  ];
+}
+
+// Per harness: the options a start may carry (CONTROL.md §2).
+message StartOptions {
+  // The levels it starts at here, already capped by `mode`.
+  repeated StartPermission permissions = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 4
+      unique: true
+    }
+  ];
+  // What a start that names none gets: one of `permissions`, or `inherit` on an
+  // inherit machine.
+  RunLevel permission = 2 [(google.api.field_behavior) = REQUIRED];
+  // Model ids the harness offers here: a suggestion, not a promise.
+  repeated string models = 3 [(buf.validate.field).repeated = {
+    max_items: 50
+    items: {
+      string: {
+        min_len: 1
+        max_len: 100
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@[\\]-]*$"
+      }
+    }
+  }];
+  // Any well-formed model is passed to the harness (which may still reject it).
+  bool any_model = 4;
+}
+
+// `POST {control}/hello`: what the machine can do right now.
+message ControlHello {
+  // The machine's name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 80
+    }
+  ];
+  // The harnesses it can drive.
+  repeated string harnesses = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      max_items: 20
+      items: {
+        string: {pattern: "^[a-z][a-z0-9-]{0,39}$"}
+      }
+    }
+  ];
+  // The delivery modes it offers.
+  repeated DeliveryMode modes = 3 [(google.api.field_behavior) = REQUIRED];
+  // Credential ids of the keys enrolled on the machine.
+  repeated string keys = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      max_items: 50
+      items: {
+        string: {
+          min_len: 16
+          max_len: 1400
+          pattern: "^[A-Za-z0-9_-]*$"
+        }
+      }
+    }
+  ];
+  // sessionpipe's version.
+  string version = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 40
+  ];
+  // Live sessions with a waiter parked on the daemon's socket.
+  repeated string waiting = 6 [(buf.validate.field).repeated = {
+    max_items: 500
+    items: {
+      string: {pattern: "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"}
+    }
+  }];
+  // As in control-pair.json: informational, re-checked on the machine.
+  repeated string folders = 7 [(buf.validate.field).repeated = {
+    max_items: 50
+    items: {
+      string: {max_len: 1024}
+    }
+  }];
+  // The machine's mode.
+  MachineMode mode = 8;
+  // As in control-pair.json: read again for every hello, so a new sign-in is named.
+  repeated HarnessAccount accounts = 9 [(buf.validate.field).repeated.max_items = 20];
+  // As in control-pair.json.
+  bool files = 10;
+  // The machine takes `files` on a prompt too (CONTROL.md §6 `prompt`). One that
+  // doesn't say so refuses them: a receiver SHOULD NOT send it a prompt with files.
+  bool prompt_files = 11;
+  // Per harness in `harnesses`: the options a start may carry (CONTROL.md §2). No
+  // entry: neither `permission` nor `model`.
+  map<string, StartOptions> start = 12 [(buf.validate.field).map = {
+    max_pairs: 50
+    keys: {
+      string: {pattern: "^[a-z][a-z0-9-]{0,39}$"}
+    }
+  }];
+  // As in control-pair.json.
+  repeated KeyType key_types = 13 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 2
+  }];
+  // The machine's account pool, when its daemon has one; sent again the moment the
+  // pool changes. A hello without it is a daemon that predates the pool.
+  ControlHelloPool pool = 14;
+  // As in control-pair.json; read again for every hello, so `sessionpipe ask off` shows.
+  bool ask = 15;
+  // As in control-pair.json.
+  bool handoff = 16;
+}

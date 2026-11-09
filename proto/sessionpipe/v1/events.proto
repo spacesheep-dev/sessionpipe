@@ -1,0 +1,757 @@
+// The event: what a harness's hook said, normalised (spec/PROTOCOL.md). One message per event
+// type under EventData; the envelope is Event. schemas/v1/event.json and event-data.json are
+// generated from this file.
+syntax = "proto3";
+
+package sessionpipe.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+import "sessionpipe/v1/options.proto";
+
+// The harnesses in the registry (spec/ADAPTERS.md). A name outside it is allowed on the wire
+// (`Harness.name` is a pattern), so a harness can report before it is listed here.
+enum HarnessName {
+  // No harness.
+  HARNESS_NAME_UNSPECIFIED = 0;
+  // Claude Code.
+  HARNESS_NAME_CLAUDE_CODE = 1 [(sessionpipe.v1.word) = "claude-code"];
+  // Codex CLI and Codex Desktop.
+  HARNESS_NAME_CODEX = 2;
+  // Gemini CLI.
+  HARNESS_NAME_GEMINI_CLI = 3 [(sessionpipe.v1.word) = "gemini-cli"];
+  // Antigravity.
+  HARNESS_NAME_ANTIGRAVITY = 4;
+  // Devin CLI.
+  HARNESS_NAME_DEVIN = 5;
+  // Cursor.
+  HARNESS_NAME_CURSOR = 6;
+  // Copilot CLI.
+  HARNESS_NAME_COPILOT_CLI = 7 [(sessionpipe.v1.word) = "copilot-cli"];
+  // Droid.
+  HARNESS_NAME_DROID = 8;
+  // Kiro.
+  HARNESS_NAME_KIRO = 9;
+  // OpenCode.
+  HARNESS_NAME_OPENCODE = 10;
+}
+
+// The harness that produced an event.
+message Harness {
+  // From the registry in ADAPTERS.md; a name outside it is allowed ([a-z0-9-]).
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}$"
+  ];
+  // The harness's version.
+  string version = 2 [(buf.validate.field).string.max_len = 64];
+  // The harness's own event name (`PostToolUse`, `agentStop`).
+  string event = 3 [(buf.validate.field).string.max_len = 64];
+}
+
+// Where a session's title came from.
+enum TitleSource {
+  // Unknown.
+  TITLE_SOURCE_UNSPECIFIED = 0;
+  // The person named it.
+  TITLE_SOURCE_CUSTOM = 1;
+  // The harness named it.
+  TITLE_SOURCE_HARNESS = 2;
+  // The first words the person asked.
+  TITLE_SOURCE_FIRST_ASK = 3 [(sessionpipe.v1.word) = "first-ask"];
+}
+
+// The session an event belongs to, with the facts every event repeats.
+message Session {
+  // The harness's own session id.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9._:-]+$"
+    }
+  ];
+  // Monotonic per session per sender; the dedup key with harness.name and id.
+  int64 seq = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64.gte = 0
+  ];
+  // The computer, as the person named it or as its hostname.
+  string machine = 3 [(buf.validate.field).string.max_len = 80];
+  // The working directory. Home is written `~`.
+  string cwd = 4 [(buf.validate.field).string.max_len = 1024];
+  // A remote URL with credentials stripped.
+  string repo = 5 [(buf.validate.field).string.max_len = 512];
+  // The git branch.
+  string branch = 6 [(buf.validate.field).string.max_len = 256];
+  // The model id, as the harness names it.
+  string model = 7 [(buf.validate.field).string.max_len = 128];
+  // The session's title.
+  string title = 8 [(buf.validate.field).string.max_len = 200];
+  // Where the title came from.
+  TitleSource title_source = 9;
+  // A link that opens the session.
+  string url = 10 [
+    (buf.validate.field).string.max_len = 1024,
+    (sessionpipe.v1.format) = FORMAT_URI
+  ];
+  // An id, never an email.
+  string account_id = 11 [(buf.validate.field).string.max_len = 128];
+  // Whether a person attends the session, in the harness's own word. Absent = unknown, never false.
+  bool attended = 12;
+  // The session this one is a subagent of, within the same harness.
+  string parent_id = 13 [
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9._:-]+$"
+    },
+    (sessionpipe.v1.nullable) = true
+  ];
+  // `<harness>:<id>` of the session that started this one on purpose (a script running
+  // `claude -p` for it), from the launcher's environment. Absent for a subagent, whose
+  // launcher is its parent, and when nothing says.
+  string launched_by = 14 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // `<harness>:<id>` of the session this one answers: the machine's daemon started or
+  // resumed it for that session's ask, or for a handoff (CONTROL.md §6, §13), and the
+  // child's environment says so. On every event of the child. Lineage across
+  // harnesses, as `parent_id` is within one; never authority, never a subagent.
+  string delegated_by = 15 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+}
+
+// What ran on the event before it left the machine.
+message Privacy {
+  // The redaction rulesets that ran; `secrets@1` always above tier 0.
+  repeated string rulesets = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.items.string.pattern = "^[a-z][a-z0-9-]*@\\d+$"
+  ];
+  // Whether the PII ruleset ran.
+  bool pii = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One event, as it travels to a receiver.
+message Event {
+  // The protocol integer: 1.
+  int32 protocol = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.const = 1
+  ];
+  // A ULID: unique, time-ordered.
+  string id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // Dotted, lowercase (`tool.ended`), or `native`. Unknown types MUST be accepted and stored.
+  string type = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^(?:native|[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+)$"
+  ];
+  // When it happened, RFC 3339 UTC with milliseconds.
+  string time = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // The privacy tier the event was filtered to (spec/PRIVACY.md).
+  int32 tier = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 0
+      lte: 3
+    }
+  ];
+  // The harness.
+  Harness harness = 6 [(google.api.field_behavior) = REQUIRED];
+  // The session.
+  Session session = 7 [(google.api.field_behavior) = REQUIRED];
+  // What ran on it.
+  Privacy privacy = 8 [(google.api.field_behavior) = REQUIRED];
+  // Per type (see EventData); extra keys allowed and kept.
+  google.protobuf.Struct data = 9 [(google.api.field_behavior) = REQUIRED];
+}
+
+// How a session began.
+enum SessionSource {
+  // Unknown.
+  SESSION_SOURCE_UNSPECIFIED = 0;
+  // A fresh start.
+  SESSION_SOURCE_STARTUP = 1;
+  // Resumed from an earlier session.
+  SESSION_SOURCE_RESUME = 2;
+  // After the person cleared the context.
+  SESSION_SOURCE_CLEAR = 3;
+  // After a compaction.
+  SESSION_SOURCE_COMPACT = 4;
+  // Forked from another session.
+  SESSION_SOURCE_FORK = 5;
+  // The harness didn't say.
+  SESSION_SOURCE_UNKNOWN = 6;
+}
+
+// Why a session ended.
+enum SessionEndReason {
+  // Unknown.
+  SESSION_END_REASON_UNSPECIFIED = 0;
+  // The person cleared the context.
+  SESSION_END_REASON_CLEAR = 1;
+  // The person signed out.
+  SESSION_END_REASON_LOGOUT = 2;
+  // The harness exited.
+  SESSION_END_REASON_EXIT = 3;
+  // Anything else.
+  SESSION_END_REASON_OTHER = 4;
+}
+
+// Why a turn ended.
+enum TurnEndReason {
+  // Unknown.
+  TURN_END_REASON_UNSPECIFIED = 0;
+  // The model stopped.
+  TURN_END_REASON_STOP = 1;
+  // The person interrupted.
+  TURN_END_REASON_INTERRUPT = 2;
+  // An error ended it.
+  TURN_END_REASON_ERROR = 3;
+}
+
+// What a session waits on when it needs the person.
+enum AttentionKind {
+  // Unknown.
+  ATTENTION_KIND_UNSPECIFIED = 0;
+  // A tool asks permission.
+  ATTENTION_KIND_PERMISSION = 1;
+  // The model asked a question.
+  ATTENTION_KIND_QUESTION = 2;
+  // A structured ask (elicitation).
+  ATTENTION_KIND_ELICITATION = 3;
+  // The session is idle and waits for the next prompt.
+  ATTENTION_KIND_IDLE = 4;
+  // An error needs the person.
+  ATTENTION_KIND_ERROR = 5;
+}
+
+// How an attention was cleared.
+enum AttentionClearance {
+  // Unknown.
+  ATTENTION_CLEARANCE_UNSPECIFIED = 0;
+  // The person answered.
+  ATTENTION_CLEARANCE_ANSWERED = 1;
+  // It was cancelled.
+  ATTENTION_CLEARANCE_CANCELLED = 2;
+  // It timed out.
+  ATTENTION_CLEARANCE_TIMEOUT = 3;
+  // The harness didn't say.
+  ATTENTION_CLEARANCE_UNKNOWN = 4;
+}
+
+// What started a compaction.
+enum CompactionTrigger {
+  // Unknown.
+  COMPACTION_TRIGGER_UNSPECIFIED = 0;
+  // The person asked for it.
+  COMPACTION_TRIGGER_MANUAL = 1;
+  // The harness did it on its own.
+  COMPACTION_TRIGGER_AUTO = 2;
+}
+
+// How a delegation reached the other agent.
+enum DelegationVia {
+  // Unknown.
+  DELEGATION_VIA_UNSPECIFIED = 0;
+  // `sessionpipe ask` (CONTROL.md §13).
+  DELEGATION_VIA_ASK = 1;
+  // A command with `reply_to` (CONTROL.md §6).
+  DELEGATION_VIA_HANDOFF = 2;
+}
+
+// Whether a handoff's answer reached `reply_to`.
+enum RelayOutcome {
+  // Unknown.
+  RELAY_OUTCOME_UNSPECIFIED = 0;
+  // It did.
+  RELAY_OUTCOME_DELIVERED = 1;
+  // The machine can't relay.
+  RELAY_OUTCOME_UNSUPPORTED = 2;
+  // It tried and failed.
+  RELAY_OUTCOME_FAILED = 3;
+}
+
+// `session.started`: a session began.
+message SessionStarted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // How it began.
+  SessionSource source = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// `session.heartbeat`: the session is still there.
+message SessionHeartbeat {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+}
+
+// `session.ended`: the session is over.
+message SessionEnded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // Why.
+  SessionEndReason reason = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// `session.backfill`: a session from before the hooks were installed, read from the harness's files.
+message SessionBackfill {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // When it began.
+  string started_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // Its last activity.
+  string last_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // How many turns it had.
+  int32 turns = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+// `session.forgotten`: the person asked every receiver to forget the session.
+message SessionForgotten {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+}
+
+// `turn.started`: a prompt was submitted.
+message TurnStarted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The harness's id for the turn.
+  string turn_id = 1 [(buf.validate.field).string.max_len = 128];
+  // How long the prompt was.
+  int32 prompt_chars = 2 [(buf.validate.field).int32.gte = 0];
+  // The harness's OWN word for who submitted the prompt, forwarded verbatim; not an enum
+  // of this spec (Claude Code: user, sdk, system, loop_wakeup, schedule_wakeup,
+  // poll_event), and a different vocabulary from session.started.source. A bare word:
+  // tier 0 is not redacted, so the shape is the only guard.
+  string submitted_by = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"];
+  // True when the prompt text is a block the harness wrote rather than words a person
+  // typed; never a claim that no person caused the turn. `injected` on
+  // turn.transcript says the same of a turn's ask, for the other way an ask arrives
+  // from somewhere other than this session's own keyboard (CONTROL.md §6.3).
+  bool injected = 4;
+}
+
+// `turn.ended`: the model stopped, was interrupted, or failed.
+message TurnEnded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The harness's id for the turn.
+  string turn_id = 1 [(buf.validate.field).string.max_len = 128];
+  // Why it ended.
+  TurnEndReason reason = 2 [(google.api.field_behavior) = REQUIRED];
+  // The harness's error class when reason is error (rate_limit, overloaded, authentication_failed, server_error …).
+  string error = 3 [(buf.validate.field).string.max_len = 200];
+  // How long the turn took.
+  int64 ms = 4 [(buf.validate.field).int64.gte = 0];
+  // Background work the harness reports still in flight as the turn ends, each of which wakes the session when it finishes (Claude Code: shell commands, monitors, subagents, workflows). Absent when the harness doesn't say.
+  int32 background = 5 [(buf.validate.field).int32.gte = 0];
+}
+
+// `turn.transcript`: what the person asked and what the assistant answered (tier 2).
+message TurnTranscript {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 2;
+  // The turn's number within the session.
+  int32 turn = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.gte = 0
+  ];
+  // The person's words, redacted.
+  string user = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 20000
+  ];
+  // The assistant's words, redacted.
+  string assistant = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 20000
+  ];
+  // When the turn ended.
+  string at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // The ask reached the session from somewhere other than its own keyboard: another
+  // local session handed it over or a channel pushed it, the two ways a control
+  // daemon reaches a session in place (CONTROL.md §6.3, §8). The words are the
+  // person's; the arrival was not. Absent means a turn asked for where the session
+  // runs. Like turn.started's `injected`, and never a claim that no person is behind
+  // the ask.
+  bool injected = 5 [(buf.validate.field).bool.const = true];
+}
+
+// `turn.progress`: the turn still running: its prompt and what the assistant has said so far. A
+// later turn.progress for the same turn replaces it; the turn.transcript with the
+// same number supersedes it. Over 20 000 chars, the assistant side keeps its END.
+message TurnProgress {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 2;
+  // The turn's number within the session.
+  int32 turn = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.gte = 0
+  ];
+  // The person's words, redacted.
+  string user = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 20000
+  ];
+  // The assistant's words so far, redacted.
+  string assistant = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 20000
+  ];
+  // When this snapshot was taken.
+  string at = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // As on turn.transcript: the ask reached the session from somewhere other than its
+  // own keyboard. A running turn says it too, or a board would show the person's
+  // relayed words as typed there until the turn ends.
+  bool injected = 5 [(buf.validate.field).bool.const = true];
+}
+
+// `tool.started`: a tool call began (tier 1; its input at tier 3).
+message ToolStarted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The tool's name.
+  string tool = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_.:-]{1,120}$"
+  ];
+  // The harness's id for the call.
+  string call_id = 2 [(buf.validate.field).string.max_len = 128];
+  // The harness's id for the turn.
+  string turn_id = 3 [(buf.validate.field).string.max_len = 128];
+  // Set when a subagent made the call.
+  string agent_id = 4 [(buf.validate.field).string.max_len = 128];
+  // The tool's input (tier 3).
+  google.protobuf.Value input = 5;
+}
+
+// `tool.ended`: a tool call finished (tier 1; its input and output at tier 3).
+message ToolEnded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The tool's name.
+  string tool = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_.:-]{1,120}$"
+  ];
+  // The harness's id for the call.
+  string call_id = 2 [(buf.validate.field).string.max_len = 128];
+  // The harness's id for the turn.
+  string turn_id = 3 [(buf.validate.field).string.max_len = 128];
+  // Set when a subagent made the call.
+  string agent_id = 4 [(buf.validate.field).string.max_len = 128];
+  // How long it took.
+  int64 ms = 5 [(buf.validate.field).int64.gte = 0];
+  // Whether it succeeded.
+  bool ok = 6 [(google.api.field_behavior) = REQUIRED];
+  // The error, when it didn't.
+  string error = 7 [(buf.validate.field).string.max_len = 2000];
+  // The tool's input (tier 3).
+  google.protobuf.Value input = 8;
+  // The tool's output (tier 3).
+  google.protobuf.Value output = 9;
+}
+
+// `files.changed`: files a turn wrote.
+message FilesChanged {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The paths, home written `~`.
+  repeated string paths = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      max_items: 500
+      items: {
+        string: {max_len: 1024}
+      }
+    }
+  ];
+}
+
+// `attention.needed`: the session waits on the person.
+message AttentionNeeded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The id a `permission.answer` names.
+  string attention_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 128
+  ];
+  // What it waits on.
+  AttentionKind kind = 2 [(google.api.field_behavior) = REQUIRED];
+  // The tool asking, for a permission.
+  string tool = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_.:-]{1,120}$"];
+  // What it asks, in at most 200 characters (tier 1).
+  string message = 4 [(buf.validate.field).string.max_len = 200];
+  // Set when a subagent asked.
+  string agent_id = 5 [(buf.validate.field).string.max_len = 128];
+}
+
+// `attention.cleared`: the session no longer waits.
+message AttentionCleared {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The attention that was cleared.
+  string attention_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 128
+  ];
+  // How.
+  AttentionClearance how = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// `subagent.started`: the session started a subagent.
+message SubagentStarted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The subagent's id.
+  string agent_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 128
+  ];
+  // Its kind, as the harness names it.
+  string agent_type = 2 [(buf.validate.field).string.max_len = 128];
+}
+
+// `subagent.ended`: a subagent finished.
+message SubagentEnded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The subagent's id.
+  string agent_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 128
+  ];
+  // Its kind, as the harness names it.
+  string agent_type = 2 [(buf.validate.field).string.max_len = 128];
+  // Background work still in flight once this subagent is out of it, counted as `turn.ended.background` is. Absent when the harness doesn't say.
+  int32 background = 3 [(buf.validate.field).int32.gte = 0];
+}
+
+// `context.compacted`: the harness compacted the context.
+message ContextCompacted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // What started it.
+  CompactionTrigger trigger = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One usage window of an account: `id` is the harness's own name for it (`five_hour`,
+// `seven_day`, `primary` …); `used_percent` passes 100 once a spend limit is exceeded.
+message LimitWindow {
+  option (sessionpipe.v1.open) = true;
+  // The harness's name for the window.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9_]{1,64}$"
+  ];
+  // How much of it is used.
+  double used_percent = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).double.gte = 0
+  ];
+  // When it resets.
+  string resets_at = 3 [(sessionpipe.v1.format) = FORMAT_DATE_TIME];
+  // How long the window is.
+  int32 window_minutes = 4 [(buf.validate.field).int32.gte = 1];
+}
+
+// `limits.observed`: the account's usage limits as the harness last reported them: one per window.
+message LimitsObserved {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 1;
+  // The windows.
+  repeated LimitWindow windows = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 8
+    }
+  ];
+  // The account's plan, as the harness names it.
+  string plan = 2 [(buf.validate.field).string.max_len = 64];
+  // The account the numbers belong to, as `session.account_id` spells it, when the
+  // session was served by another account than its own (the pool, CONTROL.md §2).
+  string account_id = 3 [(buf.validate.field).string.max_len = 128];
+}
+
+// `delegation.started`: the daemon on this machine took an ask from this session (CONTROL.md §13), or a
+// command with `reply_to` naming it (§6). On the asking session, with its own seq.
+message DelegationStarted {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The ask's id.
+  string ask_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // How it was asked.
+  DelegationVia via = 2 [(google.api.field_behavior) = REQUIRED];
+  // The agent asked.
+  string harness = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}$"
+  ];
+  // The session that answers, once known: at once for a handoff or an ask to an
+  // existing session; for a new session, when the harness reveals its id.
+  string to = 4 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // Tier 1: what was asked, cut to 200 characters, redacted.
+  string text = 5 [(buf.validate.field).string.max_len = 200];
+}
+
+// `delegation.ended`: the asked agent's turn ended, or the ask failed before one.
+message DelegationEnded {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 0;
+  // The ask's id.
+  string ask_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // The session that answered.
+  string to = 2 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // Whether it answered.
+  bool ok = 3 [(google.api.field_behavior) = REQUIRED];
+  // How long it took.
+  int64 ms = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int64.gte = 0
+  ];
+  // When not ok: why, in at most 200 characters.
+  string error = 5 [(buf.validate.field).string.max_len = 200];
+  // A handoff only: whether the answer reached `reply_to`.
+  RelayOutcome relayed = 6;
+  // Tier 2: the answer, redacted.
+  string reply = 7 [(buf.validate.field).string.max_len = 20000];
+}
+
+// `native`: a harness's raw hook line, tier 3 only.
+message Native {
+  option (sessionpipe.v1.open) = true;
+  option (sessionpipe.v1.tier) = 3;
+}
+
+// The known event types and the shape of each one's `data`. A field's JSON name is the type.
+message EventData {
+  // `session.started`.
+  SessionStarted session_started = 1 [
+    json_name = "session.started",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `session.heartbeat`.
+  SessionHeartbeat session_heartbeat = 2 [
+    json_name = "session.heartbeat",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `session.ended`.
+  SessionEnded session_ended = 3 [
+    json_name = "session.ended",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `session.backfill`.
+  SessionBackfill session_backfill = 4 [
+    json_name = "session.backfill",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `session.forgotten`.
+  SessionForgotten session_forgotten = 5 [
+    json_name = "session.forgotten",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `turn.started`.
+  TurnStarted turn_started = 6 [
+    json_name = "turn.started",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `turn.ended`.
+  TurnEnded turn_ended = 7 [
+    json_name = "turn.ended",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `turn.transcript`.
+  TurnTranscript turn_transcript = 8 [
+    json_name = "turn.transcript",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `turn.progress`.
+  TurnProgress turn_progress = 9 [
+    json_name = "turn.progress",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `tool.started`.
+  ToolStarted tool_started = 10 [
+    json_name = "tool.started",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `tool.ended`.
+  ToolEnded tool_ended = 11 [
+    json_name = "tool.ended",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `files.changed`.
+  FilesChanged files_changed = 12 [
+    json_name = "files.changed",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `attention.needed`.
+  AttentionNeeded attention_needed = 13 [
+    json_name = "attention.needed",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `attention.cleared`.
+  AttentionCleared attention_cleared = 14 [
+    json_name = "attention.cleared",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `subagent.started`.
+  SubagentStarted subagent_started = 15 [
+    json_name = "subagent.started",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `subagent.ended`.
+  SubagentEnded subagent_ended = 16 [
+    json_name = "subagent.ended",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `context.compacted`.
+  ContextCompacted context_compacted = 17 [
+    json_name = "context.compacted",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `limits.observed`.
+  LimitsObserved limits_observed = 18 [
+    json_name = "limits.observed",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `delegation.started`.
+  DelegationStarted delegation_started = 19 [
+    json_name = "delegation.started",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `delegation.ended`.
+  DelegationEnded delegation_ended = 20 [
+    json_name = "delegation.ended",
+    (google.api.field_behavior) = REQUIRED
+  ];
+  // `native`.
+  Native native = 21 [(google.api.field_behavior) = REQUIRED];
+}

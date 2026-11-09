@@ -1,0 +1,22 @@
+# sessionpipe's .proto files: the one definition of the protocol (spec/, schemas/v1/ and, in later
+# steps, the types every package and the CLI's commands are generated from). buf/ and google/ are vendored
+# copies of protovalidate's rules and Google's field_behavior (both Apache-2.0), so a build needs no network.
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+    - COMMENTS
+  ignore:
+    - buf
+    - google
+    - google
+# The protocol integer stays 1: a change that a v1 receiver could notice (a field removed or
+# retyped, a JSON name changed) fails here. Additions pass (spec/VERSIONING.md).
+breaking:
+  use:
+    - WIRE_JSON
+  ignore:
+    - buf
+    - google
