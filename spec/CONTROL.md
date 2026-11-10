@@ -765,6 +765,13 @@ Stops the current turn where the machine has a way of its own to stop it:
   the turn a cancel stops is that start, not a message waiting for it; a cancel never
   waits for a start to end.
 
+  A turn that runs in a **copy** is that copy's turn as much as the session's: a cancel
+  that names the copy — the one the session's messages go to, or the one a `fork` is
+  making, once it has named itself — stops it exactly as one that names the session
+  does. The ack and the copy's own events send a person to the copy, so that is where
+  they press Stop, and the daemon MUST NOT describe its own child there as a process it
+  did not start.
+
 **Never a signal to a pid the daemon did not start.** A session open in a terminal or in
 the Claude app, and a headless run someone else started, belong to that process, and
 nothing here reaches into it: the cancel is acked `unsupported`, and its `detail` says
