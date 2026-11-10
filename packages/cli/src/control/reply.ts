@@ -23,6 +23,14 @@ export function transcriptEnd(file: string): number {
   }
 }
 
+/** A mark the daemon may recognise a message by: the whole of one, as route.ts makes
+ *  them from a ULID — `message` and the id's last twelve characters, or a channel tag's
+ *  `message_id` with all twenty-six. The id is the receiver's and nobody signed it, so
+ *  what it is made of is not taken on trust: a mark made from a shorter one ("message
+ *  42") would be found in words anybody typed, and is treated as no mark at all — nothing
+ *  is proven by it and no answer is put down to it. */
+const WHOLE_MARK = /^(?:message [0-9A-HJKMNP-TV-Z]{12}|message_id="[0-9A-HJKMNP-TV-Z]{26}")$/;
+
 /** Who asked for the first turn the transcript gained after a delivery: `ours` — the
  *  message this daemon handed the session in place, recognised by its own mark in the row
  *  the session wrote for it: a peer row for the inbox (the mark is in the text it was
@@ -64,7 +72,9 @@ export function firstAsk(file: string, from: number, mark: string): "ours" | "ot
     const c = (j.message as { content?: unknown } | undefined)?.content;
     const origin = j.origin as { kind?: unknown; body?: unknown } | undefined;
     const said = `${typeof origin?.body === "string" ? origin.body : ""}\n${rowText(c)}`;
-    return (origin?.kind === "peer" || origin?.kind === "channel") && said.includes(mark) ? "ours" : "other";
+    return (origin?.kind === "peer" || origin?.kind === "channel") && WHOLE_MARK.test(mark) && said.includes(mark)
+      ? "ours"
+      : "other";
   }
   return null;
 }
@@ -163,7 +173,9 @@ function carries(row: unknown, mark: string): boolean {
  *    for the end acked every such answer with no reply), so a textless one ends the turn
  *    only at whatever follows it;
  *  - at a row that begins something new (`nextAsk`): the next message's turn is not this
- *    one's answer;
+ *    one's answer. A row that carries this message's own mark is never that: the harness
+ *    records a Stop block in several rows, and in whatever order it writes them they are
+ *    all this message being taken;
  *  - at a row the model wrote after `until`, once that is set: the session's own hooks
  *    said the turn ended then, so anything later belongs to what came next. */
 export class Answer {
@@ -175,7 +187,12 @@ export class Answer {
   /** When the session's hooks said the turn ended (epoch ms), once they have. */
   until: number | null = null;
 
-  constructor(private readonly mark: string) {}
+  /** A mark that is not the whole of one anchors nothing (`WHOLE_MARK`). */
+  private readonly usable: boolean;
+
+  constructor(private readonly mark: string) {
+    this.usable = WHOLE_MARK.test(mark);
+  }
 
   get text(): string {
     return this.parts.join("\n\n");
@@ -192,10 +209,12 @@ export class Answer {
     if (!j || typeof j !== "object") return;
     if (!this.anchored) {
       // Never an assistant row: the model quoting the mark is not the session taking it.
-      if (j.type !== "assistant" && !j.isSidechain && carries(j, this.mark)) this.anchored = true;
+      if (this.usable && j.type !== "assistant" && !j.isSidechain && carries(j, this.mark)) this.anchored = true;
       return;
     }
     if (j.type !== "assistant" || j.isSidechain) {
+      // Another row of the same hand-over is not the end of its answer.
+      if (!j.isSidechain && carries(j, this.mark)) return;
       if (this.textless || nextAsk(j)) this.done = true;
       return;
     }
