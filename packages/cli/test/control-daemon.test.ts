@@ -52,6 +52,18 @@ function answer(sid: string, cwd: string, text: string): void {
   appendFileSync(f, rec("tool_use", [{ type: "tool_use", name: "Edit" }]) + rec("end_turn", [{ type: "text", text }]));
 }
 
+/** The row the session's transcript gains when it takes a message handed to it in place,
+ *  carrying the text it was handed: the Stop hook's block as Claude Code 2.1.322 records
+ *  it (a meta `user` row), or the waiter's output as the tool result that read it. */
+function took(sid: string, cwd: string, handed: string, how: "stop" | "waiter" = "stop"): void {
+  const f = path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${sid}.jsonl`);
+  const row =
+    how === "stop"
+      ? { type: "user", isMeta: true, message: { content: `Stop hook feedback:\n${handed}` } }
+      : { type: "user", message: { content: [{ type: "tool_result", content: handed }] } };
+  appendFileSync(f, `${JSON.stringify(row)}\n`);
+}
+
 function transcript(sid: string, cwd: string): void {
   const dir = path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
   mkdirSync(dir, { recursive: true });
@@ -409,6 +421,11 @@ describe.runIf(unix)("delivery", () => {
     const taken = rx.acks.find((a) => a.id === q.id);
     expect(taken).toMatchObject({ outcome: "taken" });
     expect(Date.parse(taken?.at as string) - Date.parse(q.at)).toBeLessThan(2000);
+    // The text names the message, which is how its answer is told from anything else
+    // the transcript gains: here, the last words of a turn that was still running.
+    expect(text).toContain(`; message ${q.id.slice(-12)}):`);
+    answer(SID, project, "What the person at the keyboard had asked for.");
+    took(SID, project, text, "waiter");
     answer(SID, project, "Added the Oct 8 row.");
     expect(await rx.waitAck(q.id)).toMatchObject({
       outcome: "delivered",
@@ -471,9 +488,11 @@ describe.runIf(unix)("delivery", () => {
     const q = await rx.send({ session: SESSION, text: "also write pong" });
     for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await sleep(20);
     expect(rx.acks.find((a) => a.id === q.id)?.outcome).toBe("taken");
-    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 500)).toMatchObject({ op: "block" });
-    answer(SID, project, "pong");
+    const block = await ask(sock, { op: "stop", session: SESSION, active: false }, 500);
+    expect(block).toMatchObject({ op: "block" });
     await ask(sock, { op: "event", session: SESSION, event: "Stop" }, 500);
+    took(SID, project, (block as { reason: string }).reason);
+    answer(SID, project, "pong");
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "turn", reply: "pong" });
     expect(await parked).toBeNull();
   });
@@ -493,10 +512,15 @@ describe.runIf(unix)("delivery", () => {
     expect(rx.polls.length - polls).toBeLessThanOrEqual(2);
     const r = await ask(sock, { op: "stop", session: SESSION, active: false }, 500);
     expect(r).toMatchObject({ op: "block" });
-    expect((r as { reason: string }).reason).toContain("also write pong");
-    expect((r as { reason: string }).reason).toContain("sent back to them automatically");
-    answer(SID, project, "pong");
+    const reason = (r as { reason: string }).reason;
+    expect(reason).toContain("also write pong");
+    expect(reason).toContain("sent back to them automatically");
+    // It names the message: the answer is what the session writes after the row that says so.
+    expect(reason).toContain(`; message ${q.id.slice(-12)}):`);
+    // The hook's own Stop event follows its question, as the worker reports it.
     await ask(sock, { op: "event", session: SESSION, event: "Stop" }, 500);
+    took(SID, project, reason);
+    answer(SID, project, "pong");
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "turn", reply: "pong" });
     expect(await ask(sock, { op: "stop", session: SESSION, active: true }, 500)).toEqual({ op: "none" });
   });
@@ -1249,6 +1273,7 @@ describe.runIf(unix)("the built hook talks to the daemon", () => {
       const out = await runHook("Stop", { session_id: SID, stop_hook_active: false, cwd: project });
       expect(JSON.parse(out)).toMatchObject({ decision: "block" });
       expect(JSON.parse(out).reason).toContain("from the phone");
+      took(SID, project, JSON.parse(out).reason);
       answer(SID, project, "got it");
       expect(await rx.waitAck(q.id)).toMatchObject({ mode: "turn", reply: "got it" });
 

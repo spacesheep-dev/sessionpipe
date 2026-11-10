@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // The answer to an in-place message, read from the session's own transcript.
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { answerIn, awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "../src/control/reply.js";
-import { channelMark, kindPath, routePrompt } from "../src/control/route.js";
+import { Answer, answerIn, firstAsk, follow, ranInMode, transcriptEnd } from "../src/control/reply.js";
+import { channelMark, kindPath, messageMark, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
@@ -124,9 +124,53 @@ describe("ranInMode: what the turn a relaunch ran actually ran in", () => {
   });
 });
 
-describe("answerIn", () => {
+const MARK = "message 01K6ABCDEF12";
+/** The row a session's transcript records for a message handed to it at a Stop
+ *  (Claude Code 2.1.322): the hook's words, as a meta `user` row. */
+const taken = (mark = MARK) =>
+  rec({ type: "user", isMeta: true, message: { content: `Stop hook feedback:\nMessage via x (…; ${mark}):\n\nhi` } });
+const says = (text: string, extra: Record<string, unknown> = {}) => asst("end_turn", [{ type: "text", text }], extra);
+
+describe("answerIn: which words are the answer to one message", () => {
+  it("is what the session wrote after the row that carries the message's mark, and nothing from before it", () => {
+    // The last words of the turn that was ending reach the transcript AFTER its Stop
+    // hook asked: they are in what the transcript gained, and they are not the answer.
+    const lines = [says("`sleep 25` is running in the background."), taken(), says("INTERRUPT1")];
+    expect(answerIn(lines.slice(0, 1), MARK)).toEqual({ done: false, text: "", anchored: false });
+    expect(answerIn(lines.slice(0, 2), MARK)).toEqual({ done: false, text: "", anchored: true });
+    expect(answerIn(lines, MARK)).toEqual({ done: true, text: "INTERRUPT1", anchored: true });
+    // Another message's row is not this one's: its answer is never taken.
+    expect(answerIn([taken("message 01K6OTHER999"), says("PAGE-B")], MARK)).toEqual({
+      done: false,
+      text: "",
+      anchored: false,
+    });
+  });
+  it("finds the mark wherever the row says it; never in the model's own words or a subagent's", () => {
+    const deep = (o: Record<string, unknown>) => answerIn([rec(o), says("ok")], MARK).text;
+    // A hook's words as an attachment and as a summary; a command's output in a tool result.
+    expect(deep({ type: "attachment", attachment: { blockingError: { blockingError: `… ${MARK}` } } })).toBe("ok");
+    expect(deep({ type: "system", subtype: "stop_hook_summary", hookErrors: [`… ${MARK}`] })).toBe("ok");
+    expect(
+      deep({
+        type: "user",
+        message: { content: [{ type: "tool_result", content: [{ type: "text", text: `1\t${MARK}` }] }] },
+      }),
+    ).toBe("ok");
+    expect(deep({ type: "user", toolUseResult: { stdout: `x ${MARK} y` }, message: { content: [] } })).toBe("ok");
+    // Not a string that holds it, a number, null, or a row that is no object at all.
+    expect(deep({ type: "user", n: 7, none: null, list: [1, [2, { k: "message 01K6ABCDEF1" }]] })).toBe("");
+    expect(answerIn(["42", "null", '"a string"', says("no")], MARK)).toEqual({
+      done: false,
+      text: "",
+      anchored: false,
+    });
+    expect(deep({ type: "assistant", message: { content: [{ type: "text", text: `you said ${MARK}` }] } })).toBe("");
+    expect(deep({ type: "user", isSidechain: true, message: { content: MARK } })).toBe("");
+  });
   it("is the turn's text once it ends; tool steps and subagents are not the answer", () => {
     const lines = [
+      taken(),
       asst("tool_use", [
         { type: "text", text: "Looking." },
         { type: "tool_use", name: "Read" },
@@ -135,11 +179,17 @@ describe("answerIn", () => {
       asst("end_turn", [{ type: "text", text: "inner" }], { isSidechain: true }),
       asst("end_turn", [{ type: "text", text: "It has one line." }]),
     ];
-    expect(answerIn(lines.slice(0, 3))).toEqual({ done: false, text: "Looking." });
-    expect(answerIn(lines)).toEqual({ done: true, text: "Looking.\n\nIt has one line." });
+    expect(answerIn(lines.slice(0, 4), MARK)).toEqual({ done: false, text: "Looking.", anchored: true });
+    expect(answerIn(lines, MARK)).toEqual({ done: true, text: "Looking.\n\nIt has one line.", anchored: true });
+    // Nothing after the end is read.
+    expect(answerIn([...lines, says("another turn")], MARK).text).toBe("Looking.\n\nIt has one line.");
   });
-  it("skips lines that aren't JSON", () => {
-    expect(answerIn(["{", asst("end_turn", [{ type: "text", text: "ok" }])])).toEqual({ done: true, text: "ok" });
+  it("skips lines that aren't JSON, and an assistant row that holds no message", () => {
+    expect(answerIn(["{", taken(), "{", rec({ type: "assistant" }), says("ok")], MARK)).toEqual({
+      done: true,
+      text: "ok",
+      anchored: true,
+    });
   });
   it("reads past a thinking record that ends the turn to the text written after it", () => {
     // How Claude Code 2.1.314 wrote a turn the model thought about first: one message,
@@ -153,46 +203,219 @@ describe("answerIn", () => {
       type: "assistant",
       message: { id, stop_reason: "end_turn", content: [{ type: "text", text: "BUSY-OK-1" }] },
     });
-    expect(answerIn([think])).toEqual({ done: false, text: "" });
-    expect(answerIn([think, text])).toEqual({ done: true, text: "BUSY-OK-1" });
+    expect(answerIn([taken(), think], MARK)).toEqual({ done: false, text: "", anchored: true });
+    expect(answerIn([taken(), think, text], MARK)).toEqual({ done: true, text: "BUSY-OK-1", anchored: true });
     // A turn whose last message is all thinking has ended once anything else follows it.
     const after = rec({ type: "system", subtype: "turn_duration" });
-    expect(answerIn([think, after])).toEqual({ done: true, text: "" });
+    expect(answerIn([taken(), think, after], MARK)).toEqual({ done: true, text: "", anchored: true });
+    expect(answerIn([taken(), think, says("a subagent", { isSidechain: true })], MARK).done).toBe(true);
+  });
+  it("ends where something new begins: the next message's turn is not this one's answer", () => {
+    const partial = asst("tool_use", [{ type: "text", text: "On it." }]);
+    const ends = (row: Record<string, unknown>) => answerIn([taken(), partial, rec(row), says("NEXT")], MARK);
+    // Somebody's prompt, a finished background task's wake, another session's or a channel's message.
+    expect(ends({ type: "user", origin: { kind: "human" }, message: { content: "and now this" } })).toEqual({
+      done: true,
+      text: "On it.",
+      anchored: true,
+    });
+    expect(ends({ type: "user", message: { content: "typed, on an older Claude Code" } }).text).toBe("On it.");
+    expect(
+      ends({ type: "user", origin: { kind: "task-notification" }, message: { content: "<task-notification>" } }).text,
+    ).toBe("On it.");
+    expect(ends({ type: "user", isMeta: true, origin: { kind: "peer" }, message: { content: "peer" } }).text).toBe(
+      "On it.",
+    );
+    // The next message handed over at a Stop, or another hook's block: a new demand.
+    expect(JSON.parse(taken("message 01K6OTHER999"))).toMatchObject({ isMeta: true });
+    expect(answerIn([taken(), partial, taken("message 01K6OTHER999"), says("NEXT")], MARK)).toEqual({
+      done: true,
+      text: "On it.",
+      anchored: true,
+    });
+    expect(
+      ends({
+        type: "user",
+        isMeta: true,
+        message: { content: [{ type: "text", text: "Stop hook feedback:\nrun the linter" }] },
+      }).text,
+    ).toBe("On it.");
+    // What the harness slips into a running turn is part of it: the turn carries on.
+    for (const row of [
+      { type: "user", isMeta: true, message: { content: "[Image: original 2880x1800, displayed at 2000x1250.]" } },
+      { type: "user", isMeta: true, origin: {}, message: { content: "Base directory for this skill: /x" } },
+      { type: "user", isCompactSummary: true, message: { content: "summary" } },
+      { type: "user", repeatsCompactSummary: true, message: { content: "summary" } },
+      { type: "user", toolUseResult: { stdout: "" }, message: { content: "out" } },
+      { type: "user", message: { content: [{ type: "tool_result", content: "out" }] } },
+      { type: "user", isSidechain: true, message: { content: "a subagent's prompt" } },
+      { type: "attachment", attachment: { type: "queued_command", prompt: "also this" } },
+      { type: "system", subtype: "stop_hook_summary" },
+    ])
+      expect(ends(row)).toEqual({ done: true, text: "On it.\n\nNEXT", anchored: true });
+  });
+  it("ends where the session's hooks said the turn ended: later words belong to what came next", () => {
+    const at = Date.parse("2026-11-10T17:03:24.300Z");
+    const a = new Answer(MARK);
+    a.feed(taken());
+    a.feed(asst("tool_use", [{ type: "text", text: "PAGE-A" }], { timestamp: "2026-11-10T17:03:24.240Z" }));
+    a.until = at;
+    // A row with no time on it can't be told apart, and is taken; a later one ends it.
+    a.feed(asst("tool_use", [{ type: "text", text: "(untimed)" }]));
+    expect(a.done).toBe(false);
+    a.feed(asst("tool_use", [{ type: "text", text: "PAGE-B" }], { timestamp: "2026-11-10T17:03:26.000Z" }));
+    expect(a).toMatchObject({ done: true, text: "PAGE-A\n\n(untimed)" });
+    a.feed(says("ignored"));
+    expect(a.text).toBe("PAGE-A\n\n(untimed)");
   });
 });
 
-describe("awaitAnswer", () => {
-  it("reads only what the transcript gained after delivery, across partial writes", async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
-    const f = path.join(dir, "t.jsonl");
+describe("a Stop block as Claude Code records it (conformance/transcripts/claude-code/stop-block.jsonl)", () => {
+  // Recorded on 2.1.322, 2026-11-10: a turn says its last words, its Stop hook is
+  // answered with a block carrying a message, the session answers the message, and a
+  // background task then wakes it for a turn of its own.
+  const rows = readFileSync(
+    new URL("../../../conformance/transcripts/claude-code/stop-block.jsonl", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter(Boolean);
+  const mark = messageMark("01K8ZC3W5Q7RN4XJ1V2B6T9M0D");
+  const row = (i: number) =>
+    JSON.parse(rows[i] as string) as { type: string; isMeta?: boolean; message?: { content?: unknown } };
+  it("the answer is the continuation the block caused: not the words before it, not the next turn's", () => {
+    // Row 4 is the turn's last message, which reached the transcript after the hook asked;
+    // row 5 is the block.
+    expect(row(4)).toMatchObject({
+      type: "assistant",
+      message: { content: [{ text: expect.stringContaining("sleep 25") }] },
+    });
+    expect(row(5)).toMatchObject({ type: "user", isMeta: true });
+    expect(String(row(5).message?.content)).toContain(`Stop hook feedback:\nMessage via spacesheep.dev (`);
+    expect(String(row(5).message?.content)).toContain(mark);
+    for (const from of [0, 4, 5])
+      expect(answerIn(rows.slice(from), mark)).toEqual({ done: true, text: "INTERRUPT1", anchored: true });
+    // Handed over after the block's own row (never the case, but nothing is guessed): no answer.
+    expect(answerIn(rows.slice(8), mark)).toEqual({ done: false, text: "", anchored: false });
+    // Another message's mark is nowhere in it.
+    expect(answerIn(rows, messageMark("01K8ZC3W5Q7RN4XJ1V2B6T9M0E")).anchored).toBe(false);
+  });
+});
+
+describe("follow: the answer as the transcript gains it", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
+  let n = 0;
+  const fresh = (head = "") => {
+    const f = path.join(dir, `t${n++}.jsonl`);
+    writeFileSync(f, head);
+    return f;
+  };
+  const add = (f: string, ...lines: string[]) => appendFileSync(f, lines.map((l) => `${l}\n`).join(""));
+  const opts = { mark: MARK, end: "next" as const, timeoutMs: 3000, pollMs: 20, graceMs: 150 };
+  const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it("reads only what the transcript gained after the hand-over, across partial writes", async () => {
     // An earlier turn's end_turn must never be taken for this message's answer.
-    writeFileSync(f, `${asst("end_turn", [{ type: "text", text: "old answer" }])}\n`);
-    const from = transcriptEnd(f);
-    const done = awaitAnswer(f, from, { timeoutMs: 3000, pollMs: 20 });
-    const line = `${asst("end_turn", [{ type: "text", text: "new answer" }])}\n`;
-    appendFileSync(f, line.slice(0, 10));
-    await new Promise((r) => setTimeout(r, 60));
-    appendFileSync(f, line.slice(10));
-    expect(await done).toBe("new answer");
+    const f = fresh(`${says("old answer")}\n`);
+    const seen: string[] = [];
+    const done = follow(f, transcriptEnd(f), { ...opts, onText: (t) => seen.push(t) }).answer;
+    // The turn's last words land late, then the block's row, then the answer in two writes
+    // that split a multi-byte character.
+    add(f, says("late words of the turn that was ending"), taken());
+    const line = Buffer.from(`${says("new answer — done")}\n`);
+    const cut = line.indexOf(Buffer.from("—")) + 1;
+    appendFileSync(f, line.subarray(0, cut));
+    await settle(60);
+    appendFileSync(f, line.subarray(cut));
+    expect(await done).toBe("new answer — done");
+    expect(seen).toEqual(["new answer — done"]);
+    // An answer that was whole on the first look; a turn end reported after it changes nothing.
+    const whole = follow(f, 0, opts);
+    expect(await whole.answer).toBe("new answer — done");
+    whole.turnEnded();
+    expect(await whole.answer).toBe("new answer — done");
   });
   it("a turn that ended without a word is no answer", async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
-    const f = path.join(dir, "t.jsonl");
-    writeFileSync(f, "");
-    appendFileSync(f, `${asst("end_turn", [{ type: "tool_use", name: "Edit" }])}\n`);
+    const f = fresh();
+    add(f, taken(), asst("end_turn", [{ type: "tool_use", name: "Edit" }]));
     // What Claude Code writes once a turn is over: the end is seen, not waited out.
-    appendFileSync(f, `${rec({ type: "system", subtype: "turn_duration" })}\n`);
+    add(f, rec({ type: "system", subtype: "turn_duration" }));
     const t0 = Date.now();
-    expect(await awaitAnswer(f, 0, { timeoutMs: 3000, pollMs: 20 })).toBeNull();
+    expect(await follow(f, 0, opts).answer).toBeNull();
     expect(Date.now() - t0).toBeLessThan(1500);
   });
-  it("gives up after its timeout when the turn never ends", async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-reply-"));
-    const f = path.join(dir, "t.jsonl");
-    writeFileSync(f, "");
-    appendFileSync(f, `${asst("tool_use", [{ type: "text", text: "working" }])}\n`);
-    expect(await awaitAnswer(f, 0, { timeoutMs: 150, pollMs: 20 })).toBeNull();
+  it("gives up after its timeout when the turn never ends, with or without its row", async () => {
+    const f = fresh();
+    add(f, taken(), asst("tool_use", [{ type: "text", text: "working" }]));
+    expect(await follow(f, 0, { ...opts, timeoutMs: 150 }).answer).toBeNull();
+    // Defaults: the real clock, half-second looks.
+    expect(await follow(fresh(), 0, { mark: MARK, end: "next", timeoutMs: 20 }).answer).toBeNull();
   });
+  it("the hooks say the turn ended: what it said is the answer, once its last rows had their time", async () => {
+    const f = fresh();
+    const ff = follow(f, 0, opts);
+    add(f, taken(), asst("tool_use", [{ type: "text", text: "Half an answer" }]));
+    const t0 = Date.now();
+    ff.turnEnded();
+    ff.turnEnded();
+    // Still on its way when the hook fired: within the grace, it is part of the answer.
+    setTimeout(() => add(f, asst("tool_use", [{ type: "text", text: "and the rest." }])), 40);
+    expect(await ff.answer).toBe("Half an answer\n\nand the rest.");
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    // Its own end row arriving in the grace settles it at once.
+    const g = fresh();
+    const fg = follow(g, 0, { ...opts, graceMs: 5000 });
+    add(g, taken());
+    fg.turnEnded();
+    setTimeout(() => add(g, says("PAGE-A")), 30);
+    expect(await fg.answer).toBe("PAGE-A");
+  });
+  it("`next`: the turn after a Stop block is the message's, found or not — an end with no row is no answer", async () => {
+    const f = fresh();
+    const ff = follow(f, 0, opts);
+    add(f, says("words nobody can put down to this message"));
+    ff.turnEnded();
+    expect(await ff.answer).toBeNull();
+  });
+  it("`marked`: a turn that ended before the session took the message was not the message's", async () => {
+    const f = fresh();
+    const ff = follow(f, 0, { ...opts, end: "marked", timeoutMs: 5000 });
+    // The session was mid-turn when its waiter was handed the message: that turn ends first.
+    add(f, says("the answer to what the person typed"));
+    ff.turnEnded();
+    await settle(250);
+    // Then it reads the waiter's output and answers, and that turn's end is the answer's.
+    add(
+      f,
+      rec({ type: "user", message: { content: [{ type: "tool_result", content: `1\tMessage via x (…; ${MARK}):` }] } }),
+    );
+    add(f, asst("tool_use", [{ type: "text", text: "WAITED" }]));
+    ff.turnEnded();
+    expect(await ff.answer).toBe("WAITED");
+  });
+  it("a transcript rewritten, removed, unreadable or no longer a file gives no answer", async () => {
+    const f = fresh(`${taken()}\n${says("x")}\n`);
+    const cutShort = follow(f, transcriptEnd(f), opts);
+    writeFileSync(f, "");
+    expect(await cutShort.answer).toBeNull();
+    const g = fresh(`${taken()}\n`);
+    const removed = follow(g, 5, opts);
+    rmSync(g);
+    removed.turnEnded();
+    expect(await removed.answer).toBeNull();
+    // A directory can be opened and not read.
+    expect(await follow(dir, 0, opts).answer).toBeNull();
+  });
+  it.runIf(process.platform !== "win32" && process.getuid?.() !== 0)(
+    "a transcript that can't be opened gives no answer",
+    async () => {
+      const f = fresh(`${taken()}\n${says("x")}\n`);
+      chmodSync(f, 0o000);
+      expect(await follow(f, 0, opts).answer).toBeNull();
+      chmodSync(f, 0o600);
+    },
+  );
 });
 
 describe("kinds and modes the ladder names (CONTROL.md §6)", () => {

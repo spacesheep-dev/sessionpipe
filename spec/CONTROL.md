@@ -617,6 +617,32 @@ within 30 minutes is acked `delivered` without one. The framed message tells the
 its answer goes back by itself, so it never reaches for a command to send it (a real
 session invented one, 2026-10-01).
 
+**The reply is the answer to that message, or nothing.** The message names itself — a
+mark in its frame (§6.3), or its id on a channel's tag (§8) — and the session's
+transcript records it in a row that carries the mark: the Stop hook's feedback in `turn`
+mode, the waiter's output where the session reads it, the inbox's or the channel's row.
+The `reply` is the text the session wrote **after that row**, up to the end of the turn
+it began: in `turn` mode the continuation the block caused, which ends at the session's
+next Stop. A daemon:
+
+- MUST read it from the transcript of the session it handed the message to. That is the
+  session's own even where its other messages go to a copy (below): a message taken at a
+  session's own Stop or by its own waiter is answered there, and what the copy writes
+  meanwhile is another message's answer;
+- MUST NOT take anything the transcript gained before that row. A harness writes its rows
+  a moment after the fact, so the last words of the turn that was ending arrive after its
+  Stop hook has already asked; where the transcript ended at the hand-over is only where
+  the search starts;
+- MUST NOT take what the session wrote for anything else: the next message handed over at
+  the following Stop, a prompt typed after it, a turn a background task began;
+- where the row cannot be found, or the turn said nothing, sends **no `reply`**. The
+  receiver has the session's transcript; a wrong answer under a person's message is worse
+  than none.
+
+The final ack is sent when that turn ends, which the session's own hooks report (its next
+Stop, a failed turn, the session's end), and not when the 30 minutes run out: those are
+for a turn that is still going.
+
 **A cold mode (`resume`, `fork`) re-asserts a narrowing the session chose, and names
 nothing else.** The machine's mode is the person's own choice at that machine and the
 only thing that picks a permission flag (§2); `inherit` passes none, so the harness
@@ -1027,6 +1053,11 @@ send → delivered time.
   `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
 - `conformance/delivery/28` — a prompt handed to a session's channel that began no turn
   for it, acked `failed` with code `held` once and never redelivered (§8).
+- `conformance/transcripts/claude-code/stop-block.jsonl` — the rows Claude Code writes
+  around a Stop hook's block that carries a message (§6 `prompt`): the turn's own last
+  words, the block's row with the message's mark, the session's answer, and a turn a
+  background task began after it. The `reply` a daemon reads for that message is the
+  answer alone, wherever in those rows the hand-over fell.
 - `conformance/delivery/30`–`32` — a `cancel` (§6): of a turn the machine is running as
   its own child process, acked `taken` and then `delivered` with the turn's mode; of a
   session open in its own window, acked `unsupported` with a `detail` to show; and of a
@@ -1091,6 +1122,10 @@ so the model knows where the task came from and that its answer goes back by its
 
 (Asked by <harness>:<id> on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)
 ```
+
+Handed to a live session in place (§6, `waiter` or `turn`), the paragraph names the
+message as well, `… with sessionpipe ask, message <mark>. Answer here in full: …`, as a
+receiver's message does in its header: the answer is found by it (§6 `prompt`).
 
 The child's environment carries `SESSIONPIPE_ASKED_BY=<harness>:<id>` (the asker) and
 `SESSIONPIPE_ASK_CHAIN=<chain…,asker>` (comma-joined). Its hooks read the first and

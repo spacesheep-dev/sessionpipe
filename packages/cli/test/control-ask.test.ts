@@ -130,6 +130,18 @@ function answer(sid: string, cwd: string, text: string): void {
   );
 }
 
+/** The row the session's transcript gains when it takes an ask handed to it in place,
+ *  carrying the text it was handed: its waiter's output as the tool result that read
+ *  it, or the Stop hook's block as Claude Code records it. */
+function took(sid: string, cwd: string, handed: string, how: "waiter" | "stop" = "waiter"): void {
+  const f = path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"), `${sid}.jsonl`);
+  const row =
+    how === "waiter"
+      ? { type: "user", message: { content: [{ type: "tool_result", content: handed }] } }
+      : { type: "user", isMeta: true, message: { content: `Stop hook feedback:\n${handed}` } };
+  writeFileSync(f, `${JSON.stringify(row)}\n`, { flag: "a" });
+}
+
 interface Setup {
   receivers?: boolean;
   ask?: boolean;
@@ -455,8 +467,13 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13)", () => {
     await new Promise((r) => setTimeout(r, 100));
     const pending = askIt(req({ harness: "claude-code", session: ASKER, from: `codex:${THREAD}`, text: "look again" }));
     const text = await waited;
-    expect(text).toContain(frameAsk("look again", `codex:${THREAD}`));
+    // The ask's own frame, naming the message: that is how its answer is found again.
+    const mark = /with sessionpipe ask, (message [0-9A-Z]{12})\. Answer here in full/.exec(text)?.[1] as string;
+    expect(text).toContain(frameAsk("look again", `codex:${THREAD}`, mark));
     expect(text).not.toContain("Message via");
+    // What the session was in the middle of saying is not the answer to the ask.
+    answer(SID, project, "Something it was telling the person.");
+    took(SID, project, text);
     answer(SID, project, "Looks right.");
     const { got, end } = await pending;
     expect(got[0]).toMatchObject({ op: "asked", session: ASKER });
@@ -695,8 +712,15 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
       15_000,
     );
     await asked;
-    const stop = await ask(sock, { op: "stop", session: ASKER, active: false }, 500);
-    expect(stop).toMatchObject({ op: "block", reason: frameAsk("also this", `codex:${THREAD}`) });
+    const stop = (await ask(sock, { op: "stop", session: ASKER, active: false }, 500)) as {
+      op: string;
+      reason: string;
+    };
+    const mark = /sessionpipe ask, (message [0-9A-Z]{12})\./.exec(stop.reason)?.[1] as string;
+    expect(stop).toMatchObject({ op: "block", reason: frameAsk("also this", `codex:${THREAD}`, mark) });
+    // The turn's last words reach the transcript after its Stop hook asked: not the answer.
+    answer(SID, project, "The end of what it was doing.");
+    took(SID, project, stop.reason, "stop");
     answer(SID, project, "And that.");
     expect(await done).toMatchObject({ op: "answer", session: ASKER, text: "And that." });
   });
@@ -772,7 +796,7 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
     const waited = waitForMessage(ASKER, { env });
     await new Promise((r) => setTimeout(r, 100));
     const first = askIt(req({ harness: "claude-code", session: ASKER, from: "gemini-cli:g1", text: "think" }));
-    await waited;
+    const handed = await waited;
     // A asks B, a new Codex session, with a chain that says nothing: counted all the same.
     const second = askIt(req({ text: "help", chain: [] }));
     await until(
@@ -799,6 +823,7 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
       code: "depth",
     });
     expect((await second).end?.op).toBe("answer");
+    took(SID, project, handed);
     answer(SID, project, "Done.");
     expect((await first).end).toMatchObject({ op: "answer", text: "Done." });
     // Nothing in hand any more: the same asks go through.
@@ -1045,11 +1070,12 @@ describe.runIf(unix)("ask coverage: the level a child runs at, and depth from a 
     const anon = req({ harness: "claude-code", session: ASKER, text: "think" });
     delete anon.from;
     const first = askIt(anon);
-    await waited;
+    const handed = await waited;
     // From ASKER, a new Codex session: askDepth(ASKER) walks the terminal ask, whose `from`
     // is null — the branch an ask with a named asker never reaches. Allowed (one deep).
     const second = askIt(req({ from: ASKER, text: "help", chain: [] }));
     expect((await second).end?.op).toBe("answer");
+    took(SID, project, handed);
     answer(SID, project, "done");
     expect((await first).end).toMatchObject({ op: "answer", text: "done" });
   });
