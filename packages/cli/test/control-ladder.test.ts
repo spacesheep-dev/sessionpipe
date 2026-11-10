@@ -68,6 +68,15 @@ function answer(sid: string, text: string, stop = "end_turn"): void {
   );
 }
 
+/** The row the session's transcript gains when it reads what its waiter printed: the
+ *  message, which names itself, as a tool's result. */
+function readWaiter(sid: string, printed: string): void {
+  appendFileSync(
+    transcriptFile(sid),
+    `${JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: printed }] } })}\n`,
+  );
+}
+
 /** A stand-in `claude -p` that streams its answer a word at a time, then the result. */
 function streamingClaude(): void {
   writeFileSync(
@@ -503,7 +512,7 @@ describe.runIf(unix)("the answer read from a live session", () => {
     const got = waitForMessage(SESSION, { env });
     await settle(100);
     const q = await rx.send({ session: SESSION, text: "think" });
-    await got;
+    readWaiter(SID, await got);
     answer(SID, "Looking.", "tool_use");
     for (let i = 0; i < 100 && !rx.progress(q.id).length; i++) await settle(20);
     expect(rx.progress(q.id)[0]).toMatchObject({ seq: 1, reply: "Looking." });
@@ -515,21 +524,28 @@ describe.runIf(unix)("the answer read from a live session", () => {
     });
   });
 
-  it("a transcript that can't be read any more: delivered, with the reason, never stuck", async () => {
+  it("a transcript that can't be read any more: delivered without a reply, never stuck, and no path in the ack", async () => {
     await startDaemon();
     const got = waitForMessage(SESSION, { env });
     await settle(100);
     const q = await rx.send({ session: SESSION, text: "go" });
-    await got;
+    readWaiter(SID, await got);
     answer(SID, "partial", "tool_use");
     chmodSync(transcriptFile(SID), 0o000);
     const ack = await rx.waitAck(q.id);
     expect(ack).toMatchObject({ outcome: "delivered", mode: "waiter" });
-    expect(String(ack.detail)).toMatch(/EACCES/);
+    expect(ack).not.toHaveProperty("reply");
+    expect(ack).not.toHaveProperty("detail");
+    expect(log.some((l) => l.includes("no answer in") && l.includes("acked without one"))).toBe(true);
   });
 
-  it("a fork whose copy has no transcript yet: delivered to the waiter, without a reply", async () => {
+  it("a session that has a copy answers its own waiter in its own transcript: that is where the reply is read", async () => {
+    // A message handed to the session itself (its waiter, its Stop) is answered there. The
+    // copy its other messages go to says nothing about it, and whatever the copy does say
+    // is another message's answer (2026-11-10: read from the copy, one reply came back as
+    // a later message's "PAGE-B", another as nothing after half an hour).
     const COPY = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+    transcript(COPY);
     writeState(path.join(tmp, "state", "control", "state.json"), {
       started: {},
       modes: {},
@@ -540,10 +556,34 @@ describe.runIf(unix)("the answer read from a live session", () => {
     const got = waitForMessage(SESSION, { env });
     await settle(100);
     const q = await rx.send({ session: SESSION, text: "go" });
-    expect(await got).toContain("go");
-    const ack = await rx.waitAck(q.id);
-    expect(ack).toMatchObject({ outcome: "delivered", mode: "waiter" });
-    expect(ack).not.toHaveProperty("reply");
+    const printed = await got;
+    expect(printed).toContain("go");
+    // The copy answers something else meanwhile.
+    answer(COPY, "PAGE-B");
+    await settle(700);
+    expect(rx.finalAck(q.id)).toBeUndefined();
+    readWaiter(SID, printed);
+    answer(SID, "PAGE-A");
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "waiter", reply: "PAGE-A" });
+  });
+
+  it("an answer whose ack can't be recorded is logged, and nothing else falls over", async () => {
+    await startDaemon();
+    const got = waitForMessage(SESSION, { env });
+    await settle(100);
+    const q = await rx.send({ session: SESSION, text: "go" });
+    const printed = await got;
+    for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await settle(20);
+    // The acks file can't be appended to any more.
+    for (let i = 0; i < 100 && d?.status().acks_pending; i++) await settle(20);
+    rmSync(path.join(tmp, "state", "control", "acks.jsonl"), { force: true });
+    mkdirSync(path.join(tmp, "state", "control", "acks.jsonl"));
+    readWaiter(SID, printed);
+    answer(SID, "said, and not recorded");
+    for (let i = 0; i < 200 && !log.some((l) => l.includes("could not be recorded")); i++) await settle(20);
+    expect(log.find((l) => l.includes("could not be recorded"))).toMatch(
+      new RegExp(`^${q.id.slice(-8)}: its final ack could not be recorded: EISDIR`),
+    );
   });
 });
 

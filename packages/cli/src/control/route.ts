@@ -182,19 +182,21 @@ export function unframe(text: string): { text: string; via: string | null } {
   return m ? { text: text.slice(m[0].length), via: m[1] as string } : { text, via: null };
 }
 
-/** What the daemon looks for in the row the session writes for the turn this message
- *  caused (§6.3): a turn is only proof of delivery when it is THIS message's turn. */
-export const inboxMark = (id: string): string => `message ${id.slice(-12)}`;
+/** What the daemon looks for in the row the session's transcript records for a message
+ *  handed to it in place (§6 `prompt`, §6.3): a turn is only proof of delivery when it is
+ *  THIS message's turn, and only what the session wrote after that row is its answer. */
+export const messageMark = (id: string): string => `message ${id.slice(-12)}`;
 
 /** The same for a channel's message (§8): `sessionpipe channel` names the message's id on
  *  its `<channel>` tag, and Claude Code writes the tag into the row of the turn it causes. */
 export const channelMark = (id: string): string => `message_id="${id}"`;
 
-/** The framed text for the `inbox` lane: `frame()` with that mark in it, since the
- *  message becomes a prompt of the session's own and the daemon has to recognise it
- *  again in the transcript. */
-export function frameInbox(text: string, receiver: string, id: string): string {
-  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${inboxMark(id)}):\n\n${text}`;
+/** The framed text for a message handed to a live session in place — at its Stop, to
+ *  its waiter, into its inbox: `frame()` with that mark in it, since the session answers
+ *  in a turn of its own and the daemon has to recognise the message again in the
+ *  transcript to know which words are its answer. */
+export function frameMarked(text: string, receiver: string, id: string): string {
+  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${messageMark(id)}):\n\n${text}`;
 }
 
 /** Said with a message a copy of a session is answering, so the model knows its reply is
@@ -214,9 +216,11 @@ export function frameStart(text: string, receiver: string): string {
 }
 
 /** What a session another session asked receives (CONTROL.md §13), new or not: the task
- *  first, as frameStart puts it, then who asked and that the answer travels by itself. */
-export function frameAsk(text: string, from: string | undefined): string {
-  return `${text}\n\n(Asked by ${from ?? "another session"} on this machine with sessionpipe ask. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
+ *  first, as frameStart puts it, then who asked and that the answer travels by itself.
+ *  Handed to a live session in place it names the message too (`mark`), which is how the
+ *  daemon finds the answer in that session's transcript. */
+export function frameAsk(text: string, from: string | undefined, mark?: string): string {
+  return `${text}\n\n(Asked by ${from ?? "another session"} on this machine with sessionpipe ask${mark ? `, ${mark}` : ""}. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
 }
 
 /** A handoff's answer as it lands in `reply_to` (CONTROL.md §6): who answered, in the

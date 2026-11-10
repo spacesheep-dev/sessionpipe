@@ -72,7 +72,7 @@ import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./local.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
-import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
+import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./reply.js";
 import {
   CANCEL,
   CLAUDE_NOT_FOUND,
@@ -83,12 +83,12 @@ import {
   frame,
   frameAsk,
   frameHandoff,
-  frameInbox,
+  frameMarked,
   frameStart,
   HEADLESS,
   IN_PLACE_ANSWER,
-  inboxMark,
   kindPath,
+  messageMark,
   routeCancel,
   routePrompt,
 } from "./route.js";
@@ -299,8 +299,10 @@ export interface SdkHost {
 export interface AckSink {
   /** Names it in the log and the acks' `receiver`. */
   label: string;
-  /** The text as the session gets it: a new session's first message, or a later one. */
-  frame(text: string, first: boolean): string;
+  /** The text as the session gets it: a new session's first message, or a later one.
+   *  `mark` when it is handed to a live session in place: the frame names the message,
+   *  so its answer can be found in that session's transcript (reply.ts). */
+  frame(text: string, first: boolean, mark?: string): string;
   /** What a child the run starts gets in its environment, over the job's own. */
   env?: Record<string, string>;
   /** The answer so far (§10 `progress`), redacted and capped like an ack's reply. */
@@ -407,6 +409,9 @@ export interface DaemonDeps {
   writeInbox?: typeof inbox.writeInbox;
   /** How long to follow a live session's turn for an in-place answer (tests shorten it). */
   answerWaitMs?: number;
+  /** After a session's hooks say its turn ended, how long its last rows may take to
+   *  reach the transcript (reply.ts; tests shorten it). */
+  answerGraceMs?: number;
   /** Close an SDK session idle this long (a held session costs ~300 MB). */
   sdkIdleMs?: number;
   /** How long one of a start's files may take to download (tests shorten it). */
@@ -564,6 +569,9 @@ export class ControlDaemon {
    *  in-place delivery's proof. At most ONE per session: two waiters would both be
    *  settled by one turn, and that turn's answer acked as the answer to both. */
   private readonly prompted = new Map<string, (ok: boolean) => void>();
+  /** Per session, as its hooks name it: the answers being read from its transcript. They
+   *  hear when its hooks report the end of a turn. */
+  private readonly following = new Map<string, Set<Following>>();
   /** Per session: a message written into its own inbox that it has not taken yet. The
    *  receiving inbox parks one whose class it can't match and drops it after five
    *  minutes, and a hold can be RELEASED later (a mode change does it), so for that long
@@ -948,21 +956,30 @@ export class ControlDaemon {
         const l = this.liveOf(req.session);
         l.lastEvent = this.deps.now();
         this.recordMode(req.session, req.mode);
+        // A Stop: the turn, or the continuation the message before this one caused, is
+        // over. Said before the next message is handed over, so each answer ends where
+        // the next one's turn begins.
+        this.turnEnded(req.session);
         const p = this.takeTurn(l);
         if (!p) {
           this.reply(s, { op: "none" });
           return;
         }
         l.continued = true;
+        // The transcript of the session whose Stop this is. Its last words may not be in
+        // it yet, so this is only where the search for the answer starts (reply.ts).
         const from = this.answerFrom(req.session);
         // An ask's framing says how the answer travels already; a receiver's gets the note.
-        const body = this.framed(p.receiver, p.text, false);
+        const body = this.inPlace(p.receiver, p.text, p.msgId);
         this.reply(s, {
           op: "block",
           reason: isSink(p.receiver) ? body : `${body}\n\n${IN_PLACE_ANSWER}`,
           id: p.msgId,
         });
-        this.followAnswer(p.receiver, p.msgId, "turn", req.session, from, p.queuedAt);
+        this.followAnswer(p.receiver, p.msgId, "turn", req.session, from, p.queuedAt, {
+          mark: messageMark(p.msgId),
+          end: "next",
+        });
         return;
       }
       case "ask":
@@ -1044,6 +1061,10 @@ export class ControlDaemon {
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
       l.midTurn = false;
       l.continued = false;
+      // A failed turn and a session's end are told here alone. A Stop was already told by
+      // the hook's own question (`stop`, which comes before this event), and is not told
+      // twice: an event that arrives late would end the continuation that followed it.
+      if (e.event !== "Stop") this.turnEnded(named);
       // A message queued for a Stop that came and went without taking it (it
       // arrived after the hook asked, or the turn failed) goes another way.
       const left = l.turnQueue.splice(0);
@@ -2264,7 +2285,7 @@ export class ControlDaemon {
     const text = cmd.text as string;
     // An ask (a sink caller) never takes the inbox rung: its cap holds only where the
     // daemon runs the turn, and the inbox needs a receiver's host in its frame.
-    const framed = isSink(r) ? "" : `${frameInbox(text, r.url, id)}\n\n${IN_PLACE_ANSWER}`;
+    const framed = isSink(r) ? "" : `${frameMarked(text, r.url, id)}\n\n${IN_PLACE_ANSWER}`;
     // The ladder is walked once without the inbox first: its look reads a registry, a
     // settings file and a process's start time (a `ps`, on this one thread), and a
     // message that a rung above it takes — a held session, a parked waiter, a running
@@ -2296,7 +2317,13 @@ export class ControlDaemon {
         l.waiter = null;
         l.channel = null;
         const from = this.answerFrom(cmd.session);
-        this.reply(w, { op: "message", text: this.framed(r, text, false), id });
+        // A channel names the message on its own tag; a `sessionpipe wait` prints the
+        // text, so the text itself has to name it.
+        this.reply(w, {
+          op: "message",
+          text: channel === null ? this.inPlace(r, text, id) : this.framed(r, text, false),
+          id,
+        });
         this.scheduleHello();
         if (channel !== null && !(await this.tookIt(started!, cmd.session, from, channelMark(id)))) {
           this.mutedChannels.add(channel);
@@ -2305,7 +2332,12 @@ export class ControlDaemon {
           );
           return this.finish(r, id, CHANNEL_HELD_ACK, sent);
         }
-        return this.followAnswer(r, id, "waiter", cmd.session, from, sent);
+        // A waiter may be handed a message while the session is mid-turn: only the turn
+        // that reads it is its answer's.
+        return this.followAnswer(r, id, "waiter", cmd.session, from, sent, {
+          mark: channel === null ? messageMark(id) : channelMark(id),
+          end: "marked",
+        });
       }
       case "turn": {
         const l = this.liveOf(cmd.session);
@@ -2342,7 +2374,8 @@ export class ControlDaemon {
           key: string;
           cls: inbox.PeerClass | null;
         };
-        const from = this.answerFrom(cmd.session);
+        // The transcript the message is written into, which is the copy's where there is one.
+        const from = this.answerFrom(key);
         // Watch for the session's own next turn BEFORE the write, or a session that
         // begins one in milliseconds would be missed. One watcher per session, so one
         // turn can never confirm two messages: inboxLook keeps the lane shut while
@@ -2374,7 +2407,7 @@ export class ControlDaemon {
         }
         this.deps.log(`${id.slice(-8)}: into ${key.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
         this.park(key, id);
-        if (!(await this.tookIt(started, key, from, inboxMark(id))))
+        if (!(await this.tookIt(started, key, from, messageMark(id))))
           // The bytes went out, and they are not sent again on any lane: the session may
           // be holding the message (its inbox parks one whose class doesn't match, and
           // drops it after five minutes). Say exactly that, and nothing that invites the
@@ -2391,7 +2424,7 @@ export class ControlDaemon {
             sent,
           );
         this.unpark(key);
-        return this.followAnswer(r, id, "inbox", key, from, sent);
+        return this.followAnswer(r, id, "inbox", key, from, sent, { mark: messageMark(id), end: "marked" });
       }
       case "resume":
       case "fork":
@@ -2810,18 +2843,38 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "delivered", detail: `trusted ${name || "a new device"}` }, sent);
   }
 
-  /** Where the session's transcript ends right now: its answer starts after this. */
+  /** Where the transcript of the session a message is handed to ends right now: its
+   *  answer is somewhere after this. That session's OWN transcript — the one whose Stop
+   *  hook, waiter or inbox takes the message — and never the copy its other messages go
+   *  to: a message handed to a session at its Stop was answered there, while the daemon
+   *  read the copy, which said nothing for half an hour or said another message's answer
+   *  (2026-11-10). */
   private answerFrom(session: string): { file: string; offset: number } | null {
     const ref = parseSessionRef(session);
-    if (!ref || ref.harness !== "claude-code") return null;
-    const t = findTranscript(this.state.copies[ref.id]?.id ?? ref.id, this.deps.claudeDirs());
+    if (ref?.harness !== "claude-code") return null;
+    const t = findTranscript(ref.id, this.deps.claudeDirs());
     return t ? { file: t.file, offset: transcriptEnd(t.file) } : null;
   }
 
-  /** A message handed to a live session (a waiter, a Stop block) is `taken` now; the
-   *  session answers in its own turn, which the daemon reads from the transcript and
-   *  sends back as the final ack's `reply` — so the person sees the answer where they
-   *  asked. A turn that doesn't end within ANSWER_WAIT_MS is acked delivered without. */
+  /** The session's own hooks reported the end of a turn: whoever reads an answer from
+   *  its transcript hears it (reply.ts decides whether that turn was the answer's). */
+  private turnEnded(session: string): void {
+    for (const f of this.following.get(session) ?? []) f.turnEnded();
+  }
+
+  /** A message as a live session is handed it in place, naming itself (route.ts
+   *  `messageMark`): a receiver's in its header, an ask's in its own frame. */
+  private inPlace(r: Caller, text: string, id: string): string {
+    return isSink(r) ? r.frame(text, false, messageMark(id)) : frameMarked(text, r.url, id);
+  }
+
+  /** A message handed to a live session (a waiter, a Stop block, its inbox) is `taken`
+   *  now; the session answers in its own turn, which the daemon reads from the transcript
+   *  and sends back as the final ack's `reply` — so the person sees the answer where they
+   *  asked. The reply is the answer to THIS message or nothing (reply.ts): the ack goes
+   *  out when the turn the message caused ends, with what the session wrote for it, and
+   *  without a reply when nothing can be put down to it. A turn that doesn't end within
+   *  ANSWER_WAIT_MS is acked delivered without one. */
   private followAnswer(
     r: Caller,
     id: string,
@@ -2829,6 +2882,7 @@ export class ControlDaemon {
     session: string,
     from: { file: string; offset: number } | null,
     sent: number,
+    how: { mark: string; end: "next" | "marked" },
   ): void {
     this.deps.log(`${id.slice(-8)}: in ${session.slice(0, 24)} via ${mode} ${this.deps.now() - sent} ms after send`);
     this.finish(r, id, { outcome: "taken" });
@@ -2837,24 +2891,41 @@ export class ControlDaemon {
       this.finish(r, id, { outcome: "delivered", mode }, sent);
       return;
     }
+    // No transcript to read (a harness whose answer the daemon cannot follow).
+    if (!from) {
+      this.finish(r, id, { outcome: "delivered", mode }, sent);
+      return;
+    }
     const stream = this.answerStream(r, id);
-    void (async () => {
-      const answer = from
-        ? await awaitAnswer(from.file, from.offset, {
-            timeoutMs: this.deps.answerWaitMs ?? ANSWER_WAIT_MS,
-            now: this.deps.now,
-            onText: (t) => stream.set(t),
-          })
-        : null;
+    const f = follow(from.file, from.offset, {
+      ...how,
+      timeoutMs: this.deps.answerWaitMs ?? ANSWER_WAIT_MS,
+      ...(this.deps.answerGraceMs !== undefined ? { graceMs: this.deps.answerGraceMs } : {}),
+      now: this.deps.now,
+      onText: (t) => stream.set(t),
+    });
+    const all = this.following.get(session) ?? new Set<Following>();
+    this.following.set(session, all.add(f));
+    const settled = (): void => {
       stream.close();
-      this.finish(r, id, { outcome: "delivered", mode, ...(answer ? { reply: answer } : {}) }, sent);
-    })().catch((e) =>
-      this.finish(r, id, {
-        outcome: "delivered",
-        mode,
-        detail: String(/* v8 ignore next -- awaitAnswer throws fs Errors */ (e as Error)?.message || e),
-      }),
-    );
+      all.delete(f);
+      if (!all.size) this.following.delete(session);
+    };
+    void f.answer
+      .then((answer) => {
+        settled();
+        if (!answer)
+          this.deps.log(
+            `${id.slice(-8)}: no answer in ${session.slice(0, 24)} that can be put down to it; acked without one`,
+          );
+        this.finish(r, id, { outcome: "delivered", mode, ...(answer ? { reply: answer } : {}) }, sent);
+      })
+      // follow() never rejects: this is the ack itself that could not be written.
+      .catch((e) =>
+        this.deps.log(
+          `${id.slice(-8)}: its final ack could not be recorded: ${String(/* v8 ignore next -- finish() throws fs Errors */ (e as Error)?.message || e)}`,
+        ),
+      );
   }
 
   /** The answer so far, sent as a `progress` ack: whole, with a rising seq, at most
@@ -3436,7 +3507,7 @@ export class ControlDaemon {
     const chain = [...req.chain, req.from ?? "unknown"].join(",");
     return {
       label: `ask ${askId.slice(-8)}`,
-      frame: (text) => frameAsk(text, req.from),
+      frame: (text, _first, mark) => frameAsk(text, req.from, mark),
       env: { SESSIONPIPE_ASK_CHAIN: chain, ...(req.from ? { [DELEGATED_BY_ENV]: req.from } : {}) },
       wantsReply: true,
       progress: (text, seq) => {
