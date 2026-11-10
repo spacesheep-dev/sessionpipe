@@ -6,18 +6,22 @@
 // had written (2026-11-10).
 import { describe, expect, it } from "vitest";
 import {
-  COPY_NOTE,
+  COPY_WHYS,
+  copyNote,
   deliveredWords,
   frame,
   frameAsk,
   frameHandoff,
-  frameInbox,
+  frameMarked,
   frameStart,
   hostOf,
   IN_PLACE_ANSWER,
-  inboxMark,
+  messageMark,
   RE_ARM,
 } from "../src/control/frames.js";
+
+/** What a copy of a session that is open in a window is told. */
+const COPY_NOTE = copyNote("open");
 
 const R = "https://spacesheep.dev/api/control";
 const ID = "01K8ZC3W5Q7RN4XJ1V2B6T9M0D";
@@ -31,8 +35,8 @@ describe("the frames", () => {
     expect(frame("hi", R)).toBe(
       "Message via spacesheep.dev (sessionpipe control, signed on the sender's device):\n\nhi",
     );
-    expect(inboxMark(ID)).toBe("message XJ1V2B6T9M0D");
-    expect(frameInbox("hi", R, ID)).toBe(
+    expect(messageMark(ID)).toBe("message XJ1V2B6T9M0D");
+    expect(frameMarked("hi", R, ID)).toBe(
       "Message via spacesheep.dev (sessionpipe control, signed on the sender's device; message XJ1V2B6T9M0D):\n\nhi",
     );
     expect(frameStart("hi", R)).toBe(
@@ -42,6 +46,19 @@ describe("the frames", () => {
       /^hi\n\n\(Asked by codex:01a10860 on this machine with sessionpipe ask\. /,
     );
     expect(frameAsk("hi", undefined)).toContain("(Asked by another session on this machine");
+    // Handed to a live session in place, an ask names its message as a receiver's does.
+    expect(frameAsk("hi", "codex:01a10860", messageMark(ID))).toMatch(
+      /^hi\n\n\(Asked by codex:01a10860 on this machine with sessionpipe ask, message XJ1V2B6T9M0D\. Answer here in full: /,
+    );
+    // What a copy is told: why there is one, as the machine found it, in two forms.
+    expect(COPY_WHYS).toEqual(["open", "running", "recent"]);
+    expect(copyNote("open")).toBe(
+      "You are a copy of that session, started because the original is open in a window, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's window: say what you did, then stop.",
+    );
+    expect(copyNote("running")).toBe(
+      "You are a copy of that session, started because the original is in use by another process, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's: say what you did, then stop.",
+    );
+    expect(copyNote("recent")).toBe(copyNote("running"));
     expect(frameHandoff("codex:ae08c6ab", R, "It was a race.")).toBe(
       "Answer from codex:ae08c6ab (sessionpipe handoff, asked via spacesheep.dev):\n\nIt was a race.",
     );
@@ -53,7 +70,7 @@ describe("deliveredWords", () => {
 
   it("takes off the line that says where a message came from, before the words or after", () => {
     expect(deliveredWords(frame(ASK, R))).toEqual(plain(ASK));
-    expect(deliveredWords(frameInbox(ASK, R, ID))).toEqual(plain(ASK));
+    expect(deliveredWords(frameMarked(ASK, R, ID))).toEqual(plain(ASK));
     expect(deliveredWords(frameStart(ASK, R))).toEqual(plain(ASK));
     expect(deliveredWords(frameStart(ASK, "http://100.68.187.81:7373"))).toEqual(plain(ASK, "100.68.187.81:7373"));
   });
@@ -61,9 +78,11 @@ describe("deliveredWords", () => {
   it("takes off the notes to the model that travel with one", () => {
     // A Stop hook's block and the inbox: how the answer travels.
     expect(deliveredWords(`${frame(ASK, R)}\n\n${IN_PLACE_ANSWER}`)).toEqual(plain(ASK));
-    expect(deliveredWords(`${frameInbox(ASK, R, ID)}\n\n${IN_PLACE_ANSWER}`)).toEqual(plain(ASK));
-    // A copy of a session that is open in a window.
-    expect(deliveredWords(`${frame(ASK, R)}\n\n${COPY_NOTE}`)).toEqual(plain(ASK));
+    expect(deliveredWords(`${frameMarked(ASK, R, ID)}\n\n${IN_PLACE_ANSWER}`)).toEqual(plain(ASK));
+    // A copy of a session: one that is open in a window, one that something else is using.
+    for (const why of COPY_WHYS) expect(deliveredWords(`${frame(ASK, R)}\n\n${copyNote(why)}`)).toEqual(plain(ASK));
+    // A Stop hook's block and a waiter name the message, as the inbox does.
+    expect(deliveredWords(`${frameMarked(ASK, R, ID)}\n\n${RE_ARM}`)).toEqual(plain(ASK));
     // `sessionpipe wait`.
     expect(deliveredWords(`${frame(ASK, R)}\n\n${RE_ARM}`)).toEqual(plain(ASK));
   });
@@ -75,10 +94,22 @@ describe("deliveredWords", () => {
       const asked = frameAsk(ASK, from);
       expect(asked.startsWith(`${ASK}\n\n(Asked by `)).toBe(true);
       expect(deliveredWords(asked)).toEqual({ text: asked, via: null, delivered: true });
-      // To a copy of a session open in a window, and through `sessionpipe wait`.
-      expect(deliveredWords(`${asked}\n\n${COPY_NOTE}`)).toEqual({ text: asked, via: null, delivered: true });
-      expect(deliveredWords(`${asked}\n\n${RE_ARM}`)).toEqual({ text: asked, via: null, delivered: true });
+      // To a copy of a session (open in a window, or in use), and through `sessionpipe wait`.
+      for (const note of [...COPY_WHYS.map(copyNote), RE_ARM])
+        expect(deliveredWords(`${asked}\n\n${note}`)).toEqual({ text: asked, via: null, delivered: true });
+      // Handed to a live session in place (a Stop hook's block, a waiter) the paragraph
+      // names the message too. That is how the task travelled: it comes back as the plain
+      // paragraph, which is the one a receiver knows an asked turn by.
+      const marked = frameAsk(ASK, from, messageMark(ID));
+      expect(marked).not.toBe(asked);
+      expect(deliveredWords(marked)).toEqual({ text: asked, via: null, delivered: true });
+      expect(deliveredWords(`${marked}\n\n${RE_ARM}`)).toEqual({ text: asked, via: null, delivered: true });
     }
+    // Only where the daemon puts it: with a task before it, and no note it never adds.
+    const bare = frameAsk("", "codex:01a10860", messageMark(ID)).trim();
+    expect(deliveredWords(bare)).toEqual({ text: bare, via: null, delivered: false });
+    const noted = `${frameAsk(ASK, "codex:01a10860", messageMark(ID))}\n\n${IN_PLACE_ANSWER}`;
+    expect(deliveredWords(noted)).toEqual({ text: noted, via: null, delivered: false });
   });
 
   // A person can type or paste any of these words. A sentence is sessionpipe's only where

@@ -34,7 +34,13 @@
   `subagent-handback.jsonl` and `copy-of-session.jsonl` a hook at a time, for whose words a
   turn's `user` side is. `stop-block.jsonl` is what Claude Code records around a Stop hook's
   block that carries a control message (spec/CONTROL.md §6 `prompt`): which of its words are
-  the reply to that message is held by `packages/cli/test/control-reply.test.ts`.
+  the reply to that message is held by `packages/cli/test/control-reply.test.ts`, as is
+  `stop-hook-ask.jsonl`, the same block carrying another session's ask (§13): the answer is
+  found by the mark in the ask's paragraph, and a reader gives that paragraph back plain.
+- `control-held.json` — whether a Claude Code session is held, and by what (spec/CONTROL.md §6,
+  *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, expect }`, the registry rows
+  that name it, when its transcript was last written, and when a run of it is known to have
+  ended. Run by `packages/cli/test/control-daemon.test.ts`.
 - `control-order.json` — the order a machine delivers one session's control messages in
   (spec/CONTROL.md §6 `prompt`): `{ steps: [{ arrive | done | drop }], expect: [ids] }`, a
   poll's messages arriving together, the running one finishing, one being refused. Run by

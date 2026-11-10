@@ -91,6 +91,7 @@ import {
   HEADLESS,
   HELD,
   type Holder,
+  holderOf,
   IN_PLACE_ANSWER,
   kindPath,
   messageMark,
@@ -2420,9 +2421,10 @@ export class ControlDaemon {
    *  run someone started at a terminal that exited seven seconds ago is that last case:
    *  it was copied for 90 seconds as "open in a window" (2026-11-10), and is resumed now. */
   private heldBy(target: string, t: Transcript): Holder | null {
-    const rows = liveRecords(target, t.configDir);
-    if (rows.length) return rows.some((x) => x.kind === "interactive") ? "open" : "running";
-    return recentlyWritten(t.file, this.endedAt(`claude-code:${target}`, target), this.deps.now()) ? "recent" : null;
+    return holderOf(
+      liveRecords(target, t.configDir),
+      recentlyWritten(t.file, this.endedAt(`claude-code:${target}`, target), this.deps.now()),
+    );
   }
 
   /** The last time a run of this session is known to have finished: one of the daemon's

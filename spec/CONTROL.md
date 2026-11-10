@@ -1118,6 +1118,13 @@ send → delivered time.
   words, the block's row with the message's mark, the session's answer, and a turn a
   background task began after it. The `reply` a daemon reads for that message is the
   answer alone, wherever in those rows the hand-over fell.
+- `conformance/control-held.json` — whether a session is held, and by what (§6, *What
+  counts as held*): registry rows of a window and of another process's run, a transcript
+  written seconds ago with and without an end that accounts for it, and the edges of the
+  two seconds and the ninety.
+- `conformance/transcripts/claude-code/stop-hook-ask.jsonl` — an ask handed to a live
+  session at its Stop (§13): the paragraph that names the message, by which the daemon
+  finds the answer, and which a reader gives back in its plain form.
 - `conformance/control-order.json` — the order one session's messages are delivered in
   (§6 `prompt`): polls that list them in and out of signing order, a running turn, a
   message that arrives late with an earlier `iat`, ties, a refused one, two sessions.
