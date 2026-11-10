@@ -179,6 +179,14 @@ fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ bin: path.basename(
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 // A turn that never ends by itself: it works until it is stopped.
 const work = () => setInterval(() => {}, 1000);
+// The harness's own hooks, as its worker reports them to the daemon: a turn begins, and
+// ends when it ends. A child that is killed reports nothing more.
+const hook = (session, event) => new Promise((done) => {
+  const s = require("net").connect(process.env.SESSIONPIPE_SOCKET);
+  s.on("connect", () => s.write(JSON.stringify({ op: "event", session, event }) + "\\n"));
+  s.on("data", () => { s.destroy(); done(); });
+  s.on("error", () => done());
+});
 `;
   // `claude -p --output-format stream-json`: its init line names the session (a copy's
   // new id for --fork-session), then the answer streams. "long" in the prompt is a turn
@@ -188,23 +196,32 @@ const work = () => setInterval(() => {}, 1000);
     `${head}
 const i = a.indexOf("--resume"), j = a.indexOf("--session-id");
 const sid = a.includes("--fork-session") ? ${JSON.stringify(COPY)} : i >= 0 ? a[i + 1] : a[j + 1];
-if (/silent/.test(prompt)) work();
-else {
+const me = "claude-code:" + sid;
+(async () => {
+  await hook(me, "SessionStart");
+  await hook(me, "UserPromptSubmit");
+  if (/silent/.test(prompt)) return work();
   out({ type: "system", subtype: "init", session_id: sid });
   if (/long/.test(prompt)) {
     out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Pinging" } } });
-    work();
-  } else out({ type: "result", result: "did it", session_id: sid, is_error: false });
-}
+    return work();
+  }
+  await hook(me, "Stop");
+  await hook(me, "SessionEnd");
+  out({ type: "result", result: "did it", session_id: sid, is_error: false });
+})();
 `,
   );
   // `codex exec --json`: the thread it picked, a first message, then work.
   writeFileSync(
     fakeCodex,
     `${head}
-out({ type: "thread.started", thread_id: ${JSON.stringify(THREAD)} });
-out({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "On it." } });
-work();
+(async () => {
+  out({ type: "thread.started", thread_id: ${JSON.stringify(THREAD)} });
+  await hook("codex:" + ${JSON.stringify(THREAD)}, "UserPromptSubmit");
+  out({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "On it." } });
+  work();
+})();
 `,
   );
   chmodSync(fakeClaude, 0o755);
@@ -310,6 +327,37 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
     // Nothing is running now: a second Stop finds nothing to stop.
     const again = await cancel(SESSION);
     expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
+  });
+
+  it("the stopped child reports no end, and the session is not left mid-turn: a message for it goes straight through, and so does one that was already waiting for its Stop", async () => {
+    // The daemon's own run in a session's copy, with the hooks a real child fires: its
+    // UserPromptSubmit marks the copy mid-turn, and a child that is killed never unmarks it.
+    transcript(COPY);
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({ copies: { [SID]: COPY }, copies_v2: { [SID]: { id: COPY, at: "", reason: "" } } }),
+    );
+    await startDaemon();
+    const long = await hand({ session: SESSION, text: "a long one" });
+    await until(() => rx.progress(long.id).length > 0);
+    expect(d?.status().mid_turn).toEqual([`claude-code:${COPY}`]);
+    // Sent to the copy by its own name while that turn runs: it waits for the copy's Stop.
+    const forCopy = await hand({ session: `claude-code:${COPY}`, text: "to the copy itself" });
+    await until(() => acksOf(forCopy.id).includes("taken"));
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(await rx.waitAck(long.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    // No Stop is coming. The message that waited for one runs now, not in half an hour…
+    expect(await rx.waitAck(forCopy.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    expect(d?.status().mid_turn).toEqual([]);
+    // …the next one is not parked behind a turn that is over…
+    const next = await hand({ session: SESSION, text: "and this" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    // …and a Stop now finds nothing running, not a turn in a process nobody can find.
+    const again = await stopNow(SESSION);
+    expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
+    expect(runs().map((x) => x.argv[x.argv.indexOf("--resume") + 1])).toEqual([COPY, COPY, COPY]);
   });
 
   it("a turn that said nothing yet answers with the note alone; a turn waiting for its slot never starts", async () => {
