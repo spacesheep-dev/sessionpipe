@@ -492,9 +492,9 @@ interface OwnRun {
   /** The message the turn is for. */
   id: string;
   /** The sessions it is a turn of, by every id a `cancel` may name it by: the one its
-   *  command named, the copy it runs in where that session's messages go to one, and
-   *  the copy it is making, once that has named itself. The ack and the board send a
-   *  person to the copy, so that is where they press Stop. */
+   *  command named and the copy that session's messages go to (both from the moment it
+   *  is in hand, `namesOf`), and the copy it is making, once that has named itself. The
+   *  ack and the board send a person to the copy, so that is where they press Stop. */
   sessions: string[];
   /** How that message is acked, once it is known which way it goes: what a `cancel`
    *  that stops it says it stopped. */
@@ -1558,7 +1558,7 @@ export class ControlDaemon {
       if (kp === "start") return await this.startSession(r, m.id, cmd, sent);
       // A Stop for a turn the daemon has in hand: that turn was placed when it was taken,
       // and a start's session may have no transcript to place yet.
-      if (kp === "cancel" && this.runFor(ref.id)) return await this.cancel(r, m.id, cmd, sent);
+      if (kp === "cancel" && this.runFor(this.namesOf(ref))) return await this.cancel(r, m.id, cmd, sent);
       const place = this.place(cmd.session);
       // A session the daemon is still starting may have no transcript (or, for Codex and
       // Antigravity, no name) yet: wait for that start, then place it again. Never a Stop:
@@ -1611,7 +1611,7 @@ export class ControlDaemon {
       // got through its checks before its start did, and the start ran on to its end.
       await started();
       // Its turn: in hand from here, and a Stop for its session stops it wherever it is.
-      return await this.inHand(m.id, ref.id, deliver);
+      return await this.inHand(m.id, this.namesOf(ref), deliver);
     } catch (e) {
       this.finish(r, m.id, { outcome: "failed", detail: String((e as Error)?.message || e) });
     }
@@ -2011,11 +2011,10 @@ export class ControlDaemon {
   private async cancel(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const ref = parseSessionRef(cmd.session)!;
     const held = this.sdkSessions.get(ref.id);
-    const run = this.runFor(ref.id);
     // The session and, for Claude Code, the copy its messages go to: either may be the
-    // one a process holds.
-    const ids =
-      ref.harness === "claude-code" ? [...new Set([ref.id, this.state.copies[ref.id]?.id ?? ref.id])] : [ref.id];
+    // one a process holds, and a turn of the daemon's own may be in hand under either.
+    const ids = this.namesOf(ref);
+    const run = this.runFor(ids);
     const rows = ref.harness === "claude-code" ? ids.flatMap((s) => liveRecords(s, this.deps.claudeDirs())) : [];
     const route = routeCancel({
       harness: ref.harness,
@@ -2052,10 +2051,22 @@ export class ControlDaemon {
     );
   }
 
-  /** The turn a `cancel` for this session ends: the first the daemon took in hand for
-   *  it, under any of the names that turn's session has (`OwnRun.sessions`). */
-  private runFor(session: string): OwnRun | undefined {
-    return this.runs.find((x) => x.sessions.includes(session));
+  /** The names a session's turns go by on this machine: its own id and, for Claude
+   *  Code, the copy its messages go to. A message sent to either runs in the copy, and
+   *  a Stop pressed on either page is a Stop for whatever runs there. */
+  private namesOf(ref: { harness: string; id: string }): string[] {
+    const copy = ref.harness === "claude-code" ? this.state.copies[ref.id]?.id : undefined;
+    return copy ? [ref.id, copy] : [ref.id];
+  }
+
+  /** The turn a `cancel` for a session ends, among those the daemon has in hand under
+   *  any of the session's names (`namesOf`; a turn's own are `OwnRun.sessions`): the one
+   *  whose process is running, else the first taken in hand. The running one first: with
+   *  a message for the session waiting behind a turn in its copy, the first in hand was
+   *  whichever arrived first, and a Stop that picked the waiting one stopped nothing. */
+  private runFor(ids: string[]): OwnRun | undefined {
+    const mine = this.runs.filter((x) => x.sessions.some((s) => ids.includes(s)));
+    return mine.find((x) => x.began) ?? mine[0];
   }
 
   /** The turn in hand for this message. Every path that delivers one took it in hand
@@ -2064,9 +2075,9 @@ export class ControlDaemon {
     return this.runs.find((x) => x.id === id) as OwnRun;
   }
 
-  /** Take a message's turn in hand for as long as `work` lasts: a Stop for its session
-   *  stops it from now on, whatever it is doing. */
-  private async inHand(id: string, session: string, work: (run: OwnRun) => Promise<void>): Promise<void> {
+  /** Take a message's turn in hand for as long as `work` lasts: a Stop for its session,
+   *  by any of `sessions` (`namesOf`), stops it from now on, whatever it is doing. */
+  private async inHand(id: string, sessions: string[], work: (run: OwnRun) => Promise<void>): Promise<void> {
     const ctl = new AbortController();
     let settle!: (stopped: boolean) => void;
     const done = new Promise<boolean>((res) => {
@@ -2078,7 +2089,7 @@ export class ControlDaemon {
     const run: OwnRun = {
       ctl,
       id,
-      sessions: [session],
+      sessions: [...sessions],
       mode: null,
       began: false,
       stopped: false,
@@ -2647,7 +2658,7 @@ export class ControlDaemon {
       const cmd = { kind: "prompt", session: p.session, text: p.text, iat: p.iat } as ControlCommand;
       this.inflight.delete(p.msgId);
       this.inflight.add(p.msgId);
-      await this.inHand(p.msgId, parseSessionRef(p.session)!.id, () =>
+      await this.inHand(p.msgId, this.namesOf(parseSessionRef(p.session)!), () =>
         this.prompt(p.receiver, p.msgId, cmd, place, p.queuedAt),
       ).catch((e) =>
         this.finish(p.receiver, p.msgId, { outcome: "failed", detail: String((e as Error)?.message || e) }),
@@ -2870,9 +2881,12 @@ export class ControlDaemon {
     // One run at a time in a transcript, whichever name the message came under: one
     // for the session and one sent to its copy by the copy's own id both run in the
     // copy, and queued under their own ids they ran in it side by side.
-    await this.serial(target, async () => {
-      // A Stop may name either.
-      if (target !== ref.id) run.sessions.push(target);
+    let entered = false;
+    const queued = this.serial(target, async () => {
+      // Stopped while it waited for the run before it: acked there and then (below), and
+      // it never starts.
+      if (run.ctl.signal.aborted) return;
+      entered = true;
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.
       const body = this.framed(r, cmd.text as string, false) + (why ? `\n\n${copyNote(why.held)}` : "");
@@ -2997,6 +3011,14 @@ export class ControlDaemon {
         sent,
       );
     });
+    // A Stop that finds this turn still waiting for the run before it ends it now, not
+    // when that run is over (which a Stop for this turn does nothing to bring nearer).
+    // Once it has its place the run itself is what is stopped (ownRun).
+    const ran = queued.then(() => null);
+    const waited = await Promise.race([ran, run.stoppedSoon.then(() => (entered ? ran : STOPPED))]);
+    if (waited !== STOPPED) return;
+    run.stopped = true;
+    this.finish(r, id, this.stoppedAck(mode), sent);
   }
 
   /** What the ack says about the mode a cold run turned out to have (CONTROL.md §6
@@ -3287,7 +3309,7 @@ export class ControlDaemon {
     const claude = this.deps.sdk ? null : this.deps.claude();
     if (!this.deps.sdk && !claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
     // In hand from here: a Stop for the new session stops its start, wherever it has got to.
-    return this.inHand(id, ref.id, async (run) => {
+    return this.inHand(id, [ref.id], async (run) => {
       run.mode = "resume";
       const signedOut = await this.orStopped(run, this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR));
       if (signedOut === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
@@ -3396,7 +3418,7 @@ export class ControlDaemon {
         detail: "that new session's id is already taken",
       });
     // In hand from here: a Stop for the new session stops its start, wherever it has got to.
-    return this.inHand(id, ref.id, async (run) => {
+    return this.inHand(id, [ref.id], async (run) => {
       run.mode = "resume";
       const ready = await this.orStopped(run, this.drivenProblem(drv));
       if (ready === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
@@ -3754,7 +3776,7 @@ export class ControlDaemon {
           const now = this.place(session);
           /* v8 ignore next -- placed a moment ago, before the queue; a session doesn't go between */
           if ("refused" in now) return this.finish(sink, askId, refusal(now));
-          return this.inHand(askId, target.id, () => this.prompt(sink, askId, cmd, now, sent));
+          return this.inHand(askId, this.namesOf(target), () => this.prompt(sink, askId, cmd, now, sent));
         });
       }
     } catch (e) {
@@ -3916,7 +3938,7 @@ export class ControlDaemon {
       await this.inLine(session, relayed, async () => {
         const place = this.place(session);
         if ("refused" in place) return this.finish(sink, id, refusal(place));
-        return this.inHand(id, h.to.id, () => this.prompt(sink, id, cmd, place, this.deps.now()));
+        return this.inHand(id, this.namesOf(h.to), () => this.prompt(sink, id, cmd, place, this.deps.now()));
       });
     } catch (e) {
       this.finish(sink, id, {
