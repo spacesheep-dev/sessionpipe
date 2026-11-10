@@ -9,4 +9,4 @@ Two of sessionpipe's own lines stay where they were, because a receiver tells an
 
 A message delivered into a terminal session at a Stop hook is now a turn of its own: its `user` text is the message, marked `injected` like any message that arrived from elsewhere, and the reply is that turn's. Its reply used to be added to the turn before, or sent as a turn with no prompt.
 
-`sessionpipe-core/control` exports the sentences (`frame`, `frameStart`, `frameInbox`, `frameAsk`, `frameHandoff`, `IN_PLACE_ANSWER`, `COPY_NOTE`, `RE_ARM`) and `deliveredWords`, which takes off a text the ones that are not the message.
+`sessionpipe-core/control` exports the sentences (`frame`, `frameStart`, `frameMarked`, `frameAsk`, `frameHandoff`, `IN_PLACE_ANSWER`, `copyNote`, `RE_ARM`) and `deliveredWords`, which takes off a text the ones that are not the message.

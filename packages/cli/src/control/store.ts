@@ -21,7 +21,15 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { configFile, stateDir } from "@sessionpipe/core";
-import { levelRank, MODEL_RE, NONCE_TTL_MS, type RunLevel, type TrustedKey } from "@sessionpipe/core/control";
+import {
+  COPY_WHYS,
+  type CopyWhy,
+  levelRank,
+  MODEL_RE,
+  NONCE_TTL_MS,
+  type RunLevel,
+  type TrustedKey,
+} from "@sessionpipe/core/control";
 import {
   controlAccount,
   defaultRunner,
@@ -313,8 +321,7 @@ export interface Copy {
   why?: CopyWhy;
 }
 
-export const COPY_WHYS = ["open", "running", "recent"] as const;
-export type CopyWhy = (typeof COPY_WHYS)[number];
+export { COPY_WHYS, type CopyWhy };
 
 /** The id alone, as 0.10.0 and earlier wrote it, reads as a copy with nothing else known. */
 const asCopy = (v: unknown): Copy | null => {

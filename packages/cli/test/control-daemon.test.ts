@@ -20,13 +20,13 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { shortId } from "@sessionpipe/core";
+import { claudeControl, shortId } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
-import { CLAUDE_NOT_FOUND, routePrompt, type SessionView } from "../src/control/route.js";
+import { CLAUDE_NOT_FOUND, holderOf, routePrompt, type SessionView } from "../src/control/route.js";
 import { type ControlConfig, readControl } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -260,6 +260,46 @@ describe("routing (CONTROL.md §6)", () => {
         unsupported: `that ${harness} session was written to in the last 90 seconds, so ${harness} may still have it open, and a ${harness} session can't be copied: send it again once it has been idle a couple of minutes`,
       });
     }
+  });
+});
+
+describe("what counts as held (conformance/control-held.json)", () => {
+  interface Case {
+    name: string;
+    rows: { kind: string | null }[];
+    written_ms_ago: number;
+    ended_ms_ago?: number;
+    expect: "open" | "running" | "recent" | null;
+  }
+  const vectors = JSON.parse(readFileSync(path.resolve(here, "../../../conformance/control-held.json"), "utf8")) as {
+    cases: Case[];
+  };
+  const now = Date.parse("2026-11-10T16:45:54.281Z");
+  it("has every case the spec names", () => {
+    expect(vectors.cases).toHaveLength(12);
+    expect(new Set(vectors.cases.map((c) => c.expect))).toEqual(new Set(["open", "running", "recent", null]));
+  });
+  it.each(vectors.cases)("$name", (c) => {
+    const recent = claudeControl.recentWrite(
+      now - c.written_ms_ago,
+      c.ended_ms_ago === undefined ? undefined : now - c.ended_ms_ago,
+      now,
+    );
+    expect(holderOf(c.rows, recent)).toBe(c.expect);
+    // Held or not is all the ladder asks: a held session is never resumed.
+    const view: SessionView = {
+      harness: "claude-code",
+      sdk: false,
+      waiter: false,
+      midTurn: false,
+      inbox: false,
+      held: c.expect,
+      known: true,
+      canFork: true,
+      copied: false,
+      api: false,
+    };
+    expect(routePrompt(view)).toEqual({ mode: c.expect ? "fork" : "resume" });
   });
 });
 

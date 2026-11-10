@@ -32,6 +32,7 @@ import {
   parseResult,
   peerClass,
   recentlyWritten,
+  recentWrite,
   runClaude,
   sessionFolder,
   versionManagerBins,
@@ -409,6 +410,12 @@ describe("a session's transcript, folder and process", () => {
     expect(recentlyWritten(f, now - 10_000, now)).toBe(true);
     utimesSync(f, new Date(now - 200_000), new Date(now - 200_000));
     expect(recentlyWritten(f, undefined, now)).toBe(false);
+    // The rule on its own: the last 90 s, unless a run known to have ended accounts for it.
+    expect(recentWrite(now - 5000, undefined, now)).toBe(true);
+    expect(recentWrite(now - 91_000, undefined, now)).toBe(false);
+    expect(recentWrite(now - 7000, now - 6900, now)).toBe(false);
+    expect(recentWrite(now - 3000, now - 4500, now)).toBe(false);
+    expect(recentWrite(now - 1000, now - 5000, now)).toBe(true);
   });
 });
 

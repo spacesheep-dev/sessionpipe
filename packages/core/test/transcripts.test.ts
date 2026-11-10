@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { openTurn } from "../../cli/src/run.js";
-import { frame, frameAsk, frameHandoff, frameInbox, IN_PLACE_ANSWER } from "../src/control/frames.js";
+import { frame, frameAsk, frameHandoff, frameMarked, IN_PLACE_ANSWER } from "../src/control/frames.js";
 import {
   isInjected,
   pairTurns,
@@ -612,7 +612,7 @@ describe("readClaude: what sessionpipe wrote around a delivered message", () => 
   });
 
   it("an inbox delivery: the frame inside Claude Code's envelope comes off with it", () => {
-    const body = `<cross-session-message from-name="spacesheep.dev" from-mode="bypass">\n${frameInbox("are the three PRs merged?", R, "01K8ZC3W5Q7RN4XJ1V2B6T9M0D")}\n\n${IN_PLACE_ANSWER}\n</cross-session-message>`;
+    const body = `<cross-session-message from-name="spacesheep.dev" from-mode="bypass">\n${frameMarked("are the three PRs merged?", R, "01K8ZC3W5Q7RN4XJ1V2B6T9M0D")}\n\n${IN_PLACE_ANSWER}\n</cross-session-message>`;
     const row = user(`Another Claude session sent a message:\n${body}`, {
       isMeta: true,
       origin: { kind: "peer", body },

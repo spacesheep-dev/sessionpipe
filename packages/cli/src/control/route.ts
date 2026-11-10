@@ -2,8 +2,21 @@
 // The routing rule (spec/CONTROL.md §6): the first delivery mode that fits, top to
 // bottom. Pure, so every branch is a unit test.
 import { acpControl, shortId } from "@sessionpipe/core";
-import type { ControlKind } from "@sessionpipe/core/control";
-import type { CopyWhy } from "./store.js";
+import { type ControlKind, type CopyWhy, frameHandoff as handoffFrame } from "@sessionpipe/core/control";
+
+// The words around a delivered message have one definition, in core, where the
+// transcript readers take them off again (sessionpipe-core/control `deliveredWords`):
+// the daemon builds every frame with these, so a sentence cannot change on one side only.
+export {
+  copyNote,
+  frame,
+  frameAsk,
+  frameMarked,
+  frameStart,
+  hostOf,
+  IN_PLACE_ANSWER,
+  messageMark,
+} from "@sessionpipe/core/control";
 
 export type DeliveryMode = "sdk" | "waiter" | "turn" | "inbox" | "api" | "resume" | "fork";
 
@@ -51,6 +64,16 @@ export const HELD: Record<Holder, (what: string) => string> = {
   recent: (what) =>
     `the transcript of ${what} had been written to in the last 90 seconds by a process this computer could not find`,
 };
+
+/** What holds a Claude Code session, from what the machine can see of it (§6, What counts
+ *  as held; conformance/control-held.json): the live rows of the harness's own session
+ *  registry that name it — a window if any of them is one, else another process's run —
+ *  and, with no row, whether its transcript was written to too recently to account for
+ *  (core's `recentWrite`). Null: nothing holds it, and it is resumed in place. */
+export function holderOf(rows: readonly { kind: string | null }[], recent: boolean): Holder | null {
+  if (rows.length) return rows.some((x) => x.kind === "interactive") ? "open" : "running";
+  return recent ? "recent" : null;
+}
 
 /** A copy's ack `detail` opens with this, then why (`HELD`). */
 export const COPY_RAN = "ran in a copy, because";
@@ -195,18 +218,6 @@ export function routeCancel(s: CancelView): CancelRoute {
   return { outcome: "expired", detail: CANCEL.nothing };
 }
 
-/** The framed text a session receives (CONTROL.md §6): the model and the person can
- *  tell where it came from. */
-/** Said with every message that reaches a live session: the answer goes back by
- *  itself (the daemon reads it from the transcript), so the model never invents a
- *  command to reply with (a real session tried \`sessionpipe send\`, 2026-10-01). */
-export const IN_PLACE_ANSWER =
-  "Answer it right here, as you would answer the person at the keyboard: your reply is sent back to them automatically. Don't run a command or call a tool just to send it.";
-
-export function frame(text: string, receiver: string): string {
-  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device):\n\n${text}`;
-}
-
 /** frame() undone: the person's words, and the host they were sent from. A channel shows
  *  the words as the message and says where they came from beside it. Text that frame()
  *  didn't make comes back whole, from nowhere. */
@@ -215,61 +226,14 @@ export function unframe(text: string): { text: string; via: string | null } {
   return m ? { text: text.slice(m[0].length), via: m[1] as string } : { text, via: null };
 }
 
-/** What the daemon looks for in the row the session's transcript records for a message
- *  handed to it in place (§6 `prompt`, §6.3): a turn is only proof of delivery when it is
- *  THIS message's turn, and only what the session wrote after that row is its answer. */
-export const messageMark = (id: string): string => `message ${id.slice(-12)}`;
-
-/** The same for a channel's message (§8): `sessionpipe channel` names the message's id on
- *  its `<channel>` tag, and Claude Code writes the tag into the row of the turn it causes. */
+/** What the daemon looks for in the row a session's transcript records for a channel's
+ *  message (§8), as core's `messageMark` is for the other in-place lanes: `sessionpipe
+ *  channel` names the message's id on its `<channel>` tag, and Claude Code writes the tag
+ *  into the row of the turn it causes. */
 export const channelMark = (id: string): string => `message_id="${id}"`;
-
-/** The framed text for a message handed to a live session in place — at its Stop, to
- *  its waiter, into its inbox: `frame()` with that mark in it, since the session answers
- *  in a turn of its own and the daemon has to recognise the message again in the
- *  transcript to know which words are its answer. */
-export function frameMarked(text: string, receiver: string, id: string): string {
-  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${messageMark(id)}):\n\n${text}`;
-}
-
-/** Said with a message a copy of a session is answering, so the model knows its reply is
- *  the only part the person sees, while its work is as real as the original's. The first
- *  note said "nothing you do here appears in it … don't carry on the original's work", and
- *  a copy asked to change a page answered that a copy can't publish (2026-11-05). Why
- *  there is a copy is said as the machine found it: an original that is open in a
- *  window, or one that something else is using. */
-export const copyNote = (why: Holder): string =>
-  `You are a copy of that session, started because the original is ${why === "open" ? "open in a window" : "in use by another process"}, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's${why === "open" ? " window" : ""}: say what you did, then stop.`;
-
-/** A new session's first message: the person's words first, where they come from after.
- *  Claude Code names a session from the start of its first message, so a header in front
- *  named every started session "Message via spacesheep.dev (sessionpipe control, s…"
- *  (2026-10-02). In a new session there is no one else's conversation to tell it apart
- *  from, so the source line can follow the ask. */
-export function frameStart(text: string, receiver: string): string {
-  return `${text}\n\n(Sent via ${hostOf(receiver)} with sessionpipe control, signed on the sender's device.)`;
-}
-
-/** What a session another session asked receives (CONTROL.md §13), new or not: the task
- *  first, as frameStart puts it, then who asked and that the answer travels by itself.
- *  Handed to a live session in place it names the message too (`mark`), which is how the
- *  daemon finds the answer in that session's transcript. */
-export function frameAsk(text: string, from: string | undefined, mark?: string): string {
-  return `${text}\n\n(Asked by ${from ?? "another session"} on this machine with sessionpipe ask${mark ? `, ${mark}` : ""}. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
-}
 
 /** A handoff's answer as it lands in `reply_to` (CONTROL.md §6): who answered, in the
  *  short form the receivers label sessions by, and which receiver the person asked through. */
 export function frameHandoff(from: { harness: string; id: string }, receiver: string, reply: string): string {
-  return `Answer from ${from.harness}:${shortId(from.harness, from.id)} (sessionpipe handoff, asked via ${hostOf(receiver)}):\n\n${reply}`;
-}
-
-/** The receiver's own host, for a line a person reads; the whole string when it is not
- *  a URL. */
-export function hostOf(receiver: string): string {
-  try {
-    return new URL(receiver).host;
-  } catch {
-    return receiver;
-  }
+  return handoffFrame(`${from.harness}:${shortId(from.harness, from.id)}`, receiver, reply);
 }

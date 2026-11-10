@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFil
 import os from "node:os";
 import path from "node:path";
 import type { Event } from "@sessionpipe/core";
-import { COPY_NOTE, frame, frameStart } from "@sessionpipe/core/control";
+import { copyNote, frame, frameStart } from "@sessionpipe/core/control";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { frameAsk as routeAsk } from "../src/control/route.js";
 import { openTurn, runJob } from "../src/run.js";
@@ -234,7 +234,7 @@ describe("a task another agent asked with sessionpipe ask", () => {
     reply("4");
     await hook("Stop", { prompt_id: "id1", last_assistant_message: "4" });
     // The copy is told it is a copy after the paragraph; that note is the daemon's alone.
-    row(START[0], `${GIVEN}\n\n${COPY_NOTE}`);
+    row(START[0], `${GIVEN}\n\n${copyNote("open")}`);
     reply("Still 4.");
     await hook("Stop", { prompt_id: "id1", last_assistant_message: "Still 4." });
     expect(said("turn.transcript").map((t) => [t.user, t.assistant, t.injected ?? false])).toEqual([

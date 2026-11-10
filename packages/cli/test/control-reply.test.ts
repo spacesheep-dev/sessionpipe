@@ -3,9 +3,10 @@
 import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readClaude } from "@sessionpipe/core";
 import { describe, expect, it } from "vitest";
 import { Answer, answerIn, firstAsk, follow, ranInMode, transcriptEnd } from "../src/control/reply.js";
-import { channelMark, kindPath, messageMark, routePrompt } from "../src/control/route.js";
+import { channelMark, frameAsk, kindPath, messageMark, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
@@ -372,6 +373,38 @@ describe("a Stop block as Claude Code records it (conformance/transcripts/claude
     expect(answerIn(rows.slice(8), mark)).toEqual({ done: false, text: "", anchored: false });
     // Another message's mark is nowhere in it.
     expect(answerIn(rows, messageMark("01K8ZC3W5Q7RN4XJ1V2B6T9M0E")).anchored).toBe(false);
+  });
+});
+
+describe("an ask handed over at a Stop (conformance/transcripts/claude-code/stop-hook-ask.jsonl)", () => {
+  // The rows of stop-block.jsonl, with the block's words being another session's ask: its
+  // own paragraph names the message, as a receiver's header does.
+  const rows = readFileSync(
+    new URL("../../../conformance/transcripts/claude-code/stop-hook-ask.jsonl", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter(Boolean);
+  const ID = "01K8ZC3W5Q7RN4XJ1V2B6T9M0D";
+  const FROM = "codex:01a10860-a43f-7ce2-b12f-a7911ae8a880";
+  it("the daemon finds its answer by the mark in the ask's own paragraph", () => {
+    const fed = (JSON.parse(rows[5] as string) as { message: { content: string } }).message.content;
+    expect(fed).toBe(`Stop hook feedback:\n${frameAsk("What is in ci.yml?", FROM, messageMark(ID))}`);
+    for (const from of [0, 4, 5])
+      expect(answerIn(rows.slice(from), messageMark(ID))).toEqual({
+        done: true,
+        text: "Three jobs: lint, test and build.",
+        anchored: true,
+      });
+  });
+  it("and a reader gives the turn's `user` side as the task and who asked, without the mark", () => {
+    const turns = readClaude(rows, 0).turns;
+    expect(turns.map((t) => t.assistant)).toEqual([
+      "`sleep 25` is running in the background, since this environment blocks foreground sleep. I'll read `docs/api.md` once it finishes.",
+      "Three jobs: lint, test and build.",
+    ]);
+    expect(turns[1]?.user).toBe(frameAsk("What is in ci.yml?", FROM));
+    expect(turns[1]?.user).not.toContain("message XJ1V2B6T9M0D");
   });
 });
 

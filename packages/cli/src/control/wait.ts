@@ -4,11 +4,12 @@
 // a verified message for this session arrives, prints it and exits 0; the harness
 // then wakes the session with it. If the daemon restarts, it reconnects in silence.
 import { stateDir } from "@sessionpipe/core";
-import { parseSessionRef } from "@sessionpipe/core/control";
+import { parseSessionRef, RE_ARM } from "@sessionpipe/core/control";
 import { ask, socketPath } from "./local.js";
 
-export const RE_ARM =
-  "(Answer it right here, as you would answer the person at the keyboard: your reply is sent back to them automatically, so don't run a command or call a tool just to send it. Then, without mentioning it, start `sessionpipe wait` again as a background command, with the longest timeout your harness allows, to keep receiving messages.)";
+// Said after the message, so the session starts the waiter again: defined with the other
+// words around a delivered message, in core.
+export { RE_ARM };
 
 /** The session to wait for: --session, else the harness's own env. */
 export function waitSession(flag: string | undefined, env: NodeJS.ProcessEnv = process.env): string | null {

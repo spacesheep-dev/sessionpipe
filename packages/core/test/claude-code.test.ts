@@ -24,7 +24,7 @@ import {
   claudeRemoteFacts,
 } from "../src/adapters/claude-code.js";
 import type { FactsState } from "../src/adapters/types.js";
-import { COPY_NOTE, frame, frameStart } from "../src/control/frames.js";
+import { copyNote, frame, frameStart } from "../src/control/frames.js";
 
 // Every hook that is not a tool event walks the process tree through `ps` for the
 // registry file: ~100 ms a call. Stubbed here, except in the test about that walk.
@@ -472,7 +472,7 @@ describe("claude-code facts", () => {
     expect(title(frameStart("Reply with only the word IDLE1.", "http://localhost:8791"))).toBe(
       "Reply with only the word IDLE1.",
     );
-    expect(title(`${frame("Say which docs exist.", "https://spacesheep.dev")}\n\n${COPY_NOTE}`)).toBe(
+    expect(title(`${frame("Say which docs exist.", "https://spacesheep.dev")}\n\n${copyNote("open")}`)).toBe(
       "Say which docs exist.",
     );
     // An ask another agent made keeps the paragraph that says so, in the title as in the turn.

@@ -746,9 +746,14 @@ export function recentlyWritten(file: string, knownEnd?: number, now = Date.now(
   } catch {
     return false;
   }
-  if (now - m > LIVE_WRITE_MS) return false;
-  return !(knownEnd && m <= knownEnd + 2000);
+  return recentWrite(m, knownEnd, now);
 }
+
+/** The rule itself, for a transcript last written at `written` (epoch ms): held by its
+ *  last 90 seconds, unless a run known to have finished at `knownEnd` accounts for the
+ *  write (conformance/control-held.json has the cases). */
+export const recentWrite = (written: number, knownEnd: number | undefined, now: number): boolean =>
+  now - written <= LIVE_WRITE_MS && !(knownEnd && written <= knownEnd + 2000);
 
 /** Run one headless turn (headless.ts). Streaming (`--output-format stream-json`), only
  *  the `result` line is kept for the RunResult unless the caller says otherwise. */
