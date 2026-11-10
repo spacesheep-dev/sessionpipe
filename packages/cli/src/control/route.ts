@@ -111,6 +111,57 @@ export function kindPath(
   }
 }
 
+/** What a `cancel` finds when it looks at the session (CONTROL.md §6 `cancel`). */
+export interface CancelView {
+  harness: string;
+  /** The daemon holds the session (the Agent SDK, an ACP agent): its own interrupt. */
+  held: boolean;
+  /** The daemon is running a headless turn for it as its own child process. */
+  own: boolean;
+  /** A live interactive Claude Code process holds it: a terminal window, the Claude app. */
+  open: boolean;
+  /** A live Claude Code process of another kind holds it (a `claude -p` someone else
+   *  started): its pid. */
+  foreign: number | null;
+  /** The session's own hooks say a turn is running. */
+  midTurn: boolean;
+}
+
+/** A `cancel`'s `detail`, case by case: what was stopped, or why nothing could be, in
+ *  words the person who pressed Stop can act on. A receiver shows them as they are. */
+export const CANCEL = {
+  stopped: "stopped the turn this computer was running for that session",
+  finished: "the turn this computer was running for that session finished before it could be stopped",
+  open: "that session is open in Claude Code on this computer (a terminal window or the Claude app), and a turn there can only be stopped in its own window: press Esc there",
+  foreign: (pid: number) =>
+    `a Claude Code process this computer's daemon didn't start is running that session (pid ${pid}), and the daemon only stops turns it runs itself: stop it where it was started`,
+  unseen:
+    "a turn is running in that session, in a process this computer's daemon didn't start and can't find: stop it where it runs",
+  nothing: "nothing is running in that session as far as this computer can tell, so there was nothing to stop",
+  other: (harness: string) =>
+    `this computer's daemon isn't running that ${harness} session, and it has no way to stop a turn it didn't start: stop it in ${harness} itself`,
+} as const;
+
+export type CancelRoute = { stop: "held" | "own" } | { outcome: "unsupported" | "expired"; detail: string };
+
+/** What a `cancel` does (CONTROL.md §6 `cancel`). The daemon stops what is its own to
+ *  stop — a session it holds, through that session's interrupt; a headless turn it runs,
+ *  by ending the child process it spawned — and nothing else: a turn in a process it did
+ *  not start is that process's own, and is never signalled. There the ack says who has
+ *  it, which is what the person needs to stop it themselves; and a session nothing is
+ *  running in is `expired`: the turn ended before the Stop arrived. Only Claude Code
+ *  files a registry this can be read from, so any other harness's session is
+ *  `unsupported` whatever its hooks last said. */
+export function routeCancel(s: CancelView): CancelRoute {
+  if (s.held) return { stop: "held" };
+  if (s.own) return { stop: "own" };
+  if (s.harness !== "claude-code") return { outcome: "unsupported", detail: CANCEL.other(s.harness) };
+  if (s.open) return { outcome: "unsupported", detail: CANCEL.open };
+  if (s.foreign !== null) return { outcome: "unsupported", detail: CANCEL.foreign(s.foreign) };
+  if (s.midTurn) return { outcome: "unsupported", detail: CANCEL.unseen };
+  return { outcome: "expired", detail: CANCEL.nothing };
+}
+
 /** The framed text a session receives (CONTROL.md §6): the model and the person can
  *  tell where it came from. */
 /** Said with every message that reaches a live session: the answer goes back by

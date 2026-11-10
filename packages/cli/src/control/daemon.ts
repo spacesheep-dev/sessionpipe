@@ -74,6 +74,7 @@ import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./loca
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { awaitAnswer, firstAsk, ranInMode, transcriptEnd } from "./reply.js";
 import {
+  CANCEL,
   CLAUDE_NOT_FOUND,
   COPY_NOTE,
   channelMark,
@@ -88,6 +89,7 @@ import {
   IN_PLACE_ANSWER,
   inboxMark,
   kindPath,
+  routeCancel,
   routePrompt,
 } from "./route.js";
 import {
@@ -113,11 +115,13 @@ const {
   claudeArgs,
   claudeEnv,
   findTranscript,
+  initSession,
   isUuid,
   liveProcess,
   loginHint,
   homeSettings,
   liveRecord,
+  liveRecords,
   parseResult,
   peerClass,
   recentlyWritten,
@@ -438,6 +442,19 @@ export class DaemonRunning extends Error {
   }
 }
 
+/** A headless turn the daemon runs as a child process of its own. */
+interface OwnRun {
+  /** Aborted: the child is ended (core's runHeadless), or never started if it was
+   *  still waiting for a slot. */
+  ctl: AbortController;
+  /** The message the turn is for. */
+  id: string;
+  /** How that message is acked: what a `cancel` that stops it says it stopped. */
+  mode: "resume" | "fork";
+  /** Settles when the run is over: true when it was stopped, false when it ended by itself. */
+  done: Promise<boolean>;
+}
+
 interface TurnPending {
   receiver: Caller;
   msgId: string;
@@ -574,6 +591,12 @@ export class ControlDaemon {
    *  set two agents on one task (2026-10-02: a "just merge when ready" sent while the
    *  start still ran forked a second agent that raced the first toward main). */
   private readonly ownRuns = new Map<string, number>();
+  /** The headless turn the daemon is running right now as its own child process, by the
+   *  session its command named (one at a time per session, `serial`): what a `cancel`
+   *  for that session ends (CONTROL.md §6 `cancel`). `done` says whether the stop is what
+   *  ended it. A message waiting behind the run is not in here, so a Stop never takes it
+   *  with it. */
+  private readonly runs = new Map<string, OwnRun>();
   private startsRunning = 0;
   private startTimes: number[] = [];
   private procs = 0;
@@ -1441,6 +1464,9 @@ export class ControlDaemon {
     if (typeof kp === "object") return this.finish(r, m.id, { outcome: "unsupported", detail: kp.unsupported });
     try {
       if (kp === "start") return await this.startSession(r, m.id, cmd, sent);
+      // A Stop for a turn the daemon is running right now: that run was placed when it
+      // began, and a start's session may have no transcript to place yet.
+      if (kp === "cancel" && this.runs.has(ref.id)) return await this.cancel(r, m.id, cmd, sent);
       let place = this.place(cmd.session);
       // A session the daemon is still starting may have no transcript (or, for Codex and
       // Antigravity, no name) yet: wait for that start, then place it again.
@@ -1864,16 +1890,106 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "delivered", mode: "turn" }, sent);
   }
 
+  /** A `cancel` (CONTROL.md §6): stops what is the daemon's own to stop. A session it
+   *  holds, through that session's interrupt; a headless turn it is running, by ending
+   *  the child process it spawned for it, which is acked once that process is gone. A
+   *  turn in any other process is never signalled: the ack says who has the session, so
+   *  the person can stop it there. */
   private async cancel(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const ref = parseSessionRef(cmd.session)!;
     const held = this.sdkSessions.get(ref.id);
-    if (!held)
-      return this.finish(r, id, {
-        outcome: "unsupported",
-        detail: "no cancel path for a session the daemon doesn't hold",
+    const run = this.runs.get(ref.id);
+    // The session and, for Claude Code, the copy its messages go to: either may be the
+    // one a process holds.
+    const ids =
+      ref.harness === "claude-code" ? [...new Set([ref.id, this.state.copies[ref.id]?.id ?? ref.id])] : [ref.id];
+    const rows = ref.harness === "claude-code" ? ids.flatMap((s) => liveRecords(s, this.deps.claudeDirs())) : [];
+    const route = routeCancel({
+      harness: ref.harness,
+      held: !!held,
+      own: !!run,
+      open: rows.some((x) => x.kind === "interactive"),
+      foreign: rows.find((x) => x.kind !== "interactive")?.pid ?? null,
+      midTurn: ids.some((s) => this.midTurnNow(this.live.get(`${ref.harness}:${s}`))),
+    });
+    if ("outcome" in route) {
+      this.deps.log(`${id.slice(-8)}: nothing stopped in ${cmd.session.slice(0, 24)} — ${route.detail}`);
+      return this.finish(r, id, route, sent);
+    }
+    if (route.stop === "held") {
+      const s = held as SdkSession;
+      await s.interrupt();
+      return this.finish(r, id, { outcome: "delivered", mode: s.mode ?? "sdk" }, sent);
+    }
+    const mine = run as OwnRun;
+    // Ending a process takes a moment (ten seconds at most, core's runHeadless): the
+    // receiver must not hand the Stop back meanwhile.
+    this.finish(r, id, { outcome: "taken" });
+    this.deps.log(
+      `${id.slice(-8)}: stopping ${mine.id.slice(-8)}, the turn this daemon is running for ${cmd.session.slice(0, 24)}`,
+    );
+    mine.ctl.abort();
+    this.finish(
+      r,
+      id,
+      (await mine.done)
+        ? { outcome: "delivered", mode: mine.mode, detail: CANCEL.stopped }
+        : { outcome: "expired", detail: CANCEL.finished },
+      sent,
+    );
+  }
+
+  /** The session's own hooks say a turn is running, and said something in the last ten
+   *  minutes: a session killed mid-turn never sends its Stop. */
+  private midTurnNow(l: Live | undefined): boolean {
+    return !!l?.midTurn && this.deps.now() - l.lastEvent < 10 * 60_000;
+  }
+
+  /** One headless turn as a child process of the daemon's own: in a slot, and stoppable
+   *  from the moment it is asked for (CONTROL.md §6 `cancel`), so a Stop that arrives
+   *  while it still waits for its slot means it never starts. */
+  private async ownRun(
+    session: string,
+    msgId: string,
+    mode: "resume" | "fork",
+    bin: string,
+    args: string[],
+    o: RunOptions,
+  ): Promise<RunResult> {
+    const ctl = new AbortController();
+    let stopped = false;
+    let settle!: (v: boolean) => void;
+    const done = new Promise<boolean>((res) => {
+      settle = res;
+    });
+    this.runs.set(session, { ctl, id: msgId, mode, done });
+    try {
+      let began = false;
+      // Stopped while it waits: it is over now, not when a slot comes free, which could
+      // be half an hour away. The slot, when its turn comes, is given straight back.
+      const unbegun = new Promise<RunResult>((res) => {
+        ctl.signal.addEventListener("abort", () => {
+          if (!began) res({ stopped: true });
+        });
       });
-    await held.interrupt();
-    this.finish(r, id, { outcome: "delivered", mode: held.mode ?? "sdk" }, sent);
+      const run = this.slot<RunResult>(async () => {
+        if (ctl.signal.aborted) return { stopped: true };
+        began = true;
+        return this.deps.run(bin, args, { ...o, signal: ctl.signal });
+      });
+      const res = await Promise.race([run, unbegun]);
+      stopped = !!res.stopped;
+      return res;
+    } finally {
+      this.runs.delete(session);
+      settle(stopped);
+    }
+  }
+
+  /** What a turn the person stopped answers with (CONTROL.md §6 `cancel`): the words it
+   *  had written, and that it was cancelled — as an ACP agent's cancelled turn does. */
+  private stoppedReply(soFar: string): string {
+    return soFar ? `${soFar}\n\n${acpControl.CANCELLED_NOTE}` : acpControl.CANCELLED_NOTE;
   }
 
   /** The permission mode a session's own hooks last reported, or null. Keyed by the
@@ -2432,15 +2548,13 @@ export class ControlDaemon {
       name();
     };
     const res = await this.owning(ref.id, () =>
-      this.slot(() =>
-        this.deps.run(bin, args, {
-          cwd,
-          env: { ...jobEnv(this.deps.env), ...extra },
-          timeoutMs: JOB_TIMEOUT_MS,
-          onLine,
-          keep: () => false,
-        }),
-      ),
+      this.ownRun(ref.id, id, "resume", bin, args, {
+        cwd,
+        env: { ...jobEnv(this.deps.env), ...extra },
+        timeoutMs: JOB_TIMEOUT_MS,
+        onLine,
+        keep: () => false,
+      }),
     );
     // A runner that doesn't stream hands the whole output over at the end.
     if (!reading.lines && res.stdout) for (const l of res.stdout.split("\n")) if (l.trim()) onLine(l);
@@ -2448,7 +2562,8 @@ export class ControlDaemon {
     this.lastEnd.set(ref.id, this.deps.now());
     if (reading.warnings?.length)
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} warned: ${reading.warnings.join(" · ").slice(0, 400)}`);
-    const out = reading.outcome(res);
+    // Stopped on the person's request: what it had said, and that it was cancelled.
+    const out = res.stopped ? { reply: this.stoppedReply(reading.text) } : reading.outcome(res);
     if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
     const moved =
       asked && named && named !== asked
@@ -2527,31 +2642,43 @@ export class ControlDaemon {
       // place() refuses a Claude Code session with no transcript, so there is one.
       const own = (place.transcript as Transcript).file;
       const before = transcriptEnd(own);
+      // The session the run says it is, as soon as it says so: a copy stopped before its
+      // result line is still a copy on disk, and later messages must find it.
+      const said: { session: string | null } = { session: null };
       const res = await this.owning(target, () =>
-        this.slot(() =>
-          this.deps.run(claude.bin, args, {
-            cwd: place.folder,
-            env: {
-              ...claudeEnv(dir, this.deps.env),
-              // The harness's own contract for copying a session something else still
-              // holds: without it the resuming process claims the transcript's pointer,
-              // so the COPY's end becomes what the person's next window resumes — and
-              // the message re-enters their own conversation without them seeing it.
-              ...(mode === "fork"
-                ? {
-                    CLAUDE_CODE_RESUME_SOURCE_ALIVE: `${target}|${new Date(this.deps.now()).toISOString()}|${target}`,
-                  }
-                : {}),
-              ...this.childEnv(r, cmd),
-            },
-            timeoutMs: JOB_TIMEOUT_MS,
-            ...(claude.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
-          }),
-        ),
+        this.ownRun(ref.id, id, mode, claude.bin, args, {
+          cwd: place.folder,
+          env: {
+            ...claudeEnv(dir, this.deps.env),
+            // The harness's own contract for copying a session something else still
+            // holds: without it the resuming process claims the transcript's pointer,
+            // so the COPY's end becomes what the person's next window resumes — and
+            // the message re-enters their own conversation without them seeing it.
+            ...(mode === "fork"
+              ? {
+                  CLAUDE_CODE_RESUME_SOURCE_ALIVE: `${target}|${new Date(this.deps.now()).toISOString()}|${target}`,
+                }
+              : {}),
+            ...this.childEnv(r, cmd),
+          },
+          timeoutMs: JOB_TIMEOUT_MS,
+          ...(claude.caps.stream
+            ? {
+                onLine: (l: string) => {
+                  stream.feed(l);
+                  said.session ??= initSession(l);
+                },
+              }
+            : {}),
+        }),
       );
       stream.close();
       this.lastEnd.set(target, this.deps.now());
-      const out = this.outcome(res);
+      // Stopped on the person's request (a `cancel`): what it had said, and that it was
+      // cancelled. Its mode is not reported: the turn it would describe never finished.
+      const out = res.stopped
+        ? { reply: this.stoppedReply(stream.soFar), ...(said.session ? { session: said.session } : {}) }
+        : this.outcome(res);
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
       if (mode === "fork" && ran !== target) {
@@ -2575,11 +2702,13 @@ export class ControlDaemon {
           // A copy's turn is in the COPY's transcript, from its first row: the session
           // the command named gained nothing, and reading its file would say what the
           // person is doing in it rather than what this turn ran in.
-          ...this.ranNote(
-            ran === target
-              ? { file: own, from: before, narrow, home }
-              : { file: findTranscript(ran, this.deps.claudeDirs())?.file ?? null, from: 0, narrow, home },
-          ),
+          ...(res.stopped
+            ? {}
+            : this.ranNote(
+                ran === target
+                  ? { file: own, from: before, narrow, home }
+                  : { file: findTranscript(ran, this.deps.claudeDirs())?.file ?? null, from: 0, narrow, home },
+              )),
         },
         sent,
       );
@@ -2875,19 +3004,17 @@ export class ControlDaemon {
     /* v8 ignore next -- startChoice() offered this level from these same caps */
     const args = "args" in built ? built.args : [];
     const stream = this.answerStream(r, id);
-    const res = await this.slot(() =>
-      this.deps.run(c.bin, args, {
-        cwd,
-        env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
-        timeoutMs: JOB_TIMEOUT_MS,
-        ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
-      }),
-    );
+    const res = await this.ownRun(ref.id, id, "resume", c.bin, args, {
+      cwd,
+      env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
+      timeoutMs: JOB_TIMEOUT_MS,
+      ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
+    });
     stream.close();
     // The transcript this run just wrote is ours: the next message must not read it as a
     // live session (a fork instead of a resume).
     this.lastEnd.set(ref.id, this.deps.now());
-    const out = this.outcome(res);
+    const out = res.stopped ? { reply: this.stoppedReply(stream.soFar) } : this.outcome(res);
     if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
     this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply, applied: this.applied(o) }, sent);
   }

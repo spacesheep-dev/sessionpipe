@@ -842,10 +842,13 @@ setTimeout(() => { fs.appendFileSync(${JSON.stringify(marks)}, JSON.stringify({ 
     }
   });
 
-  it("cancel with no held session is unsupported", async () => {
+  it("cancel with nothing running in the session: there was nothing to stop (control-cancel.test.ts has the rest)", async () => {
     await startDaemon();
     const q = await rx.send({ kind: "cancel", session: SESSION, text: undefined });
-    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "unsupported" });
+    expect(await rx.waitAck(q.id)).toMatchObject({
+      outcome: "expired",
+      detail: "nothing is running in that session as far as this computer can tell, so there was nothing to stop",
+    });
   });
 });
 

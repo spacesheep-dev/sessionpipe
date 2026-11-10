@@ -785,3 +785,19 @@ export function parseResult(stdout: string | null | undefined): ClaudeResult | n
 }
 
 export const isUuid = (s: unknown): s is string => typeof s === "string" && UUID_RE.test(s);
+
+/** The session a streamed run (`--output-format stream-json`) says it is, from its
+ *  `system` / `init` line, which comes before any turn: a `--fork-session` run names its
+ *  copy there. The `result` line says it again, but a run that is stopped before it
+ *  finishes never prints one, and the copy it made is still on disk. Null for any other
+ *  line. */
+export function initSession(line: string): string | null {
+  if (!line.includes('"init"')) return null;
+  try {
+    const j = JSON.parse(line) as { type?: unknown; subtype?: unknown; session_id?: unknown };
+    // A line that holds the word is an object, an array or a string: never null.
+    return j.type === "system" && j.subtype === "init" && isUuid(j.session_id) ? j.session_id : null;
+  } catch {
+    return null;
+  }
+}

@@ -114,12 +114,18 @@ export interface RunResult {
   tooBig?: boolean;
   stderr?: string;
   timedOut?: boolean;
+  /** The caller stopped it (`RunOptions.signal`) before it finished. */
+  stopped?: boolean;
 }
 
 export interface RunOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** The caller's way to stop the run it started (spec/CONTROL.md §6 `cancel`): once
+   *  aborted, the child is ended the way a run past its cap is. Aborted before the run
+   *  began, nothing is spawned at all. */
+  signal?: AbortSignal;
   /** Streaming: each stdout line as it arrives. Only the lines `keep` names are kept
    *  for the RunResult (none by default), so a long stream never hits the cap. */
   onLine?: (line: string) => void;
@@ -127,7 +133,10 @@ export interface RunOptions {
 }
 
 /** Run one headless turn in its own process group, stdin closed (Codex waits on an open
- *  one), holding at most 1 MB of stdout. */
+ *  one), holding at most 1 MB of stdout. The run ends by itself, at its cap, or when the
+ *  caller stops it: the last two the same way, SIGTERM to the child's own process group
+ *  (the harness and the tools it started) and SIGKILL ten seconds later to whatever is
+ *  left. Only ever the child this call spawned: no other process is signalled. */
 export function runHeadless(bin: string, args: string[], o: RunOptions): Promise<RunResult> {
   return new Promise((resolve) => {
     let out: Buffer[] = [];
@@ -135,8 +144,13 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
     let tooBig = false;
     let errTail = "";
     let timedOut = false;
+    let stopped = false;
     let settled = false;
     let child: import("node:child_process").ChildProcess;
+    if (o.signal?.aborted) {
+      resolve({ stopped: true });
+      return;
+    }
     const c = spawnable(bin, args);
     if (!c) {
       resolve({ error: shimNote(bin) });
@@ -197,11 +211,19 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
     child.stderr?.on("data", (b: Buffer) => {
       errTail = (errTail + b.toString("utf8")).slice(-4000);
     });
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const end = () => {
       kill("SIGTERM");
       setTimeout(() => kill("SIGKILL"), 10_000).unref();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      end();
     }, o.timeoutMs ?? JOB_TIMEOUT_MS);
+    const stop = () => {
+      stopped = true;
+      end();
+    };
+    o.signal?.addEventListener("abort", stop, { once: true });
     const result = (code: number | null, signal: NodeJS.Signals | null): RunResult => ({
       code,
       signal,
@@ -209,11 +231,13 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
       tooBig,
       stderr: errTail,
       timedOut,
+      ...(stopped ? { stopped } : {}),
     });
     const finish = (r: RunResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      o.signal?.removeEventListener("abort", stop);
       resolve(r);
     };
     child.on("error", (e) => finish({ error: e.message }));
@@ -256,6 +280,11 @@ export function stderrTail(stderr: string | undefined, n = 3): string {
     .join(" ")
     .trim();
 }
+
+/** Said at the end of what a turn had written when it was stopped on the person's
+ *  request (spec/CONTROL.md §6 `cancel`): the same words whichever way it was stopped, an
+ *  ACP agent's `session/cancel` or the end of a headless run's own process. */
+export const CANCELLED_NOTE = "(The turn was cancelled.)";
 
 /** What a run that wasn't there to ask says about the actions it was refused. */
 export function deniedNote(names: string[], count: number): string {

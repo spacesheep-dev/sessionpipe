@@ -64,6 +64,11 @@ export class AnswerStream {
     this.schedule();
   }
 
+  /** The answer as far as it has been written: what a turn stopped midway had said. */
+  get soFar(): string {
+    return this.text.trim();
+  }
+
   /** No more progress: the final ack follows. */
   close(): void {
     this.closed = true;

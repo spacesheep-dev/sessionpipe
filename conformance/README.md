@@ -15,7 +15,8 @@
   what a receiver shows and searches by must reach these.
 - `delivery/*.json` — receiver scenarios: dedup, 413 split, 403 tier, retry, forget, and control
   (spec/CONTROL.md §11 lists each): polls and acks, open pairing, `control.session_tools`,
-  `progress` acks, pairing renewal, starts, inherit and the pool.
+  `progress` acks, pairing renewal, starts, inherit, the pool, and what a `cancel` is acked
+  with (stopped, not ours to stop, nothing to stop).
   A control scenario's `enqueue` step is the receiver's own test door: the runner signs
   the message with a test key it enrolled there, and `{run}` / `{run12}` are the run id.
   A `hello` step posts its `body` as the machine's hello (`POST {control}/hello`, the
