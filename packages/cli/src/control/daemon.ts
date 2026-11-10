@@ -46,7 +46,6 @@ import {
   redactSecrets,
   type Session,
   safeId,
-  shortId,
   takeLock,
   tilde,
   ulid,
@@ -374,6 +373,13 @@ export const askCode = (code: string | undefined): string =>
     : code === "permission" || code === "model"
       ? "bad_fields"
       : (code ?? "failed");
+
+/** A session as the person knows it, for a sentence they will read: the start of its own
+ *  id, which is what a receiver's page and address show and what `claude --resume` takes.
+ *  Not the protocol's short id (PROTOCOL.md §3), a hash no page of theirs has ever shown:
+ *  "No Claude Code session 66a04e0a on this machine" named a session that was 88749ed7
+ *  everywhere else (2026-11-10). */
+const known = (id: string): string => id.slice(0, 8);
 
 /** A session place() refused, as the ack says it. */
 const refusal = (p: { refused: string; why: string }): Omit<Ack, "receiver" | "id" | "at"> => ({
@@ -1547,8 +1553,7 @@ export class ControlDaemon {
       // one id can be filed in several (CONTROL.md §6, Homes), and the home that holds
       // it open is the one a message is for.
       const home = resolveHome(target, dirs) ?? resolveHome(ref.id, dirs);
-      if (!home)
-        return { refused: "no_session", why: `no Claude Code session ${shortId(ref.harness, ref.id)} on this machine` };
+      if (!home) return { refused: "no_session", why: `no Claude Code session ${known(ref.id)} on this machine` };
       if ("ambiguous" in home)
         return {
           refused: "ambiguous_home",
@@ -1579,14 +1584,13 @@ export class ControlDaemon {
     let file: string | null = null;
     if (ref.harness === "codex") {
       file = isUuid(target) ? codexControl.findRollout(target, this.deps.env ?? process.env) : null;
-      if (!a && !file)
-        return { refused: "no_session", why: `no Codex session ${shortId(ref.harness, ref.id)} on this machine` };
+      if (!a && !file) return { refused: "no_session", why: `no Codex session ${known(ref.id)} on this machine` };
       cwd ||= file ? codexControl.codexFacts(file).cwd : undefined;
     } else cwd ||= this.live.get(session)?.cwd || this.factsCwd(ref.harness, ref.id);
     if (!cwd)
       return {
         refused: "no_session",
-        why: `no folder known for ${this.label(ref.harness)} session ${shortId(ref.harness, ref.id)}`,
+        why: `no folder known for ${this.label(ref.harness)} session ${known(ref.id)}`,
       };
     const ok = this.allowed(cwd);
     if (!ok) return { refused: "folder", why: "that session's folder isn't one this machine allows" };
@@ -2495,7 +2499,7 @@ export class ControlDaemon {
       const l = this.liveOf(p.session);
       l.midTurn = false;
       const place = this.place(p.session);
-      if ("refused" in place) return this.finish(p.receiver, p.msgId, { outcome: "refused", code: place.refused });
+      if ("refused" in place) return this.finish(p.receiver, p.msgId, refusal(place));
       const cmd = { kind: "prompt", session: p.session, text: p.text, iat: p.iat } as ControlCommand;
       this.inflight.delete(p.msgId);
       this.inflight.add(p.msgId);
@@ -2762,7 +2766,7 @@ export class ControlDaemon {
       if (why && ran !== target) {
         const reason = HELD[why.held]("the session");
         this.state.copies[ref.id] = { id: ran, at: new Date(this.deps.now()).toISOString(), reason, why: why.held };
-        this.saveState(`the copy of ${shortId("claude-code", ref.id)}`);
+        this.saveState(`the copy of ${known(ref.id)}`);
         this.lastEnd.set(ran, this.deps.now());
         notes.push(`${COPY_RAN} ${reason}${why.inPlace ? `; it could not be reached in place: ${why.inPlace}` : ""}`);
         this.deps.log(`${id.slice(-8)}: ${notes[0]}`);
@@ -3038,10 +3042,14 @@ export class ControlDaemon {
     const now = this.deps.now();
     this.startTimes = this.startTimes.filter((t) => now - t < 3_600_000);
     if (this.startsRunning >= lim.startConcurrent || this.startTimes.length >= lim.startPerHour) {
+      // A limit of none is not a crowd: "already starting 0 new session(s); it starts at
+      // most 0 at once" sent the person off to wait for sessions that were not starting.
       const detail =
-        this.startsRunning >= lim.startConcurrent
-          ? `this machine is already starting ${this.startsRunning} new session(s); it starts at most ${lim.startConcurrent} at once`
-          : `this machine started ${this.startTimes.length} new sessions in the last hour, its limit`;
+        !lim.startConcurrent || !lim.startPerHour
+          ? "this machine is set to start no new sessions (the start limit in its control config is 0)"
+          : this.startsRunning >= lim.startConcurrent
+            ? `this machine is already starting ${this.startsRunning} new session(s); it starts at most ${lim.startConcurrent} at once`
+            : `this machine started ${this.startTimes.length} new sessions in the last hour, its limit`;
       this.deps.log(`refused ${id.slice(-8)}: start_limit — ${detail}`);
       return this.finish(r, id, { outcome: "refused", code: "start_limit", detail });
     }
@@ -3193,9 +3201,7 @@ export class ControlDaemon {
       cwd,
       ...(o.model ? { model: o.model } : {}),
     });
-    this.deps.log(
-      `${id.slice(-8)}: ${drv.cmd} new session for ${shortId(ref.harness, ref.id)} (${o.permission}) in ${cwd}`,
-    );
+    this.deps.log(`${id.slice(-8)}: ${drv.cmd} new session for ${known(ref.id)} (${o.permission}) in ${cwd}`);
     await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o, this.childEnv(r, cmd));
   }
 
@@ -3223,9 +3229,7 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "taken" });
     const text = await this.attached(r, id, cmd, ref, cwd);
     if (text === null) return;
-    this.deps.log(
-      `${id.slice(-8)}: ${found.bin} new session for ${shortId(ref.harness, ref.id)} (${this.cfg.mode}) in ${cwd}`,
-    );
+    this.deps.log(`${id.slice(-8)}: ${found.bin} new session for ${known(ref.id)} (${this.cfg.mode}) in ${cwd}`);
     const stream = this.answerStream(r, id);
     const out = await this.slot(async () => {
       const opened = await this.openAcp(id, found, cwd, label, stream, { env: this.childEnv(r, cmd) });
@@ -3386,7 +3390,7 @@ export class ControlDaemon {
     const ref = parseSessionRef(session);
     /* v8 ignore next -- every ref here passed askProblem or came from the daemon */
     if (!ref) return session;
-    if (ref.harness === "claude-code") return `${ref.harness}:${this.state.copies[ref.id] ?? ref.id}`;
+    if (ref.harness === "claude-code") return `${ref.harness}:${this.state.copies[ref.id]?.id ?? ref.id}`;
     return `${ref.harness}:${this.aliasOf(ref.harness, ref.id)?.id ?? ref.id}`;
   }
 

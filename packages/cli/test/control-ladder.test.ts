@@ -495,7 +495,11 @@ describe.runIf(unix)("a message waiting for a Stop", () => {
     for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await settle(20);
     rmSync(transcriptFile(SID));
     await ask(sock, { op: "event", session: SESSION, event: "Stop" }, 500);
-    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+    expect(await rx.waitAck(q.id)).toMatchObject({
+      outcome: "refused",
+      code: "no_session",
+      detail: `no Claude Code session ${SID.slice(0, 8)} on this machine`,
+    });
     transcript(SID);
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
     const q2 = await rx.send({ session: SESSION, text: "later" });
