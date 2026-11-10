@@ -635,9 +635,10 @@ describe.runIf(unix)("what the lane will not write into", () => {
     );
     expect(written).toEqual([]);
     // Nothing is parked: the next message, with an id a mark is made of, is written in.
+    // (This daemon was told it is on a Mac, so a delivery is the one line, on any runner.)
     const next = await rx.send({ session: SESSION, kind: "prompt", text: "and this one" });
-    await wrote(LINES);
-    expect(frameIn(LINES - 1)).toContain(markOf(next.id));
+    await wrote(1);
+    expect(frameIn()).toContain(markOf(next.id));
   });
 
   it("two live processes for one session: the daemon won't choose between them", async () => {
