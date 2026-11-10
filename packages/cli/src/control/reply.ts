@@ -146,19 +146,37 @@ const nextAsk = (j: Record<string, unknown>): boolean =>
     typeof (j.origin as { kind?: unknown } | undefined)?.kind === "string" ||
     rowText((j.message as { content?: unknown } | undefined)?.content).startsWith(STOP_BLOCK));
 
+/** A prompt somebody typed, or a command they ran: the person's own row, and never one
+ *  the harness wrote for a delivery. Those are a hook's feedback (a meta row, an
+ *  attachment, a summary), a tool's result, and a row whose origin is another session,
+ *  a channel or a finished task. */
+function typed(j: Record<string, unknown>): boolean {
+  if (!promptRow(j) || j.isMeta) return false;
+  const kind = (j.origin as { kind?: unknown } | undefined)?.kind;
+  return typeof kind !== "string" || kind === "human";
+}
+
 /** Does anything this row says hold `mark`? Every string in it, however deep: the
  *  harness records a hook's words in a `user` row, an attachment and a summary, and a
- *  command's output inside a tool result. */
+ *  command's output inside a tool result. (One value at a time: a list of a hundred
+ *  thousand, spread into one call, is more arguments than a call takes.) */
 function carries(row: unknown, mark: string): boolean {
   const todo: unknown[] = [row];
   while (todo.length) {
     const x = todo.pop();
     if (typeof x === "string") {
       if (x.includes(mark)) return true;
-    } else if (x && typeof x === "object") todo.push(...Object.values(x));
+    } else if (x && typeof x === "object") for (const v of Object.values(x)) todo.push(v);
   }
   return false;
 }
+
+/** Is this one of the rows the harness wrote for the hand-over of the message that
+ *  carries `mark`? Never the model's own row (quoting the mark is not the session taking
+ *  the message), never a subagent's, and never a prompt the person typed: the mark is in
+ *  the header they read in their own window, and a prompt that quotes it is theirs. */
+const handsOver = (j: Record<string, unknown>, mark: string): boolean =>
+  j.type !== "assistant" && !j.isSidechain && !typed(j) && carries(j, mark);
 
 /** The answer to ONE message, read row by row from what the session's transcript gained
  *  since the message was handed over.
@@ -176,9 +194,10 @@ function carries(row: unknown, mark: string): boolean {
  *    for the end acked every such answer with no reply), so a textless one ends the turn
  *    only at whatever follows it;
  *  - at a row that begins something new (`nextAsk`): the next message's turn is not this
- *    one's answer. A row that carries this message's own mark is never that: the harness
- *    records a Stop block in several rows, and in whatever order it writes them they are
- *    all this message being taken;
+ *    one's answer. A row the harness wrote that carries this message's own mark is never
+ *    that: it records a Stop block in several rows, and in whatever order it writes them
+ *    they are all this message being taken. A prompt the person typed is always that,
+ *    whatever it quotes;
  *  - at a row the model wrote after `until`, once that is set: the session's own hooks
  *    said the turn ended then, so anything later belongs to what came next. */
 export class Answer {
@@ -219,13 +238,12 @@ export class Answer {
     const mark = this.mark;
     if (mark === null) return;
     if (!this.anchored) {
-      // Never an assistant row: the model quoting the mark is not the session taking it.
-      if (j.type !== "assistant" && !j.isSidechain && carries(j, mark)) this.anchored = true;
+      if (handsOver(j, mark)) this.anchored = true;
       return;
     }
     if (j.type !== "assistant" || j.isSidechain) {
       // Another row of the same hand-over is not the end of its answer.
-      if (!j.isSidechain && carries(j, mark)) return;
+      if (handsOver(j, mark)) return;
       if (this.textless || nextAsk(j)) this.done = true;
       return;
     }

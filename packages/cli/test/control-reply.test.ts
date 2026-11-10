@@ -207,6 +207,42 @@ describe("answerIn: which words are the answer to one message", () => {
       true,
     );
   });
+  it("a prompt the person typed that quotes the mark is theirs: it ends the answer, and never begins one", () => {
+    // The mark is in the header of the message in their own window, so they can type it.
+    const quoting = (extra: Record<string, unknown> = {}) =>
+      rec({ type: "user", ...extra, message: { content: `what was "${MARK}" about?` } });
+    for (const typed of [quoting(), quoting({ origin: { kind: "human" } })]) {
+      // After the hand-over it is the next thing asked: what the session says to it was
+      // folded into the reply to the message.
+      expect(
+        answerIn(
+          [
+            taken(),
+            asst("tool_use", [{ type: "text", text: "On it." }]),
+            typed,
+            says("That was a message from the page."),
+          ],
+          MARK,
+        ),
+      ).toEqual({ done: true, text: "On it.", anchored: true });
+      // Before any row of the hand-over it is not the session taking the message.
+      expect(answerIn([typed, says("their answer")], MARK)).toEqual({ done: false, text: "", anchored: false });
+      expect(answerIn([typed, says("their answer"), taken(), says("ours")], MARK).text).toBe("ours");
+    }
+  });
+  it("finds the mark in a row that holds a very long list", () => {
+    // Every value of the row is looked at; spread into one call, 120,000 of them were
+    // more arguments than a call takes, and the reply was lost with the error.
+    const long = rec({
+      type: "user",
+      isMeta: true,
+      message: { content: `Stop hook feedback:\n… ${MARK} …` },
+      toolUseIds: Array.from({ length: 300_000 }, () => 0),
+    });
+    expect(answerIn([long, says("after it")], MARK)).toEqual({ done: true, text: "after it", anchored: true });
+    // The same row where it ends nothing: a later row of the same hand-over.
+    expect(answerIn([taken(), long, says("after both")], MARK).text).toBe("after both");
+  });
   it("a mark that is not the whole of one is no mark: nothing is anchored on it, and nothing is proven by it", () => {
     // The mark is made from the receiver's id for the message, which nobody signed. One
     // that is not a ULID's tail ("42") would be found in words anybody typed.
