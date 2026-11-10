@@ -365,6 +365,47 @@ describe.runIf(unix)("messages for one session run in the order they were sent",
     expect(ran()).toEqual(["real"]);
   });
 
+  it("a kind written with a JSON escape is the same kind: the prompt has its place on arrival, and waits for a start written that way", async () => {
+    // JSON lets "prompt" be written "\u0070rompt", and what is signed is the bytes. Read
+    // by its literal bytes before it was verified, such a prompt had no place in line: it
+    // verified, and was acked `failed`, "Cannot read properties of null (reading 'ready')".
+    const written = async (m: Queued, kind: string): Promise<Queued> => {
+      const bytes = `"kind":"\\u00${kind.charCodeAt(0).toString(16)}${kind.slice(1)}"`;
+      m.cmd = m.cmd.replace(`"kind":"${kind}"`, bytes);
+      expect(m.cmd).toContain(bytes);
+      expect((JSON.parse(m.cmd) as { kind: string }).kind).toBe(kind);
+      m.csig = await rx.day.sign(m.cmd);
+      return m;
+    };
+    await startDaemon();
+    const first = await sign("slowly reply with just the word first");
+    poll(first);
+    await until(() => ran().length === 1);
+    const escaped = await written(await sign("reply with just the word escaped"), "prompt");
+    await settle(5);
+    const after = await sign("reply with just the word after");
+    verifiedLate("word escaped");
+    poll(escaped, after);
+    expect(await reply(escaped)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "escaped" });
+    expect(await reply(after)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "after" });
+    expect(ran()).toEqual(["first", "escaped", "after"]);
+    // A start written that way is a start a message for its session waits for.
+    const session = `claude-code:${NEW}`;
+    const start = await written(
+      await rx.send(
+        { kind: "start", session, cwd: project, text: "slowly reply with just the word started, late" },
+        { hold: true },
+      ),
+      "start",
+    );
+    const early = await sign("reply with just the word early", { session });
+    vi.restoreAllMocks();
+    verifiedLate("started, late");
+    poll(start, early);
+    for (const m of [start, early]) expect(await reply(m)).toMatchObject({ outcome: "delivered" });
+    expect(ran().slice(3)).toEqual(["started", "early"]);
+  });
+
   it("a message sent to a session's copy by its own name waits for the turn already running in that copy: never two at once in one transcript", async () => {
     // The session's messages go to its copy, and the copy is on the board under its own
     // id, so a person can message either. Both run in the copy's transcript.

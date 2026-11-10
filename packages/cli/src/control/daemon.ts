@@ -194,9 +194,11 @@ const POOL_CONFIRM = new Set(["on", "off", "remove", "order", "disable", "login.
 const MODEL_FAILURE_RE = /\bmodel\b/i;
 
 /** A start, read from the command before it is verified: only ever used to order a
- *  prompt behind it, never to run anything. */
+ *  prompt behind it, never to run anything. Read as the verifier reads it, from the
+ *  parsed command: the kind's own bytes say nothing, since JSON lets "start" be written
+ *  with an escape. */
 function startNamed(cmd: unknown): string | null {
-  if (typeof cmd !== "string" || cmd.length > 64 * 1024 || !cmd.includes('"start"')) return null;
+  if (typeof cmd !== "string" || cmd.length > 64 * 1024) return null;
   try {
     const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown };
     return c?.kind === "start" && typeof c.session === "string" ? c.session : null;
@@ -207,10 +209,12 @@ function startNamed(cmd: unknown): string | null {
 
 /** A prompt's session and the time it was signed, read from the command before it is
  *  verified: only ever used to give it its place in that session's line (line.ts), never
- *  to run anything. The bytes are the ones the verifier then reads, so a prompt that
- *  verifies is one this found. */
+ *  to run anything. The bytes are the ones the verifier then reads, and they are read
+ *  the way it reads them (parsed; a command longer than this is refused there), so a
+ *  prompt that verifies is one this found. Looking for the bytes `"prompt"` first found
+ *  none in a kind written `"\u0070rompt"`: that prompt verified with no place in line. */
 function promptNamed(cmd: unknown): { session: string; iat: number } | null {
-  if (typeof cmd !== "string" || cmd.length > 64 * 1024 || !cmd.includes('"prompt"')) return null;
+  if (typeof cmd !== "string" || cmd.length > 64 * 1024) return null;
   try {
     const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown; iat?: unknown };
     return c?.kind === "prompt" && typeof c.session === "string" && typeof c.iat === "number" && Number.isFinite(c.iat)
