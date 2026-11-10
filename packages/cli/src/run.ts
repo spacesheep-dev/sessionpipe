@@ -50,6 +50,7 @@ import {
   tilde,
   writeConfig,
 } from "@sessionpipe/core";
+import { deliveredWords } from "@sessionpipe/core/control";
 import { aliasFile, readAliases, receiverIdOf } from "./control/aliases.js";
 import { ask, socketPath } from "./control/local.js";
 import { sendTool, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
@@ -281,7 +282,9 @@ export function openTurn(
   // Text the person never typed (a task notification, another session's message) opens
   // no turn: the readers skip it, so that turn would never be delivered, and its
   // reading would stand in for the turn that is running until the next one lands.
-  const prompt = o.prompt?.trim();
+  // What sessionpipe wrote around a message it delivered is taken off, as the readers
+  // take it off the transcript's copy: the reading is the person's words there too.
+  const prompt = o.prompt === undefined ? undefined : deliveredWords(o.prompt.trim()).text;
   if (prompt && !isInjected(prompt) && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
   // A turn the person interrupted is over: it is not the one running now.
   if (!last || last.interrupted) return null;

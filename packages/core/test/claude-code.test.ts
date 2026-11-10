@@ -24,6 +24,7 @@ import {
   claudeRemoteFacts,
 } from "../src/adapters/claude-code.js";
 import type { FactsState } from "../src/adapters/types.js";
+import { COPY_NOTE, frame, frameStart } from "../src/control/frames.js";
 
 // Every hook that is not a tool event walks the process tree through `ps` for the
 // registry file: ~100 ms a call. Stubbed here, except in the test about that walk.
@@ -463,6 +464,22 @@ describe("claude-code facts", () => {
     expect(facts.branch).toBeUndefined();
     expect(facts.account_id).toBeUndefined();
     expect(claudeFacts(path.join(home, "missing.jsonl"), SID, {}, memState())).toEqual({});
+  });
+  // A session the control daemon started was named "Reply with only the word IDLE1. (Sent via
+  // localh..." when its ask was short enough to leave the line sessionpipe adds inside the 50.
+  it("a first ask sessionpipe delivered names the session by the person's words alone", () => {
+    const title = (ask: string) => claudeFacts(transcript([user(ask), assistant("ok")]), SID, {}, memState()).title;
+    expect(title(frameStart("Reply with only the word IDLE1.", "http://localhost:8791"))).toBe(
+      "Reply with only the word IDLE1.",
+    );
+    expect(title(`${frame("Say which docs exist.", "https://spacesheep.dev")}\n\n${COPY_NOTE}`)).toBe(
+      "Say which docs exist.",
+    );
+    // A message that was only frame is no ask: the next one names the session.
+    expect(
+      claudeFacts(transcript([user(frameStart("", "https://x.test")), user("the real ask")]), SID, {}, memState())
+        .title,
+    ).toBe("the real ask");
   });
   it("a /rename beats a custom-title record beats Claude's own name beats its ai-title beats the first ask", () => {
     const base = [user("the ask"), assistant("ok")];
