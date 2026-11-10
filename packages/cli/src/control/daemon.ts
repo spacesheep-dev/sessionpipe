@@ -1583,7 +1583,11 @@ export class ControlDaemon {
         // A prompt's files are on disk, and listed in its text, before any mode hands it over.
         if (cmd.files) {
           this.finish(r, m.id, { outcome: "taken" });
-          const text = await this.orStopped(run as OwnRun, this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce));
+          const mine = run as OwnRun;
+          const text = await this.orStopped(
+            mine,
+            this.attached(r, m.id, cmd, ref, now.folder, { message: cmd.nonce, signal: mine.ctl.signal }),
+          );
           if (text === STOPPED) return this.finish(r, m.id, this.stoppedAck(null), sent);
           if (text === null) return;
           return await this.prompt(r, m.id, { ...cmd, text }, now, sent);
@@ -3297,7 +3301,7 @@ export class ControlDaemon {
       }
       this.recordStart(ref.id, o);
       this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd));
+      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
       if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
       if (text === null) return;
       if (this.deps.sdk) {
@@ -3398,7 +3402,7 @@ export class ControlDaemon {
       if (ready === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
       if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
       this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd));
+      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
       if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
       if (text === null) return;
       const args = drv.args({
@@ -3523,32 +3527,43 @@ export class ControlDaemon {
    *  nonce) — every check in §5 passed and the nonce is recorded by now, so the `taken`
    *  ack is out and the download may take its time. Null when a file failed: the command
    *  is acked `failed` with code `file`, nothing is kept, no session starts and no
-   *  message is delivered. */
+   *  message is delivered.
+   *
+   *  Null too, and with nothing said or written, when the command is over before its
+   *  files are here: its turn was stopped (`signal`, a `cancel`), which drops the
+   *  download, and its one final ack is already out. A download that carried on was
+   *  acked a second time when it failed (`failed`, code `file`, after `delivered`), and
+   *  when it succeeded wrote its files into the folder of a session that was never
+   *  created. */
   private async attached(
     r: Caller,
     id: string,
     cmd: ControlCommand,
     ref: { id: string },
     cwd: string,
-    message?: string,
+    o: { message?: string; signal?: AbortSignal } = {},
   ): Promise<string | null> {
     const text = cmd.text as string;
     if (!cmd.files) return text;
     /* v8 ignore next -- an ask or a relay carries no files; the receiver's token is what fetches them */
     if (isSink(r)) return text;
+    const over = (): boolean => !!o.signal?.aborted || !this.inflight.has(id);
     try {
       const got = await fetchFiles(cmd.files, {
         control: r.control,
         token: r.token,
         fetch: this.deps.fetch,
         timeoutMs: this.deps.fileTimeoutMs,
+        signal: o.signal,
       });
-      const rel = writeFiles(cwd, ref.id, got, message);
+      if (over()) return null;
+      const rel = writeFiles(cwd, ref.id, got, o.message);
       this.deps.log(
-        `${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}${message ? `/${message}` : ""}`,
+        `${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}${o.message ? `/${o.message}` : ""}`,
       );
       return withFiles(text, got, rel);
     } catch (e) {
+      if (over()) return null;
       // fetchFiles and writeFiles throw nothing but a FileProblem, and its message is the detail.
       const detail = (e as Error).message;
       this.deps.log(`${id.slice(-8)}: file — ${detail}`);

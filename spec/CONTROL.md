@@ -768,7 +768,10 @@ Stops the current turn where the machine has a way of its own to stop it:
   where the turn had got far enough to have one); a `prompt` whose turn never started is
   acked `delivered` with `(The turn was cancelled.)` as its whole reply, and a `start`
   that never began is acked `failed` with code `cancelled`, since no session was
-  created and none must be shown as one. For a session whose `start` is still running,
+  created and none must be shown as one. That ack is the command's one final outcome
+  (§10) whatever it was in the middle of: a download in flight is dropped, a file that
+  arrives all the same is not written, and a download that fails afterwards is not
+  acked `failed` on top of it. For a session whose `start` is still running,
   the turn a cancel stops is that start, not a message waiting for it; a cancel never
   waits for a start to end.
 
