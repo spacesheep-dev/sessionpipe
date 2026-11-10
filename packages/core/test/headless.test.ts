@@ -5,7 +5,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   deniedNote,
   findBinary,
@@ -150,6 +150,126 @@ describe("runHeadless", () => {
       const ms = Date.now() - t0;
       expect(ms).toBeGreaterThanOrEqual(1900);
       expect(ms).toBeLessThan(9000);
+    },
+  );
+});
+
+describe("runHeadless: nothing is signalled once the child is gone", () => {
+  /** Every signal sent to a process or a group, as it goes out. */
+  const signals = () => {
+    const sent: { to: number; sig: string | number | undefined }[] = [];
+    const real = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, sig) => {
+      // Signal 0 only asks whether a process is there (this test's own `alive`).
+      if (sig !== 0) sent.push({ to: pid, sig });
+      return real(pid, sig);
+    });
+    return sent;
+  };
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // The real clock, for the moments a child needs while the test's own is faked.
+  const realTimeout = setTimeout;
+  const pause = (ms: number) => new Promise((r) => realTimeout(r, ms));
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  posix(
+    "a stopped child that exits: what it left in its group is ended as it goes, once, and nothing is sent ten seconds later",
+    async () => {
+      const pidFile = path.join(tmp, "stubborn-tool.pid");
+      // The harness dies of SIGTERM; a tool it started ignores it and holds its stdout.
+      const bin = script("with-tool", `(trap '' TERM; sleep 30) &\necho $! > ${pidFile}\necho ready\nwait`);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const ctl = new AbortController();
+      let ready = () => {};
+      const isReady = new Promise<void>((r) => {
+        ready = r;
+      });
+      const run = runHeadless(bin, [], {
+        cwd: tmp,
+        env: process.env,
+        signal: ctl.signal,
+        onLine: (l) => {
+          if (l === "ready") ready();
+        },
+      });
+      await isReady;
+      const tool = Number(readFileSync(pidFile, "utf8"));
+      const sent = signals();
+      ctl.abort();
+      await pause(400);
+      // The child is gone by now, and so is the tool: not ten seconds from now.
+      const group = sent[0]?.to as number;
+      expect(group).toBeLessThan(0);
+      expect(sent).toEqual([
+        { to: group, sig: "SIGTERM" },
+        { to: group, sig: "SIGKILL" },
+      ]);
+      expect(alive(tool)).toBe(false);
+      expect(await run).toMatchObject({ stopped: true, signal: "SIGTERM" });
+      // The ten seconds pass: that group id is nobody's the daemon knows any more.
+      await vi.advanceTimersByTimeAsync(11_000);
+      await pause(50);
+      expect(sent).toHaveLength(2);
+    },
+  );
+
+  posix(
+    "a Stop or the cap that comes after the child has exited signals nothing, and the run is not called stopped",
+    async () => {
+      // The harness answers and exits; a tool it left holds stdout, so the result is two seconds away.
+      const leaves = script("leaves-a-tool", "sleep 3 &\nprintf 'bye'");
+      const sent = signals();
+      const ctl = new AbortController();
+      const run = runHeadless(leaves, [], { cwd: tmp, env: process.env, signal: ctl.signal });
+      await pause(400);
+      ctl.abort();
+      const r = await run;
+      expect(r).toMatchObject({ code: 0, stdout: "bye", timedOut: false });
+      expect(r.stopped).toBeUndefined();
+      const capped = await runHeadless(leaves, [], { cwd: tmp, env: process.env, timeoutMs: 500 });
+      expect(capped).toMatchObject({ code: 0, stdout: "bye", timedOut: false });
+      expect(sent).toEqual([]);
+    },
+  );
+
+  posix(
+    "a turn at its cap that is then stopped too is still ended once: one SIGKILL, ten seconds after the first SIGTERM",
+    async () => {
+      const stubborn = script("stubborn-twice", "trap 'echo trapped' TERM\necho ready\nwhile :; do sleep 1; done");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const ctl = new AbortController();
+      let ready = () => {};
+      const isReady = new Promise<void>((r) => {
+        ready = r;
+      });
+      const run = runHeadless(stubborn, [], {
+        cwd: tmp,
+        env: process.env,
+        timeoutMs: 100,
+        signal: ctl.signal,
+        onLine: (l) => {
+          if (l === "ready") ready();
+        },
+      });
+      await isReady;
+      const sent = signals();
+      await vi.advanceTimersByTimeAsync(100); // the cap: SIGTERM, trapped
+      ctl.abort(); // and a Stop: SIGTERM again, trapped again
+      await vi.advanceTimersByTimeAsync(10_000);
+      const r = await run;
+      expect(r).toMatchObject({ timedOut: true, stopped: true, signal: "SIGKILL" });
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(sent.map((x) => x.sig)).toEqual(["SIGTERM", "SIGTERM", "SIGKILL"]);
     },
   );
 });
