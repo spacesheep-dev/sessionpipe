@@ -426,7 +426,7 @@ describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
       waiter: false,
       midTurn: false,
       inbox: false,
-      live: false,
+      held: null,
       known: true,
       canFork: false,
       copied: false,

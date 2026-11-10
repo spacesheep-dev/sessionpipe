@@ -458,6 +458,21 @@ Nothing fits: acked `unsupported`. **Never two writers on one transcript**: a se
 live process holds is never resumed; it gets an in-place mode or a fork, and later
 messages to it go to the same copy.
 
+**What counts as held.** A session is held when a live process of the harness has it,
+by the harness's own word: for Claude Code a row in its session registry
+(`<config>/sessions/<pid>.json`) that names the session, with its pid alive — a window
+the person has open, or another run of it. Where no row names it, it is still held while
+its transcript was **written in the last 90 seconds by something the machine cannot
+account for**: a registry is not the whole truth (a session can file its row under
+another id, a harness can have none), and a write that recent may have a writer behind
+it. A write the machine can account for does not hold anything: one made no later than
+the end of a run of the daemon's own, or no later than the session's own end as its
+hooks reported it (Claude Code and Codex: `SessionEnd`), since the process that made it
+has let go. So a session whose headless run exited seconds ago is resumed in place at
+once; it is not copied, and nothing is said about a window. A daemon MUST NOT resume
+inside that window on the strength of an absent registry row alone, and MUST NOT
+describe a session as open where a recent write is all it found.
+
 Two rules hold across the in-place modes:
 
 - **A message never chooses a permission mode.** In an in-place mode no mode is picked
@@ -676,7 +691,14 @@ in, rather than what was asked for.
 A `fork` answers from a **copy**, not from the session the command named, and the person
 is owed that fact: the ack names the copy in `session` and the original in `copy_of`, and
 the message itself SHOULD tell the copy that it is one, so it does not carry on the
-original's work. A copy is a leaf: later messages for that session resume the copy, and a
+original's work. They are owed the reason too, and the true one: the ack's `detail` opens
+`ran in a copy, because` and then says what held the session as the machine found it —
+it was open in a window, another process was running it, or its transcript had been
+written to in the last 90 seconds by a process the machine could not find — and, where
+the session's own inbox was looked at, why that was no way in. A later message's ack,
+which resumes the copy, opens `ran in the copy made earlier, because` with the same
+reason. A receiver SHOULD show the machine's reason and not one of its own: "open in a
+window" is one case of three. A copy is a leaf: later messages for that session resume the copy, and a
 copy is never itself copied. A machine MAY cap how many copies it makes in a day (each
 replays a whole conversation) and refuses beyond that `copy_limit`, with a reason. Where
 the harness has a contract for copying a session something else still holds — Claude
@@ -1050,7 +1072,8 @@ send → delivered time.
   inbox and acked `delivered` with `mode: "inbox"`; one written into that inbox that the
   session never took, acked `failed` with code `held` once and never retried (§6.3); and
   a copy's ack, naming the copy in `session` and the session the person addressed in
-  `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
+  `copy_of`, with why a copy was made and the mode the copy's own turn ran in (§6
+  `prompt`).
 - `conformance/delivery/28` — a prompt handed to a session's channel that began no turn
   for it, acked `failed` with code `held` once and never redelivered (§8).
 - `conformance/transcripts/claude-code/stop-block.jsonl` — the rows Claude Code writes

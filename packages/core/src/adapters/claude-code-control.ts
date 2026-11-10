@@ -733,8 +733,13 @@ export function relaunchMode(recorded: string | null | undefined, home: HomeSett
   return null;
 }
 
-/** Written in the last 90 s, and not by a job of ours. */
-export function recentlyWritten(file: string, ourLastEnd?: number, now = Date.now()): boolean {
+/** Written in the last 90 s by something the caller can't account for: a writer that may
+ *  still be there (spec/CONTROL.md §6, never two writers on one transcript). `knownEnd` is
+ *  the last time a run of that session is known to have finished — a job of the caller's
+ *  own, whose process it saw close, or the session's own end as its hooks reported it —
+ *  and a write no later than that (two seconds of slack for the last rows) was made by a
+ *  process that is done with the file, however recent it is. */
+export function recentlyWritten(file: string, knownEnd?: number, now = Date.now()): boolean {
   let m: number;
   try {
     m = statSync(file).mtimeMs;
@@ -742,7 +747,7 @@ export function recentlyWritten(file: string, ourLastEnd?: number, now = Date.no
     return false;
   }
   if (now - m > LIVE_WRITE_MS) return false;
-  return !(ourLastEnd && m <= ourLastEnd + 2000);
+  return !(knownEnd && m <= knownEnd + 2000);
 }
 
 /** Run one headless turn (headless.ts). Streaming (`--output-format stream-json`), only

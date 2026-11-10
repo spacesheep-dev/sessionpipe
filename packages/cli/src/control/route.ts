@@ -3,6 +3,7 @@
 // bottom. Pure, so every branch is a unit test.
 import { acpControl, shortId } from "@sessionpipe/core";
 import type { ControlKind } from "@sessionpipe/core/control";
+import type { CopyWhy } from "./store.js";
 
 export type DeliveryMode = "sdk" | "waiter" | "turn" | "inbox" | "api" | "resume" | "fork";
 
@@ -17,8 +18,11 @@ export interface SessionView {
   /** A live, idle, vetted session whose own permission class is this machine's: its own
    *  local inbox takes the message (§6.3). */
   inbox: boolean;
-  /** A live process holds the session (registry entry or a fresh transcript write). */
-  live: boolean;
+  /** What holds the session right now, as far as this machine can tell, or null when
+   *  nothing does (§6, What counts as held): a live Claude Code window (`open`), another
+   *  live process of the harness (`running`), or only a write to its transcript too
+   *  recent to account for (`recent`). Held, it is never resumed. */
+  held: Holder | null;
   /** The transcript exists on this machine (Codex, Antigravity: the session was placed). */
   known: boolean;
   /** This Claude Code can copy a session (`--fork-session`); no other harness can. */
@@ -32,6 +36,28 @@ export interface SessionView {
   /** The harness has an input API (OpenCode, Codex app-server) — none is wired yet. */
   api: boolean;
 }
+
+/** What holds a session (SessionView `held`): the same three a copy records as its why. */
+export type Holder = CopyWhy;
+
+/** What held it, in words, for the person: why a copy was made (the ack's `detail`, the
+ *  copy's record), or why nothing could be done. `what` is the thing that was held: the
+ *  session, or the copy its messages go to. Each is only what the machine found: a
+ *  session written to seconds ago by a headless run that has since exited was never
+ *  "open in a window" (2026-11-10). */
+export const HELD: Record<Holder, (what: string) => string> = {
+  open: (what) => `${what} was open in Claude Code on this computer (a terminal window or the Claude app)`,
+  running: (what) => `another Claude Code process on this computer was running ${what}`,
+  recent: (what) =>
+    `the transcript of ${what} had been written to in the last 90 seconds by a process this computer could not find`,
+};
+
+/** A copy's ack `detail` opens with this, then why (`HELD`). */
+export const COPY_RAN = "ran in a copy, because";
+/** The same for a later message, which resumes the copy made earlier. */
+export const COPY_AGAIN = "ran in the copy made earlier, because";
+/** …and where the copy's record says nothing this machine would repeat (store.ts `Copy`). */
+export const COPY_AGAIN_BARE = "ran in the copy this session's messages go to";
 
 export type Route = { mode: DeliveryMode } | { unsupported: string } | { refused: "no_session" };
 
@@ -59,8 +85,8 @@ const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
   turn: (s) => s.midTurn,
   inbox: (s) => s.inbox,
   api: (s) => s.api,
-  resume: (s) => HEADLESS.has(s.harness) && s.known && !s.live,
-  fork: (s) => HEADLESS.has(s.harness) && s.known && s.live && s.canFork && !s.copied,
+  resume: (s) => HEADLESS.has(s.harness) && s.known && !s.held,
+  fork: (s) => HEADLESS.has(s.harness) && s.known && !!s.held && s.canFork && !s.copied,
 };
 
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
@@ -75,13 +101,17 @@ export function routePrompt(s: SessionView): Route {
   if (!HEADLESS.has(s.harness)) return { unsupported: `no idle delivery for ${s.harness} yet` };
   if (!s.known) return { refused: "no_session" };
   if (s.harness === "claude-code" && s.installed === false) return { unsupported: CLAUDE_NOT_FOUND };
+  // Known, headless, and not resumed: something holds it (FITS.resume took every other case).
+  const held = s.held as Holder;
+  // Only a write that recent passes on its own: the rest is for the person to end.
+  const again = held === "recent" ? ": send it again in a couple of minutes" : "";
   return {
     unsupported:
       s.harness === "claude-code"
         ? s.copied
-          ? "the session is open, and so is the copy its messages already go to; a copy is never itself copied"
-          : "the session is open and this Claude Code can't copy it (no --fork-session)"
-        : `the session is open in ${s.harness} right now, and a ${s.harness} session can't be copied: send it again once it has been idle a couple of minutes`,
+          ? `${HELD[held]("the copy this session's messages go to")}, and a copy is never itself copied${again}`
+          : `${HELD[held]("the session")}, and this Claude Code can't copy it (no --fork-session)${again}`
+        : `that ${s.harness} session was written to in the last 90 seconds, so ${s.harness} may still have it open, and a ${s.harness} session can't be copied: send it again once it has been idle a couple of minutes`,
   };
 }
 
@@ -202,9 +232,11 @@ export function frameMarked(text: string, receiver: string, id: string): string 
 /** Said with a message a copy of a session is answering, so the model knows its reply is
  *  the only part the person sees, while its work is as real as the original's. The first
  *  note said "nothing you do here appears in it … don't carry on the original's work", and
- *  a copy asked to change a page answered that a copy can't publish (2026-11-05). */
-export const COPY_NOTE =
-  "You are a copy of that session, started because the original is open in a window, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's window: say what you did, then stop.";
+ *  a copy asked to change a page answered that a copy can't publish (2026-11-05). Why
+ *  there is a copy is said as the machine found it: an original that is open in a
+ *  window, or one that something else is using. */
+export const copyNote = (why: Holder): string =>
+  `You are a copy of that session, started because the original is ${why === "open" ? "open in a window" : "in use by another process"}, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's${why === "open" ? " window" : ""}: say what you did, then stop.`;
 
 /** A new session's first message: the person's words first, where they come from after.
  *  Claude Code names a session from the start of its first message, so a header in front

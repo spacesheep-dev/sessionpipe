@@ -433,7 +433,7 @@ describe.runIf(unix)("a session that already has a copy", () => {
     const ack = await rx.waitAck(q.id, 15_000);
     expect(ack).toMatchObject({ outcome: "unsupported" });
     expect(String(ack.detail)).toBe(
-      "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
+      "the copy this session's messages go to was open in Claude Code on this computer (a terminal window or the Claude app), and a copy is never itself copied",
     );
   });
 });
