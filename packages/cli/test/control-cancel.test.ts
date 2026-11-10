@@ -153,6 +153,20 @@ const hand = async (fields: Record<string, unknown>): Promise<Queued> => {
 const stopNow = (session: string) => hand({ kind: "cancel", session, text: undefined });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Make the verification of every command whose text holds `word` finish late: its day
+ *  key's signature is over the command's own bytes, so that check can be told apart. */
+function verifiedLate(word: string, ms = 300): void {
+  const real = crypto.subtle.verify.bind(crypto.subtle);
+  vi.spyOn(crypto.subtle, "verify").mockImplementation(async (alg, key, sig, data) => {
+    const bytes =
+      data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (Buffer.from(bytes).toString("utf8").includes(word)) await sleep(ms);
+    return real(alg, key, sig, data);
+  });
+}
+
 beforeAll(async () => {
   rx = new FakeReceiver();
   await rx.start();
@@ -256,6 +270,7 @@ fs.writeFileSync(row, JSON.stringify({ pid: process.pid, sessionId: sid, kind: "
   rx.acks.length = 0;
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await d?.stop();
   d = null;
   // A run a failed case left behind is not left running.
@@ -574,7 +589,10 @@ describe.runIf(unix)("a copy's run is the copy's, never the original's", () => {
     expect(acksOf(next.id)).toEqual(["taken"]);
     expect(runs()).toHaveLength(1);
     // It is handed to them where they are, when their turn ends.
-    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 500)).toMatchObject({ op: "block", id: next.id });
+    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 500)).toMatchObject({
+      op: "block",
+      id: next.id,
+    });
   });
 
   it("a copy stopped before it wrote anything leaves the original as it was: mid-turn and just written to, it is not resumed in place", async () => {
@@ -821,6 +839,34 @@ describe.runIf(unix)("a turn the daemon has in hand and has not started yet", ()
     expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
     // The message behind it was not cancelled; the start left no session for it.
     expect(await rx.waitAck(waiting.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+  });
+
+  it("the same when the two came in one poll and the start was verified last: the waiting message is never the one a Stop finds", async () => {
+    await startDaemon();
+    const session = `claude-code:${NEW}`;
+    const start = await rx.send(
+      { kind: "start", session, cwd: project, text: "a long one, verified late" },
+      { hold: true },
+    );
+    const waiting = await rx.send({ session, text: "and then this" }, { hold: true });
+    verifiedLate("verified late");
+    // One poll's messages, side by side: the message is through its checks before its start is.
+    void (d as ControlDaemon).handle(receiver, start as Carried);
+    void (d as ControlDaemon).handle(receiver, waiting as Carried);
+    await until(() => rx.progress(start.id).length > 0);
+    expect(acksOf(waiting.id)).toEqual(["taken"]);
+    const child = runs()[0]?.pid as number;
+    const stop = await stopNow(session);
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({
+      outcome: "delivered",
+      mode: "resume",
+      detail: CANCEL.stopped,
+    });
+    expect(alive(child)).toBe(false);
+    expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    // The message that waited was not what was stopped: it is answered for itself.
+    expect(await rx.waitAck(waiting.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+    expect(rx.acks.filter((a) => a.id === waiting.id && a.outcome !== "taken")).toHaveLength(1);
   });
 });
 

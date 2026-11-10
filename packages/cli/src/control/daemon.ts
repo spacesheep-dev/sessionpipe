@@ -1568,13 +1568,12 @@ export class ControlDaemon {
       // No such session, and no start of it to wait for: said now, not when its turn comes.
       if ("refused" in place && !forStart) return this.finish(r, m.id, refusal(place));
       if (forStart) this.finish(r, m.id, { outcome: "taken" });
+      const started = async (): Promise<void> => {
+        if (!forStart) return;
+        await starting;
+        await this.serial(ref.id, async () => {});
+      };
       const deliver = async (run: OwnRun | null): Promise<void> => {
-        // The wait for the session's start is part of a prompt's turn: a message that came
-        // after it, when the start's transcript was already there, stays behind it.
-        if (forStart) {
-          await starting;
-          await this.serial(ref.id, async () => {});
-        }
         // Read again: the start has ended, or the message before this one may have moved
         // the session (a fork).
         const now = this.place(cmd.session);
@@ -1592,12 +1591,21 @@ export class ControlDaemon {
         return await this.prompt(r, m.id, cmd, now, sent);
       };
       // A permission answer and a Stop are not in the session's line: they act now.
-      if (kp !== "prompt") return await deliver(null);
+      if (kp !== "prompt") {
+        await started();
+        return await deliver(null);
+      }
       // One session's prompts one at a time, in the order they were sent, each routed
       // only once the one before it has landed (a second message to a session the first
       // one forked goes to the copy). Other sessions don't wait. Its place in that line
       // was taken when it arrived (handle()): a verified prompt is one promptNamed() read.
       await (turn as Turn).ready;
+      // The wait for the session's start is part of a prompt's turn (a message that came
+      // after it, when the start's transcript was already there, stays behind it), and it
+      // is not yet a turn in hand: while the session is being started, the start is what
+      // a Stop for it stops. In hand first, this message was what a Stop found whenever it
+      // got through its checks before its start did, and the start ran on to its end.
+      await started();
       // Its turn: in hand from here, and a Stop for its session stops it wherever it is.
       return await this.inHand(m.id, ref.id, deliver);
     } catch (e) {
