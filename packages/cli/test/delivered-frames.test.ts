@@ -49,8 +49,15 @@ describe("the daemon's frames and core's", () => {
       "a Stop hook's block": [`${route.frame(WORDS, R)}\n\n${route.IN_PLACE_ANSWER}`, WORDS],
       "the inbox": [`${route.frameInbox(WORDS, R, ID)}\n\n${route.IN_PLACE_ANSWER}`, WORDS],
       "a waiter": [`${route.frame(WORDS, R)}\n\n${RE_ARM}`, WORDS],
-      "another session's ask": [route.frameAsk(WORDS, "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"), WORDS],
     };
+    // Another session's ask keeps the paragraph that says who asked, whichever way it
+    // arrives: a receiver has nothing else to tell an agent's task from the person's words.
+    const asked = route.frameAsk(WORDS, "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e");
+    Object.assign(lanes, {
+      "an ask: a new session, an idle one resumed, a Stop hook's block": [asked, asked],
+      "an ask to a copy of a session open in a window": [`${asked}\n\n${route.COPY_NOTE}`, asked],
+      "an ask through a waiter": [`${asked}\n\n${RE_ARM}`, asked],
+    });
     for (const [lane, [given, words]] of Object.entries(lanes))
       expect(core.deliveredWords(given), lane).toMatchObject({ text: words, delivered: true });
     // What a channel is handed: the daemon's own undoing agrees with core's.
