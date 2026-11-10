@@ -35,6 +35,11 @@
   turn's `user` side is. `stop-block.jsonl` is what Claude Code records around a Stop hook's
   block that carries a control message (spec/CONTROL.md §6 `prompt`): which of its words are
   the reply to that message is held by `packages/cli/test/control-reply.test.ts`.
+- `control-order.json` — the order a machine delivers one session's control messages in
+  (spec/CONTROL.md §6 `prompt`): `{ steps: [{ arrive | done | drop }], expect: [ids] }`, a
+  poll's messages arriving together, the running one finishing, one being refused. Run by
+  `packages/cli/test/control-line.test.ts`; a second implementation of the machine runs the
+  same file.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet

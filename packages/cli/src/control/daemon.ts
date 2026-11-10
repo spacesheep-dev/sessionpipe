@@ -69,6 +69,7 @@ import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
+import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./local.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./reply.js";
@@ -198,6 +199,22 @@ function startNamed(cmd: unknown): string | null {
   try {
     const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown };
     return c?.kind === "start" && typeof c.session === "string" ? c.session : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A prompt's session and the time it was signed, read from the command before it is
+ *  verified: only ever used to give it its place in that session's line (line.ts), never
+ *  to run anything. The bytes are the ones the verifier then reads, so a prompt that
+ *  verifies is one this found. */
+function promptNamed(cmd: unknown): { session: string; iat: number } | null {
+  if (typeof cmd !== "string" || cmd.length > 64 * 1024 || !cmd.includes('"prompt"')) return null;
+  try {
+    const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown; iat?: unknown };
+    return c?.kind === "prompt" && typeof c.session === "string" && typeof c.iat === "number" && Number.isFinite(c.iat)
+      ? { session: c.session, iat: c.iat }
+      : null;
   } catch {
     return null;
   }
@@ -578,6 +595,8 @@ export class ControlDaemon {
   private readonly recentAcks = new Map<string, { ack: Ack; at: number }>();
   private readonly inflight = new Set<string>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  /** Each session's messages, one at a time and in the order they were sent (line.ts). */
+  private readonly lines = new Lines();
   private readonly lastEnd = new Map<string, number>();
   /** Per session: who is waiting for its next `UserPromptSubmit` — the first half of an
    *  in-place delivery's proof. At most ONE per session: two waiters would both be
@@ -1444,14 +1463,21 @@ export class ControlDaemon {
         if (this.startsPending.get(starting) === all) this.startsPending.delete(starting);
       });
     }
+    // A prompt takes its place in its session's line now too, for the same reason and one
+    // more: the order two messages finish verifying in is not the order they were sent
+    // in, and the line is the order they run in (CONTROL.md §6 `prompt`). Held until its
+    // delivery is over, or it turns out to have none.
+    const named = promptNamed(m.cmd);
+    const turn = named ? this.lines.enter(named.session, named.iat) : null;
     try {
-      await this.handleVerified(r, m);
+      await this.handleVerified(r, m, turn);
     } finally {
       done();
+      turn?.leave();
     }
   }
 
-  private async handleVerified(r: PairedReceiver, m: Carried): Promise<void> {
+  private async handleVerified(r: PairedReceiver, m: Carried, turn: Turn | null): Promise<void> {
     const sent = Date.parse(m.at) || this.deps.now();
     if (Date.parse(m.expires_at) <= this.deps.now()) return this.finish(r, m.id, { outcome: "expired" });
     const v = await verifyCommand(
@@ -1504,36 +1530,40 @@ export class ControlDaemon {
       // A Stop for a turn the daemon is running right now: that run was placed when it
       // began, and a start's session may have no transcript to place yet.
       if (kp === "cancel" && this.runs.has(ref.id)) return await this.cancel(r, m.id, cmd, sent);
-      let place = this.place(cmd.session);
+      const place = this.place(cmd.session);
       // A session the daemon is still starting may have no transcript (or, for Codex and
       // Antigravity, no name) yet: wait for that start, then place it again.
       const starting = kp === "prompt" ? this.startsPending.get(cmd.session) : undefined;
-      if ("refused" in place && (starting || this.ownRuns.has(ref.id))) {
-        this.finish(r, m.id, { outcome: "taken" });
+      const forStart = "refused" in place && (!!starting || this.ownRuns.has(ref.id));
+      // No such session, and no start of it to wait for: said now, not when its turn comes.
+      if ("refused" in place && !forStart) return this.finish(r, m.id, refusal(place));
+      if (forStart) this.finish(r, m.id, { outcome: "taken" });
+      // One session's prompts one at a time, in the order they were sent, each routed
+      // only once the one before it has landed (a second message to a session the first
+      // one forked goes to the copy). Other sessions don't wait. Its place in that line
+      // was taken when it arrived (handle()): a verified prompt is one promptNamed() read.
+      // A permission answer and a Stop are not in line: they act now.
+      if (kp === "prompt") await (turn as Turn).ready;
+      // The wait for the session's start is part of a prompt's turn: a message that came
+      // after it, when the start's transcript was already there, stays behind it.
+      if (forStart) {
         await starting;
         await this.serial(ref.id, async () => {});
-        place = this.place(cmd.session);
       }
-      if ("refused" in place)
-        return this.finish(r, m.id, { outcome: "refused", code: place.refused, detail: place.why });
+      // Read again: the start has ended, or the message before this one may have moved
+      // the session (a fork).
+      const now = this.place(cmd.session);
+      if ("refused" in now) return this.finish(r, m.id, refusal(now));
       if (kp === "permission") return this.permission(r, m.id, cmd, sent);
       if (kp === "cancel") return await this.cancel(r, m.id, cmd, sent);
-      // One session's prompts in the order they came, each routed only once the one
-      // before it has landed (a second message to a session the first one forked
-      // goes to the copy). Other sessions don't wait.
-      return await this.serial(`deliver:${cmd.session}`, async () => {
-        // Read again: the message before this one may have moved the session (a fork).
-        const now = this.place(cmd.session);
-        if ("refused" in now) return this.finish(r, m.id, { outcome: "refused", code: now.refused, detail: now.why });
-        // A prompt's files are on disk, and listed in its text, before any mode hands it over.
-        if (cmd.files) {
-          this.finish(r, m.id, { outcome: "taken" });
-          const text = await this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce);
-          if (text === null) return;
-          return this.prompt(r, m.id, { ...cmd, text }, now, sent);
-        }
-        return this.prompt(r, m.id, cmd, now, sent);
-      });
+      // A prompt's files are on disk, and listed in its text, before any mode hands it over.
+      if (cmd.files) {
+        this.finish(r, m.id, { outcome: "taken" });
+        const text = await this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce);
+        if (text === null) return;
+        return await this.prompt(r, m.id, { ...cmd, text }, now, sent);
+      }
+      return await this.prompt(r, m.id, cmd, now, sent);
     } catch (e) {
       this.finish(r, m.id, { outcome: "failed", detail: String((e as Error)?.message || e) });
     }
@@ -2381,6 +2411,9 @@ export class ControlDaemon {
         const l = this.liveOf(cmd.session);
         const p: TurnPending = { receiver: r, msgId: id, text, session: cmd.session, queuedAt: sent, iat: cmd.iat };
         l.turnQueue.push(p);
+        // In the order they were sent, whenever each got here: a later poll can bring a
+        // message signed before one that is already waiting for this session's Stop.
+        l.turnQueue.sort((a, b) => a.iat - b.iat);
         // It waits for the session's Stop: the receiver must not keep handing it back.
         this.finish(r, id, { outcome: "taken" });
         const t = setTimeout(() => {
@@ -2491,11 +2524,11 @@ export class ControlDaemon {
   }
 
   /** A turn message whose Stop never took it: route again, now that it isn't mid-turn.
-   *  In the session's own delivery queue, like every other prompt — two messages
-   *  rerouted at one Stop would otherwise both take an in-place lane at once, and one
-   *  turn's answer would be acked as the answer to both. */
+   *  In the session's own line, like every other prompt, at the place its signing time
+   *  gives it — two messages rerouted at one Stop would otherwise both take an in-place
+   *  lane at once, and one turn's answer would be acked as the answer to both. */
   private async reroute(p: TurnPending): Promise<void> {
-    await this.serial(`deliver:${p.session}`, async () => {
+    await this.inLine(p.session, p.iat, async () => {
       const l = this.liveOf(p.session);
       l.midTurn = false;
       const place = this.place(p.session);
@@ -2507,6 +2540,20 @@ export class ControlDaemon {
         this.finish(p.receiver, p.msgId, { outcome: "failed", detail: String((e as Error)?.message || e) }),
       );
     });
+  }
+
+  /** A delivery that takes its place in its session's line now (line.ts), runs when its
+   *  turn comes and gives the turn up when it is over, however it ends: a message
+   *  rerouted from a Stop, an ask, a handoff's relay. A receiver's prompt takes its place
+   *  earlier, as it arrives (handle()). */
+  private async inLine(session: string, iat: number, task: () => Promise<void>): Promise<void> {
+    const turn = this.lines.enter(session, iat);
+    try {
+      await turn.ready;
+      await task();
+    } finally {
+      turn.leave();
+    }
   }
 
   /** Jobs for one session (and its copy) run one at a time, in order. */
@@ -3525,9 +3572,10 @@ export class ControlDaemon {
         await this.startSession(sink, askId, cmd, sent);
       } else {
         // `permission` on a prompt is the cap a run of the session gets (capped()), safe
-        // unless the ask said read; the session keeps its own model.
-        const cmd = { kind: "prompt", session, text: req.text, ...level } as ControlCommand;
-        await this.serial(`deliver:${session}`, async () => {
+        // unless the ask said read; the session keeps its own model. It is in the
+        // session's line as a message sent now.
+        const cmd = { kind: "prompt", session, text: req.text, iat: sent, ...level } as ControlCommand;
+        await this.inLine(session, sent, async () => {
           const now = this.place(session);
           /* v8 ignore next -- placed a moment ago, before the queue; a session doesn't go between */
           if ("refused" in now) return this.finish(sink, askId, refusal(now));
@@ -3677,15 +3725,17 @@ export class ControlDaemon {
     };
     const session = `${h.to.harness}:${h.to.id}`;
     const answered = parseSessionRef(ack.session ?? h.from)!;
+    const relayed = this.deps.now();
     const cmd = {
       kind: "prompt",
       session,
       text: frameHandoff(answered, h.receiver.url, ack.reply),
+      iat: relayed,
     } as ControlCommand;
     this.inflight.add(id);
     this.deps.log(`${id.slice(-8)}: the reply of ${ack.id.slice(-8)} goes to ${session.slice(0, 24)}`);
     try {
-      await this.serial(`deliver:${session}`, async () => {
+      await this.inLine(session, relayed, async () => {
         const place = this.place(session);
         if ("refused" in place) return this.finish(sink, id, refusal(place));
         return this.prompt(sink, id, cmd, place, this.deps.now());

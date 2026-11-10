@@ -1,0 +1,104 @@
+{
+  "spec": "CONTROL.md §6 prompt, One at a time, in the order they were sent",
+  "note": "The order a machine delivers one session's messages in. Each case is a run of steps: `arrive` is one poll's answer, its messages listed as the receiver listed them and all taken in hand together (`iat` is the signed time, in milliseconds); `done` is the message whose turn it is finishing, however it ends (answered, failed, stopped by a cancel); `drop` is a message that turns out to have no delivery while it waits or as its turn comes (refused, expired). `expect` is the order the messages are given their turn in. A message is given its turn only when no message of its session has one; then the earliest-signed of those waiting goes, and of two signed in the same millisecond the one that arrived first. Nothing here depends on how long a message's verification, download or wait for its session's start takes.",
+  "cases": [
+    {
+      "name": "two of one poll, nothing running: in the order the poll lists them when that is the order they were signed in",
+      "steps": [
+        { "arrive": [{ "id": "one", "session": "claude-code:A", "iat": 1000 }, { "id": "two", "session": "claude-code:A", "iat": 1600 }] },
+        { "done": "one" },
+        { "done": "two" }
+      ],
+      "expect": ["one", "two"]
+    },
+    {
+      "name": "behind a running turn: two that arrive in one poll wait, and go in sent order (2026-11-10: bravo, charlie, delta)",
+      "steps": [
+        { "arrive": [{ "id": "bravo", "session": "claude-code:A", "iat": 50037 }] },
+        { "arrive": [{ "id": "charlie", "session": "claude-code:A", "iat": 50873 }, { "id": "delta", "session": "claude-code:A", "iat": 51535 }] },
+        { "done": "bravo" },
+        { "done": "charlie" },
+        { "done": "delta" }
+      ],
+      "expect": ["bravo", "charlie", "delta"]
+    },
+    {
+      "name": "a poll that lists them out of the order they were signed in: by signing time, even with nothing running",
+      "steps": [
+        { "arrive": [{ "id": "later", "session": "claude-code:A", "iat": 2000 }, { "id": "earlier", "session": "claude-code:A", "iat": 1000 }] },
+        { "done": "earlier" },
+        { "done": "later" }
+      ],
+      "expect": ["earlier", "later"]
+    },
+    {
+      "name": "a later poll brings one signed before those already waiting: it goes ahead of them",
+      "steps": [
+        { "arrive": [{ "id": "running", "session": "claude-code:A", "iat": 1000 }] },
+        { "arrive": [{ "id": "third", "session": "claude-code:A", "iat": 3000 }] },
+        { "arrive": [{ "id": "fourth", "session": "claude-code:A", "iat": 4000 }, { "id": "second", "session": "claude-code:A", "iat": 2000 }] },
+        { "done": "running" },
+        { "done": "second" },
+        { "done": "third" },
+        { "done": "fourth" }
+      ],
+      "expect": ["running", "second", "third", "fourth"]
+    },
+    {
+      "name": "signed in the same millisecond: the one that arrived first",
+      "steps": [
+        { "arrive": [{ "id": "running", "session": "claude-code:A", "iat": 1000 }] },
+        { "arrive": [{ "id": "a", "session": "claude-code:A", "iat": 2000 }] },
+        { "arrive": [{ "id": "b", "session": "claude-code:A", "iat": 2000 }, { "id": "c", "session": "claude-code:A", "iat": 2000 }] },
+        { "done": "running" },
+        { "done": "a" },
+        { "done": "b" },
+        { "done": "c" }
+      ],
+      "expect": ["running", "a", "b", "c"]
+    },
+    {
+      "name": "one that has its turn keeps it: an earlier-signed message that arrives later waits for it",
+      "steps": [
+        { "arrive": [{ "id": "started", "session": "claude-code:A", "iat": 5000 }] },
+        { "arrive": [{ "id": "signed-before", "session": "claude-code:A", "iat": 1000 }] },
+        { "done": "started" },
+        { "done": "signed-before" }
+      ],
+      "expect": ["started", "signed-before"]
+    },
+    {
+      "name": "one refused while it waits, and one refused as its turn comes, give their places up: the rest keep their order",
+      "steps": [
+        { "arrive": [{ "id": "running", "session": "claude-code:A", "iat": 1000 }] },
+        {
+          "arrive": [
+            { "id": "a", "session": "claude-code:A", "iat": 2000 },
+            { "id": "forged", "session": "claude-code:A", "iat": 3000 },
+            { "id": "b", "session": "claude-code:A", "iat": 4000 },
+            { "id": "expired", "session": "claude-code:A", "iat": 5000 },
+            { "id": "c", "session": "claude-code:A", "iat": 6000 }
+          ]
+        },
+        { "drop": "forged" },
+        { "done": "running" },
+        { "done": "a" },
+        { "done": "b" },
+        { "drop": "expired" },
+        { "done": "c" }
+      ],
+      "expect": ["running", "a", "b", "expired", "c"]
+    },
+    {
+      "name": "each session has its own line: one session's running turn holds up nobody else's message",
+      "steps": [
+        { "arrive": [{ "id": "a1", "session": "claude-code:A", "iat": 1000 }] },
+        { "arrive": [{ "id": "a2", "session": "claude-code:A", "iat": 2000 }, { "id": "b1", "session": "claude-code:B", "iat": 3000 }] },
+        { "done": "b1" },
+        { "done": "a1" },
+        { "done": "a2" }
+      ],
+      "expect": ["a1", "b1", "a2"]
+    }
+  ]
+}

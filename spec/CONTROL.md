@@ -611,6 +611,21 @@ that follows; the hook blocks again only for another queued message, so a delive
 message never loops. In `resume` and `fork` the ack carries the agent's `reply`
 (redacted by the secrets ruleset).
 
+**One at a time, in the order they were sent.** A session takes one message at a time,
+and the messages that wait for it — behind a turn the machine is running, behind the
+session's own turn, behind each other — are delivered in the order they were signed
+(`iat`), and where two were signed in the same millisecond in the order they arrived.
+The machine takes a message's place in that order **when the message arrives**, before
+it verifies it: messages of one poll are verified side by side, and how long each
+verification, download or wait for the session's start takes MUST NOT decide which of
+them goes first. A message that turns out to have no delivery (refused, expired) gives
+its place up, and neither that, nor a message that fails, nor a `cancel` of the one
+that is running changes the order of the rest. A message that has its turn keeps it:
+one signed earlier that arrives after it has begun waits for it. In `turn` mode the
+order is the order the session's Stops are handed the messages in. A `cancel` and a
+`permission.answer` are not in line: they act at once. Each session has its own line,
+and nothing here orders one session's messages against another's.
+
 A `prompt` MAY carry `files`, to a machine whose hello says `prompt_files: true`. The
 machine fetches and checks them exactly as for a start (§6 `start`, **Files**, step 1),
 writes them to `<cwd>/.sessionpipe/files/<session id>/<nonce>/<name>` (the session's
@@ -1081,6 +1096,9 @@ send → delivered time.
   words, the block's row with the message's mark, the session's answer, and a turn a
   background task began after it. The `reply` a daemon reads for that message is the
   answer alone, wherever in those rows the hand-over fell.
+- `conformance/control-order.json` — the order one session's messages are delivered in
+  (§6 `prompt`): polls that list them in and out of signing order, a running turn, a
+  message that arrives late with an earlier `iat`, ties, a refused one, two sessions.
 - `conformance/delivery/30`–`32` — a `cancel` (§6): of a turn the machine is running as
   its own child process, acked `taken` and then `delivered` with the turn's mode; of a
   session open in its own window, acked `unsupported` with a `detail` to show; and of a
