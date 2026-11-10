@@ -2849,9 +2849,15 @@ export class ControlDaemon {
       if (refusal) return this.finish(r, id, { outcome: "refused", code: "copy_limit", detail: refusal });
     }
     this.finish(r, id, { outcome: "taken" });
-    await this.serial(ref.id, async () => {
-      const target = this.state.copies[ref.id]?.id ?? ref.id;
-      // The turn runs in the copy where there is one: a Stop may name either.
+    // The session the turn runs in: the copy, where the session's messages go to one.
+    // (Read here and not after the wait: only a message for this same session could
+    // change it, and those take their turns one at a time.)
+    const target = this.state.copies[ref.id]?.id ?? ref.id;
+    // One run at a time in a transcript, whichever name the message came under: one
+    // for the session and one sent to its copy by the copy's own id both run in the
+    // copy, and queued under their own ids they ran in it side by side.
+    await this.serial(target, async () => {
+      // A Stop may name either.
       if (target !== ref.id) run.sessions.push(target);
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.

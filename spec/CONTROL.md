@@ -624,7 +624,10 @@ that is running changes the order of the rest. A message that has its turn keeps
 one signed earlier that arrives after it has begun waits for it. In `turn` mode the
 order is the order the session's Stops are handed the messages in. A `cancel` and a
 `permission.answer` are not in line: they act at once. Each session has its own line,
-and nothing here orders one session's messages against another's.
+and nothing here orders one session's messages against another's — except that a session
+and its copy share a transcript: a message addressed to the copy by the copy's own id and
+one addressed to the session both run in the copy, and the machine MUST NOT run them
+there at the same time.
 
 A `prompt` MAY carry `files`, to a machine whose hello says `prompt_files: true`. The
 machine fetches and checks them exactly as for a start (§6 `start`, **Files**, step 1),
