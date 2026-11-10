@@ -388,6 +388,72 @@ describe("a turn's words, when its Stop comes before its last row is in the tran
     expect(facts().transcript_due).toBeNull();
   });
 
+  // Two hooks fired close together are handled in the order their workers reach the
+  // session's lock. The next prompt's may be first: it must not send the turn before the
+  // turn's own Stop has said it ended.
+  it("the next prompt's worker, running first, leaves the turn to its own Stop", async () => {
+    await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
+    await runJob(job("UserPromptSubmit", { prompt: ASK_SIX, prompt_id: "id2" }), { state: tmp });
+    flush(0, 7); // the whole turn, and the next prompt
+    const next = await runJob(job("UserPromptSubmit", { prompt: ASK_SEVEN, prompt_id: "id11" }), { state: tmp });
+    expect(types(next.events)).toEqual(["turn.started", "turn.progress"]);
+    // The running turn is still numbered after the one not sent yet.
+    expect(next.events[1]?.data).toMatchObject({ turn: 1, user: ASK_SEVEN });
+    const w = waits();
+    const late = await runJob(stop("SIX", "id2"), { state: tmp, clock: w.clock });
+    expect(w.slept).toEqual([]);
+    expect(types(late.events)).toEqual(["turn.ended", "turn.transcript"]);
+    expect(turns(late.events)).toMatchObject([{ turn: 0, assistant: "SIX" }]);
+  });
+
+  it("and sends the turns before it that are closed, the cursor after the last one sent", async () => {
+    // Nothing of the session has been sent (the sink is new); SEVEN is the turn the hooks hold.
+    await runJob(job("UserPromptSubmit", { prompt: ASK_SEVEN, prompt_id: "id11" }), { state: tmp });
+    writeFileSync(out, "");
+    flush(0, 11);
+    const next = await runJob(job("UserPromptSubmit", { prompt: ASK_PING, prompt_id: "id18" }), { state: tmp });
+    expect(types(next.events)).toEqual(["turn.transcript", "turn.started", "turn.progress"]);
+    expect(turns(next.events)).toMatchObject([{ turn: 0, assistant: "SIX" }]);
+    expect(facts().transcript_line).toBe(4);
+    expect(next.events[2]?.data).toMatchObject({ turn: 2, user: ASK_PING });
+    const late = await runJob(stop("SEVEN", "id11"), { state: tmp, clock: waits().clock });
+    expect(types(late.events)).toEqual(["turn.ended", "turn.transcript"]);
+    expect(turns(stored()).map((t) => [t.turn, t.assistant])).toEqual([
+      [0, "SIX"],
+      [1, "SEVEN"],
+    ]);
+  });
+
+  // The budgets are counted in ticks that only go forward. Counted by the wall clock, a
+  // clock set back mid-wait kept the loop going until the worker's 15 s exit.
+  it("a wall clock set back during the wait does not lengthen it", async () => {
+    flush(0, 3);
+    let wall = T0;
+    let ticks = 0;
+    const slept: number[] = [];
+    const clock: Clock = {
+      now: () => wall,
+      ticks: () => ticks,
+      sleep: async (ms) => {
+        ticks += ms;
+        wall -= 60_000; // an hour's correction, a minute a wait
+        slept.push(ms);
+      },
+    };
+    const r = await runJob(stop("SIX", "id2"), { state: tmp, clock });
+    expect(slept).toHaveLength(FAST + SETTLE_MS / SETTLE_POLL_MS);
+    expect(types(r.events)).toEqual(["turn.ended"]);
+  });
+
+  it("with the worker's own clock: the words land in real time and go with the turn's end", async () => {
+    flush(0, 3);
+    setTimeout(() => flush(3, 6), 40);
+    const started = performance.now();
+    const r = await runJob(stop("SIX", "id2"), { state: tmp });
+    expect(types(r.events)).toEqual(["turn.ended", "turn.transcript"]);
+    expect(performance.now() - started).toBeLessThan(SETTLE_FAST_MS + 2000);
+  });
+
   it("a Stop that names no words, or a transcript that is not there, is read once as before", async () => {
     flush(0, 1);
     appendFileSync(
