@@ -276,7 +276,9 @@ describe("openTurn: the hook's own copy of a prompt", () => {
     // The transcript already has the turn, with a reply: it is that turn, not a new one.
     const read = { turns: [{ user: "Rebase the branch.", assistant: "Rebasing.", at: 1, endLine: 2 }], line: 3 };
     expect(openTurn(read, { base: 3, at: 9, prompt: hint })).toMatchObject({ turn: 3, assistant: "Rebasing." });
-    // A prompt that was nothing but frame opens no turn.
-    expect(openTurn({ turns: [], line: 0 }, { base: 0, at: 9, prompt: frameStart(" ", HOST) })).toBeNull();
+    // A prompt that is only one of sessionpipe's sentences is what the person typed.
+    const only = "(Sent via localhost:8791 with sessionpipe control, signed on the sender's device.)";
+    expect(openTurn({ turns: [], line: 0 }, { base: 0, at: 9, prompt: only })?.user).toBe(only);
+    expect(openTurn({ turns: [], line: 0 }, { base: 0, at: 9, prompt: "  " })).toBeNull();
   });
 });

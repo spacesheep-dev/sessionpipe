@@ -475,11 +475,10 @@ describe("claude-code facts", () => {
     expect(title(`${frame("Say which docs exist.", "https://spacesheep.dev")}\n\n${COPY_NOTE}`)).toBe(
       "Say which docs exist.",
     );
-    // A message that was only frame is no ask: the next one names the session.
+    // An ask another agent made keeps the paragraph that says so, in the title as in the turn.
     expect(
-      claudeFacts(transcript([user(frameStart("", "https://x.test")), user("the real ask")]), SID, {}, memState())
-        .title,
-    ).toBe("the real ask");
+      title("Count docs/.\n\n(Asked by codex:01a10860 on this machine with sessionpipe ask. Answer here in full.)"),
+    ).toBe("Count docs/. (Asked by codex:01a10860 on this mach...");
   });
   it("a /rename beats a custom-title record beats Claude's own name beats its ai-title beats the first ask", () => {
     const base = [user("the ask"), assistant("ok")];

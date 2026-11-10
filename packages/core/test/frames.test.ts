@@ -81,11 +81,49 @@ describe("deliveredWords", () => {
     }
   });
 
-  it("wherever the line sits: another message joined after it leaves it in the middle", () => {
-    const joined = `${frameStart("Count the files under docs/.", R)}\n\nand under src/ too`;
-    expect(deliveredWords(joined)).toEqual(plain("Count the files under docs/.\n\nand under src/ too"));
-    const two = `first, typed here\n\n${frame("second, from the board", R)}\n\n${IN_PLACE_ANSWER}`;
-    expect(deliveredWords(two)).toEqual(plain("first, typed here\n\nsecond, from the board"));
+  // A person can type or paste any of these words. A sentence is sessionpipe's only where
+  // the daemon puts it; a paragraph that merely reads like one is the person's.
+  const typed = (text: string) => ({ text, via: null, delivered: false });
+  const SENT = "(Sent via spacesheep.dev with sessionpipe control, signed on the sender's device.)";
+  const HEAD = "Message via spacesheep.dev (sessionpipe control, signed on the sender's device):";
+  it("a prompt that is only one of the sentences stays as typed", () => {
+    for (const only of [SENT, HEAD, IN_PLACE_ANSWER, COPY_NOTE, RE_ARM, frameAsk("", "codex:01a10860").trim()])
+      expect(deliveredWords(only), only.slice(0, 30)).toEqual(typed(only));
+    // What the builders give for no words at all, and a frame with only a note after it.
+    for (const built of [
+      frame("", R),
+      frameStart("", R),
+      `${HEAD}\n\n${IN_PLACE_ANSWER}`,
+      frameHandoff("codex:x", R, ""),
+    ])
+      expect(deliveredWords(built), built.slice(0, 30)).toEqual(typed(built));
+  });
+
+  it("a sentence in a place sessionpipe does not put it is the person's", () => {
+    for (const text of [
+      // A note with no frame before the words: nothing here came from the daemon.
+      `do this\n\n${IN_PLACE_ANSWER}`,
+      `do this\n\n${COPY_NOTE}`,
+      `do this\n\n${RE_ARM}`,
+      // The line that opens a message, not at the start; the one that closes one, not at the end.
+      `first, typed here\n\n${frame("second", R)}`,
+      `${frameStart("Count the files under docs/.", R)}\n\nand under src/ too`,
+      // Combinations the daemon never builds.
+      `${frameStart("do this", R)}\n\n${COPY_NOTE}`,
+      `${frameAsk("do this", "codex:01a10860")}\n\n${IN_PLACE_ANSWER}`,
+      `${frameHandoff("codex:ae08c6ab", R, "It was a race.")}\n\n${IN_PLACE_ANSWER}`,
+    ])
+      expect(deliveredWords(text), text.slice(0, 40)).toEqual(typed(text));
+  });
+
+  it("inside a delivered message, the person's own paragraphs stay, whatever they read like", () => {
+    const quoting = `why did it say this?\n\n${IN_PLACE_ANSWER}\n\n${SENT}\n\nand this:\n\n${COPY_NOTE}`;
+    // Only the daemon's own line and its one note come off, each from where it put it.
+    expect(deliveredWords(`${frame(quoting, R)}\n\n${IN_PLACE_ANSWER}`)).toEqual(plain(quoting));
+    expect(deliveredWords(frame(quoting, R))).toEqual(
+      plain(`why did it say this?\n\n${IN_PLACE_ANSWER}\n\n${SENT}\n\nand this:`),
+    );
+    expect(deliveredWords(frameStart(quoting, R))).toEqual(plain(quoting));
   });
 
   it("keeps what the message says: the attached files, and whose answer a handoff carries", () => {
@@ -94,6 +132,9 @@ describe("deliveredWords", () => {
     expect(deliveredWords(frameStart(files, R))).toEqual(plain(files));
     const handoff = frameHandoff("codex:ae08c6ab", R, "It was a race.\n\nFixed in ci.yml.");
     expect(deliveredWords(handoff)).toEqual({ text: handoff, via: null, delivered: true });
+    // Handed to a copy of the session, or through a waiter: the note after it goes.
+    for (const note of [COPY_NOTE, RE_ARM])
+      expect(deliveredWords(`${handoff}\n\n${note}`)).toEqual({ text: handoff, via: null, delivered: true });
   });
 
   it("leaves text sessionpipe did not write exactly as it was", () => {
@@ -107,10 +148,5 @@ describe("deliveredWords", () => {
       "Message via two words (sessionpipe control, signed on the sender's device):\n\nhi",
     ])
       expect(deliveredWords(text)).toEqual({ text, via: null, delivered: false });
-  });
-
-  it("a message that was nothing but frame is no words at all", () => {
-    expect(deliveredWords(frame("", R))).toEqual(plain(""));
-    expect(deliveredWords(`${frameStart("  ", R)}`)).toEqual(plain(""));
   });
 });

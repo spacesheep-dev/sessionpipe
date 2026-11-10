@@ -76,21 +76,46 @@ const lineOf = (built: string, hole = "(\\S+)"): RegExp =>
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       .replaceAll(HOLE, hole)}$`,
   );
-const FRAME_LINE = lineOf(frame("", HOLE));
-const INBOX_LINE = lineOf(frameInbox("", HOLE, HOLE));
-const START_LINE = lineOf(frameStart("", HOLE));
-/** Whoever asked is named as it gave itself: a session reference, or "another session". */
-const ASK_LINE = lineOf(frameAsk("", HOLE), "[^\\n]{1,300}");
-const HANDOFF_LINE = lineOf(frameHandoff(HOLE, HOLE, ""));
 
-/** A delivered message with sessionpipe's own words taken off, wherever they sit: the
- *  line that says where it came from (before the words for a message into a running
- *  session, after them for a new session's first), and the notes to the model that follow
- *  it (how the answer travels, that the session is a copy, to start the waiter again).
- *  Each is a paragraph of its own, as the builders above write it, so the words between
- *  them are untouched. `via` is the receiver's host when a line named one, and
- *  `delivered` is whether sessionpipe wrote anything at all here: text it did not touch
- *  comes back as it was.
+// Where each builder puts its own line in the text a session gets, which is the only
+// place `deliveredWords` looks for it. A new wording (an ask that names its message,
+// another note to a copy) is one more entry in the list its builder belongs to.
+/** The first paragraph, the words after it: `frame`, `frameInbox`. */
+const HEAD_LINES = [lineOf(frame("", HOLE)), lineOf(frameInbox("", HOLE, HOLE))];
+/** The last paragraph, the words before it: `frameStart`. */
+const START_LINES = [lineOf(frameStart("", HOLE))];
+/** The last paragraph, the task before it: `frameAsk`. Whoever asked is named as it gave
+ *  itself, a session reference or "another session". */
+const ASK_LINES = [lineOf(frameAsk("", HOLE), "[^\\n]{1,300}")];
+/** The first paragraph, the answer after it: `frameHandoff`. */
+const HANDOFF_LINES = [lineOf(frameHandoff(HOLE, HOLE, ""))];
+/** What the daemon may add, once, after the words of a message a receiver sent
+ *  (control/daemon.ts: a Stop hook's block and the inbox, a copy, a waiter). */
+const NOTES = [IN_PLACE_ANSWER, COPY_NOTE, RE_ARM];
+/** And after an ask or a handoff's answer, whose own lines already say how the answer
+ *  travels: a copy, a waiter. */
+const ASK_NOTES = [COPY_NOTE, RE_ARM];
+
+const lineIn = (lines: RegExp[], line: string): RegExpExecArray | null => {
+  for (const l of lines) {
+    const m = l.exec(line);
+    if (m) return m;
+  }
+  return null;
+};
+
+/** A delivered message with sessionpipe's own words taken off: the line that says where
+ *  it came from (before the words for a message into a session that exists, after them
+ *  for a new session's first), and the one note to the model that may follow the words
+ *  (how the answer travels, that the session is a copy, to start the waiter again).
+ *
+ *  Only where sessionpipe puts them. A sentence is taken off in the place and the form
+ *  the daemon builds it in, never because a paragraph somewhere reads like one: a person
+ *  can type or paste any of these words, and a prompt that is nothing but one of them is
+ *  what the person wrote. So a note comes off only after the words of a text that carries
+ *  a frame, a frame's line only with words beside it, and text in no shape the daemon
+ *  builds comes back exactly as it was, `delivered: false`. `via` is the receiver's host
+ *  when the frame names one.
  *
  *  Kept, because they say whose words these are and not how they travelled: the
  *  paragraph `frameAsk` puts after a task (`(Asked by <session> on this machine with
@@ -100,15 +125,21 @@ const HANDOFF_LINE = lineOf(frameHandoff(HOLE, HOLE, ""));
  *  person wrote. Kept too, because it is what the message says: the list of attached
  *  files. */
 export function deliveredWords(text: string): { text: string; via: string | null; delivered: boolean } {
-  let via: string | null = null;
-  let delivered = false;
-  const words = text.split("\n\n").filter((paragraph) => {
-    const line = paragraph.trim();
-    const from = FRAME_LINE.exec(line) ?? INBOX_LINE.exec(line) ?? START_LINE.exec(line);
-    if (from) via ??= from[1] as string;
-    const ours = !!from || line === IN_PLACE_ANSWER || line === COPY_NOTE || line === RE_ARM;
-    if (ours || ASK_LINE.test(line) || HANDOFF_LINE.test(line)) delivered = true;
-    return !ours;
-  });
-  return delivered ? { text: words.join("\n\n").trim(), via, delivered } : { text, via, delivered };
+  const paragraphs = text.split("\n\n");
+  const at = (i: number): string => (paragraphs[i] as string).trim();
+  const n = paragraphs.length;
+  // The words end before a note, when the text ends with one and is more than the note.
+  const note = n > 1 && NOTES.includes(at(n - 1)) ? at(n - 1) : null;
+  const end = note === null ? n : n - 1;
+  const words = (from: number, to: number) => paragraphs.slice(from, to).join("\n\n").trim();
+  const head = lineIn(HEAD_LINES, at(0));
+  if (head && words(1, end)) return { text: words(1, end), via: head[1] as string, delivered: true };
+  const start = note === null ? lineIn(START_LINES, at(n - 1)) : null;
+  if (start && words(0, n - 1)) return { text: words(0, n - 1), via: start[1] as string, delivered: true };
+  // An agent's task and an agent's answer keep the line that says so; a note after it goes.
+  const theirs =
+    (note === null || ASK_NOTES.includes(note)) &&
+    ((lineIn(ASK_LINES, at(end - 1)) && words(0, end - 1)) || (lineIn(HANDOFF_LINES, at(0)) && words(1, end)));
+  if (theirs) return { text: note === null ? text : words(0, end), via: null, delivered: true };
+  return { text, via: null, delivered: false };
 }
