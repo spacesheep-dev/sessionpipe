@@ -66,9 +66,19 @@ describe("deliveredWords", () => {
     expect(deliveredWords(`${frame(ASK, R)}\n\n${COPY_NOTE}`)).toEqual(plain(ASK));
     // `sessionpipe wait`.
     expect(deliveredWords(`${frame(ASK, R)}\n\n${RE_ARM}`)).toEqual(plain(ASK));
-    // Another session's ask: the task stays, who asked and how the answer travels goes.
-    expect(deliveredWords(frameAsk(ASK, "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"))).toEqual(plain(ASK, null));
-    expect(deliveredWords(frameAsk(ASK, undefined))).toEqual(plain(ASK, null));
+  });
+
+  // A receiver captions a turn "asked with sessionpipe" by this paragraph and nothing else:
+  // with it gone, an agent's task was drawn as the person's own message.
+  it("keeps the paragraph that says an agent asked, and takes off only a note after it", () => {
+    for (const from of ["claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e", undefined]) {
+      const asked = frameAsk(ASK, from);
+      expect(asked.startsWith(`${ASK}\n\n(Asked by `)).toBe(true);
+      expect(deliveredWords(asked)).toEqual({ text: asked, via: null, delivered: true });
+      // To a copy of a session open in a window, and through `sessionpipe wait`.
+      expect(deliveredWords(`${asked}\n\n${COPY_NOTE}`)).toEqual({ text: asked, via: null, delivered: true });
+      expect(deliveredWords(`${asked}\n\n${RE_ARM}`)).toEqual({ text: asked, via: null, delivered: true });
+    }
   });
 
   it("wherever the line sits: another message joined after it leaves it in the middle", () => {

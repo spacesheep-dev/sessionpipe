@@ -718,12 +718,13 @@ describe("readClaude: a message sessionpipe's Stop hook delivered", () => {
 
   it("an ask or a handoff's answer delivered the same way is the turn's too; markup in the frame is not", () => {
     const fed = (reason: string) => user(`Stop hook feedback:\n${reason}`, { isMeta: true, promptId: "p7" });
-    const asked = readClaude(
-      [user("a"), assistant("x"), fed(frameAsk("what is in ci.yml?", "codex:01a10860")), assistant("Three jobs.")],
-      0,
-    );
+    // An agent's task keeps the paragraph that says an agent asked: it is how a receiver
+    // tells it from the person's words, here in the person's own session above all.
+    const task = frameAsk("what is in ci.yml?", "codex:01a10860");
+    const asked = readClaude([user("a"), assistant("x"), fed(task), assistant("Three jobs.")], 0);
+    expect(task).toMatch(/^what is in ci\.yml\?\n\n\(Asked by codex:01a10860 on this machine with sessionpipe ask\. /);
     expect(asked.turns[1]).toEqual({
-      user: "what is in ci.yml?",
+      user: task,
       assistant: "Three jobs.",
       at: at(T0),
       endLine: 3,

@@ -86,15 +86,19 @@ const HANDOFF_LINE = lineOf(frameHandoff(HOLE, HOLE, ""));
 /** A delivered message with sessionpipe's own words taken off, wherever they sit: the
  *  line that says where it came from (before the words for a message into a running
  *  session, after them for a new session's first), and the notes to the model that follow
- *  it (how the answer travels, that the session is a copy, to start the waiter again, who
- *  asked). Each is a paragraph of its own, as the builders above write it, so the words
- *  between them are untouched. `via` is the receiver's host when a line named one, and
+ *  it (how the answer travels, that the session is a copy, to start the waiter again).
+ *  Each is a paragraph of its own, as the builders above write it, so the words between
+ *  them are untouched. `via` is the receiver's host when a line named one, and
  *  `delivered` is whether sessionpipe wrote anything at all here: text it did not touch
  *  comes back as it was.
  *
- *  Kept, because they are what the message says and not how it travelled: the list of
- *  attached files, and the first line of a handoff's answer, which is the only thing that
- *  says the words after it are another agent's and not the person's. */
+ *  Kept, because they say whose words these are and not how they travelled: the
+ *  paragraph `frameAsk` puts after a task (`(Asked by <session> on this machine with
+ *  sessionpipe ask. …)`), and the first line of a handoff's answer. The task is an
+ *  agent's and the answer is an agent's; a receiver tells them from the person's own
+ *  words by exactly those lines, so a text without them would be drawn as something the
+ *  person wrote. Kept too, because it is what the message says: the list of attached
+ *  files. */
 export function deliveredWords(text: string): { text: string; via: string | null; delivered: boolean } {
   let via: string | null = null;
   let delivered = false;
@@ -102,8 +106,8 @@ export function deliveredWords(text: string): { text: string; via: string | null
     const line = paragraph.trim();
     const from = FRAME_LINE.exec(line) ?? INBOX_LINE.exec(line) ?? START_LINE.exec(line);
     if (from) via ??= from[1] as string;
-    const ours = !!from || line === IN_PLACE_ANSWER || line === COPY_NOTE || line === RE_ARM || ASK_LINE.test(line);
-    if (ours || HANDOFF_LINE.test(line)) delivered = true;
+    const ours = !!from || line === IN_PLACE_ANSWER || line === COPY_NOTE || line === RE_ARM;
+    if (ours || ASK_LINE.test(line) || HANDOFF_LINE.test(line)) delivered = true;
     return !ours;
   });
   return delivered ? { text: words.join("\n\n").trim(), via, delivered } : { text, via, delivered };
