@@ -314,6 +314,80 @@ describe("a turn's words, when its Stop comes before its last row is in the tran
     expect(facts().transcript_due).toBe(wordsDigest("SIX"));
   });
 
+  // A session's end fires within milliseconds of a headless run's Stop (37 ms apart in a
+  // recorded run), and either hook's worker may take the session's lock first. When the
+  // end's did, it sent every turn; the Stop then waited 417 ms under the lock and 5 s more
+  // for words that had already gone out, and left the turn marked as waiting.
+  it("a Stop whose turn a sibling hook's worker has already sent does not wait, and marks nothing", async () => {
+    await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
+    await runJob(job("UserPromptSubmit", { prompt: ASK_SIX, prompt_id: "id2" }), { state: tmp });
+    flush(0, 6);
+    const end = await runJob(job("SessionEnd", { reason: "other" }), { state: tmp });
+    expect(types(end.events)).toEqual(["session.ended", "turn.transcript"]);
+    expect(facts().transcript_sent).toBe(`id2:${wordsDigest("SIX")}`);
+    const w = waits();
+    const late = await runJob(stop("SIX", "id2"), { state: tmp, clock: w.clock });
+    expect(w.slept).toEqual([]);
+    expect(types(late.events)).toEqual(["turn.ended"]);
+    expect(facts().transcript_due ?? null).toBeNull();
+    expect(turns(stored())).toHaveLength(1);
+    expect(logged()).not.toContain("not in the transcript");
+  });
+
+  it("the same words under the same prompt id are waited for when the file holds more of that prompt", async () => {
+    // A message a Stop hook delivered continues the turn under its prompt id, and its
+    // reply can be the very words the turn ended on before.
+    const row = (o: object) =>
+      appendFileSync(transcript, `${JSON.stringify({ timestamp: "2026-11-10T17:00:00.000Z", ...o })}\n`);
+    const said = (text: string) => row({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    row({ type: "user", promptId: "p1", message: { content: "Is it merged?" } });
+    said("Yes.");
+    await runJob(stop("Yes.", "p1"), { state: tmp, clock: waits().clock });
+    expect(facts().transcript_sent).toBe(`p1:${wordsDigest("Yes.")}`);
+    row({
+      type: "user",
+      isMeta: true,
+      promptId: "p1",
+      message: {
+        content:
+          "Stop hook feedback:\nMessage via localhost:8791 (sessionpipe control, signed on the sender's device):\n\nAnd deployed?",
+      },
+    });
+    const w = waits((n) => {
+      if (n === 2) said("Yes.");
+    });
+    const r = await runJob(stop("Yes.", "p1"), { state: tmp, clock: w.clock });
+    expect(w.slept).toEqual([25, 25]);
+    expect(turns(r.events)).toMatchObject([{ turn: 1, user: "And deployed?", assistant: "Yes.", injected: true }]);
+  });
+
+  it("a prompt after the cursor that names no id could be the turn's own: the wait stands", async () => {
+    flush(0, 6);
+    await runJob(job("SessionEnd", { reason: "other" }), { state: tmp });
+    // A message the person sent mid-turn is recorded without a prompt id.
+    appendFileSync(
+      transcript,
+      `${JSON.stringify({ type: "attachment", timestamp: "2026-11-10T17:20:00.000Z", attachment: { type: "queued_command", prompt: "and then?" } })}\n`,
+    );
+    const w = waits();
+    await runJob(stop("SIX", "id2"), { state: tmp, clock: w.clock, deadline: T0 });
+    expect(w.slept).toHaveLength(FAST);
+    expect(facts().transcript_due).toBe(wordsDigest("SIX"));
+    // One that names another prompt is a later turn's: this one has gone out.
+    const next = waits();
+    flush(6, 7);
+    writeFileSync(
+      transcript,
+      readFileSync(transcript, "utf8")
+        .split("\n")
+        .filter((l) => !l.includes("queued_command"))
+        .join("\n"),
+    );
+    await runJob(stop("SIX", "id2"), { state: tmp, clock: next.clock });
+    expect(next.slept).toEqual([]);
+    expect(facts().transcript_due).toBeNull();
+  });
+
   it("a Stop that names no words, or a transcript that is not there, is read once as before", async () => {
     flush(0, 1);
     appendFileSync(

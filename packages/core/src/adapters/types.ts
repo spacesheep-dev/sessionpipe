@@ -55,8 +55,9 @@ export interface TranscriptRead {
   turns: Turn[];
   /** The line the cursor may advance to once every turn is delivered. */
   line: number;
-  /** A prompt after the last turn with no reply yet (a turn that just began). */
-  open?: { user: string; at: number; injected?: true };
+  /** A prompt after the last turn with no reply yet (a turn that just began), with the
+   *  harness's own id for it where its transcript records one (as `Turn.id`). */
+  open?: { user: string; at: number; injected?: true; id?: string };
   /** The last of `turns`, for a caller that may have to hold it back because the file is
    *  still being written: the line it starts on (where the cursor stops if it is held),
    *  and `said`, the assistant's last words in it when nothing of that turn follows them
