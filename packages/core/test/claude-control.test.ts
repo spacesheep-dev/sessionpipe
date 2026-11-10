@@ -18,6 +18,7 @@ import {
   helpFailure,
   homeSettings,
   hookMode,
+  initSession,
   isUuid,
   liveProcess,
   loginCommand,
@@ -426,6 +427,19 @@ describe("the result line", () => {
     expect(parseResult('{"type":"system"}\n{"result":"bare"}')).toEqual({ result: "bare" });
     expect(parseResult("garbage\nmore")).toBeNull();
     expect(parseResult("42")).toBeNull();
+  });
+  it("initSession: the session a streamed run says it is, from its init line and no other", () => {
+    const sid = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+    expect(initSession(JSON.stringify({ type: "system", subtype: "init", session_id: sid, tools: [] }))).toBe(sid);
+    // A result line, another system line, an id that isn't one, a line that isn't JSON,
+    // and a line that only quotes the word.
+    expect(initSession(JSON.stringify({ type: "result", result: "ok", session_id: sid }))).toBeNull();
+    expect(initSession(JSON.stringify({ type: "system", subtype: "status", session_id: sid }))).toBeNull();
+    expect(initSession(JSON.stringify({ type: "assistant", subtype: "init", session_id: sid }))).toBeNull();
+    expect(initSession(JSON.stringify({ type: "system", subtype: "init", session_id: "x" }))).toBeNull();
+    expect(initSession('{"type":"system","subtype":"init"')).toBeNull();
+    expect(initSession('"init"')).toBeNull();
+    expect(initSession('null "init"')).toBeNull();
   });
   it.runIf(process.platform !== "win32")("runClaude keeps the result line by default", async () => {
     const bin = script(path.join(tmp, "stream"), `printf '{"type":"system"}\\n{"type":"result","result":"ok"}\\n'`);

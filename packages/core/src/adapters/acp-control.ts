@@ -13,7 +13,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { deniedNote, findBinary, JOB_TIMEOUT_MS, type Mode, shimNote, spawnable } from "./headless.js";
+import { CANCELLED_NOTE, deniedNote, findBinary, JOB_TIMEOUT_MS, type Mode, shimNote, spawnable } from "./headless.js";
+
+// What a cancelled turn's reply ends with, for the daemon's other way of stopping one.
+export { CANCELLED_NOTE };
 
 export interface AcpAgent {
   /** sessionpipe's harness name (ADAPTERS.md): the registry's id unless a hook adapter already named it. */
@@ -404,7 +407,7 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
                   reply: "",
                   error: `${label} was still working after ${Math.round(limit / 60_000)} minutes, so it was stopped`,
                 }
-              : { reply: `${words}\n\n(The turn was cancelled.)${refused}` };
+              : { reply: `${words}\n\n${CANCELLED_NOTE}${refused}` };
           return { reply: "", error: `${label} ended the turn with ${stop || "no stop reason"}` };
         } catch (e) {
           return { reply: "", error: (e as Error).message };

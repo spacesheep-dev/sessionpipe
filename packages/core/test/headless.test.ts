@@ -2,7 +2,7 @@
 // The spawner every headless turn goes through: what it does with a binary that
 // isn't there, a run that says too much, a line that never ends, a turn that
 // overstays.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -103,6 +103,39 @@ describe("runHeadless", () => {
     expect(runFailure("Claude", r)).toContain("still working after 30 minutes");
     expect(runFailure("Claude", { error: "nope" })).toBe("couldn't start Claude: nope");
     expect(runFailure("Claude", { code: 1 })).toBeNull();
+  });
+  posix("a turn its caller stops is ended like one past its cap, and says so", async () => {
+    // The tool the harness started is in the same process group: it goes too.
+    const pidFile = path.join(tmp, "tool.pid");
+    const busy = script("busy", `sleep 30 &\necho $! > ${pidFile}\necho ready\nwait`);
+    const ctl = new AbortController();
+    const r = await runHeadless(busy, [], {
+      cwd: tmp,
+      env: process.env,
+      signal: ctl.signal,
+      onLine: (l) => {
+        if (l === "ready") ctl.abort();
+      },
+    });
+    expect(r).toMatchObject({ stopped: true, signal: "SIGTERM", timedOut: false });
+    const tool = Number(readFileSync(pidFile, "utf8"));
+    await vi.waitFor(() => expect(() => process.kill(tool, 0)).toThrow());
+    // Not a failure of the harness's: nobody is told it broke.
+    expect(runFailure("Claude", r)).toBeNull();
+  });
+  posix("a turn stopped before it began never starts; one that ended by itself was not stopped", async () => {
+    const marker = path.join(tmp, "ran");
+    const touch = script("touch", `echo ran > ${marker}`);
+    const ctl = new AbortController();
+    ctl.abort();
+    expect(await runHeadless(touch, [], { cwd: tmp, env: process.env, signal: ctl.signal })).toEqual({ stopped: true });
+    expect(existsSync(marker)).toBe(false);
+    const late = new AbortController();
+    const r = await runHeadless(touch, [], { cwd: tmp, env: process.env, signal: late.signal });
+    late.abort();
+    expect(r).toMatchObject({ code: 0, timedOut: false });
+    expect(r.stopped).toBeUndefined();
+    expect(existsSync(marker)).toBe(true);
   });
   posix(
     "a tool left holding stdout after the harness exits does not hold the result past two seconds",

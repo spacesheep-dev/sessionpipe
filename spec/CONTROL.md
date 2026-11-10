@@ -673,10 +673,33 @@ attention it did not receive a verified `permission.answer` for.
 
 ### `cancel`
 
-Stops the current turn where an API exists (the Agent SDK's interrupt in `sdk` mode;
-ACP `session/cancel` for a session the daemon holds in `api` mode; OpenCode
-`/session/:id/abort`; Codex app-server interrupt); everywhere else acked
-`unsupported`. **Never a signal to a pid.**
+Stops the current turn where the machine has a way of its own to stop it:
+
+- **A session the daemon holds**, through that session's own interrupt: the Agent SDK's
+  in `sdk` mode; ACP `session/cancel` for a session it holds in `api` mode (OpenCode
+  `/session/:id/abort` and Codex app-server interrupt where those are wired). Acked
+  `delivered` with that mode.
+- **A turn the daemon is running as its own child process** (a `resume`, a `fork`, a
+  headless `start`): the daemon ends the child it spawned, the way it ends one at the
+  30-minute cap — SIGTERM to the child's own process group (the harness and the tools it
+  started), SIGKILL ten seconds later to whatever is left; on Windows the child is
+  killed. The cancel is acked `taken`, then `delivered` once that process is gone, with
+  the mode the turn was running in (`resume` or `fork`). The turn's own message still
+  gets its one final ack: `delivered`, its `reply` what the turn had written, ending
+  `(The turn was cancelled.)` as an ACP agent's cancelled turn does; a `fork` stopped
+  after it named its copy still names it. A turn that ended by itself before the stop
+  took effect leaves the cancel `expired`. **A message waiting behind that turn is not
+  cancelled**: it runs next, in order, as it would have.
+
+**Never a signal to a pid the daemon did not start.** A session open in a terminal or in
+the Claude app, and a headless run someone else started, belong to that process, and
+nothing here reaches into it: the cancel is acked `unsupported`, and its `detail` says
+who has the session in words the person can act on (press Esc in its window; stop it
+where it was started), which a receiver SHOULD show as they are. A Claude Code session
+in which nothing is running — no turn of the daemon's own, no live process in the
+harness's session registry, no turn its hooks reported — is acked `expired`: the turn
+ended before the Stop arrived. Any other harness's session the daemon is not itself
+running is `unsupported`.
 
 ### `start`
 
@@ -951,8 +974,8 @@ hook waits or prints.
 | `progress` | Not final. The answer so far, whole, in `reply`, with `seq` rising per message; a receiver keeps the highest `seq` and MAY show it as it grows. Best effort: a daemon sends at most one every few hundred milliseconds and never retries one, since the next (or the final ack) supersedes it. |
 | `taken` | Not final. The machine verified the message and is delivering it; a final ack follows. Sent at once when delivery may take a while (a headless resume, a start). |
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
-| `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first. |
-| `unsupported` | No path for this kind on this harness. |
+| `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first, or a `cancel` found the turn already over (§6 `cancel`). |
+| `unsupported` | No path for this kind on this harness, or for a `cancel` no path into the process that has the session (§6 `cancel`); `detail` says which. |
 | `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
@@ -1004,6 +1027,10 @@ send → delivered time.
   `copy_of`, with the mode the copy's own turn ran in (§6 `prompt`).
 - `conformance/delivery/28` — a prompt handed to a session's channel that began no turn
   for it, acked `failed` with code `held` once and never redelivered (§8).
+- `conformance/delivery/30`–`32` — a `cancel` (§6): of a turn the machine is running as
+  its own child process, acked `taken` and then `delivered` with the turn's mode; of a
+  session open in its own window, acked `unsupported` with a `detail` to show; and of a
+  session nothing is running in, acked `expired`.
 
 ## 12. Status
 
