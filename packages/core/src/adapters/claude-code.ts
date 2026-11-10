@@ -308,6 +308,14 @@ export const claudeCode: Adapter = {
     // The prompt, for the turn's first turn.progress: the transcript may not hold it
     // yet when the worker runs. Never an event field of its own (tier 2 carries it).
     if (event === "UserPromptSubmit" && typeof s.prompt === "string") hints.prompt = s.prompt;
+    // The turn's last words, as its Stop names them (`last_assistant_message`, in every Stop
+    // recorded since 2.1.258): how the worker knows the transcript holds the whole turn. A
+    // terminal session's Stop fires before its last row reaches the file, because Claude
+    // Code queues its transcript writes for 100 ms (measured on 2.1.322: the worker read the
+    // file 90 to 135 ms after the row was made and found it in 1 turn of 9). Like the
+    // prompt, never an event field of its own.
+    if (event === "Stop" && typeof s.last_assistant_message === "string" && s.last_assistant_message.trim())
+      hints.final = s.last_assistant_message;
     const host = input.env.CLAUDE_CODE_HOST_SESSION_ID;
     if (host && DESKTOP_ID.test(host)) hints.desktop_id = host;
     // Whether a person attends the session, in Claude Code's own word ("1" or "0" in a hook's

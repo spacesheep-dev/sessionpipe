@@ -79,6 +79,49 @@ describe("pairTurns", () => {
   });
   it("nothing in, nothing out", () => {
     expect(pairTurns([], 0)).toEqual({ turns: [], line: 0 });
+    expect(pairTurns([], 0, true)).toEqual({ turns: [], line: 0 });
+  });
+
+  // No hook fires when the person stops a turn, so the transcript's marker is the only
+  // thing that ends it: the turn is whole as it stands, and the next prompt is a new one
+  // (it used to join the prompt nobody answered).
+  const stop = (line: number) => ({ role: "interrupt" as const, text: "", at: line, line });
+  it("an interruption ends the turn as it stands, with or without a reply", () => {
+    const r = pairTurns(
+      [m("user", "a", 0), stop(1), m("user", "b", 2), m("assistant", "x", 3), stop(4), m("user", "c", 5)],
+      6,
+    );
+    expect(r.turns).toEqual([
+      { user: "a", assistant: "", at: 0, endLine: 1, interrupted: true },
+      { user: "b", assistant: "x", at: 2, endLine: 4, interrupted: true },
+    ]);
+    expect(r.open).toEqual({ user: "c", at: 5 });
+    expect(r.line).toBe(5);
+  });
+  it("an interruption with no turn before it is nothing, and after one the cursor may pass", () => {
+    expect(pairTurns([stop(0)], 1)).toEqual({ turns: [], line: 1 });
+    expect(pairTurns([m("user", "a", 0), stop(1)], 2).line).toBe(2);
+  });
+  it("says where the last turn starts and what it said last, only when asked", () => {
+    const msgs = [
+      m("user", "a", 0),
+      m("assistant", "x", 1),
+      m("user", "b", 2),
+      m("assistant", "y", 3),
+      m("assistant", "z", 4),
+    ];
+    expect(pairTurns(msgs, 5).tail).toBeUndefined();
+    expect(pairTurns(msgs, 5, true).tail).toEqual({ start: 2, said: "z" });
+    // A prompt after it closes the turn; its last words are still its last words.
+    expect(pairTurns([...msgs, m("user", "c", 5)], 6, true).tail).toEqual({ start: 2, said: "z" });
+    // An interrupted turn has said all it will; one that said nothing has no last words.
+    expect(pairTurns([...msgs, stop(5)], 6, true).tail).toEqual({ start: 2 });
+    expect(pairTurns([m("user", "a", 0), stop(1)], 2, true).tail).toEqual({ start: 0 });
+  });
+  it("a turn carries its prompt's id, the latest when a second prompt joined the first", () => {
+    const u = (text: string, line: number, id?: string) => ({ ...m("user", text, line), ...(id ? { id } : {}) });
+    const r = pairTurns([u("a", 0, "p1"), u("b", 1, "p2"), u("c", 2), m("assistant", "x", 3), u("d", 4)], 5);
+    expect(r.turns).toEqual([{ user: "a\n\nb\n\nc", assistant: "x", at: 0, endLine: 3, id: "p2" }]);
   });
 });
 
@@ -115,13 +158,18 @@ describe("isInjected", () => {
     expect(readClaude([user("hello"), assistant("hi"), peer, ""], 0)).toEqual({
       turns: [{ user: "hello", assistant: "hi", at: Date.parse(T0), endLine: 1 }],
       line: 3,
+      tail: { start: 0, said: "hi" },
     });
   });
 });
 
 describe("readClaude", () => {
   it.each(SUMMARIES)("keeps replies before and after $flag in the person's original turn", ({ lines }) => {
-    expect(readClaude(lines, 0)).toEqual({ turns: [COMPACTED_TURN], line: 8 });
+    expect(readClaude(lines, 0)).toEqual({
+      turns: [COMPACTED_TURN],
+      line: 8,
+      tail: { start: 0, said: "Writing the evaluation app now." },
+    });
   });
 
   it.each(SUMMARIES)("keeps turn.progress on turn 107 and the person's ask across $flag", ({ lines }) => {
@@ -366,7 +414,116 @@ describe("readClaude: the person's mid-turn messages", () => {
       ],
       0,
     );
-    expect(r).toEqual({ turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 8 }], line: 9 });
+    expect(r).toEqual({
+      turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 8 }],
+      line: 9,
+      tail: { start: 0, said: "hi" },
+    });
+  });
+});
+
+// A terminal session, recorded on 2.1.322 (2026-11-10): a turn with a tool call, a turn of
+// one word, and a turn the person stopped with Esc while its tool ran. Claude Code fires
+// no Stop for the last one; it writes `[Request interrupted by user for tool use]` as a
+// `user` record, which nobody typed.
+const INTERRUPTED = readFileSync(
+  new URL("../../../conformance/transcripts/claude-code/interrupted-turn.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n");
+const SIX = {
+  user: "Run `sleep 6` in bash, then reply with only the word SIX.",
+  at: Date.parse("2026-11-10T17:19:24.018Z"),
+};
+const PING = "Run `ping -c 30 127.0.0.1` in bash, then reply with only the word PINGI.";
+
+describe("readClaude: a turn the person interrupted", () => {
+  it("is a turn of its own, with what it had said, and its marker is nobody's words", () => {
+    const r = readClaude(INTERRUPTED, 0);
+    expect(r.turns).toEqual([
+      { ...SIX, assistant: "SIX", endLine: 3, id: "id2" },
+      {
+        user: "Reply with only the word SEVEN.",
+        assistant: "SEVEN",
+        at: Date.parse("2026-11-10T17:22:27.052Z"),
+        endLine: 7,
+        id: "id11",
+      },
+      {
+        user: PING,
+        assistant: "",
+        at: Date.parse("2026-11-10T17:31:34.318Z"),
+        endLine: 13,
+        id: "id18",
+        interrupted: true,
+      },
+    ]);
+    expect(r.open).toBeUndefined();
+    expect(r.line).toBe(14);
+    expect(JSON.stringify(r)).not.toContain("Request interrupted");
+  });
+
+  it("until the marker is written the prompt is open, and the next prompt is not joined to it after", () => {
+    const running = readClaude(INTERRUPTED.slice(0, 13), 10);
+    expect(running.turns).toEqual([]);
+    expect(running.open).toEqual({ user: PING, at: Date.parse("2026-11-10T17:31:34.318Z") });
+    const after = readClaude([...INTERRUPTED, user("try again"), assistant("ok")], 10);
+    expect(after.turns.map((t) => [t.user, t.assistant, t.interrupted ?? false])).toEqual([
+      [PING, "", true],
+      ["try again", "ok", false],
+    ]);
+    // `[Request interrupted by user]`, the form without a tool, and one with a reply before it.
+    const plain = readClaude([user("a"), assistant("so far"), user("[Request interrupted by user]"), user("b")], 0);
+    expect(plain.turns).toEqual([{ user: "a", assistant: "so far", at: at(T0), endLine: 2, interrupted: true }]);
+    expect(plain.open).toEqual({ user: "b", at: at(T0) });
+    // The person quoting the marker inside a sentence is still the person.
+    expect(readClaude([user("why does it say [Request interrupted by user]?")], 0).open?.user).toContain("why does");
+  });
+});
+
+describe("readClaude: the last words of the last turn", () => {
+  // Claude Code names a turn's last words in its Stop (`last_assistant_message`) and
+  // writes its transcript rows up to 100 ms late, so a reader has to know whether the
+  // file already ends with them.
+  const toolUse = cl("assistant", [{ type: "tool_use", name: "Bash" }], { timestamp: T1 });
+  const toolResult = cl("user", [{ type: "tool_result", content: "x" }]);
+  it("are the turn's last text, while no tool call or result of the turn follows it", () => {
+    expect(readClaude(INTERRUPTED.slice(0, 4), 0).tail).toEqual({ start: 0, said: "SIX" });
+    // The rows a Stop leaves after the words, and a thinking block, are not the turn going on.
+    expect(readClaude(INTERRUPTED.slice(0, 6), 0).tail).toEqual({ start: 0, said: "SIX" });
+    const thinking = cl("assistant", [{ type: "thinking", thinking: "" }], { timestamp: T1 });
+    expect(readClaude([user("a"), assistant("done"), thinking], 0).tail).toEqual({ start: 0, said: "done" });
+    // Words before a tool call are not the turn's last, whichever row says so.
+    expect(readClaude([user("a"), assistant("let me look"), toolUse], 0).tail).toEqual({ start: 0 });
+    expect(readClaude([user("a"), assistant("let me look"), toolUse, toolResult], 0).tail).toEqual({ start: 0 });
+    expect(readClaude([user("a"), assistant("let me look"), toolResult], 0).tail).toEqual({ start: 0 });
+    expect(
+      readClaude([user("a"), assistant("let me look"), toolUse, toolResult, assistant("found it")], 0).tail,
+    ).toEqual({ start: 0, said: "found it" });
+  });
+  it("stay the last words once a later prompt, or a tool of its turn, follows", () => {
+    const next = [user("a"), assistant("done"), user("b")];
+    expect(readClaude(next, 0).tail).toEqual({ start: 0, said: "done" });
+    expect(readClaude([...next, toolUse, toolResult], 0).tail).toEqual({ start: 0, said: "done" });
+    expect(readClaude([...next, toolUse, toolResult, assistant("b done")], 0).tail).toEqual({
+      start: 2,
+      said: "b done",
+    });
+    // A message sent mid-turn begins the next turn of the reading; so does an interruption.
+    const queued = JSON.stringify({
+      type: "attachment",
+      timestamp: T0,
+      attachment: { type: "queued_command", prompt: "and c" },
+    });
+    expect(readClaude([user("a"), assistant("done"), queued, toolUse], 0).tail).toEqual({ start: 0, said: "done" });
+    expect(readClaude([user("a"), assistant("done"), user("[Request interrupted by user]"), toolUse], 0).tail).toEqual({
+      start: 0,
+    });
+  });
+  it("there is no tail without a turn", () => {
+    expect(readClaude([user("a")], 0).tail).toBeUndefined();
+    expect(readClaude([], 0).tail).toBeUndefined();
   });
 });
 

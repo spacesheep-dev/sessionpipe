@@ -239,6 +239,26 @@ describe("claude-code fromHook", () => {
     });
     expect(hook("PostToolUse", { tool_name: "Bash" }, { HOME: home })?.hints).toEqual({});
   });
+  // A terminal session's Stop fires before the turn's last row is in the transcript; the
+  // words the Stop names are how the worker knows when the file holds the whole turn.
+  it("hints.final: the turn's last words as its Stop names them, and only a Stop's", () => {
+    const final = (event: string, s: Record<string, unknown>) => hook(event, s, { HOME: home })?.hints?.final;
+    expect(final("Stop", { last_assistant_message: "All three are merged." })).toBe("All three are merged.");
+    for (const none of [undefined, "", "  \n", 7, null])
+      expect(final("Stop", { last_assistant_message: none })).toBeUndefined();
+    expect(final("StopFailure", { last_assistant_message: "API Error: 529", error: "overloaded" })).toBeUndefined();
+    expect(final("SubagentStop", { last_assistant_message: "The report.", agent_id: "a1" })).toBeUndefined();
+    // Every Stop recorded since 2.1.258 carries it.
+    const dir = new URL("../../../conformance/harness/claude-code/", import.meta.url);
+    for (const name of ["stop.json", "stop-2.json", "stop-background.json", "stop-waiter.json"]) {
+      const { input } = JSON.parse(readFileSync(new URL(name, dir), "utf8"));
+      const stdin = JSON.parse(input.stdin) as { last_assistant_message: string };
+      expect(claudeCode.fromHook({ ...input, env: { HOME: home } })?.hints?.final, name).toBe(
+        stdin.last_assistant_message,
+      );
+      expect(stdin.last_assistant_message.trim(), name).not.toBe("");
+    }
+  });
   // PROTOCOL.md §4: the harness's own word, forwarded verbatim, and the injected flag.
   // The recorded fixtures prove the shapes 2.1.304 sends; these are the rest.
   it("turn.started: submitted_by is forwarded as given, never mapped; a bad shape is dropped", () => {
