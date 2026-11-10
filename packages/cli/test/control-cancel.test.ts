@@ -206,6 +206,14 @@ fs.writeFileSync(row, JSON.stringify({ pid: process.pid, sessionId: sid, kind: "
   if (/silent/.test(prompt)) return work();
   out({ type: "system", subtype: "init", session_id: sid });
   if (/long/.test(prompt)) {
+    // A copy's own transcript is there once its turn is under way; "unwritten" is a copy
+    // stopped before that, with nothing of it on disk.
+    if (a.includes("--fork-session") && !/unwritten/.test(prompt)) {
+      const file = path.join(${JSON.stringify(configDir)}, "projects", ${JSON.stringify(project)}.replace(/[^a-zA-Z0-9]/g, "-"), sid + ".jsonl");
+      fs.writeFileSync(file, JSON.stringify({ type: "user", cwd: ${JSON.stringify(project)} }) + "\\n");
+      const past = new Date(Date.now() - 600000);
+      fs.utimesSync(file, past, past);
+    }
     out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Pinging" } } });
     return work();
   }
@@ -440,10 +448,29 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
       reply: `Pinging\n\n${CANCELLED_NOTE}`,
     });
     // The next message goes to that copy: not a second one.
-    transcript(COPY);
     const next = await rx.send({ session: SESSION, text: "carry on" });
     expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
     expect(runs()[1]?.argv).toEqual(expect.arrayContaining(["--resume", COPY]));
+  });
+
+  it("a copy that named itself and was stopped before it wrote anything is not the session's copy: there is nothing to resume", async () => {
+    holds(SID, "interactive");
+    await startDaemon();
+    const long = await hand({ session: SESSION, text: "a long unwritten one" });
+    await until(() => rx.progress(long.id).length > 0);
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    const ack = await rx.waitAck(long.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "fork", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    // No copy is named: none exists on this machine.
+    expect(ack.session).toBeUndefined();
+    expect(ack.copy_of).toBeUndefined();
+    expect(existsSync(path.join(tmp, "state", "control", "state.json"))).toBe(false);
+    // The next message is not sent to resume a session that is not there (every message
+    // after it would fail the same way): the session is still open, so it is copied afresh.
+    const next = await hand({ session: SESSION, text: "carry on" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: SESSION });
+    expect(runs()[1]?.argv).toEqual(expect.arrayContaining(["--resume", SID, "--fork-session"]));
   });
 
   it("a copy stopped before it named itself made none that anything knows of", async () => {

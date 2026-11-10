@@ -2920,8 +2920,12 @@ export class ControlDaemon {
       this.runOver("claude-code", target);
       // Stopped on the person's request (a `cancel`): what it had said, and that it was
       // cancelled. Its mode is not reported: the turn it would describe never finished.
+      // A copy it had named counts only if it is on disk: one stopped before it wrote
+      // anything is no session, and recording it would send every later message to
+      // resume what isn't there.
+      const onDisk = said.session && findTranscript(said.session, this.deps.claudeDirs()) ? said.session : null;
       const out = res.stopped
-        ? { reply: this.stoppedReply(stream.soFar), ...(said.session ? { session: said.session } : {}) }
+        ? { reply: this.stoppedReply(stream.soFar), ...(onDisk ? { session: onDisk } : {}) }
         : this.outcome(res);
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
