@@ -123,6 +123,9 @@ describe("pairTurns", () => {
     const u = (text: string, line: number, id?: string) => ({ ...m("user", text, line), ...(id ? { id } : {}) });
     const r = pairTurns([u("a", 0, "p1"), u("b", 1, "p2"), u("c", 2), m("assistant", "x", 3), u("d", 4)], 5);
     expect(r.turns).toEqual([{ user: "a\n\nb\n\nc", assistant: "x", at: 0, endLine: 3, id: "p2" }]);
+    // And so does a prompt nothing has answered yet.
+    expect(r.open).toEqual({ user: "d", at: 4 });
+    expect(pairTurns([u("a", 0, "p1"), u("b", 1, "p2")], 2).open).toEqual({ user: "a\n\nb", at: 0, id: "p2" });
   });
 });
 
@@ -468,7 +471,7 @@ describe("readClaude: a turn the person interrupted", () => {
   it("until the marker is written the prompt is open, and the next prompt is not joined to it after", () => {
     const running = readClaude(INTERRUPTED.slice(0, 13), 10);
     expect(running.turns).toEqual([]);
-    expect(running.open).toEqual({ user: PING, at: Date.parse("2026-11-10T17:31:34.318Z") });
+    expect(running.open).toEqual({ user: PING, at: Date.parse("2026-11-10T17:31:34.318Z"), id: "id18" });
     const after = readClaude([...INTERRUPTED, user("try again"), assistant("ok")], 10);
     expect(after.turns.map((t) => [t.user, t.assistant, t.interrupted ?? false])).toEqual([
       [PING, "", true],
@@ -679,6 +682,7 @@ describe("readClaude: a message sessionpipe's Stop hook delivered", () => {
       user: "Reply with only the word INTERRUPT1.",
       at: Date.parse("2026-11-10T16:57:30.600Z"),
       injected: true,
+      id: "id1",
     });
     expect(first.tail).toEqual({ start: 0, said: WAITING });
     const second = readClaude(STOP_DELIVERY.slice(0, 12), first.line);

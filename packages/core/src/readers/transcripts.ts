@@ -90,7 +90,12 @@ export function pairTurns(msgs: Msg[], endLine: number, tail = false): Transcrip
     line,
   };
   if (cur && !cur.assistant && cur.user)
-    out.open = { user: cur.user, at: cur.at, ...(cur.injected ? { injected: true as const } : {}) };
+    out.open = {
+      user: cur.user,
+      at: cur.at,
+      ...(cur.injected ? { injected: true as const } : {}),
+      ...(cur.id ? { id: cur.id } : {}),
+    };
   const last = turns[turns.length - 1];
   // An interrupted turn says nothing more, so it has no last words to wait for.
   if (tail && last)

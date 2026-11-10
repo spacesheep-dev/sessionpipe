@@ -512,11 +512,29 @@ export async function runJob(
      *  added to, as turn.transcript events, the cursor moved past them (before they reach
      *  the outbox, so a turn is never sent twice). `open`: the turn the hooks still hold
      *  as running; when the transcript says the person interrupted it, its `turn.ended`
-     *  goes first, since no hook fired one. */
-    const turnEvents = (file: string, o: { all?: boolean; due?: string | undefined; open?: string | undefined }) => {
+     *  goes first, since no hook fired one. `named`: the prompt id of the turn whose last
+     *  words `due` are, as its Stop names it. */
+    const turnEvents = (
+      file: string,
+      o: { all?: boolean; due?: string | undefined; open?: string | undefined; named?: string | undefined },
+    ) => {
       const cur = facts.get(job.harness, id);
       let turnNo = Number(cur.transcript_turns) || 0;
-      const c = closedTurns(adapter.readTranscript(file, Number(cur.transcript_line) || 0), o);
+      const read = adapter.readTranscript(file, Number(cur.transcript_line) || 0);
+      const c = closedTurns(read, o);
+      // A hook that comes late finds its turn gone out: a sibling's worker took the lock
+      // first (a session's end fires within milliseconds of a headless run's Stop, and
+      // sends every turn). The last turn sent had this Stop's prompt id and these last
+      // words, and nothing after the cursor is that prompt's, so there is nothing to wait
+      // for. Without an id on both sides it cannot be told from a turn that says the same
+      // words as the one before it, and the wait stands.
+      const gone =
+        c.waiting &&
+        o.named !== undefined &&
+        cur.transcript_sent === `${o.named}:${o.due}` &&
+        !read.turns.length &&
+        (!read.open || (read.open.id !== undefined && read.open.id !== o.named));
+      const waiting = c.waiting && !gone;
       const out: Event[] = [];
       for (const t of c.turns) {
         if (t.interrupted && o.open !== undefined && t.id === o.open) {
@@ -539,10 +557,20 @@ export async function runJob(
           }),
         );
       }
-      if (c.turns.length) facts.save(job.harness, id, { transcript_line: c.line, transcript_turns: turnNo });
+      const last = c.turns[c.turns.length - 1];
+      if (last)
+        facts.save(job.harness, id, {
+          transcript_line: c.line,
+          transcript_turns: turnNo,
+          // The last turn sent, when it is the last of the file, by its prompt's id and a
+          // digest of its last words: what `gone` above knows it by.
+          ...(c.turns.length === read.turns.length && last.id && read.tail?.said !== undefined
+            ? { transcript_sent: `${last.id}:${wordsDigest(read.tail.said)}` }
+            : {}),
+        });
       // The words a turn's end was waiting for are in (or nothing waits): the wait is over.
-      if (!c.waiting && cur.transcript_due != null) facts.save(job.harness, id, { transcript_due: null });
-      return { events: out, waiting: c.waiting };
+      if (!waiting && cur.transcript_due != null) facts.save(job.harness, id, { transcript_due: null });
+      return { events: out, waiting };
     };
     // What the transcript settled since the session's last hook goes first: a turn whose
     // last words were not in the file when it ended (and not within SETTLE_MS after), and
@@ -597,7 +625,8 @@ export async function runJob(
         r.events.some((e) => e.type === "turn.ended") && typeof r.hints?.final === "string" && existsSync(transcript)
           ? wordsDigest(r.hints.final)
           : undefined;
-      const how = { all: final === undefined, due: final };
+      const named = r.events.find((e) => e.type === "turn.ended")?.data.turn_id;
+      const how = { all: final === undefined, due: final, named: typeof named === "string" ? named : undefined };
       let got = turnEvents(transcript, how);
       events.push(...got.events);
       for (const until = clock.now() + SETTLE_FAST_MS; got.waiting && opts.drain !== false && clock.now() < until; ) {
