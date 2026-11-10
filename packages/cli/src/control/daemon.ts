@@ -259,6 +259,11 @@ const PARKED_ACK = {
  *  was started, so it is not called delivered, and a receiver that shows a new session
  *  as working until it hears otherwise hears it here. */
 const UNSTARTED_ACK = { outcome: "failed" as const, code: "cancelled", detail: CANCEL.unstarted };
+/** Why a message is not written into a live session's inbox when its id is not a ULID
+ *  (CONTROL.md §6.3): said in the log and, where the message then ran in a copy, in its
+ *  ack's `detail` after "it could not be reached in place:". */
+const UNMARKED =
+  "the receiver gave this message an id that is not a ULID, so the turn it would cause there could not be told from any other";
 /** A channel took the message and the session began no turn for it (CONTROL.md §8). */
 const CHANNEL_HELD_ACK = {
   outcome: "failed" as const,
@@ -327,7 +332,7 @@ export interface AckSink {
   /** The text as the session gets it: a new session's first message, or a later one.
    *  `mark` when it is handed to a live session in place: the frame names the message,
    *  so its answer can be found in that session's transcript (reply.ts). */
-  frame(text: string, first: boolean, mark?: string): string;
+  frame(text: string, first: boolean, mark?: string | null): string;
   /** What a child the run starts gets in its environment, over the job's own. */
   env?: Record<string, string>;
   /** The answer so far (§10 `progress`), redacted and capped like an ack's reply. */
@@ -2203,7 +2208,7 @@ export class ControlDaemon {
   private inboxLook(
     session: string,
     place: Placed,
-    o: { iat: number; body: string },
+    o: { iat: number; body: string; id: string },
   ):
     | { rec: LiveRecord; declare: inbox.PeerClass; key: string; cls: inbox.PeerClass | null }
     | { code: string; detail: string }
@@ -2227,6 +2232,12 @@ export class ControlDaemon {
     // A run of the daemon's own holding it is not a session to write into: the message
     // queues behind that run and resumes it.
     if (this.ownRuns.has(target)) return null;
+    // The proof that the session took a message written here is the row its turn begins
+    // with, found by the message's mark, and only a whole ULID makes one (core's
+    // `messageMark`). A message with none could be written and never told from the
+    // person's own next prompt: it was acked `held`, and the lane shut for five minutes,
+    // whatever the session did with it.
+    if (messageMark(o.id) === null) return { code: "unmarked", detail: UNMARKED };
     const held = this.parkedFor(key);
     if (held)
       return {
@@ -2347,7 +2358,7 @@ export class ControlDaemon {
     started: { ok: Promise<boolean> },
     session: string,
     from: { file: string; offset: number } | null,
-    mark: string,
+    mark: string | null,
   ): Promise<boolean> {
     if (!(await started.ok)) return false;
     /* v8 ignore next -- answerFrom is null only off Claude Code, which has no inbox lane */
@@ -2373,12 +2384,23 @@ export class ControlDaemon {
    *  already swallowed a message (CONTROL.md §8): Claude Code folds a channel message that
    *  arrives during a turn into that turn as a queued command, which the model need not
    *  answer (on 2.1.314 it didn't), so a running turn takes the message at its Stop. */
-  private waiterFits(l: Live | undefined): boolean {
+  private waiterFits(l: Live | undefined, marked: boolean): boolean {
     if (!l?.waiter || l.waiter.destroyed) return false;
-    return l.channel === null || (!l.midTurn && !this.mutedChannels.has(l.channel));
+    // …and only a message that can be proven taken: its id goes on the channel's tag, and
+    // the tag is what the turn it causes is recognised by (`channelMark`). One whose id
+    // makes no mark was handed over, acked `held` whatever the session did, and the
+    // channel shut.
+    return l.channel === null || (marked && !l.midTurn && !this.mutedChannels.has(l.channel));
   }
 
-  private view(session: string, place: Placed, look?: ReturnType<ControlDaemon["inboxLook"]>) {
+  private view(
+    session: string,
+    place: Placed,
+    look?: ReturnType<ControlDaemon["inboxLook"]>,
+    /** The message has a mark its turn can be recognised by (`waiterFits`). An ask and a
+     *  relay always have: their ids are the daemon's own. */
+    marked = true,
+  ) {
     const ref = parseSessionRef(session)!;
     const l = this.live.get(session);
     if (ref.harness !== "claude-code") {
@@ -2394,7 +2416,7 @@ export class ControlDaemon {
       return {
         harness: ref.harness,
         sdk: this.sdkSessions.has(ref.id),
-        waiter: this.waiterFits(l),
+        waiter: this.waiterFits(l, marked),
         midTurn: !!l?.midTurn,
         // The inbox is Claude Code's own local socket; no other harness has one.
         inbox: false,
@@ -2418,7 +2440,7 @@ export class ControlDaemon {
     return {
       harness: ref.harness,
       sdk: this.sdkSessions.has(ref.id),
-      waiter: this.waiterFits(l),
+      waiter: this.waiterFits(l, marked),
       midTurn: !!l?.midTurn,
       inbox: !!look && "rec" in look,
       held,
@@ -2472,11 +2494,14 @@ export class ControlDaemon {
     // settings file and a process's start time (a `ps`, on this one thread), and a
     // message that a rung above it takes — a held session, a parked waiter, a running
     // turn — was never going to use it.
-    const bare = this.view(cmd.session, place, null);
+    // What a session writes for a message handed to it in place is found by the message's
+    // mark, which is made of its id and only of a whole ULID (core's `messageMark`).
+    const marked = messageMark(id) !== null;
+    const bare = this.view(cmd.session, place, null, marked);
     const first = routePrompt(bare);
     const over = o.noInbox || isSink(r) || ("mode" in first && earlier(first.mode, "inbox"));
-    const look = over ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed });
-    const seen = over ? bare : this.view(cmd.session, place, look);
+    const look = over ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed, id });
+    const seen = over ? bare : this.view(cmd.session, place, look, marked);
     const route = over ? first : routePrompt(seen);
     // Said before the message's own outcome: why the session was not reached in place is
     // the machine's own business, and it is the same fact whether the rung below it
@@ -3160,7 +3185,7 @@ export class ControlDaemon {
     session: string,
     from: { file: string; offset: number } | null,
     sent: number,
-    how: { mark: string; end: "next" | "marked" },
+    how: { mark: string | null; end: "next" | "marked" },
   ): void {
     this.deps.log(`${id.slice(-8)}: in ${session.slice(0, 24)} via ${mode} ${this.deps.now() - sent} ms after send`);
     this.finish(r, id, { outcome: "taken" });

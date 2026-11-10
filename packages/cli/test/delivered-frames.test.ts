@@ -28,6 +28,7 @@ describe("the daemon's frames and core's", () => {
     expect(route.frameStart).toBe(core.frameStart);
     expect(route.frameAsk).toBe(core.frameAsk);
     expect(route.copyNote).toBe(core.copyNote);
+    expect(route.unframe).toBe(core.unframe);
     // What a copy of a session that is open in a window is told has not changed.
     expect(route.copyNote("open")).toBe(
       "You are a copy of that session, started because the original is open in a window, and you have its conversation, folder and tools. Do what the message asks the way the original would: edits, commands and publishing all take effect for real. Only this conversation stays here, so the person reads your reply and not the original's window: say what you did, then stop.",
@@ -81,11 +82,10 @@ describe("the daemon's frames and core's", () => {
     });
     for (const [lane, [given, words]] of Object.entries(lanes))
       expect(core.deliveredWords(given), lane).toMatchObject({ text: words, delivered: true });
-    // What a channel is handed: the daemon's own undoing agrees with core's.
-    expect(core.deliveredWords(route.frame(WORDS, R))).toMatchObject({
-      text: route.unframe(route.frame(WORDS, R)).text,
-      via: route.unframe(route.frame(WORDS, R)).via,
-    });
+    // What a channel is handed, undone for its tag (`unframe`): the same words, from the
+    // same host, as a reader finds — with the message's mark in the header or without.
+    for (const given of [route.frame(WORDS, R), route.frameMarked(WORDS, R, ID)])
+      expect(core.deliveredWords(given)).toMatchObject(route.unframe(given));
     // A handoff's answer keeps its first line: it is what says whose words follow. It
     // carries no mark of its own, whatever lane it lands by.
     const handoff = route.frameHandoff({ harness: "codex", id: "x" }, R, WORDS);

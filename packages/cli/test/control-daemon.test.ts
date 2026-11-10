@@ -544,6 +544,26 @@ describe.runIf(unix)("delivery", () => {
     expect(await again).toBeNull();
   }, 30_000);
 
+  it("channel: a message whose id is not a ULID is not handed to it, and the channel stays open for the next", async () => {
+    await startDaemon();
+    const parked = ask(sock, { op: "wait", session: SESSION, pid: 4444, channel: true }, 10_000);
+    await sleep(100);
+    // The id goes on the channel's tag, and the tag is the only proof the session took
+    // it: an id no mark is made of proves nothing. It was handed over all the same, acked
+    // `held` though the session answered, and the channel shut.
+    const q = await rx.send({ session: SESSION, text: "anyone there?" }, { hold: true });
+    q.id = "msg-42";
+    rx.enqueue(q);
+    // Another way: a resume here, since nothing holds the session.
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const next = await rx.send({ session: SESSION, text: "Add the Oct 8 row" });
+    expect(await parked).toMatchObject({ op: "message", id: next.id });
+    channelRow(next.id, "Add the Oct 8 row");
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
+    answer(SID, project, "Added the Oct 8 row.");
+    expect(await rx.waitAck(next.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "waiter" });
+  }, 30_000);
+
   it("channel: a session in the middle of a turn takes it at its Stop, not through the channel", async () => {
     await startDaemon();
     // (A channel that names no process of its own is still a channel.)
