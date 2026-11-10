@@ -616,6 +616,30 @@ describe.runIf(unix)("what the lane will not write into", () => {
     expect(log.some((l) => l.includes("stale"))).toBe(true);
   });
 
+  it("a message whose id is not a ULID: nothing could prove the session took it, so it is not written there", async () => {
+    row();
+    await startDaemon();
+    await sawMode("bypassPermissions");
+    const q = await rx.send(
+      { session: SESSION, kind: "prompt", text: "under an id of the receiver's own" },
+      { hold: true },
+    );
+    q.id = "msg-42";
+    rx.enqueue(q);
+    // The next rung, and the log says why this one was not taken. (It was written into
+    // the session, acked `held` though the session answered, and the lane shut for five
+    // minutes.)
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(log.join("\n")).toContain(
+      "not in place via its own inbox (unmarked: the receiver gave this message an id that is not a ULID, so the turn it would cause there could not be told from any other)",
+    );
+    expect(written).toEqual([]);
+    // Nothing is parked: the next message, with an id a mark is made of, is written in.
+    const next = await rx.send({ session: SESSION, kind: "prompt", text: "and this one" });
+    await wrote(LINES);
+    expect(frameIn(LINES - 1)).toContain(markOf(next.id));
+  });
+
   it("two live processes for one session: the daemon won't choose between them", async () => {
     row();
     writeFileSync(

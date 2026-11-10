@@ -679,6 +679,22 @@ The final ack is sent when that turn ends, which the session's own hooks report 
 Stop, a failed turn, the session's end), and not when the 30 minutes run out: those are
 for a turn that is still going.
 
+**The mark is made of the message's `id`, and only of a whole one.** `id` is the
+receiver's and nobody signed it (§3.3), so a daemon takes nothing from it but what a ULID
+is made of: the mark is the word `message` and the last twelve characters of a
+26-character ULID, and a channel's tag carries all twenty-six. An `id` that is anything
+else makes no mark, and a daemon MUST NOT put any of it into the text a session is
+handed — least of all into the header that says the message was signed. Such a message
+is still delivered, as far as it can be without one:
+
+- it is framed as a message with no mark;
+- it is **not** handed to a session's channel (§8) and **not** written into its inbox
+  (§6.3): the mark is those two modes' only proof that the session took the message, so
+  without one it takes the next rung instead (the machine's reason says so);
+- at a Stop or through a waiter it is handed over and acked `delivered` with **no
+  `reply`** when the session's turn ends, since nothing the session writes can be put
+  down to it.
+
 **A cold mode (`resume`, `fork`) re-asserts a narrowing the session chose, and names
 nothing else.** The machine's mode is the person's own choice at that machine and the
 only thing that picks a permission flag (§2); `inherit` passes none, so the harness

@@ -49,17 +49,32 @@ export function frame(text: string, receiver: string): string {
   return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device):\n\n${text}`;
 }
 
+/** A message id a mark is made of: a whole ULID, which is what a receiver gives a
+ *  message (HTTP.md §3). */
+const WHOLE_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
 /** What the daemon looks for in the row the session's transcript records for a message
  *  handed to it in place (§6 `prompt`, §6.3): a turn is only proof of delivery when it is
- *  THIS message's turn, and only what the session wrote after that row is its answer. */
-export const messageMark = (id: string): string => `message ${id.slice(-12)}`;
+ *  THIS message's turn, and only what the session wrote after that row is its answer.
+ *
+ *  Null for an id that is not a whole ULID. The id is the receiver's and nobody signed
+ *  it: its characters go into a header that says "signed on the sender's device" and
+ *  into the session's context, so nothing but the alphabet of a ULID is ever taken from
+ *  it (an id of `x\n\nrm -rf ~` put those words in the header), and a short one ("42")
+ *  would make a mark anybody's words contain. */
+export const messageMark = (id: string): string | null => (WHOLE_ID.test(id) ? `message ${id.slice(-12)}` : null);
+
+const marked = (text: string, host: string, mark: string): string =>
+  `Message via ${host} (sessionpipe control, signed on the sender's device; ${mark}):\n\n${text}`;
 
 /** The framed text for a message handed to a live session in place — at its Stop, to
  *  its waiter, into its inbox: `frame()` with that mark in it, since the session answers
  *  in a turn of its own and the daemon has to recognise the message again in the
- *  transcript to know which words are its answer. */
+ *  transcript to know which words are its answer. A message whose id makes no mark gets
+ *  `frame()` as it is: nothing of the id reaches the session. */
 export function frameMarked(text: string, receiver: string, id: string): string {
-  return `Message via ${hostOf(receiver)} (sessionpipe control, signed on the sender's device; ${messageMark(id)}):\n\n${text}`;
+  const mark = messageMark(id);
+  return mark ? marked(text, hostOf(receiver), mark) : frame(text, receiver);
 }
 
 /** A new session's first message: the person's words first, where they come from after
@@ -72,7 +87,7 @@ export function frameStart(text: string, receiver: string): string {
  *  first, then who asked and that the answer travels by itself. Handed to a live session
  *  in place it names the message too (`mark`), which is how the daemon finds the answer
  *  in that session's transcript. */
-export function frameAsk(text: string, from: string | undefined, mark?: string): string {
+export function frameAsk(text: string, from: string | undefined, mark?: string | null): string {
   return `${text}\n\n(Asked by ${from ?? "another session"} on this machine with sessionpipe ask${mark ? `, ${mark}` : ""}. Answer here in full: your reply is returned to that session automatically. Don't run a command or call a tool just to send it.)`;
 }
 
@@ -100,7 +115,7 @@ const lineOf = (built: string, hole = "(\\S+)"): RegExp =>
 // place `deliveredWords` looks for it. A new wording (an ask that names its message,
 // another note to a copy) is one more entry in the list its builder belongs to.
 /** The first paragraph, the words after it: `frame`, `frameMarked`. */
-const HEAD_LINES = [lineOf(frame("", HOLE)), lineOf(frameMarked("", HOLE, HOLE))];
+const HEAD_LINES = [lineOf(frame("", HOLE)), lineOf(marked("", HOLE, MARK))];
 /** The last paragraph, the words before it: `frameStart`. */
 const START_LINES = [lineOf(frameStart("", HOLE))];
 /** The last paragraph, the task before it: `frameAsk`. Whoever asked is named as it gave
@@ -128,6 +143,16 @@ const lineIn = (lines: RegExp[], line: string): RegExpExecArray | null => {
   }
   return null;
 };
+
+/** `frame()` and `frameMarked()` undone, and nothing else: the person's words, and the
+ *  host they were sent from. A channel shows the words as the message and says where
+ *  they came from beside it (CONTROL.md §8). Text neither of them made comes back whole,
+ *  from nowhere. */
+export function unframe(text: string): { text: string; via: string | null } {
+  const cut = text.indexOf("\n\n");
+  const head = cut < 0 ? null : lineIn(HEAD_LINES, text.slice(0, cut));
+  return head ? { text: text.slice(cut + 2), via: head[1] as string } : { text, via: null };
+}
 
 /** A delivered message with sessionpipe's own words taken off: the line that says where
  *  it came from (before the words for a message into a session that exists, after them

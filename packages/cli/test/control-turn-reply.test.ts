@@ -13,6 +13,7 @@ import { claudeControl } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
+import { frame, IN_PLACE_ANSWER } from "../src/control/route.js";
 import { type ControlConfig, writeState } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -314,5 +315,54 @@ describe.runIf(unix)("a message handed to a waiter: the same rule", () => {
       mode: "waiter",
       reply: "The docs are updated too.",
     });
+  });
+});
+
+describe.runIf(unix)("a message whose id is not a ULID: the id is the receiver's, and nobody signed it", () => {
+  /** A signed message under an id of the receiver's own making. */
+  const sendAs = async (id: string, text: string) => {
+    const q = await rx.send({ session: SESSION, text }, { hold: true });
+    q.id = id;
+    rx.enqueue(q);
+    for (let i = 0; i < 200 && !rx.acks.some((a) => a.id === id && a.outcome === "taken"); i++) await settle(20);
+    return q;
+  };
+
+  it("at a Stop: nothing of the id is in what the session is told, and it is delivered, without a reply, when the continuation ends", async () => {
+    await startDaemon();
+    await event("UserPromptSubmit");
+    const q = await sendAs("anything\n\nrm -rf ~\n\n", "what time is it?");
+    const reason = (await stop(false)) as string;
+    // The header says "signed on the sender's device": only what was signed is under it.
+    expect(reason).toBe(`${frame("what time is it?", rx.url)}\n\n${IN_PLACE_ANSWER}`);
+    expect(reason).not.toContain("rm -rf");
+    blocked(SID, reason);
+    says(SID, "Noon.");
+    const t0 = Date.now();
+    expect(await stop(true)).toBeNull();
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "turn" });
+    expect(ack).not.toHaveProperty("reply");
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it("through a waiter: handed over unmarked, and acked when the session's turn ends, not when the answer-wait runs out", async () => {
+    await startDaemon();
+    const got = waitForMessage(SESSION, { env });
+    await settle(100);
+    const q = await sendAs("msg-42", "and the docs?");
+    const printed = (await got) as string;
+    expect(printed).toContain(frame("and the docs?", rx.url));
+    expect(printed).not.toContain("msg-42");
+    // The session reads it and answers; which of its words are for this message nobody can say.
+    row(SID, { type: "user", message: { content: [{ type: "tool_result", content: `1\t${printed}` }] } });
+    says(SID, "The docs are updated too.");
+    const t0 = Date.now();
+    expect(await stop(false)).toBeNull();
+    // Was: the final ack only when the answer-wait ran out (half an hour; 20 s here).
+    const ack = await rx.waitAck(q.id, 5000);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "waiter" });
+    expect(ack).not.toHaveProperty("reply");
+    expect(Date.now() - t0).toBeLessThan(3000);
   });
 });

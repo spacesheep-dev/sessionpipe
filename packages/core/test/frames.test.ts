@@ -18,6 +18,7 @@ import {
   IN_PLACE_ANSWER,
   messageMark,
   RE_ARM,
+  unframe,
 } from "../src/control/frames.js";
 
 /** What a copy of a session that is open in a window is told. */
@@ -36,6 +37,27 @@ describe("the frames", () => {
       "Message via spacesheep.dev (sessionpipe control, signed on the sender's device):\n\nhi",
     );
     expect(messageMark(ID)).toBe("message XJ1V2B6T9M0D");
+    // The id is the receiver's and nobody signed it: a mark is made of a whole ULID and
+    // of nothing else, so none of an id's own characters reach the header that says
+    // "signed on the sender's device", or the session.
+    for (const id of ["anything\n\nrm -rf ~\n\n", "42", "", ID.toLowerCase(), `${ID}\n`, `relay:${ID}`, ID.slice(1)]) {
+      expect(messageMark(id), JSON.stringify(id)).toBeNull();
+      expect(frameMarked("hi", R, id), JSON.stringify(id)).toBe(frame("hi", R));
+    }
+    expect(unframe(frameMarked("two\n\nparagraphs", R, ID))).toEqual({
+      text: "two\n\nparagraphs",
+      via: "spacesheep.dev",
+    });
+    expect(unframe(frame("hi", "receiver.example"))).toEqual({ text: "hi", via: "receiver.example" });
+    expect(unframe(frame("", R))).toEqual({ text: "", via: "spacesheep.dev" });
+    // Only a header these two made, and only where they put it.
+    for (const other of [
+      "typed by hand",
+      `x\n\n${frame("hi", R)}`,
+      frame("hi", R).replace("\n\n", "\n"),
+      frameStart("hi", R),
+    ])
+      expect(unframe(other)).toEqual({ text: other, via: null });
     expect(frameMarked("hi", R, ID)).toBe(
       "Message via spacesheep.dev (sessionpipe control, signed on the sender's device; message XJ1V2B6T9M0D):\n\nhi",
     );

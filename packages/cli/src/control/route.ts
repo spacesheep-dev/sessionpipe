@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The routing rule (spec/CONTROL.md §6): the first delivery mode that fits, top to
 // bottom. Pure, so every branch is a unit test.
-import { acpControl, shortId } from "@sessionpipe/core";
+import { acpControl, isUlid, shortId } from "@sessionpipe/core";
 import { type ControlKind, type CopyWhy, frameHandoff as handoffFrame } from "@sessionpipe/core/control";
 
 // The words around a delivered message have one definition, in core, where the
@@ -16,6 +16,7 @@ export {
   hostOf,
   IN_PLACE_ANSWER,
   messageMark,
+  unframe,
 } from "@sessionpipe/core/control";
 
 export type DeliveryMode = "sdk" | "waiter" | "turn" | "inbox" | "api" | "resume" | "fork";
@@ -218,19 +219,12 @@ export function routeCancel(s: CancelView): CancelRoute {
   return { outcome: "expired", detail: CANCEL.nothing };
 }
 
-/** frame() undone: the person's words, and the host they were sent from. A channel shows
- *  the words as the message and says where they came from beside it. Text that frame()
- *  didn't make comes back whole, from nowhere. */
-export function unframe(text: string): { text: string; via: string | null } {
-  const m = /^Message via (\S+) \(sessionpipe control, signed on the sender's device\):\n\n/.exec(text);
-  return m ? { text: text.slice(m[0].length), via: m[1] as string } : { text, via: null };
-}
-
 /** What the daemon looks for in the row a session's transcript records for a channel's
  *  message (§8), as core's `messageMark` is for the other in-place lanes: `sessionpipe
  *  channel` names the message's id on its `<channel>` tag, and Claude Code writes the tag
- *  into the row of the turn it causes. */
-export const channelMark = (id: string): string => `message_id="${id}"`;
+ *  into the row of the turn it causes. Null, as there, for an id that is not a whole
+ *  ULID: such a message is not handed to a channel at all. */
+export const channelMark = (id: string): string | null => (isUlid(id) ? `message_id="${id}"` : null);
 
 /** A handoff's answer as it lands in `reply_to` (CONTROL.md §6): who answered, in the
  *  short form the receivers label sessions by, and which receiver the person asked through. */

@@ -66,9 +66,10 @@ describe("firstAsk: which message the turn that just began is for", () => {
     );
   });
 
-  it("is never `ours` on a mark that is not the whole of one", () => {
+  it("is never `ours` on a mark that is not the whole of one, or with no mark at all", () => {
     const short = "message 42";
     expect(firstAsk(file, after(peerRow({}, `… ${short} …`)), short)).toBe("other");
+    expect(firstAsk(file, after(peerRow({}, "… null …")), null)).toBe("other");
     expect(
       firstAsk(
         file,
@@ -80,7 +81,7 @@ describe("firstAsk: which message the turn that just began is for", () => {
             message: { content: '<channel message_id="7">\nhi\n</channel>' },
           }),
         ),
-        channelMark("7"),
+        'message_id="7"',
       ),
     ).toBe("other");
   });
@@ -147,7 +148,7 @@ describe("ranInMode: what the turn a relaunch ran actually ran in", () => {
 const MARK = "message 01K6ABCDEF12";
 /** The row a session's transcript records for a message handed to it at a Stop
  *  (Claude Code 2.1.322): the hook's words, as a meta `user` row. */
-const taken = (mark = MARK) =>
+const taken = (mark: string | null = MARK) =>
   rec({ type: "user", isMeta: true, message: { content: `Stop hook feedback:\nMessage via x (…; ${mark}):\n\nhi` } });
 const says = (text: string, extra: Record<string, unknown> = {}) => asst("end_turn", [{ type: "text", text }], extra);
 
@@ -210,12 +211,11 @@ describe("answerIn: which words are the answer to one message", () => {
     // The mark is made from the receiver's id for the message, which nobody signed. One
     // that is not a ULID's tail ("42") would be found in words anybody typed.
     const typed = rec({ type: "user", origin: { kind: "human" }, message: { content: "send message 42 times" } });
-    expect(answerIn([typed, says("their answer")], messageMark("42"))).toEqual({
-      done: false,
-      text: "",
-      anchored: false,
-    });
-    expect(messageMark("42")).toBe("message 42");
+    // The builders make no mark of such an id; the reader would not take one if they did.
+    expect(messageMark("42")).toBeNull();
+    expect(channelMark("7")).toBeNull();
+    for (const mark of [null, "message 42"])
+      expect(answerIn([typed, says("their answer")], mark)).toEqual({ done: false, text: "", anchored: false });
     const peer = rec({
       type: "user",
       isMeta: true,
@@ -231,7 +231,7 @@ describe("answerIn: which words are the answer to one message", () => {
         origin: { kind: "channel" },
         message: { content: `<channel message_id="${id}">\nhi\n</channel>` },
       });
-    expect(answerIn([chan("7"), says("x")], channelMark("7")).anchored).toBe(false);
+    expect(answerIn([chan("7"), says("x")], 'message_id="7"').anchored).toBe(false);
     const whole = "01K6ABCDEF1234567890ABCDEF";
     expect(answerIn([chan(whole), says("x")], channelMark(whole))).toEqual({ done: true, text: "x", anchored: true });
     expect(answerIn([taken(messageMark(whole)), says("y")], messageMark(whole))).toEqual({
@@ -499,6 +499,20 @@ describe("follow: the answer as the transcript gains it", () => {
     add(f, asst("tool_use", [{ type: "text", text: "WAITED" }]));
     ff.turnEnded();
     expect(await ff.answer).toBe("WAITED");
+  });
+  it("a message with no mark has no row to wait for: the next end of a turn settles it, with no answer", async () => {
+    // Its id was not one a mark is made of, so it was handed over unmarked. Left to
+    // `marked`, it was acked when the answer-wait ran out: half an hour.
+    for (const mark of [null, "message 42"]) {
+      const f = fresh();
+      const ff = follow(f, 0, { ...opts, mark, end: "marked", timeoutMs: 5000 });
+      add(f, rec({ type: "user", message: { content: [{ type: "tool_result", content: "1\tMessage via x (…):" }] } }));
+      add(f, says("whatever the session wrote: none of it can be put down to this message"));
+      const t0 = Date.now();
+      ff.turnEnded();
+      expect(await ff.answer).toBeNull();
+      expect(Date.now() - t0).toBeLessThan(1000);
+    }
   });
   it("a transcript rewritten, removed, unreadable or no longer a file gives no answer", async () => {
     const f = fresh(`${taken()}\n${says("x")}\n`);

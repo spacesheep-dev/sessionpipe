@@ -23,13 +23,16 @@ export function transcriptEnd(file: string): number {
   }
 }
 
-/** A mark the daemon may recognise a message by: the whole of one, as route.ts makes
- *  them from a ULID — `message` and the id's last twelve characters, or a channel tag's
- *  `message_id` with all twenty-six. The id is the receiver's and nobody signed it, so
- *  what it is made of is not taken on trust: a mark made from a shorter one ("message
- *  42") would be found in words anybody typed, and is treated as no mark at all — nothing
- *  is proven by it and no answer is put down to it. */
+/** A mark the daemon may recognise a message by: the whole of one, as core's
+ *  `messageMark` and route.ts's `channelMark` make them from a ULID — `message` and the
+ *  id's last twelve characters, or a channel tag's `message_id` with all twenty-six. The
+ *  id is the receiver's and nobody signed it, so a mark is made only from a whole ULID
+ *  (the builders answer null for anything else) and is checked again here, where it is
+ *  read: a mark made from a shorter id ("message 42") would be found in words anybody
+ *  typed. No mark, or one that is not whole, proves nothing and no answer is put down to
+ *  it. */
 const WHOLE_MARK = /^(?:message [0-9A-HJKMNP-TV-Z]{12}|message_id="[0-9A-HJKMNP-TV-Z]{26}")$/;
+const whole = (mark: string | null): mark is string => mark !== null && WHOLE_MARK.test(mark);
 
 /** Who asked for the first turn the transcript gained after a delivery: `ours` — the
  *  message this daemon handed the session in place, recognised by its own mark in the row
@@ -43,7 +46,7 @@ const WHOLE_MARK = /^(?:message [0-9A-HJKMNP-TV-Z]{12}|message_id="[0-9A-HJKMNP-
  *  from the person's: confirming on it alone acked a delivery that was really a hold,
  *  and then sent the answer to THEIR prompt back to the receiver as the answer to this
  *  message. */
-export function firstAsk(file: string, from: number, mark: string): "ours" | "other" | null {
+export function firstAsk(file: string, from: number, mark: string | null): "ours" | "other" | null {
   const size = transcriptEnd(file);
   if (size <= from) return null;
   let text: string;
@@ -72,7 +75,7 @@ export function firstAsk(file: string, from: number, mark: string): "ours" | "ot
     const c = (j.message as { content?: unknown } | undefined)?.content;
     const origin = j.origin as { kind?: unknown; body?: unknown } | undefined;
     const said = `${typeof origin?.body === "string" ? origin.body : ""}\n${rowText(c)}`;
-    return (origin?.kind === "peer" || origin?.kind === "channel") && WHOLE_MARK.test(mark) && said.includes(mark)
+    return (origin?.kind === "peer" || origin?.kind === "channel") && whole(mark) && said.includes(mark)
       ? "ours"
       : "other";
   }
@@ -187,11 +190,17 @@ export class Answer {
   /** When the session's hooks said the turn ended (epoch ms), once they have. */
   until: number | null = null;
 
-  /** A mark that is not the whole of one anchors nothing (`WHOLE_MARK`). */
-  private readonly usable: boolean;
+  /** The mark, where there is a whole one (`WHOLE_MARK`): nothing else anchors anything. */
+  private readonly mark: string | null;
 
-  constructor(private readonly mark: string) {
-    this.usable = WHOLE_MARK.test(mark);
+  constructor(mark: string | null) {
+    this.mark = whole(mark) ? mark : null;
+  }
+
+  /** There is a mark to find the message's row by. Without one no row is ever its row,
+   *  and no text is ever put down to it. */
+  get usable(): boolean {
+    return this.mark !== null;
   }
 
   get text(): string {
@@ -207,14 +216,16 @@ export class Answer {
       return;
     }
     if (!j || typeof j !== "object") return;
+    const mark = this.mark;
+    if (mark === null) return;
     if (!this.anchored) {
       // Never an assistant row: the model quoting the mark is not the session taking it.
-      if (this.usable && j.type !== "assistant" && !j.isSidechain && carries(j, this.mark)) this.anchored = true;
+      if (j.type !== "assistant" && !j.isSidechain && carries(j, mark)) this.anchored = true;
       return;
     }
     if (j.type !== "assistant" || j.isSidechain) {
       // Another row of the same hand-over is not the end of its answer.
-      if (!j.isSidechain && carries(j, this.mark)) return;
+      if (!j.isSidechain && carries(j, mark)) return;
       if (this.textless || nextAsk(j)) this.done = true;
       return;
     }
@@ -238,7 +249,7 @@ export class Answer {
 }
 
 /** `Answer` over rows already in hand. */
-export function answerIn(lines: string[], mark: string): { done: boolean; text: string; anchored: boolean } {
+export function answerIn(lines: string[], mark: string | null): { done: boolean; text: string; anchored: boolean } {
   const a = new Answer(mark);
   for (const line of lines) a.feed(line);
   return { done: a.done, text: a.text, anchored: a.anchored };
@@ -250,13 +261,17 @@ const GRACE_MS = 2000;
 const GRACE_POLL_MS = 100;
 
 export interface FollowOptions {
-  /** What the row that carries this message says (route.ts `messageMark`, `channelMark`). */
-  mark: string;
+  /** What the row that carries this message says (core's `messageMark`, route.ts
+   *  `channelMark`), or null: the message has no mark (its id is not one a mark is made
+   *  of), so no row can be found for it and nothing the session writes is its answer. */
+  mark: string | null;
   /** Which end of a turn, reported by the session's own hooks, is the end of this
    *  message's: `next` — the message was handed over AS a turn ended and continued it (a
    *  Stop block), so the next end is its own, whether or not its row was ever found;
    *  `marked` — only an end that comes once the row carrying the mark has been written (a
-   *  waiter's message can land while another turn is still running). */
+   *  waiter's message can land while another turn is still running). A message with no
+   *  mark has no such row to wait for: the next end settles it, with no answer, rather
+   *  than leaving its ack to the limit. */
   end: "next" | "marked";
   timeoutMs: number;
   graceMs?: number;
@@ -347,7 +362,7 @@ export function follow(file: string, from: number, o: FollowOptions): Following 
       if (overAt !== null) return;
       drain();
       // A turn that ended before the session took this message was not this message's.
-      if (o.end === "marked" && !a.anchored) return;
+      if (o.end === "marked" && a.usable && !a.anchored) return;
       overAt = now();
       a.until = overAt;
       wake();
