@@ -135,8 +135,16 @@ export interface RunOptions {
 /** Run one headless turn in its own process group, stdin closed (Codex waits on an open
  *  one), holding at most 1 MB of stdout. The run ends by itself, at its cap, or when the
  *  caller stops it: the last two the same way, SIGTERM to the child's own process group
- *  (the harness and the tools it started) and SIGKILL ten seconds later to whatever is
- *  left. Only ever the child this call spawned: no other process is signalled. */
+ *  (the harness and the tools it started), then SIGKILL to whatever is left — ten
+ *  seconds later while the child lives, or the moment the child exits, whichever comes
+ *  first.
+ *
+ *  Only ever the child this call spawned, and only while that is certain. The group is
+ *  named by the child's pid, and once the child has exited and its group has emptied
+ *  the number is the kernel's to hand out again: so the last signal goes out as the
+ *  child exits, when the group can only be its own, and nothing is sent to that number
+ *  after — no timer left running, no Stop and no cap that arrives while the result waits
+ *  on a tool still holding stdout. */
 export function runHeadless(bin: string, args: string[], o: RunOptions): Promise<RunResult> {
   return new Promise((resolve) => {
     let out: Buffer[] = [];
@@ -211,15 +219,26 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
     child.stderr?.on("data", (b: Buffer) => {
       errTail = (errTail + b.toString("utf8")).slice(-4000);
     });
+    /** The SIGKILL that follows the SIGTERM, while it is still to come. */
+    let ending: NodeJS.Timeout | null = null;
+    /** The child has exited: its pid, and the group it named, are no longer this run's. */
+    let gone = false;
     const end = () => {
       kill("SIGTERM");
-      setTimeout(() => kill("SIGKILL"), 10_000).unref();
+      // Asked to end twice (its cap, then a Stop): still one SIGKILL, ten seconds after the first.
+      ending ??= setTimeout(() => {
+        ending = null;
+        kill("SIGKILL");
+      }, 10_000);
+      ending.unref();
     };
     const timer = setTimeout(() => {
+      if (gone) return;
       timedOut = true;
       end();
     }, o.timeoutMs ?? JOB_TIMEOUT_MS);
     const stop = () => {
+      if (gone) return;
       stopped = true;
       end();
     };
@@ -241,8 +260,18 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
       resolve(r);
     };
     child.on("error", (e) => finish({ error: e.message }));
-    // A tool the agent left running can hold stdout open after the harness exits.
-    child.on("exit", (code, signal) => setTimeout(() => finish(result(code, signal)), 2000).unref());
+    child.on("exit", (code, signal) => {
+      // It was being ended and has gone: what it left in its group (a tool that ignores
+      // SIGTERM) is ended now, once, and the ten-second timer with it.
+      if (ending) {
+        clearTimeout(ending);
+        ending = null;
+        kill("SIGKILL");
+      }
+      gone = true;
+      // A tool the agent left running can hold stdout open after the harness exits.
+      setTimeout(() => finish(result(code, signal)), 2000).unref();
+    });
     child.on("close", (code, signal) => {
       // The last line may end without a newline: it is often the result itself.
       if (o.onLine && partial.trim()) {

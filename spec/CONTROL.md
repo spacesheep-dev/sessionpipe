@@ -745,8 +745,9 @@ Stops the current turn where the machine has a way of its own to stop it:
 - **A turn the daemon is running as its own child process** (a `resume`, a `fork`, a
   headless `start`): the daemon ends the child it spawned, the way it ends one at the
   30-minute cap — SIGTERM to the child's own process group (the harness and the tools it
-  started), SIGKILL ten seconds later to whatever is left; on Windows the child is
-  killed. The cancel is acked `taken`, then `delivered` once that process is gone, with
+  started), then SIGKILL to whatever is left, ten seconds later or as the child exits,
+  whichever is first; on Windows the child is killed. Once the child has exited nothing
+  more is sent to that group: its number is no longer certain to be the daemon's own. The cancel is acked `taken`, then `delivered` once that process is gone, with
   the mode the turn was running in (`resume` or `fork`). The turn's own message still
   gets its one final ack: `delivered`, its `reply` what the turn had written, ending
   `(The turn was cancelled.)` as an ACP agent's cancelled turn does; a `fork` stopped
