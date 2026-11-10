@@ -254,6 +254,10 @@ const PARKED_ACK = {
   code: "parked",
   detail: "another message for that session is still waiting for it to answer; send this one again in a moment",
 };
+/** A start whose Stop came before its process began (CONTROL.md §6 `cancel`): nothing
+ *  was started, so it is not called delivered, and a receiver that shows a new session
+ *  as working until it hears otherwise hears it here. */
+const UNSTARTED_ACK = { outcome: "failed" as const, code: "cancelled", detail: CANCEL.unstarted };
 /** A channel took the message and the session began no turn for it (CONTROL.md §8). */
 const CHANNEL_HELD_ACK = {
   outcome: "failed" as const,
@@ -474,18 +478,35 @@ export class DaemonRunning extends Error {
   }
 }
 
-/** A headless turn the daemon runs as a child process of its own. */
+/** A turn the daemon has in hand as its own: from the moment its message's turn comes,
+ *  through everything that has to happen before it can start (the wait for its session's
+ *  start, a login check, its files, a free slot), to the end of the child process it
+ *  runs as. A `cancel` stops it at any of those points (CONTROL.md §6 `cancel`); it is let
+ *  go of when its message is handed to a live session instead, which is not the
+ *  daemon's to stop. */
 interface OwnRun {
-  /** Aborted: the child is ended (core's runHeadless), or never started if it was
-   *  still waiting for a slot. */
+  /** Aborted: whatever it is waiting on is given up and it never starts, or the child
+   *  it runs as is ended (core's runHeadless). */
   ctl: AbortController;
   /** The message the turn is for. */
   id: string;
-  /** How that message is acked: what a `cancel` that stops it says it stopped. */
-  mode: "resume" | "fork";
-  /** Settles when the run is over: true when it was stopped, false when it ended by itself. */
+  /** The session it is a turn of, by the id a `cancel` names. */
+  session: string;
+  /** How that message is acked, once it is known which way it goes: what a `cancel`
+   *  that stops it says it stopped. */
+  mode: "resume" | "fork" | null;
+  /** The child process was started. */
+  began: boolean;
+  /** The stop is what ended it. */
+  stopped: boolean;
+  /** Resolves when it is stopped, for whatever is waiting on something else meanwhile. */
+  stoppedSoon: Promise<typeof STOPPED>;
+  /** Settles when it is over or handed on: true when it was stopped, false otherwise. */
   done: Promise<boolean>;
+  settle: (stopped: boolean) => void;
 }
+/** What `orStopped` answers when the stop came first. */
+const STOPPED = Symbol("stopped");
 
 interface TurnPending {
   receiver: Caller;
@@ -632,12 +653,11 @@ export class ControlDaemon {
    *  set two agents on one task (2026-10-02: a "just merge when ready" sent while the
    *  start still ran forked a second agent that raced the first toward main). */
   private readonly ownRuns = new Map<string, number>();
-  /** The headless turn the daemon is running right now as its own child process, by the
-   *  session its command named (one at a time per session, `serial`): what a `cancel`
-   *  for that session ends (CONTROL.md §6 `cancel`). `done` says whether the stop is what
-   *  ended it. A message waiting behind the run is not in here, so a Stop never takes it
-   *  with it. */
-  private readonly runs = new Map<string, OwnRun>();
+  /** The turns the daemon has in hand as its own, in the order it took them (`OwnRun`):
+   *  what a `cancel` ends is the first of them for the session it names — a start that is
+   *  running, not the message that waits for it. A message still waiting in its session's
+   *  line is not in here, so a Stop never takes it with it. */
+  private readonly runs: OwnRun[] = [];
   private startsRunning = 0;
   private startTimes: number[] = [];
   private procs = 0;
@@ -1527,43 +1547,50 @@ export class ControlDaemon {
     if (typeof kp === "object") return this.finish(r, m.id, { outcome: "unsupported", detail: kp.unsupported });
     try {
       if (kp === "start") return await this.startSession(r, m.id, cmd, sent);
-      // A Stop for a turn the daemon is running right now: that run was placed when it
-      // began, and a start's session may have no transcript to place yet.
-      if (kp === "cancel" && this.runs.has(ref.id)) return await this.cancel(r, m.id, cmd, sent);
+      // A Stop for a turn the daemon has in hand: that turn was placed when it was taken,
+      // and a start's session may have no transcript to place yet.
+      if (kp === "cancel" && this.runFor(ref.id)) return await this.cancel(r, m.id, cmd, sent);
       const place = this.place(cmd.session);
       // A session the daemon is still starting may have no transcript (or, for Codex and
-      // Antigravity, no name) yet: wait for that start, then place it again.
+      // Antigravity, no name) yet: wait for that start, then place it again. Never a Stop:
+      // one that waited for the start to end would find nothing left to stop.
       const starting = kp === "prompt" ? this.startsPending.get(cmd.session) : undefined;
-      const forStart = "refused" in place && (!!starting || this.ownRuns.has(ref.id));
+      const forStart = kp !== "cancel" && "refused" in place && (!!starting || this.ownRuns.has(ref.id));
       // No such session, and no start of it to wait for: said now, not when its turn comes.
       if ("refused" in place && !forStart) return this.finish(r, m.id, refusal(place));
       if (forStart) this.finish(r, m.id, { outcome: "taken" });
+      const deliver = async (run: OwnRun | null): Promise<void> => {
+        // The wait for the session's start is part of a prompt's turn: a message that came
+        // after it, when the start's transcript was already there, stays behind it.
+        if (forStart) {
+          await starting;
+          await this.serial(ref.id, async () => {});
+        }
+        // Read again: the start has ended, or the message before this one may have moved
+        // the session (a fork).
+        const now = this.place(cmd.session);
+        if ("refused" in now) return this.finish(r, m.id, refusal(now));
+        if (kp === "permission") return this.permission(r, m.id, cmd, sent);
+        if (kp === "cancel") return await this.cancel(r, m.id, cmd, sent);
+        // A prompt's files are on disk, and listed in its text, before any mode hands it over.
+        if (cmd.files) {
+          this.finish(r, m.id, { outcome: "taken" });
+          const text = await this.orStopped(run as OwnRun, this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce));
+          if (text === STOPPED) return this.finish(r, m.id, this.stoppedAck(null), sent);
+          if (text === null) return;
+          return await this.prompt(r, m.id, { ...cmd, text }, now, sent);
+        }
+        return await this.prompt(r, m.id, cmd, now, sent);
+      };
+      // A permission answer and a Stop are not in the session's line: they act now.
+      if (kp !== "prompt") return await deliver(null);
       // One session's prompts one at a time, in the order they were sent, each routed
       // only once the one before it has landed (a second message to a session the first
       // one forked goes to the copy). Other sessions don't wait. Its place in that line
       // was taken when it arrived (handle()): a verified prompt is one promptNamed() read.
-      // A permission answer and a Stop are not in line: they act now.
-      if (kp === "prompt") await (turn as Turn).ready;
-      // The wait for the session's start is part of a prompt's turn: a message that came
-      // after it, when the start's transcript was already there, stays behind it.
-      if (forStart) {
-        await starting;
-        await this.serial(ref.id, async () => {});
-      }
-      // Read again: the start has ended, or the message before this one may have moved
-      // the session (a fork).
-      const now = this.place(cmd.session);
-      if ("refused" in now) return this.finish(r, m.id, refusal(now));
-      if (kp === "permission") return this.permission(r, m.id, cmd, sent);
-      if (kp === "cancel") return await this.cancel(r, m.id, cmd, sent);
-      // A prompt's files are on disk, and listed in its text, before any mode hands it over.
-      if (cmd.files) {
-        this.finish(r, m.id, { outcome: "taken" });
-        const text = await this.attached(r, m.id, cmd, ref, now.folder, cmd.nonce);
-        if (text === null) return;
-        return await this.prompt(r, m.id, { ...cmd, text }, now, sent);
-      }
-      return await this.prompt(r, m.id, cmd, now, sent);
+      await (turn as Turn).ready;
+      // Its turn: in hand from here, and a Stop for its session stops it wherever it is.
+      return await this.inHand(m.id, ref.id, deliver);
     } catch (e) {
       this.finish(r, m.id, { outcome: "failed", detail: String((e as Error)?.message || e) });
     }
@@ -1963,7 +1990,7 @@ export class ControlDaemon {
   private async cancel(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const ref = parseSessionRef(cmd.session)!;
     const held = this.sdkSessions.get(ref.id);
-    const run = this.runs.get(ref.id);
+    const run = this.runFor(ref.id);
     // The session and, for Claude Code, the copy its messages go to: either may be the
     // one a process holds.
     const ids =
@@ -1991,17 +2018,71 @@ export class ControlDaemon {
     // receiver must not hand the Stop back meanwhile.
     this.finish(r, id, { outcome: "taken" });
     this.deps.log(
-      `${id.slice(-8)}: stopping ${mine.id.slice(-8)}, the turn this daemon is running for ${cmd.session.slice(0, 24)}`,
+      `${id.slice(-8)}: stopping ${mine.id.slice(-8)}, the turn this daemon ${mine.began ? "is running" : "was about to run"} for ${cmd.session.slice(0, 24)}`,
     );
     mine.ctl.abort();
     this.finish(
       r,
       id,
       (await mine.done)
-        ? { outcome: "delivered", mode: mine.mode, detail: CANCEL.stopped }
+        ? { outcome: "delivered", ...(mine.mode ? { mode: mine.mode } : {}), detail: CANCEL.stopped }
         : { outcome: "expired", detail: CANCEL.finished },
       sent,
     );
+  }
+
+  /** The turn a `cancel` for this session ends: the first the daemon took in hand for it. */
+  private runFor(session: string): OwnRun | undefined {
+    return this.runs.find((x) => x.session === session);
+  }
+
+  /** The turn in hand for this message. Every path that delivers one took it in hand
+   *  first (`inHand`), so there is one. */
+  private runOf(id: string): OwnRun {
+    return this.runs.find((x) => x.id === id) as OwnRun;
+  }
+
+  /** Take a message's turn in hand for as long as `work` lasts: a Stop for its session
+   *  stops it from now on, whatever it is doing. */
+  private async inHand(id: string, session: string, work: (run: OwnRun) => Promise<void>): Promise<void> {
+    const ctl = new AbortController();
+    let settle!: (stopped: boolean) => void;
+    const done = new Promise<boolean>((res) => {
+      settle = res;
+    });
+    const stoppedSoon = new Promise<typeof STOPPED>((res) => {
+      ctl.signal.addEventListener("abort", () => res(STOPPED));
+    });
+    const run: OwnRun = { ctl, id, session, mode: null, began: false, stopped: false, stoppedSoon, done, settle };
+    this.runs.push(run);
+    try {
+      await work(run);
+    } finally {
+      this.letGo(run);
+    }
+  }
+
+  /** The turn is over, or its message went to a live session, which is not the daemon's
+   *  to stop: a Stop no longer finds it. Doing it again does nothing. */
+  private letGo(run: OwnRun): void {
+    const i = this.runs.indexOf(run);
+    if (i < 0) return;
+    this.runs.splice(i, 1);
+    run.settle(run.stopped);
+  }
+
+  /** `p`, unless the turn is stopped first: then `STOPPED` at once, whatever `p` is still
+   *  doing (a login check, a download), and the turn is recorded as stopped. */
+  private async orStopped<T>(run: OwnRun, p: Promise<T>): Promise<T | typeof STOPPED> {
+    const v = await Promise.race([p, run.stoppedSoon]);
+    if (v === STOPPED) run.stopped = true;
+    return v;
+  }
+
+  /** The final ack of a message whose turn was stopped (CONTROL.md §6 `cancel`): what it
+   *  had written, if it ever ran, and that it was cancelled. */
+  private stoppedAck(mode: "resume" | "fork" | null, soFar = ""): Omit<Ack, "receiver" | "id" | "at"> {
+    return { outcome: "delivered", ...(mode ? { mode } : {}), reply: this.stoppedReply(soFar) };
   }
 
   /** The session's own hooks say a turn is running, and said something in the last ten
@@ -2011,44 +2092,22 @@ export class ControlDaemon {
   }
 
   /** One headless turn as a child process of the daemon's own: in a slot, and stoppable
-   *  from the moment it is asked for (CONTROL.md §6 `cancel`), so a Stop that arrives
-   *  while it still waits for its slot means it never starts. */
-  private async ownRun(
-    session: string,
-    msgId: string,
-    mode: "resume" | "fork",
-    bin: string,
-    args: string[],
-    o: RunOptions,
-  ): Promise<RunResult> {
-    const ctl = new AbortController();
-    let stopped = false;
-    let settle!: (v: boolean) => void;
-    const done = new Promise<boolean>((res) => {
-      settle = res;
+   *  while it waits for one (CONTROL.md §6 `cancel`), so a Stop that arrives before its
+   *  slot does means it never starts. */
+  private async ownRun(run: OwnRun, bin: string, args: string[], o: RunOptions): Promise<RunResult> {
+    const slotted = this.slot<RunResult>(async () => {
+      if (run.ctl.signal.aborted) return { stopped: true };
+      run.began = true;
+      return this.deps.run(bin, args, { ...o, signal: run.ctl.signal });
     });
-    this.runs.set(session, { ctl, id: msgId, mode, done });
-    try {
-      let began = false;
-      // Stopped while it waits: it is over now, not when a slot comes free, which could
-      // be half an hour away. The slot, when its turn comes, is given straight back.
-      const unbegun = new Promise<RunResult>((res) => {
-        ctl.signal.addEventListener("abort", () => {
-          if (!began) res({ stopped: true });
-        });
-      });
-      const run = this.slot<RunResult>(async () => {
-        if (ctl.signal.aborted) return { stopped: true };
-        began = true;
-        return this.deps.run(bin, args, { ...o, signal: ctl.signal });
-      });
-      const res = await Promise.race([run, unbegun]);
-      stopped = !!res.stopped;
-      return res;
-    } finally {
-      this.runs.delete(session);
-      settle(stopped);
-    }
+    // Stopped while it waits: it is over now, not when a slot comes free, which could be
+    // half an hour away. The slot, when its turn comes, is given straight back.
+    const res = await Promise.race([
+      slotted,
+      run.stoppedSoon.then((): RunResult | Promise<RunResult> => (run.began ? slotted : { stopped: true })),
+    ]);
+    run.stopped = !!res.stopped;
+    return res;
   }
 
   /** What a turn the person stopped answers with (CONTROL.md §6 `cancel`): the words it
@@ -2382,6 +2441,8 @@ export class ControlDaemon {
         const started = channel === null ? null : this.awaitPrompted(cmd.session, inbox.CONFIRM_MS);
         /* v8 ignore next -- one in-place delivery per session at a time (`serial`); this is the backstop */
         if (channel !== null && !started) return this.finish(r, id, PARKED_ACK);
+        // Handed to the live session from here: no longer a turn of the daemon's own.
+        this.letGo(this.runOf(id));
         l.waiter = null;
         l.channel = null;
         const from = this.answerFrom(cmd.session);
@@ -2410,6 +2471,7 @@ export class ControlDaemon {
       case "turn": {
         const l = this.liveOf(cmd.session);
         const p: TurnPending = { receiver: r, msgId: id, text, session: cmd.session, queuedAt: sent, iat: cmd.iat };
+        this.letGo(this.runOf(id));
         l.turnQueue.push(p);
         // In the order they were sent, whenever each got here: a later poll can bring a
         // message signed before one that is already waiting for this session's Stop.
@@ -2427,6 +2489,8 @@ export class ControlDaemon {
       }
       case "sdk": {
         const s = this.sdkSessions.get(ref.id)!;
+        // A session the daemon holds: a Stop is its own interrupt, not the end of a run.
+        this.letGo(this.runOf(id));
         this.finish(r, id, { outcome: "taken" });
         const out = await this.sendHeld(ref.id, s, this.framed(r, text, false));
         return this.finish(
@@ -2477,6 +2541,7 @@ export class ControlDaemon {
           return this.prompt(r, id, cmd, place, sent, { noInbox: true });
         }
         this.deps.log(`${id.slice(-8)}: into ${key.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
+        this.letGo(this.runOf(id));
         this.park(key, id);
         if (!(await this.tookIt(started, key, from, messageMark(id))))
           // The bytes went out, and they are not sent again on any lane: the session may
@@ -2536,7 +2601,9 @@ export class ControlDaemon {
       const cmd = { kind: "prompt", session: p.session, text: p.text, iat: p.iat } as ControlCommand;
       this.inflight.delete(p.msgId);
       this.inflight.add(p.msgId);
-      await this.prompt(p.receiver, p.msgId, cmd, place, p.queuedAt).catch((e) =>
+      await this.inHand(p.msgId, parseSessionRef(p.session)!.id, () =>
+        this.prompt(p.receiver, p.msgId, cmd, place, p.queuedAt),
+      ).catch((e) =>
         this.finish(p.receiver, p.msgId, { outcome: "failed", detail: String((e as Error)?.message || e) }),
       );
     });
@@ -2603,7 +2670,10 @@ export class ControlDaemon {
   private async resumeDriven(r: Caller, id: string, cmd: ControlCommand, place: Placed, sent: number) {
     const ref = parseSessionRef(cmd.session)!;
     const drv = this.driver(ref.harness)!;
-    const ready = await this.drivenProblem(drv);
+    const run = this.runOf(id);
+    run.mode = "resume";
+    const ready = await this.orStopped(run, this.drivenProblem(drv));
+    if (ready === STOPPED) return this.finish(r, id, this.stoppedAck("resume"), sent);
     if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
@@ -2671,8 +2741,9 @@ export class ControlDaemon {
       if (reading.feed(l)) stream.set(reading.text);
       name();
     };
+    const run = this.runOf(id);
     const res = await this.owning(ref.id, () =>
-      this.ownRun(ref.id, id, "resume", bin, args, {
+      this.ownRun(run, bin, args, {
         cwd,
         env: { ...jobEnv(this.deps.env), ...extra },
         timeoutMs: JOB_TIMEOUT_MS,
@@ -2686,6 +2757,8 @@ export class ControlDaemon {
     this.lastEnd.set(ref.id, this.deps.now());
     if (reading.warnings?.length)
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} warned: ${reading.warnings.join(" · ").slice(0, 400)}`);
+    // A start stopped before its process began started nothing.
+    if (!asked && res.stopped && !run.began) return this.finish(r, id, UNSTARTED_ACK, sent);
     // Stopped on the person's request: what it had said, and that it was cancelled.
     const out = res.stopped ? { reply: this.stoppedReply(reading.text) } : reading.outcome(res);
     if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
@@ -2717,7 +2790,11 @@ export class ControlDaemon {
     why?: { held: Holder; inPlace?: string },
   ): Promise<void> {
     const harness = parseSessionRef(cmd.session)?.harness;
-    if (acpControl.acpAgent(harness as string)) return this.resumeAcp(r, id, cmd, place, sent);
+    if (acpControl.acpAgent(harness as string)) {
+      // An agent the daemon holds once it is open: a Stop is its `session/cancel`.
+      this.letGo(this.runOf(id));
+      return this.resumeAcp(r, id, cmd, place, sent);
+    }
     if (harness !== "claude-code") return this.resumeDriven(r, id, cmd, place, sent);
     const claude = this.deps.claude();
     if (!claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
@@ -2729,7 +2806,11 @@ export class ControlDaemon {
     const o = this.capped(this.laterOptions("claude-code", recorded), cmd);
     const mf = claudeControl.modeFlags(o.permission, claude.caps);
     if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
-    const signedOut = await this.loginProblem(dir);
+    const run = this.runOf(id);
+    run.mode = mode;
+    // The login check can take seconds: a Stop meanwhile means the turn never starts.
+    const signedOut = await this.orStopped(run, this.loginProblem(dir));
+    if (signedOut === STOPPED) return this.finish(r, id, this.stoppedAck(mode), sent);
     if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
     if (mode === "fork") {
       const refusal = this.copyLimit();
@@ -2772,7 +2853,7 @@ export class ControlDaemon {
       // result line is still a copy on disk, and later messages must find it.
       const said: { session: string | null } = { session: null };
       const res = await this.owning(target, () =>
-        this.ownRun(ref.id, id, mode, claude.bin, args, {
+        this.ownRun(run, claude.bin, args, {
           cwd: place.folder,
           env: {
             ...claudeEnv(dir, this.deps.env),
@@ -3138,68 +3219,78 @@ export class ControlDaemon {
       });
     const claude = this.deps.sdk ? null : this.deps.claude();
     if (!this.deps.sdk && !claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
-    const signedOut = await this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR);
-    if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
-    // The flags this level needs, checked once more before anything is taken: a run with
-    // no permission flag at all is never the fallback (#152).
-    if (claude) {
-      const mf = claudeControl.modeFlags(o.permission, claude.caps);
-      /* v8 ignore next 2 -- startChoice() offered this level from these same caps */
-      if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
-    }
-    this.recordStart(ref.id, o);
-    this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-    const text = await this.attached(r, id, cmd, ref, cwd);
-    if (text === null) return;
-    if (this.deps.sdk) {
-      const sdk = this.deps.sdk;
-      const extra = this.childEnv(r, cmd);
-      const out = await this.slot(async () => {
-        const s = sdk.start({
-          session: ref.id,
-          cwd,
-          permission: o.permission,
-          ...(o.model ? { model: o.model } : {}),
-          allowedTools: this.allowedFor(r),
-          ...(Object.keys(extra).length ? { env: extra } : {}),
+    // In hand from here: a Stop for the new session stops its start, wherever it has got to.
+    return this.inHand(id, ref.id, async (run) => {
+      run.mode = "resume";
+      const signedOut = await this.orStopped(run, this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR));
+      if (signedOut === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if (signedOut) return this.finish(r, id, { outcome: "failed", detail: signedOut });
+      // The flags this level needs, checked once more before anything is taken: a run with
+      // no permission flag at all is never the fallback (#152).
+      if (claude) {
+        const mf = claudeControl.modeFlags(o.permission, claude.caps);
+        /* v8 ignore next 2 -- startChoice() offered this level from these same caps */
+        if ("error" in mf) return this.finish(r, id, { outcome: "refused", code: "permission", detail: mf.error });
+      }
+      this.recordStart(ref.id, o);
+      this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
+      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd));
+      if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if (text === null) return;
+      if (this.deps.sdk) {
+        // A session the daemon will hold: from here a Stop is that session's interrupt.
+        this.letGo(run);
+        const sdk = this.deps.sdk;
+        const extra = this.childEnv(r, cmd);
+        const out = await this.slot(async () => {
+          const s = sdk.start({
+            session: ref.id,
+            cwd,
+            permission: o.permission,
+            ...(o.model ? { model: o.model } : {}),
+            allowedTools: this.allowedFor(r),
+            ...(Object.keys(extra).length ? { env: extra } : {}),
+          });
+          this.sdkSessions.set(ref.id, s);
+          return s.send(this.framed(r, text, true));
         });
-        this.sdkSessions.set(ref.id, s);
-        return s.send(this.framed(r, text, true));
+        return this.finish(
+          r,
+          id,
+          out.error
+            ? this.failedRun(out.error, o)
+            : { outcome: "delivered", mode: "sdk", reply: out.reply, applied: this.applied(o) },
+          sent,
+        );
+      }
+      const c = claude!;
+      const built = claudeArgs({
+        caps: c.caps,
+        level: o.permission,
+        prompt: this.framed(r, text, true),
+        session: ref.id,
+        allowedTools: this.allowedFor(r),
+        ...(o.model ? { model: o.model } : {}),
       });
-      return this.finish(
-        r,
-        id,
-        out.error
-          ? this.failedRun(out.error, o)
-          : { outcome: "delivered", mode: "sdk", reply: out.reply, applied: this.applied(o) },
-        sent,
-      );
-    }
-    const c = claude!;
-    const built = claudeArgs({
-      caps: c.caps,
-      level: o.permission,
-      prompt: this.framed(r, text, true),
-      session: ref.id,
-      allowedTools: this.allowedFor(r),
-      ...(o.model ? { model: o.model } : {}),
+      /* v8 ignore next -- startChoice() offered this level from these same caps */
+      const args = "args" in built ? built.args : [];
+      const stream = this.answerStream(r, id);
+      const res = await this.ownRun(run, c.bin, args, {
+        cwd,
+        env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
+        timeoutMs: JOB_TIMEOUT_MS,
+        ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
+      });
+      stream.close();
+      // The transcript this run just wrote is ours: the next message must not read it as a
+      // live session (a fork instead of a resume).
+      this.lastEnd.set(ref.id, this.deps.now());
+      // Stopped before its process began (it was waiting for a slot): nothing started.
+      if (res.stopped && !run.began) return this.finish(r, id, UNSTARTED_ACK, sent);
+      const out = res.stopped ? { reply: this.stoppedReply(stream.soFar) } : this.outcome(res);
+      if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
+      this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply, applied: this.applied(o) }, sent);
     });
-    /* v8 ignore next -- startChoice() offered this level from these same caps */
-    const args = "args" in built ? built.args : [];
-    const stream = this.answerStream(r, id);
-    const res = await this.ownRun(ref.id, id, "resume", c.bin, args, {
-      cwd,
-      env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
-      timeoutMs: JOB_TIMEOUT_MS,
-      ...(c.caps.stream ? { onLine: (l: string) => stream.feed(l) } : {}),
-    });
-    stream.close();
-    // The transcript this run just wrote is ours: the next message must not read it as a
-    // live session (a fork instead of a resume).
-    this.lastEnd.set(ref.id, this.deps.now());
-    const out = res.stopped ? { reply: this.stoppedReply(stream.soFar) } : this.outcome(res);
-    if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
-    this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply, applied: this.applied(o) }, sent);
   }
 
   /** A Claude Code session the daemon starts: what it runs with, for its later runs. */
@@ -3237,19 +3328,25 @@ export class ControlDaemon {
         code: "bad_session",
         detail: "that new session's id is already taken",
       });
-    const ready = await this.drivenProblem(drv);
-    if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
-    this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-    const text = await this.attached(r, id, cmd, ref, cwd);
-    if (text === null) return;
-    const args = drv.args({
-      permission: o.permission,
-      prompt: this.framed(r, text, true),
-      cwd,
-      ...(o.model ? { model: o.model } : {}),
+    // In hand from here: a Stop for the new session stops its start, wherever it has got to.
+    return this.inHand(id, ref.id, async (run) => {
+      run.mode = "resume";
+      const ready = await this.orStopped(run, this.drivenProblem(drv));
+      if (ready === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
+      this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
+      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd));
+      if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if (text === null) return;
+      const args = drv.args({
+        permission: o.permission,
+        prompt: this.framed(r, text, true),
+        cwd,
+        ...(o.model ? { model: o.model } : {}),
+      });
+      this.deps.log(`${id.slice(-8)}: ${drv.cmd} new session for ${known(ref.id)} (${o.permission}) in ${cwd}`);
+      await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o, this.childEnv(r, cmd));
     });
-    this.deps.log(`${id.slice(-8)}: ${drv.cmd} new session for ${known(ref.id)} (${o.permission}) in ${cwd}`);
-    await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o, this.childEnv(r, cmd));
   }
 
   /** A new session of an ACP agent (CONTROL.md §6): the agent's CLI as a child the
@@ -3579,7 +3676,7 @@ export class ControlDaemon {
           const now = this.place(session);
           /* v8 ignore next -- placed a moment ago, before the queue; a session doesn't go between */
           if ("refused" in now) return this.finish(sink, askId, refusal(now));
-          return this.prompt(sink, askId, cmd, now, sent);
+          return this.inHand(askId, target.id, () => this.prompt(sink, askId, cmd, now, sent));
         });
       }
     } catch (e) {
@@ -3738,7 +3835,7 @@ export class ControlDaemon {
       await this.inLine(session, relayed, async () => {
         const place = this.place(session);
         if ("refused" in place) return this.finish(sink, id, refusal(place));
-        return this.prompt(sink, id, cmd, place, this.deps.now());
+        return this.inHand(id, h.to.id, () => this.prompt(sink, id, cmd, place, this.deps.now()));
       });
     } catch (e) {
       this.finish(sink, id, {

@@ -19,11 +19,11 @@ import os from "node:os";
 import path from "node:path";
 import { acpControl, claudeControl, type RunResult } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import { type Carried, ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { CANCEL, type CancelView, routeCancel } from "../src/control/route.js";
-import type { ControlConfig } from "../src/control/store.js";
-import { FakeReceiver } from "./helpers/receiver.js";
+import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
+import { FakeReceiver, type Queued } from "./helpers/receiver.js";
 
 const { CANCELLED_NOTE } = acpControl;
 
@@ -117,8 +117,12 @@ function cfg(over: Partial<ControlConfig> = {}): ControlConfig {
   };
 }
 
+let receiver: PairedReceiver;
+
 async function startDaemon(o: { cfg?: Partial<ControlConfig>; extra?: Partial<DaemonDeps> } = {}): Promise<void> {
-  d = new ControlDaemon(cfg(o.cfg), path.join(tmp, "state", "control"), sock, {
+  const c = cfg(o.cfg);
+  receiver = c.receivers[0] as PairedReceiver;
+  d = new ControlDaemon(c, path.join(tmp, "state", "control"), sock, {
     now: () => clock(),
     fetch,
     log: (s) => log.push(s),
@@ -138,6 +142,16 @@ async function startDaemon(o: { cfg?: Partial<ControlConfig>; extra?: Partial<Da
 
 const cancel = (session: string) => rx.send({ kind: "cancel", session, text: undefined });
 const acksOf = (id: string) => rx.acks.filter((a) => a.id === id).map((a) => a.outcome);
+/** A signed command handed to the daemon this instant, as a poll would hand it: the poll
+ *  loop's own timing (it looks again two seconds after a message it already has) would
+ *  decide when a Stop lands, and these cases are about exactly when it lands. */
+const hand = async (fields: Record<string, unknown>): Promise<Queued> => {
+  const q = await rx.send(fields, { hold: true });
+  void (d as ControlDaemon).handle(receiver, q as Carried);
+  return q;
+};
+const stopNow = (session: string) => hand({ kind: "cancel", session, text: undefined });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
   rx = new FakeReceiver();
@@ -408,6 +422,197 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
       detail: "the turn this computer was running for that session finished before it could be stopped",
     });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "all done" });
+  });
+});
+
+describe.runIf(unix)("a turn the daemon has in hand and has not started yet", () => {
+  /** A login check that takes its time, as an uncached `claude auth status` does. */
+  const slowLogin = (asked: { n: number }) => async () => {
+    asked.n++;
+    await sleep(700);
+    return { loggedIn: true };
+  };
+
+  it("a Stop while a message's turn is being prepared: the turn never starts, and the Stop says it stopped it", async () => {
+    const asked = { n: 0 };
+    await startDaemon({ extra: { login: slowLogin(asked) } });
+    const q = await hand({ session: SESSION, text: "a long one" });
+    await until(() => asked.n === 1);
+    const stop = await stopNow(SESSION);
+    // At once: not when the login check comes back.
+    const t0 = Date.now();
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(acksOf(stop.id)).toEqual(["taken", "delivered"]);
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    // The check answers, and nothing runs after all.
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+    expect(rx.acks.filter((a) => a.id === q.id && a.outcome !== "taken")).toHaveLength(1);
+    // The session is as it was: the next message runs in it.
+    const next = await hand({ session: SESSION, text: "and now" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    expect(runs()).toHaveLength(1);
+  });
+
+  it("a Stop while a message's files are being fetched: the same, and nothing is handed to the session", async () => {
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    const slowFiles: typeof fetch = async (input, init) => {
+      if (String(input instanceof Request ? input.url : input).includes("/files/")) await sleep(700);
+      return fetch(input, init);
+    };
+    await startDaemon({ extra: { fetch: slowFiles } });
+    const q = await hand({ session: SESSION, text: "look at this", files: [png] });
+    await until(() => acksOf(q.id).includes("taken"));
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+  });
+
+  it("a Stop while a new session's start is being prepared: no session is created, and the start says so", async () => {
+    const asked = { n: 0 };
+    await startDaemon({ extra: { login: slowLogin(asked) } });
+    const start = await hand({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "a long one" });
+    await until(() => asked.n === 1);
+    const stop = await stopNow(`claude-code:${NEW}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    // Nothing began, so nothing was delivered: the receiver's page must not show a
+    // session at work that was never created.
+    expect(await rx.waitAck(start.id)).toMatchObject({
+      outcome: "failed",
+      code: "cancelled",
+      detail: "stopped before it started, as asked: no session was created",
+    });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+    const next = await hand({ session: `claude-code:${NEW}`, text: "are you there?" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+  });
+
+  it("the same for a Codex start, and for a start whose files are still on their way", async () => {
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    const slowFiles: typeof fetch = async (input, init) => {
+      if (String(input instanceof Request ? input.url : input).includes("/files/")) await sleep(700);
+      return fetch(input, init);
+    };
+    let asked = 0;
+    await startDaemon({
+      extra: {
+        fetch: slowFiles,
+        codexLogin: async () => {
+          asked++;
+          await sleep(700);
+          return { loggedIn: true };
+        },
+      },
+    });
+    const RECV = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7e02";
+    const codex = await hand({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    await until(() => asked === 1);
+    const stopCodex = await stopNow(`codex:${RECV}`);
+    expect(await rx.waitAck(stopCodex.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(codex.id)).toMatchObject({ outcome: "failed", code: "cancelled" });
+    const withFile = await hand({
+      kind: "start",
+      session: `claude-code:${NEW}`,
+      cwd: project,
+      text: "a long one",
+      files: [png],
+    });
+    await until(() => acksOf(withFile.id).includes("taken"));
+    const stop = await stopNow(`claude-code:${NEW}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(withFile.id)).toMatchObject({ outcome: "failed", code: "cancelled" });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+  });
+
+  it("starts that wait for a slot, and a Codex start waiting for its files: stopped there, nothing started", async () => {
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    const slowFiles: typeof fetch = async (input, init) => {
+      if (String(input instanceof Request ? input.url : input).includes("/files/")) await sleep(700);
+      return fetch(input, init);
+    };
+    await startDaemon({ cfg: { limits: { headless: 1 } }, extra: { fetch: slowFiles } });
+    const RECV = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7e03";
+    // Its files are still on their way.
+    const withFile = await hand({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go", files: [png] });
+    await until(() => acksOf(withFile.id).includes("taken"));
+    const stopFile = await stopNow(`codex:${RECV}`);
+    expect(await rx.waitAck(stopFile.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(withFile.id)).toMatchObject({ outcome: "failed", code: "cancelled" });
+    // The one slot is taken by another session's turn: both starts wait for it.
+    const busy = await hand({ session: SESSION, text: "silent work" });
+    await until(() => runs().length === 1);
+    const claude = await hand({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "a long one" });
+    const OTHER_RECV = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7e04";
+    const codex = await hand({ kind: "start", session: `codex:${OTHER_RECV}`, cwd: project, text: "go" });
+    await until(() => acksOf(claude.id).includes("taken") && acksOf(codex.id).includes("taken"));
+    for (const [start, session] of [
+      [claude, `claude-code:${NEW}`],
+      [codex, `codex:${OTHER_RECV}`],
+    ] as const) {
+      const stop = await stopNow(session);
+      expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+      expect(await rx.waitAck(start.id)).toMatchObject({
+        outcome: "failed",
+        code: "cancelled",
+        detail: CANCEL.unstarted,
+      });
+    }
+    expect(runs()).toHaveLength(1);
+    const stopBusy = await stopNow(SESSION);
+    expect(await rx.waitAck(stopBusy.id)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(busy.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+  });
+
+  it("a message to a Codex session, stopped while Codex's login is checked: it never runs", async () => {
+    let now = Date.now();
+    clock = () => now;
+    let slow = false;
+    let asked = 0;
+    await startDaemon({
+      extra: {
+        codexLogin: async () => {
+          asked++;
+          if (slow) await sleep(700);
+          return { loggedIn: true };
+        },
+      },
+    });
+    const RECV = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7e05";
+    const start = await hand({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
+    await until(() => rx.progress(start.id).length > 0);
+    const stopStart = await stopNow(`codex:${RECV}`);
+    expect(await rx.waitAck(stopStart.id)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: `On it.\n\n${CANCELLED_NOTE}` });
+    // The login is asked about again after ten minutes, and this time it takes a while.
+    now += 11 * 60_000;
+    slow = true;
+    const q = await hand({ session: `codex:${RECV}`, text: "and now this" });
+    await until(() => asked === 2);
+    const stop = await stopNow(`codex:${RECV}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: CANCELLED_NOTE });
+    await sleep(1000);
+    expect(runs()).toHaveLength(1);
+  });
+
+  it("a Stop for a session being started goes to the start that is running, not to the message waiting behind it", async () => {
+    await startDaemon();
+    const start = await hand({ kind: "start", session: `claude-code:${NEW}`, cwd: project, text: "a long one" });
+    await until(() => rx.progress(start.id).length > 0);
+    // The stand-in writes no transcript: the message waits for the start to say where it is.
+    const waiting = await hand({ session: `claude-code:${NEW}`, text: "and then this" });
+    await until(() => acksOf(waiting.id).includes("taken"));
+    const stop = await stopNow(`claude-code:${NEW}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+    expect(acksOf(stop.id)).toEqual(["taken", "delivered"]);
+    expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    // The message behind it was not cancelled; the start left no session for it.
+    expect(await rx.waitAck(waiting.id)).toMatchObject({ outcome: "refused", code: "no_session" });
   });
 });
 

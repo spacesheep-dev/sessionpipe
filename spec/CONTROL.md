@@ -754,6 +754,17 @@ Stops the current turn where the machine has a way of its own to stop it:
   took effect leaves the cancel `expired`. **A message waiting behind that turn is not
   cancelled**: it runs next, in order, as it would have.
 
+  The turn is the daemon's to stop **from the moment its message's turn comes**, not
+  from the moment its process exists: a Stop that arrives while the daemon is still
+  preparing it (checking the harness's login, fetching the message's files, waiting for
+  a free slot) means it never starts. The cancel is acked the same way (`mode` only
+  where the turn had got far enough to have one); a `prompt` whose turn never started is
+  acked `delivered` with `(The turn was cancelled.)` as its whole reply, and a `start`
+  that never began is acked `failed` with code `cancelled`, since no session was
+  created and none must be shown as one. For a session whose `start` is still running,
+  the turn a cancel stops is that start, not a message waiting for it; a cancel never
+  waits for a start to end.
+
 **Never a signal to a pid the daemon did not start.** A session open in a terminal or in
 the Claude app, and a headless run someone else started, belong to that process, and
 nothing here reaches into it: the cancel is acked `unsupported`, and its `detail` says
@@ -1039,7 +1050,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first, or a `cancel` found the turn already over (§6 `cancel`). |
 | `unsupported` | No path for this kind on this harness, or for a `cancel` no path into the process that has the session (§6 `cancel`); `detail` says which. |
-| `failed` | A path exists and errored; `detail` says what. `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `cancelled`: a `start` stopped by a `cancel` before its process began, so no session exists (§6 `cancel`). `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -1099,10 +1110,11 @@ send → delivered time.
 - `conformance/control-order.json` — the order one session's messages are delivered in
   (§6 `prompt`): polls that list them in and out of signing order, a running turn, a
   message that arrives late with an earlier `iat`, ties, a refused one, two sessions.
-- `conformance/delivery/30`–`32` — a `cancel` (§6): of a turn the machine is running as
+- `conformance/delivery/30`–`33` — a `cancel` (§6): of a turn the machine is running as
   its own child process, acked `taken` and then `delivered` with the turn's mode; of a
-  session open in its own window, acked `unsupported` with a `detail` to show; and of a
-  session nothing is running in, acked `expired`.
+  session open in its own window, acked `unsupported` with a `detail` to show; of a
+  session nothing is running in, acked `expired`; and a `start` stopped before it began,
+  acked `failed` with code `cancelled`.
 
 ## 12. Status
 
