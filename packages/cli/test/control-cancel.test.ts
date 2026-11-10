@@ -167,6 +167,23 @@ function verifiedLate(word: string, ms = 300): void {
   });
 }
 
+/** A login check that takes its time, as an uncached `claude auth status` does. */
+const slowLogin = (asked: { n: number }) => async () => {
+  asked.n++;
+  await sleep(700);
+  return { loggedIn: true };
+};
+
+/** The session's messages go to a copy made earlier. */
+function copied(): void {
+  transcript(COPY);
+  mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+  writeFileSync(
+    path.join(tmp, "state", "control", "state.json"),
+    JSON.stringify({ copies: { [SID]: COPY }, copies_v2: { [SID]: { id: COPY, at: "", reason: "" } } }),
+  );
+}
+
 beforeAll(async () => {
   rx = new FakeReceiver();
   await rx.start();
@@ -561,6 +578,94 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
   });
 });
 
+describe.runIf(unix)("a Stop by the other of a session's two names, its own and its copy's", () => {
+  it("the copy's name, while a message sent to the session is still being prepared: the turn never starts", async () => {
+    copied();
+    const asked = { n: 0 };
+    await startDaemon({ extra: { login: slowLogin(asked) } });
+    const q = await hand({ session: SESSION, text: "a long one" });
+    await until(() => asked.n === 1);
+    const stop = await stopNow(`claude-code:${COPY}`);
+    // Not "nothing is running in that session", with the turn starting a moment later.
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+  });
+
+  it("the session's name, while the turn runs in its copy for a message sent to the copy", async () => {
+    copied();
+    await startDaemon();
+    const long = await hand({ session: `claude-code:${COPY}`, text: "a long one" });
+    await until(() => rx.progress(long.id).length > 0);
+    const child = runs()[0]?.pid as number;
+    const stop = await stopNow(SESSION);
+    const ack = await rx.waitAck(stop.id);
+    // The process in the copy is the daemon's own child, whichever name its message came under.
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+    expect(String(ack.detail)).not.toContain(String(child));
+    expect(alive(child)).toBe(false);
+    expect(await rx.waitAck(long.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+  });
+
+  it("the same with a message for the session waiting behind that turn: the turn that is running is the one stopped, and the one that waited runs", async () => {
+    copied();
+    await startDaemon();
+    const long = await hand({ session: `claude-code:${COPY}`, text: "a long one" });
+    await until(() => rx.progress(long.id).length > 0);
+    const child = runs()[0]?.pid as number;
+    const waiting = await hand({ session: SESSION, text: "and then this" });
+    await until(() => acksOf(waiting.id).includes("taken"));
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({
+      outcome: "delivered",
+      mode: "resume",
+      detail: CANCEL.stopped,
+    });
+    expect(alive(child)).toBe(false);
+    expect(await rx.waitAck(long.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    expect(await rx.waitAck(waiting.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    expect(runs().map((x) => x.argv[x.argv.indexOf("--resume") + 1])).toEqual([COPY, COPY]);
+  });
+
+  it("a turn that waits behind one that has not begun either is stopped where it waits, not when the other is over", async () => {
+    copied();
+    transcript(OTHER);
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    const slowFiles: typeof fetch = async (input, init) => {
+      if (String(input instanceof Request ? input.url : input).includes("/files/")) await sleep(500);
+      return fetch(input, init);
+    };
+    await startDaemon({ cfg: { limits: { headless: 1 } }, extra: { fetch: slowFiles } });
+    // The one slot is taken by another session's turn.
+    const busy = await hand({ session: `claude-code:${OTHER}`, text: "silent work" });
+    await until(() => runs().length === 1);
+    // In hand first, and still fetching its file…
+    const first = await hand({ session: SESSION, text: "look at this", files: [png] });
+    await until(() => acksOf(first.id).includes("taken"));
+    // …when one sent to the copy by name gets to the copy ahead of it, and waits there for a slot.
+    const second = await hand({ session: `claude-code:${COPY}`, text: "a long one" });
+    await until(() => acksOf(second.id).includes("taken"));
+    await sleep(900);
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: CANCELLED_NOTE });
+    // The other one was not what was stopped: it runs when the slot comes free, and the
+    // stopped one never does.
+    expect(acksOf(second.id)).toEqual(["taken"]);
+    const stopBusy = await stopNow(`claude-code:${OTHER}`);
+    expect(await rx.waitAck(stopBusy.id)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(busy.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    await until(() => rx.progress(second.id).length > 0);
+    const stopSecond = await stopNow(`claude-code:${COPY}`);
+    expect(await rx.waitAck(stopSecond.id)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    await sleep(300);
+    expect(runs().map((x) => x.argv[x.argv.indexOf("--resume") + 1])).toEqual([OTHER, COPY]);
+    expect(rx.acks.filter((a) => a.id === first.id && a.outcome !== "taken")).toHaveLength(1);
+  });
+});
+
 describe.runIf(unix)("a copy's run is the copy's, never the original's", () => {
   /** The original was written to a moment ago, and no process in the registry names it. */
   const justWritten = (): void => {
@@ -652,13 +757,6 @@ describe.runIf(unix)("a copy's run is the copy's, never the original's", () => {
 });
 
 describe.runIf(unix)("a turn the daemon has in hand and has not started yet", () => {
-  /** A login check that takes its time, as an uncached `claude auth status` does. */
-  const slowLogin = (asked: { n: number }) => async () => {
-    asked.n++;
-    await sleep(700);
-    return { loggedIn: true };
-  };
-
   it("a Stop while a message's turn is being prepared: the turn never starts, and the Stop says it stopped it", async () => {
     const asked = { n: 0 };
     await startDaemon({ extra: { login: slowLogin(asked) } });

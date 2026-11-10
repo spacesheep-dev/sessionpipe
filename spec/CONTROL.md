@@ -780,7 +780,12 @@ Stops the current turn where the machine has a way of its own to stop it:
   making, once it has named itself — stops it exactly as one that names the session
   does. The ack and the copy's own events send a person to the copy, so that is where
   they press Stop, and the daemon MUST NOT describe its own child there as a process it
-  did not start.
+  did not start. It holds the other way round too — a cancel that names the session
+  stops a turn running in its copy for a message that was addressed to the copy — and
+  from the moment the turn is the daemon's to stop, not from the moment it runs. Where
+  more than one turn is in hand under a session's two names, the one whose process is
+  running is the one a cancel stops; a message waiting behind it is neither stopped nor
+  what the cancel waits for.
 
 **Never a signal to a pid the daemon did not start.** A session open in a terminal or in
 the Claude app, and a headless run someone else started, belong to that process, and
