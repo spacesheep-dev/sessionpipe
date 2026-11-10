@@ -15,6 +15,7 @@ import {
   detectCaps,
   findClaude,
   findTranscript,
+  helpFailure,
   homeSettings,
   hookMode,
   isUuid,
@@ -214,10 +215,54 @@ describe("capabilities and mode flags", () => {
         unread: "`caps-slow --help` timed out after 0.2 s",
       });
       const failed = script(path.join(tmp, "caps-failed"), "echo '  --fork-session  x'\nexit 1");
-      expect(detectCaps(failed)).toMatchObject({ fork: true, unread: "`caps-failed --help` failed" });
-      expect(detectCaps(path.join(tmp, "caps-missing")).unread).toBe("`caps-missing --help` failed");
+      expect(detectCaps(failed)).toMatchObject({ fork: true, unread: "`caps-failed --help` failed with exit code 1" });
+      expect(detectCaps(path.join(tmp, "caps-missing")).unread).toBe("`caps-missing --help` failed: no such file");
     },
   );
+  it.runIf(process.platform !== "win32")("a --help that fails says why, in the run's own first line of stderr", () => {
+    // My Solid, 2026-11-09: the pinned claude was an npm script and the service's PATH
+    // had no node. The refusal said "failed"; the person had nothing to act on.
+    const nonode = script(
+      path.join(tmp, "caps-nonode"),
+      "echo 'env: node: No such file or directory' >&2\necho 'second line' >&2\nexit 127",
+    );
+    expect(detectCaps(nonode).unread).toBe("`caps-nonode --help` failed: env: node: No such file or directory");
+    expect(modeFlags("auto", detectCaps(nonode))).toEqual({
+      error:
+        "this machine couldn't read its Claude Code's options (`caps-nonode --help` failed: env: node: No such file or directory); try again in a minute",
+    });
+    const noexec = path.join(tmp, "caps-noexec");
+    writeFileSync(noexec, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+    expect(detectCaps(noexec).unread).toBe("`caps-noexec --help` failed: the file can't be run (permission denied)");
+  });
+  it("helpFailure is one clean line: no escape codes, no home folder, no secret, no more than 200 characters", () => {
+    expect(
+      helpFailure(
+        {
+          status: 1,
+          stderr: "\n\u001b[31mError:\u001b[0m   Cannot find module '/Users/ada/.npm/claude/cli.js'\n  at x\n",
+        },
+        "/Users/ada",
+      ),
+    ).toBe("failed: Error: Cannot find module '~/.npm/claude/cli.js'");
+    const secret = `sk-ant-api03-${"a".repeat(86)}-AA`;
+    const leaked = helpFailure({ status: 1, stderr: `bad key ${secret} for ada@example.com` }, "/Users/ada");
+    expect(leaked).not.toContain(secret);
+    expect(leaked).not.toContain("ada@example.com");
+    expect(leaked.startsWith("failed: bad key ")).toBe(true);
+    const long = helpFailure({ status: 1, stderr: "x".repeat(900) });
+    expect(long.length).toBe("failed: ".length + 200);
+    expect(long.endsWith("…")).toBe(true);
+    expect(helpFailure({ status: 1, stderr: Buffer.from("boom\r\n") })).toBe("failed: boom");
+    expect(helpFailure({ status: 3, stderr: "  \n\t\n" })).toBe("failed with exit code 3");
+    expect(helpFailure({ status: null, signal: "SIGKILL", stderr: "" })).toBe("failed: killed by SIGKILL");
+    expect(helpFailure({ code: "ENOENT" })).toBe("failed: no such file");
+    expect(helpFailure({ code: "EACCES", stderr: "ignored" })).toBe(
+      "failed: the file can't be run (permission denied)",
+    );
+    expect(helpFailure(null)).toBe("failed");
+    expect(helpFailure({})).toBe("failed");
+  });
   it("caps whose --help couldn't be read refuse every level but inherit, and say why", () => {
     const unread = {
       hasMode: false,

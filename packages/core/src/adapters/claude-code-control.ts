@@ -12,6 +12,8 @@ import os from "node:os";
 import path from "node:path";
 import { levelRank, type RunLevel, START_PERMISSIONS, type StartPermission } from "../control/verify.js";
 import { withoutLineage } from "../launched-by.js";
+import { reducePii } from "../privacy/pii.js";
+import { redactSecrets } from "../privacy/secrets.js";
 import {
   isExe,
   JOB_TIMEOUT_MS,
@@ -311,9 +313,44 @@ export function loginHint(configDir: string | undefined, platform: NodeJS.Platfo
   return `Claude Code (${shown}) isn't signed in on this machine: run ${login} there.`;
 }
 
+/** A terminal's escape sequences (colours, cursor moves), which a command's stderr can
+ *  carry; built from the character's code so the pattern holds no control character. */
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
+
+/** Why a `--help` run failed, in the run's own words: the first line it wrote to stderr
+ *  (a `claude` that is a script whose `node` isn't on the service's PATH says "env: node:
+ *  No such file or directory"), else how it ended. One line, at most 200 characters, with
+ *  the home folder written `~` and anything shaped like a secret removed: the line goes
+ *  into a refusal, which the receiver shows to the person who sent the message. "Failed"
+ *  alone told them nothing to act on. */
+export function helpFailure(
+  err: { code?: string | number; status?: number | null; signal?: string | null; stderr?: unknown } | null | undefined,
+  home: string = os.homedir(),
+): string {
+  if (err?.code === "ENOENT") return "failed: no such file";
+  if (err?.code === "EACCES") return "failed: the file can't be run (permission denied)";
+  const plain = Array.from(String(err?.stderr ?? "").replace(ANSI, ""))
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c === 10 || (c >= 32 && c !== 127);
+    })
+    .join("");
+  const line = plain
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .find((l) => l.length > 0);
+  if (line) {
+    const said = redactSecrets(reducePii(line, home));
+    return `failed: ${said.length > 200 ? `${said.slice(0, 199)}…` : said}`;
+  }
+  if (err?.signal) return `failed: killed by ${err.signal}`;
+  if (typeof err?.status === "number") return `failed with exit code ${err.status}`;
+  return "failed";
+}
+
 /** What `claude --help` lists. A run that fails still counts when it printed its
  *  `--permission-mode` line; one that didn't (a timeout on a machine still starting up,
- *  most often) is `unread`, never a Claude Code with no modes. */
+ *  most often) is `unread`, never a Claude Code with no modes, and says why (helpFailure). */
 export function detectCaps(bin: string, timeoutMs = 30_000): Caps {
   const c = probe(bin, ["--help"]); // a claude.cmd shim can't be spawned bare (#165)
   try {
@@ -328,10 +365,16 @@ export function detectCaps(bin: string, timeoutMs = 30_000): Caps {
       }),
     );
   } catch (e) {
-    const err = e as { stdout?: string; code?: string };
+    const err = e as {
+      stdout?: string;
+      stderr?: string;
+      code?: string;
+      status?: number | null;
+      signal?: string | null;
+    };
     const caps = parseCaps(String(err?.stdout || ""));
     if (caps.hasMode) return caps;
-    const why = err?.code === "ETIMEDOUT" ? `timed out after ${timeoutMs / 1000} s` : "failed";
+    const why = err?.code === "ETIMEDOUT" ? `timed out after ${timeoutMs / 1000} s` : helpFailure(err);
     return { ...caps, unread: `\`${path.basename(bin)} --help\` ${why}` };
   }
 }
