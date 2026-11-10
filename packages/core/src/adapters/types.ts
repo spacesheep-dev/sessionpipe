@@ -42,6 +42,13 @@ export interface Turn {
    *  daemon reaches a session in place (spec/CONTROL.md §6.3, §8). The words are the
    *  person's; the arrival was not. */
   injected?: true;
+  /** The harness's own id for the turn's prompt, where its transcript records one (Claude
+   *  Code's `promptId`, the `prompt_id` of its hooks): what `turn.started` named the turn. */
+  id?: string;
+  /** The person stopped the turn before it finished, and the transcript says so. Such a
+   *  turn is whole as it stands, with whatever it had said (nothing, sometimes): no hook
+   *  fires for it, so the file is the only thing that knows. */
+  interrupted?: true;
 }
 
 export interface TranscriptRead {
@@ -50,6 +57,13 @@ export interface TranscriptRead {
   line: number;
   /** A prompt after the last turn with no reply yet (a turn that just began). */
   open?: { user: string; at: number; injected?: true };
+  /** The last of `turns`, for a caller that may have to hold it back because the file is
+   *  still being written: the line it starts on (where the cursor stops if it is held),
+   *  and `said`, the assistant's last words in it when nothing of that turn follows them
+   *  (no tool call, no tool result). A harness names a turn's last words as the turn ends
+   *  (Claude Code's `last_assistant_message`); until `said` is those words, the end of the
+   *  turn is not in the file yet. Absent when there are no turns. */
+  tail?: { start: number; said?: string };
 }
 
 export interface SessionFacts extends Partial<Session> {

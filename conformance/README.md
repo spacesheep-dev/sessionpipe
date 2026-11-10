@@ -27,7 +27,8 @@
   `packages/core/test/claude-code.test.ts`.
 - `transcripts/<harness>/*.jsonl` — transcript files as the harness writes them, scrubbed, for what
   a reader must keep and skip (spec/ADAPTERS.md, the Transcript row). Read by
-  `packages/core/test/transcripts.test.ts`.
+  `packages/core/test/transcripts.test.ts`; `packages/cli/test/turn-settle.test.ts` writes
+  `interrupted-turn.jsonl` out a flush at a time, as Claude Code does, for when a turn is whole.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet

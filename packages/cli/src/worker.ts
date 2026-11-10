@@ -4,7 +4,9 @@
 // a sweeper racing for it loses); adapter turns the payload into events; facts are
 // merged; every event is appended to the outbox with its seq, and the claim is
 // released; on a turn end the transcript is read from the stored offset for tier-2
-// sinks; then the sinks are drained from their cursors, unless another worker is
+// sinks, and read again until it holds the turn's last words where the harness wrote
+// them after its hook fired (run.ts SETTLE_MS, a third of this worker's life); then
+// the sinks are drained from their cursors, unless another worker is
 // at it (run.ts drain: this one leaves its events to it). Exits within 15 s: a
 // claim still held then is a job a sweep gives back; a sink that cannot be reached
 // waits as HTTP.md §2 says, for every worker. A job the session's

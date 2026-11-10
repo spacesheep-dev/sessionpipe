@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // What a worker run does, as a function so tests and `sessionpipe replay` share it.
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -14,6 +15,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import {
+  type AdapterEvent,
   adapterByName,
   Cursors,
   capTail,
@@ -42,6 +44,7 @@ import {
   shortId,
   stateDir,
   type TranscriptRead,
+  type Turn,
   takeLock,
   takeNamedLock,
   tilde,
@@ -280,7 +283,8 @@ export function openTurn(
   // reading would stand in for the turn that is running until the next one lands.
   const prompt = o.prompt?.trim();
   if (prompt && !isInjected(prompt) && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
-  if (!last) return null;
+  // A turn the person interrupted is over: it is not the one running now.
+  if (!last || last.interrupted) return null;
   return {
     turn: o.base + read.turns.length - 1,
     user: last.user.slice(0, MAX_TURN_SIDE),
@@ -290,6 +294,50 @@ export function openTurn(
   };
 }
 const MAX_TURN_SIDE = 20_000;
+
+/** A turn's Stop can come before the turn's last row is in the transcript: Claude Code
+ *  queues its transcript writes and flushes them on a 100 ms timer, and a terminal
+ *  session's Stop hook fires within tens of milliseconds of the last message (issue: the
+ *  turn reached a receiver only when the NEXT turn ended, 8 turn ends of 9, 2026-11-10).
+ *  So the worker waits for the words the Stop named. Under the session's lock, for at
+ *  most SETTLE_FAST_MS, re-reading every SETTLE_STEP_MS: the usual case, and the turn's
+ *  `turn.transcript` then goes into the outbox with its `turn.ended`, ahead of anything
+ *  a later hook of the session emits. Past that the `turn.ended` goes alone and the
+ *  worker keeps looking without the lock, every SETTLE_POLL_MS for SETTLE_MS; past that
+ *  the session's next hook looks (for DUE_MS; a later turn's end takes over anyway). */
+export const SETTLE_FAST_MS = 400;
+const SETTLE_STEP_MS = 25;
+export const SETTLE_MS = 5000;
+export const SETTLE_POLL_MS = 100;
+const DUE_MS = 60_000;
+
+/** What a turn's last words are remembered by while the transcript does not hold them yet
+ *  (facts `transcript_due`): a digest, never the words, since facts are not redacted. */
+export const wordsDigest = (text: string): string =>
+  createHash("sha256").update(text.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16);
+
+/** The turns of a transcript read that nothing more will be added to, and the line the
+ *  cursor may move to once they are sent. `all`: every turn with a reply, as a session's
+ *  end or a harness that names no last words takes them. Otherwise the last turn is whole
+ *  only once its last words are the ones its Stop named (`due`, their digest), a later
+ *  prompt closed it, or the person interrupted it; until then it is held back with the
+ *  cursor before it, so it is sent once, whole, and never in two halves. `waiting`: the
+ *  words `due` names are not in the file yet. Only a reader that says where its last turn
+ *  starts (`tail`: Claude Code's) can have a turn held back or told closed; from any
+ *  other, nothing goes but at `all`. */
+export function closedTurns(
+  read: TranscriptRead,
+  o: { all?: boolean; due?: string | undefined },
+): { turns: Turn[]; line: number; waiting: boolean } {
+  const whole = !!o.all || (read.tail?.said !== undefined && wordsDigest(read.tail.said) === o.due);
+  const waiting = !whole && o.due !== undefined;
+  if (whole) return { turns: read.turns, line: read.line, waiting };
+  if (!read.tail) return { turns: [], line: read.line, waiting };
+  if (read.open || read.turns[read.turns.length - 1]?.interrupted)
+    return { turns: read.turns, line: read.line, waiting };
+  // The last turn may still be growing.
+  return { turns: read.turns.slice(0, -1), line: read.tail.start, waiting };
+}
 /** What session.attended is read from, the desktop app's link included, and session.launched_by
  *  and delegated_by (hook.ts picks all five): the job's own, never the worker's. */
 const JOB_OWN_ENV = [
@@ -379,6 +427,10 @@ export async function runJob(
     return { events: [], delivered: {}, requeued };
   }
   const events: Event[] = [];
+  const clock = opts.clock ?? REAL_CLOCK;
+  /** Set when a turn ended before its last words reached the transcript: the rest of the
+   *  wait, run once the lock is released and the turn's end is on its way. */
+  let settle: ((send: () => Promise<void>) => Promise<void>) | null = null;
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
@@ -435,31 +487,89 @@ export async function runJob(
       ...(r.session.delegated_by ? { delegated_by: r.session.delegated_by } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
-    for (const a of r.events) {
-      const e = makeEvent(a, {
+    const at = opts.now ?? job.at;
+    /** An event of this job, with the session's next seq. */
+    const stamp = (a: AdapterEvent): Event =>
+      makeEvent(a, {
         harness: { name: job.harness, ...(version ? { version } : {}) },
         session: { ...session, seq: outbox.nextSeq(ref) },
-        now: opts.now ?? job.at,
+        now: at,
       });
-      events.push(e);
-    }
     const wantsTranscript = cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 2);
-    // Tier 2, while a turn runs: what it has said so far, so a receiver can show a long
-    // turn before it ends. On the prompt, then at most every PROGRESS_MS on a tool call,
-    // and only when it changed. The cursor stays where it is: turn.transcript still
-    // delivers the whole turn when it ends.
+    const transcript = wantsTranscript ? r.transcript : undefined;
     const ending = r.events.some((e) => e.type === "turn.ended" || e.type === "session.ended");
     const starting = r.events.some((e) => e.type === "turn.started");
     // A message sent while a turn runs is absorbed by that turn, and Claude Code reports
     // it as a prompt with the running turn's own id. It is not a new turn: where it
     // belongs is the transcript's to say, so its text is no reading of its own.
     const startedId = r.events.find((e) => e.type === "turn.started")?.data.turn_id;
-    const absorbed = starting && typeof startedId === "string" && facts.get(job.harness, id).open_turn === startedId;
-    if (wantsTranscript && r.transcript && !ending && (starting || r.events.some((e) => e.type === "tool.ended"))) {
+    const before = facts.get(job.harness, id);
+    const absorbed = starting && typeof startedId === "string" && before.open_turn === startedId;
+    /** Tier 2: the transcript's turns from the delivery cursor that nothing more will be
+     *  added to, as turn.transcript events, the cursor moved past them (before they reach
+     *  the outbox, so a turn is never sent twice). `open`: the turn the hooks still hold
+     *  as running; when the transcript says the person interrupted it, its `turn.ended`
+     *  goes first, since no hook fired one. */
+    const turnEvents = (file: string, o: { all?: boolean; due?: string | undefined; open?: string | undefined }) => {
       const cur = facts.get(job.harness, id);
-      const at = opts.now ?? job.at;
+      let turnNo = Number(cur.transcript_turns) || 0;
+      const c = closedTurns(adapter.readTranscript(file, Number(cur.transcript_line) || 0), o);
+      const out: Event[] = [];
+      for (const t of c.turns) {
+        if (t.interrupted && o.open !== undefined && t.id === o.open) {
+          out.push(
+            stamp({ type: "turn.ended", harnessEvent: job.event, data: { turn_id: o.open, reason: "interrupt" } }),
+          );
+          facts.save(job.harness, id, { open_turn: null });
+        }
+        out.push(
+          stamp({
+            type: "turn.transcript",
+            harnessEvent: job.event,
+            data: {
+              turn: turnNo++,
+              user: t.user,
+              assistant: t.assistant,
+              at: new Date(t.at).toISOString(),
+              ...(t.injected ? { injected: true as const } : {}),
+            },
+          }),
+        );
+      }
+      if (c.turns.length) facts.save(job.harness, id, { transcript_line: c.line, transcript_turns: turnNo });
+      // The words a turn's end was waiting for are in (or nothing waits): the wait is over.
+      if (!c.waiting && cur.transcript_due != null) facts.save(job.harness, id, { transcript_due: null });
+      return { events: out, waiting: c.waiting };
+    };
+    // What the transcript settled since the session's last hook goes first: a turn whose
+    // last words were not in the file when it ended (and not within SETTLE_MS after), and
+    // a turn the person interrupted, which no hook ends. The interrupted one is looked for
+    // where a turn can no longer be running: at the next prompt, a compaction, a start.
+    const dueBefore =
+      typeof before.transcript_due === "string" && at - Number(before.transcript_due_at) < DUE_MS
+        ? before.transcript_due
+        : undefined;
+    const openBefore = typeof before.open_turn === "string" && !absorbed ? before.open_turn : undefined;
+    if (
+      transcript &&
+      heavy &&
+      !ending &&
+      (dueBefore !== undefined ||
+        (openBefore !== undefined &&
+          r.events.some(
+            (e) => e.type === "turn.started" || e.type === "context.compacted" || e.type === "session.started",
+          )))
+    )
+      events.push(...turnEvents(transcript, { due: dueBefore, open: openBefore }).events);
+    for (const a of r.events) events.push(stamp(a));
+    // Tier 2, while a turn runs: what it has said so far, so a receiver can show a long
+    // turn before it ends. On the prompt, then at most every PROGRESS_MS on a tool call,
+    // and only when it changed. The cursor stays where it is: turn.transcript still
+    // delivers the whole turn when it ends.
+    if (transcript && !ending && (starting || r.events.some((e) => e.type === "tool.ended"))) {
+      const cur = facts.get(job.harness, id);
       if (starting || at - (Number(cur.progress_at) || 0) >= PROGRESS_MS) {
-        const p = openTurn(adapter.readTranscript(r.transcript, Number(cur.transcript_line) || 0), {
+        const p = openTurn(adapter.readTranscript(transcript, Number(cur.transcript_line) || 0), {
           base: Number(cur.transcript_turns) || 0,
           prompt: !absorbed && typeof r.hints?.prompt === "string" ? r.hints.prompt : undefined,
           at,
@@ -467,14 +577,7 @@ export async function runJob(
         const sig = p && `${p.turn}:${p.user.length}:${p.assistant.length}`;
         if (p && (starting || sig !== cur.progress_sig)) {
           events.push(
-            makeEvent(
-              { type: "turn.progress", harnessEvent: job.event, data: { ...p, at: new Date(p.at).toISOString() } },
-              {
-                harness: { name: job.harness, ...(version ? { version } : {}) },
-                session: { ...session, seq: outbox.nextSeq(ref) },
-                now: at,
-              },
-            ),
+            stamp({ type: "turn.progress", harnessEvent: job.event, data: { ...p, at: new Date(p.at).toISOString() } }),
           );
           facts.save(job.harness, id, { progress_at: at, progress_sig: sig });
         }
@@ -484,38 +587,65 @@ export async function runJob(
     if (starting && typeof startedId === "string" && !absorbed) facts.save(job.harness, id, { open_turn: startedId });
     if (ending) facts.save(job.harness, id, { open_turn: null });
     // Tier 2: after a turn ends, the transcript's new turns become turn.transcript events.
-    if (
-      wantsTranscript &&
-      r.transcript &&
-      r.events.some((e) => e.type === "turn.ended" || e.type === "session.ended")
-    ) {
-      const cur = facts.get(job.harness, id);
-      const fromLine = Number(cur.transcript_line) || 0;
-      let turnNo = Number(cur.transcript_turns) || 0;
-      const read = adapter.readTranscript(r.transcript, fromLine);
-      for (const t of read.turns) {
-        events.push(
-          makeEvent(
-            {
-              type: "turn.transcript",
-              harnessEvent: job.event,
-              data: {
-                turn: turnNo++,
-                user: t.user,
-                assistant: t.assistant,
-                at: new Date(t.at).toISOString(),
-                ...(t.injected ? { injected: true as const } : {}),
-              },
-            },
-            {
-              harness: { name: job.harness, ...(version ? { version } : {}) },
-              session: { ...session, seq: outbox.nextSeq(ref) },
-              now: opts.now ?? job.at,
-            },
-          ),
-        );
+    // A Stop that names the turn's last words is held to them (see SETTLE_FAST_MS): a
+    // swept job is seconds old, so it reads once.
+    if (transcript && ending) {
+      const final =
+        r.events.some((e) => e.type === "turn.ended") && typeof r.hints?.final === "string" && existsSync(transcript)
+          ? wordsDigest(r.hints.final)
+          : undefined;
+      const how = { all: final === undefined, due: final };
+      let got = turnEvents(transcript, how);
+      events.push(...got.events);
+      for (const until = clock.now() + SETTLE_FAST_MS; got.waiting && opts.drain !== false && clock.now() < until; ) {
+        await clock.sleep(SETTLE_STEP_MS);
+        got = turnEvents(transcript, how);
+        events.push(...got.events);
       }
-      if (read.turns.length) facts.save(job.harness, id, { transcript_line: read.line, transcript_turns: turnNo });
+      if (got.waiting) {
+        facts.save(job.harness, id, { transcript_due: final, transcript_due_at: at });
+        if (opts.drain !== false)
+          settle = async (send) => {
+            const until = clock.now() + SETTLE_MS;
+            while (
+              clock.now() + SETTLE_POLL_MS <= until &&
+              (opts.deadline === undefined || clock.now() + SETTLE_POLL_MS + PASS_BUDGET_MS <= opts.deadline)
+            ) {
+              await clock.sleep(SETTLE_POLL_MS);
+              // A sibling hook has the session: it looks for the words itself, or the next round does.
+              const again = takeLock(state, ref);
+              if (!again) continue;
+              let late: { events: Event[]; waiting: boolean };
+              try {
+                // Another hook of the session found them meanwhile, or a later turn ended
+                // and the wait is that turn's now.
+                if (facts.get(job.harness, id).transcript_due !== final) return;
+                late = turnEvents(transcript, how);
+                if (late.events.length) {
+                  outbox.append(
+                    ref,
+                    late.events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
+                  );
+                  log(
+                    state,
+                    `${job.harness} ${job.event}: ${late.events.map((e) => e.type).join(",")}, once the transcript held it (${shortId(job.harness, id)})`,
+                  );
+                }
+              } finally {
+                again();
+              }
+              if (late.events.length) {
+                events.push(...late.events);
+                await send();
+              }
+              if (!late.waiting) return;
+            }
+            log(
+              state,
+              `${job.harness} ${job.event}: the turn's last words are not in the transcript ${SETTLE_MS / 1000} s on; its turn.transcript waits for the session's next hook (${shortId(job.harness, id)})`,
+            );
+          };
+      }
     }
     // Tier 1: the account's limits, when the turn left new numbers in the transcript
     // (Codex's rollout; Claude Code's come from its status line, through fromHook).
@@ -528,16 +658,7 @@ export async function runJob(
       const limits = adapter.limits(r.transcript);
       const sig = limits && JSON.stringify(limits);
       if (limits && sig !== facts.get(job.harness, id).limits_sig) {
-        events.push(
-          makeEvent(
-            { type: "limits.observed", harnessEvent: job.event, data: limits },
-            {
-              harness: { name: job.harness, ...(version ? { version } : {}) },
-              session: { ...session, seq: outbox.nextSeq(ref) },
-              now: opts.now ?? job.at,
-            },
-          ),
-        );
+        events.push(stamp({ type: "limits.observed", harnessEvent: job.event, data: limits }));
         facts.save(job.harness, id, { limits_sig: sig });
       }
     }
@@ -562,14 +683,19 @@ export async function runJob(
   // found the lock taken meanwhile left its events and a `flush.more` mark, and this
   // drain sends them.
   if (Math.random() < 0.02) outbox.prune(cfg.keep_days ?? 30);
-  const delivered =
-    opts.drain === false
-      ? {}
-      : ((await drain(state, cfg.sinks, outbox, ref, {
-          ...(opts.clock ? { clock: opts.clock } : {}),
-          ...(opts.deadline !== undefined ? { deadline: opts.deadline } : {}),
-          ...(opts.handoff ? { handoff: opts.handoff } : {}),
-        })) ?? {});
+  const delivered: Record<string, number> = {};
+  const send = async (): Promise<void> => {
+    const sent =
+      (await drain(state, cfg.sinks, outbox, ref, {
+        ...(opts.clock ? { clock: opts.clock } : {}),
+        ...(opts.deadline !== undefined ? { deadline: opts.deadline } : {}),
+        ...(opts.handoff ? { handoff: opts.handoff } : {}),
+      })) ?? {};
+    for (const [sink, n] of Object.entries(sent)) delivered[sink] = (delivered[sink] ?? 0) + n;
+  };
+  if (opts.drain !== false) await send();
+  // The turn's end is on its way; its words follow as soon as the transcript holds them.
+  if (settle) await (settle as (send: () => Promise<void>) => Promise<void>)(send);
   return { events, delivered };
 }
 

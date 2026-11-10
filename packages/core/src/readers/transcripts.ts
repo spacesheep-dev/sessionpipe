@@ -7,7 +7,8 @@ import { codexReplayBoundary } from "../adapters/codex-rollout.js";
 import type { TranscriptRead } from "../adapters/types.js";
 
 interface Msg {
-  role: "user" | "assistant";
+  /** `interrupt` carries no words: the person stopped the running turn at this line. */
+  role: "user" | "assistant" | "interrupt";
   text: string;
   at: number;
   line: number;
@@ -16,9 +17,13 @@ interface Msg {
    *  control daemon reaches a session in place (spec/CONTROL.md §6.3, §8). The words are
    *  the person's; the arrival was not. */
   injected?: true;
+  /** The harness's own id for the prompt (a `user` message's only). */
+  id?: string;
 }
 
-export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
+/** `tail`: also say where the last turn starts and what the assistant said last in it
+ *  (TranscriptRead.tail), for a reader whose harness names a turn's last words. */
+export function pairTurns(msgs: Msg[], endLine: number, tail = false): TranscriptRead {
   const turns: {
     user: string;
     assistant: string;
@@ -26,14 +31,29 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
     startLine: number;
     endLine: number;
     injected?: true;
+    id?: string;
+    interrupted?: true;
+    /** The assistant's last message in the turn, so far. */
+    said?: string;
   }[] = [];
   let cur: (typeof turns)[number] | null = null;
   for (const m of msgs) {
-    if (m.role === "user") {
+    if (m.role === "interrupt") {
+      // The person stopped the turn: it is whole as it stands, with whatever it had said,
+      // and what follows is another turn. No hook fires for this, so without it the
+      // prompt would wait for a reply that is not coming and join the next prompt instead.
+      if (cur) {
+        cur.interrupted = true;
+        cur.endLine = m.line;
+        turns.push(cur);
+        cur = null;
+      }
+    } else if (m.role === "user") {
       // Never overwrite a prompt that has no reply yet: in an agentic turn the reply
       // comes after tool calls, and a second user record is not a new question.
       if (cur && !cur.assistant) {
         cur.user += `\n\n${m.text}`;
+        if (m.id) cur.id = m.id;
         continue;
       }
       if (cur) turns.push(cur);
@@ -44,11 +64,13 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
         startLine: m.line,
         endLine: m.line,
         ...(m.injected ? { injected: true as const } : {}),
+        ...(m.id ? { id: m.id } : {}),
       };
     } else {
       if (!cur) cur = { user: "", assistant: "", at: m.at, startLine: m.line, endLine: m.line };
       cur.assistant += (cur.assistant ? "\n\n" : "") + m.text;
       cur.endLine = m.line;
+      cur.said = m.text;
     }
   }
   if (cur?.assistant) turns.push(cur);
@@ -61,11 +83,17 @@ export function pairTurns(msgs: Msg[], endLine: number): TranscriptRead {
       at: t.at,
       endLine: t.endLine,
       ...(t.injected ? { injected: true as const } : {}),
+      ...(t.id ? { id: t.id } : {}),
+      ...(t.interrupted ? { interrupted: true as const } : {}),
     })),
     line,
   };
   if (cur && !cur.assistant && cur.user)
     out.open = { user: cur.user, at: cur.at, ...(cur.injected ? { injected: true as const } : {}) };
+  const last = turns[turns.length - 1];
+  // An interrupted turn says nothing more, so it has no last words to wait for.
+  if (tail && last)
+    out.tail = { start: last.startLine, ...(last.said !== undefined && !last.interrupted ? { said: last.said } : {}) };
   return out;
 }
 
@@ -161,10 +189,23 @@ const queuedPrompt = (a: unknown): string => {
  *  elsewhere: the turn's ask. Anything else in that record is nobody's words. */
 const channelText = (text: string): string => /^<channel\b[^>]*>([\s\S]*)<\/channel>$/.exec(text)?.[1]?.trim() ?? "";
 
+/** What Claude Code writes, as a `user` record, where the person stopped a turn (Esc, or
+ *  the first Ctrl-C): `[Request interrupted by user]`, or `… for tool use]` when a tool
+ *  was running. Its own test for the marker has the same shape. Nobody typed it. */
+const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
+
+const hasBlock = (c: unknown, type: string): boolean =>
+  Array.isArray(c) && c.some((b) => b && typeof b === "object" && (b as { type?: unknown }).type === type);
+
 /** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},
  *  plus the person's mid-turn messages (queuedPrompt) and messages from a channel (channelText). */
 export function readClaude(lines: string[], from: number): TranscriptRead {
   const msgs: Msg[] = [];
+  // For `tail.said`: the line of the assistant's latest words while nothing of their turn
+  // follows them. A tool call or a tool result after them means the turn went on, so they
+  // were not its last; once a message has begun another turn, its tools are its own.
+  let saidLine = -1;
+  let turnOver = false;
   for (let i = from; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j || j.isSidechain) continue;
@@ -176,32 +217,56 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     // `origin.kind === "peer"`, a framed message `peerAsk` unwraps).
     const channel = j.type === "user" && origin?.kind === "channel";
     const peer = origin?.kind === "peer";
+    const c = (j.message as { content?: unknown } | undefined)?.content;
+    if (
+      !turnOver &&
+      ((j.type === "assistant" && hasBlock(c, "tool_use")) || (j.type === "user" && hasBlock(c, "tool_result")))
+    )
+      saidLine = -1;
     if (j.type === "user" && (j.isCompactSummary || j.repeatsCompactSummary)) continue;
     if (j.type === "user" && !channel && !peer && (j.isMeta || (origin?.kind && origin.kind !== "human"))) continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
-    const c = (j.message as { content?: unknown } | undefined)?.content;
+    /** A message that is a turn's ask, or joins one: whatever follows is that turn's. */
+    const ask = (m: { text: string; injected?: true; id?: string }) => {
+      msgs.push({ role: "user", at, line: i, ...m });
+      turnOver = true;
+    };
     if (channel) {
       // Like a peer's: the words are the person's, the arrival was not the keyboard's.
       const text = channelText(textParts(c, ["text"]).trim());
-      if (text) msgs.push({ role: "user", text, at, line: i, injected: true });
+      if (text) ask({ text, injected: true });
     } else if (j.type === "user") {
       const raw = textParts(c, ["text"]).trim();
+      if (!peer && INTERRUPTED.test(raw)) {
+        msgs.push({ role: "interrupt", text: "", at, line: i });
+        turnOver = true;
+        continue;
+      }
       const text = peer ? peerAsk(origin, raw) : raw;
       // The tag test applies to a peer row like any other. `peerAsk` has taken the
       // envelope off already, so what is left is the message itself — and any local
       // program of this uid can write one, so a body shaped like harness markup must not
       // become a turn whose ask is that markup, published as something the person typed.
       if (!text || isInjected(text)) continue;
-      msgs.push({ role: "user", text, at, line: i, ...(peer ? { injected: true as const } : {}) });
+      const id = typeof j.promptId === "string" && j.promptId ? j.promptId : undefined;
+      ask({ text, ...(peer ? { injected: true as const } : {}), ...(id ? { id } : {}) });
     } else if (j.type === "assistant" && Array.isArray(c)) {
       const text = textParts(c, ["text"]).trim();
-      if (text) msgs.push({ role: "assistant", text, at, line: i });
+      if (text) {
+        msgs.push({ role: "assistant", text, at, line: i });
+        saidLine = i;
+        turnOver = false;
+      }
     } else if (j.type === "attachment") {
       const text = queuedPrompt(j.attachment);
-      if (text && !isInjected(text)) msgs.push({ role: "user", text, at, line: i });
+      if (text && !isInjected(text)) ask({ text });
     }
   }
-  return pairTurns(msgs, endOf(lines));
+  const out = pairTurns(msgs, endOf(lines), true);
+  // pairTurns took the last turn's last message for its last words; here they are that
+  // only while no tool call or result of the same turn came after them.
+  if (out.tail && saidLine !== (out.turns[out.turns.length - 1] as { endLine: number }).endLine) delete out.tail.said;
+  return out;
 }
 
 /** What Codex writes into a session as a "user" message that the person never typed:
