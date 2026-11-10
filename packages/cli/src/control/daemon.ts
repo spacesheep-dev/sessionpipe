@@ -1114,17 +1114,22 @@ export class ControlDaemon {
       l.ended = this.deps.now();
     }
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
-      l.midTurn = false;
-      l.continued = false;
       // A failed turn and a session's end are told here alone. A Stop was already told by
       // the hook's own question (`stop`, which comes before this event), and is not told
       // twice: an event that arrives late would end the continuation that followed it.
       if (e.event !== "Stop") this.turnEnded(named);
-      // A message queued for a Stop that came and went without taking it (it
-      // arrived after the hook asked, or the turn failed) goes another way.
-      const left = l.turnQueue.splice(0);
-      for (const p of left) if (this.inflight.has(p.msgId)) void this.reroute(p);
+      this.notMidTurn(l);
     }
+  }
+
+  /** The session's turn is over. A message queued for a Stop that came and went without
+   *  taking it (it arrived after the hook asked, or the turn failed), or for one that
+   *  will never come (the turn's process was killed), goes another way. */
+  private notMidTurn(l: Live): void {
+    l.midTurn = false;
+    l.continued = false;
+    const left = l.turnQueue.splice(0);
+    for (const p of left) if (this.inflight.has(p.msgId)) void this.reroute(p);
   }
 
   // --- receivers ------------------------------------------------------------------
@@ -2110,6 +2115,19 @@ export class ControlDaemon {
     return res;
   }
 
+  /** A run of the daemon's own in this session is over: its child process has closed,
+   *  however it ended. What it wrote was written by a process that is gone (view()), and
+   *  the session is not mid-turn, whatever its hooks last said. The child's own
+   *  UserPromptSubmit marked it so, and only its Stop, StopFailure or SessionEnd unmarks
+   *  it: a child that is killed (a `cancel`, the 30-minute cap, any kill on Windows)
+   *  reports none of them, and the next message then waited up to half an hour for a
+   *  Stop that was never coming. */
+  private runOver(harness: string, id: string): void {
+    this.lastEnd.set(id, this.deps.now());
+    const l = this.live.get(`${harness}:${id}`);
+    if (l) this.notMidTurn(l);
+  }
+
   /** What a turn the person stopped answers with (CONTROL.md §6 `cancel`): the words it
    *  had written, and that it was cancelled — as an ACP agent's cancelled turn does. */
   private stoppedReply(soFar: string): string {
@@ -2754,7 +2772,7 @@ export class ControlDaemon {
     // A runner that doesn't stream hands the whole output over at the end.
     if (!reading.lines && res.stdout) for (const l of res.stdout.split("\n")) if (l.trim()) onLine(l);
     stream.close();
-    this.lastEnd.set(ref.id, this.deps.now());
+    this.runOver(ref.harness, ref.id);
     if (reading.warnings?.length)
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} warned: ${reading.warnings.join(" · ").slice(0, 400)}`);
     // A start stopped before its process began started nothing.
@@ -2880,7 +2898,7 @@ export class ControlDaemon {
         }),
       );
       stream.close();
-      this.lastEnd.set(target, this.deps.now());
+      this.runOver("claude-code", target);
       // Stopped on the person's request (a `cancel`): what it had said, and that it was
       // cancelled. Its mode is not reported: the turn it would describe never finished.
       const out = res.stopped
@@ -2895,7 +2913,7 @@ export class ControlDaemon {
         const reason = HELD[why.held]("the session");
         this.state.copies[ref.id] = { id: ran, at: new Date(this.deps.now()).toISOString(), reason, why: why.held };
         this.saveState(`the copy of ${known(ref.id)}`);
-        this.lastEnd.set(ran, this.deps.now());
+        this.runOver("claude-code", ran);
         notes.push(`${COPY_RAN} ${reason}${why.inPlace ? `; it could not be reached in place: ${why.inPlace}` : ""}`);
         this.deps.log(`${id.slice(-8)}: ${notes[0]}`);
       } else if (target !== ref.id) {
@@ -3284,7 +3302,7 @@ export class ControlDaemon {
       stream.close();
       // The transcript this run just wrote is ours: the next message must not read it as a
       // live session (a fork instead of a resume).
-      this.lastEnd.set(ref.id, this.deps.now());
+      this.runOver("claude-code", ref.id);
       // Stopped before its process began (it was waiting for a slot): nothing started.
       if (res.stopped && !run.began) return this.finish(r, id, UNSTARTED_ACK, sent);
       const out = res.stopped ? { reply: this.stoppedReply(stream.soFar) } : this.outcome(res);
