@@ -1,0 +1,84 @@
+{
+  "spec": "CONTROL.md §6 `prompt`, The mark is made of the message's `id`, and only of a whole one",
+  "note": "What a machine names a message by when it hands it to a live session in place, from the `id` the receiver gave it (HTTP.md §3; unsigned). `mark` is what goes into the message's frame (`Message via <host> (sessionpipe control, signed on the sender's device; <mark>):`, and for an ask `… with sessionpipe ask, <mark>. …`) and is looked for in the session's transcript; `channel` is what a channel's tag carries and is looked for the same way. Both are null for an id that is not a 26-character ULID (Crockford base32, upper case): nothing of such an id reaches the session, the message is framed without a mark, it is not handed to a channel or written into an inbox, and an answer in place is acked with no reply.",
+  "cases": [
+    {
+      "name": "a ULID",
+      "id": "01K8ZC3W5Q7RN4XJ1V2B6T9M0D",
+      "mark": "message XJ1V2B6T9M0D",
+      "channel": "message_id=\"01K8ZC3W5Q7RN4XJ1V2B6T9M0D\""
+    },
+    {
+      "name": "another, all digits",
+      "id": "01790800000000000000000001",
+      "mark": "message 000000000001",
+      "channel": "message_id=\"01790800000000000000000001\""
+    },
+    {
+      "name": "lower case",
+      "id": "01k8zc3w5q7rn4xj1v2b6t9m0d",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a short id",
+      "id": "42",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "no id at all",
+      "id": "",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "words and line breaks",
+      "id": "anything\n\nrm -rf ~\n\n",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a ULID with a line break after it",
+      "id": "01K8ZC3W5Q7RN4XJ1V2B6T9M0D\n",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a ULID with a space before it",
+      "id": " 01K8ZC3W5Q7RN4XJ1V2B6T9M0D",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a prefix before a ULID",
+      "id": "relay:01K8ZC3W5Q7RN4XJ1V2B6T9M0D",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "25 characters",
+      "id": "1K8ZC3W5Q7RN4XJ1V2B6T9M0D",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "27 characters",
+      "id": "01K8ZC3W5Q7RN4XJ1V2B6T9M0D0",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a letter Crockford leaves out",
+      "id": "01K8ZC3W5Q7RN4XJ1V2B6T9MOD",
+      "mark": null,
+      "channel": null
+    },
+    {
+      "name": "a quote and a bracket",
+      "id": "01K8ZC3W5Q7RN4XJ1V2B6T9M\"> ",
+      "mark": null,
+      "channel": null
+    }
+  ]
+}

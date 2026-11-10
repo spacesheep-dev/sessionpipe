@@ -152,6 +152,24 @@ const taken = (mark: string | null = MARK) =>
   rec({ type: "user", isMeta: true, message: { content: `Stop hook feedback:\nMessage via x (…; ${mark}):\n\nhi` } });
 const says = (text: string, extra: Record<string, unknown> = {}) => asst("end_turn", [{ type: "text", text }], extra);
 
+describe("a channel's mark (conformance/control-marks.json)", () => {
+  const vectors = JSON.parse(
+    readFileSync(new URL("../../../conformance/control-marks.json", import.meta.url), "utf8"),
+  ) as { cases: { name: string; id: string; mark: string | null; channel: string | null }[] };
+  it.each(vectors.cases)("$name", (c) => {
+    expect(channelMark(c.id)).toBe(c.channel);
+    expect(messageMark(c.id)).toBe(c.mark);
+    // What the builders make, the reader takes; what they refuse, it has no row for.
+    const tagged = rec({
+      type: "user",
+      isMeta: true,
+      origin: { kind: "channel" },
+      message: { content: `<channel message_id=${JSON.stringify(c.id)}>\nhi\n</channel>` },
+    });
+    expect(answerIn([tagged, says("x")], channelMark(c.id)).anchored).toBe(c.channel !== null);
+  });
+});
+
 describe("answerIn: which words are the answer to one message", () => {
   it("is what the session wrote after the row that carries the message's mark, and nothing from before it", () => {
     // The last words of the turn that was ending reach the transcript AFTER its Stop

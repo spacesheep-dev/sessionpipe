@@ -41,6 +41,10 @@
   *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, expect }`, the registry rows
   that name it, when its transcript was last written, and when a run of it is known to have
   ended. Run by `packages/cli/test/control-daemon.test.ts`.
+- `control-marks.json` — what a machine names a message by when it hands it to a live session
+  (spec/CONTROL.md §6 `prompt`): `{ id, mark, channel }`, the receiver's unsigned `id`, the mark
+  it makes for a frame and for a channel's tag, and null for every id that is not a whole ULID.
+  Run by `packages/core/test/frames.test.ts` and `packages/cli/test/control-reply.test.ts`.
 - `control-order.json` — the order a machine delivers one session's control messages in
   (spec/CONTROL.md §6 `prompt`): `{ steps: [{ arrive | done | drop }], expect: [ids] }`, a
   poll's messages arriving together, the running one finishing, one being refused. Run by

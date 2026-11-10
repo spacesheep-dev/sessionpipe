@@ -1154,6 +1154,9 @@ send → delivered time.
 - `conformance/transcripts/claude-code/stop-hook-ask.jsonl` — an ask handed to a live
   session at its Stop (§13): the paragraph that names the message, by which the daemon
   finds the answer, and which a reader gives back in its plain form.
+- `conformance/control-marks.json` — what a message is named by when it is handed to a
+  live session (§6 `prompt`): the mark a ULID makes, for a frame and for a channel's tag,
+  and the ids that make none (short, lower case, with a prefix, a line break, words).
 - `conformance/control-order.json` — the order one session's messages are delivered in
   (§6 `prompt`): polls that list them in and out of signing order, a running turn, a
   message that arrives late with an earlier `iat`, ties, a refused one, two sessions.

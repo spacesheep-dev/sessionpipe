@@ -4,6 +4,7 @@
 // may be left in it: a board showed "Reply with only the word IDLE1. You are a copy of
 // that session, started because the original is open in a window, …" as what the person
 // had written (2026-11-10).
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   COPY_WHYS,
@@ -27,6 +28,28 @@ const COPY_NOTE = copyNote("open");
 const R = "https://spacesheep.dev/api/control";
 const ID = "01K8ZC3W5Q7RN4XJ1V2B6T9M0D";
 const ASK = "Fix the flaky test in ci.yml.\n\nThen tell me what it was.";
+
+describe("a message's mark (conformance/control-marks.json)", () => {
+  const vectors = JSON.parse(
+    readFileSync(new URL("../../../conformance/control-marks.json", import.meta.url), "utf8"),
+  ) as { cases: { name: string; id: string; mark: string | null; channel: string | null }[] };
+  it("has an id that makes one, and every kind that makes none", () => {
+    expect(vectors.cases).toHaveLength(13);
+    expect(vectors.cases.filter((c) => c.mark).length).toBe(2);
+  });
+  it.each(vectors.cases)("$name", (c) => {
+    expect(messageMark(c.id)).toBe(c.mark);
+    // In the frame, or nothing of the id at all.
+    const header = (frameMarked("hi", R, c.id).split("\n")[0] as string).replace(/^Message via \S+ /, "");
+    expect(header).toBe(
+      c.mark
+        ? `(sessionpipe control, signed on the sender's device; ${c.mark}):`
+        : "(sessionpipe control, signed on the sender's device):",
+    );
+    expect(frameMarked("hi", R, c.id).endsWith("\n\nhi")).toBe(true);
+    expect(deliveredWords(frameMarked("hi", R, c.id))).toEqual({ text: "hi", via: "spacesheep.dev", delivered: true });
+  });
+});
 
 describe("the frames", () => {
   it("say where a message came from, by the receiver's host", () => {
