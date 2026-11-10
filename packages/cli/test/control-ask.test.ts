@@ -831,6 +831,38 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
     expect((await askIt(req({ from: b, chain: [], text: "more" }))).end?.op).toBe("answer");
   });
 
+  it("two sessions that each have a copy are two sessions: one may ask the other", { timeout: 20_000 }, async () => {
+    // The loop rule compares sessions by where their messages go. Reading the copy's whole
+    // record where its id was meant made every session with a copy the same session, so
+    // an ask between two of them was refused as a session asking itself.
+    const OTHER = "5e0d1c2b-3a49-4857-9665-74839201aabb";
+    const COPIES = { [SID]: "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7aa1", [OTHER]: "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7aa2" };
+    for (const id of [OTHER, ...Object.values(COPIES)]) transcript(id, project);
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({
+        copies: COPIES,
+        copies_v2: Object.fromEntries(Object.entries(COPIES).map(([k, id]) => [k, { id, at: "", reason: "" }])),
+      }),
+    );
+    await startDaemon();
+    const { end } = await askIt(req({ harness: "claude-code", session: `claude-code:${OTHER}`, text: "your view?" }));
+    expect(end).toMatchObject({
+      op: "answer",
+      session: `claude-code:${COPIES[OTHER]}`,
+      text: "claude did: your view?",
+    });
+    // A session asking itself is still a loop, by its own name or its copy's.
+    expect((await askIt(req({ harness: "claude-code", session: ASKER, text: "me?" }))).end).toMatchObject({
+      code: "loop",
+    });
+    expect(
+      (await askIt(req({ harness: "claude-code", session: ASKER, from: `claude-code:${COPIES[SID]}`, text: "me?" })))
+        .end,
+    ).toMatchObject({ code: "loop" });
+  });
+
   it("a session takes three asks at a time, as asker and as asked: the fourth is refused start_limit before it begins", {
     timeout: 20_000,
   }, async () => {

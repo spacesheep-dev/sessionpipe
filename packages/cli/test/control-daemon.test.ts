@@ -20,6 +20,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { shortId } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
@@ -1263,10 +1264,39 @@ describe.runIf(unix)("refusals (CONTROL.md §5)", () => {
     });
     expect(await rx.waitAck(`${q.id.slice(0, -1)}Y`)).toMatchObject({ outcome: "expired" });
   });
-  it("a command for no session on this machine", async () => {
+  it("a command for no session on this machine: refused, naming the session by the id the person knows", async () => {
     await startDaemon();
-    const q = await rx.send({ session: "claude-code:00000000-0000-4000-8000-000000000000", text: "hi" });
-    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+    // A session whose transcript is gone (moved, deleted, or it ran on another computer).
+    const GONE = "88749ed7-c212-405c-a4dd-cabe83687ca4";
+    const q = await rx.send({ session: `claude-code:${GONE}`, text: "hi" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({
+      outcome: "refused",
+      code: "no_session",
+      detail: "no Claude Code session 88749ed7 on this machine",
+    });
+    // Not the protocol's short id, a hash no page has ever shown them ("66a04e0a").
+    expect(shortId("claude-code", GONE)).toBe("66a04e0a");
+    expect(String(ack.detail)).not.toContain("66a04e0a");
+  });
+
+  it("a machine set to start no sessions says that, not that it is busy starting none", async () => {
+    for (const limits of [{ start_concurrent: 0 }, { start_per_hour: 0 }]) {
+      await startDaemon({ limits });
+      const q = await rx.send({
+        kind: "start",
+        session: "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7b99",
+        cwd: project,
+        text: "go",
+      });
+      expect(await rx.waitAck(q.id)).toMatchObject({
+        outcome: "refused",
+        code: "start_limit",
+        detail: "this machine is set to start no new sessions (the start limit in its control config is 0)",
+      });
+      await d?.stop();
+      d = null;
+    }
   });
 });
 

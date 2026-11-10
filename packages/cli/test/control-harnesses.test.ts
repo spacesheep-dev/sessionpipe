@@ -404,12 +404,17 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     );
     await startDaemon();
     const none = await rx.send({ session: "codex:thread-1", text: "hi" });
-    expect(await rx.waitAck(none.id)).toMatchObject({ outcome: "refused", code: "no_session" });
+    expect(await rx.waitAck(none.id)).toMatchObject({
+      outcome: "refused",
+      code: "no_session",
+      detail: "no Codex session thread-1 on this machine",
+    });
     const bare = await rx.send({ session: "codex:named", text: "hi" });
     expect(await rx.waitAck(bare.id)).toMatchObject({
       outcome: "refused",
       code: "no_session",
-      detail: expect.stringMatching(/^no folder known for Codex session /),
+      // By the id the person sent, as far as it is short enough to read.
+      detail: "no folder known for Codex session named",
     });
   });
 
