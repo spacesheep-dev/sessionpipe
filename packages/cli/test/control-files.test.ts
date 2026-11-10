@@ -79,6 +79,34 @@ describe("fetchFiles", () => {
   });
 });
 
+describe("fetchFiles, told to stop", () => {
+  const f = (name: string) => ({ name, type: "text/plain", size: 3, sha256: "A".repeat(43) });
+  it("drops the download in flight, and asks for no file after it", async () => {
+    const ctl = new AbortController();
+    const asked: string[] = [];
+    const stalls: typeof fetch = (input, init) =>
+      new Promise((_res, rej) => {
+        asked.push(String(input));
+        init?.signal?.addEventListener("abort", () => rej(new Error("hung up")));
+      });
+    const got = fetchFiles([f("a.txt"), f("b.txt")], {
+      control: "http://x/c",
+      token: "t",
+      fetch: stalls,
+      signal: ctl.signal,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    ctl.abort();
+    await expect(got).rejects.toThrow('couldn\'t download "a.txt": hung up');
+    expect(asked).toHaveLength(1);
+    // Stopped before it began: nothing is asked for at all.
+    const none = fetchFiles([f("b.txt")], { control: "http://x/c", token: "t", fetch: stalls, signal: ctl.signal });
+    await expect(none).rejects.toThrow(FileProblem);
+    await expect(none).rejects.toThrow('stopped before "b.txt" was downloaded');
+    expect(asked).toHaveLength(1);
+  });
+});
+
 describe("the list the session reads", () => {
   it("sizes in units of 1024, and the text first", () => {
     expect(humanSize(512)).toBe("512 B");

@@ -697,6 +697,68 @@ describe.runIf(unix)("a turn the daemon has in hand and has not started yet", ()
     expect(runs()).toEqual([]);
   });
 
+  it("a turn stopped while its file is still on its way has one final ack, and the download is over", async () => {
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    // A file that never arrives: the download ends when it is given up on, or told to stop.
+    let asked = 0;
+    let dropped = 0;
+    const stalled: typeof fetch = (input, init) => {
+      if (!String(input instanceof Request ? input.url : input).includes("/files/")) return fetch(input, init);
+      asked++;
+      return new Promise((_res, rej) => {
+        init?.signal?.addEventListener("abort", () => {
+          dropped++;
+          rej(new Error("aborted"));
+        });
+      });
+    };
+    await startDaemon({ extra: { fetch: stalled, fileTimeoutMs: 1200 } });
+    const q = await hand({ session: SESSION, text: "look at this", files: [png] });
+    await until(() => asked === 1);
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    // The download was told to stop there and then, not left to run out its time…
+    expect(dropped).toBe(1);
+    await sleep(1600);
+    // …and when that time has passed nothing more is said about the message (§10: one
+    // final outcome). It was acked `failed`, code `file`, a second and a half after
+    // `delivered`.
+    expect(rx.acks.filter((a) => a.id === q.id).map((a) => a.outcome)).toEqual(["taken", "delivered"]);
+    expect(runs()).toEqual([]);
+  });
+
+  it("a start stopped while its file is still on its way writes nothing into the folder afterwards", async () => {
+    const png = await rx.upload("shot.png", "image/png", new Uint8Array(1024).fill(3));
+    // The receiver is slow to answer and deaf to being hung up on: the bytes do arrive.
+    const late: typeof fetch = async (input, init) => {
+      if (!String(input instanceof Request ? input.url : input).includes("/files/")) return fetch(input, init);
+      await sleep(600);
+      return fetch(input, { ...init, signal: null });
+    };
+    await startDaemon({ extra: { fetch: late } });
+    const start = await hand({
+      kind: "start",
+      session: `claude-code:${NEW}`,
+      cwd: project,
+      text: "a long one",
+      files: [png],
+    });
+    await until(() => acksOf(start.id).includes("taken"));
+    const stop = await stopNow(`claude-code:${NEW}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(start.id)).toMatchObject({
+      outcome: "failed",
+      code: "cancelled",
+      detail: CANCEL.unstarted,
+    });
+    await sleep(1200);
+    // "No session was created", and nothing of it is in the project either.
+    expect(existsSync(path.join(project, ".sessionpipe"))).toBe(false);
+    expect(rx.acks.filter((a) => a.id === start.id).map((a) => a.outcome)).toEqual(["taken", "failed"]);
+    expect(runs()).toEqual([]);
+  });
+
   it("a Stop while a new session's start is being prepared: no session is created, and the start says so", async () => {
     const asked = { n: 0 };
     await startDaemon({ extra: { login: slowLogin(asked) } });

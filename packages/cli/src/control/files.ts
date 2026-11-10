@@ -31,6 +31,9 @@ export interface FetchOptions {
   fetch: typeof fetch;
   /** Per file; tests shorten it. */
   timeoutMs?: number | undefined;
+  /** Whoever asked no longer wants them (the turn was stopped): the download in flight is
+   *  dropped and no further file is asked for. */
+  signal?: AbortSignal | undefined;
 }
 
 const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -41,6 +44,7 @@ const reason = (e: unknown) => (e instanceof Error ? e.message : String(e)).slic
 export async function fetchFiles(files: ControlFile[], o: FetchOptions): Promise<Fetched[]> {
   const out: Fetched[] = [];
   for (const file of files) {
+    if (o.signal?.aborted) throw new FileProblem(`stopped before ${JSON.stringify(file.name)} was downloaded`);
     let bytes: Uint8Array;
     try {
       bytes = await fetchOne(file, o);
@@ -56,7 +60,9 @@ export async function fetchFiles(files: ControlFile[], o: FetchOptions): Promise
 async function fetchOne(f: ControlFile, o: FetchOptions): Promise<Uint8Array> {
   const label = JSON.stringify(f.name);
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), o.timeoutMs ?? FETCH_TIMEOUT_MS);
+  const drop = (): void => ctl.abort();
+  const t = setTimeout(drop, o.timeoutMs ?? FETCH_TIMEOUT_MS);
+  o.signal?.addEventListener("abort", drop, { once: true });
   try {
     const res = await o.fetch(`${o.control.replace(/\/$/, "")}/files/${f.sha256}`, {
       headers: { authorization: `Bearer ${o.token}` },
@@ -83,6 +89,7 @@ async function fetchOne(f: ControlFile, o: FetchOptions): Promise<Uint8Array> {
     return buf;
   } finally {
     clearTimeout(t);
+    o.signal?.removeEventListener("abort", drop);
     // Done or failed: whatever the receiver is still sending is cut off here.
     ctl.abort();
   }
