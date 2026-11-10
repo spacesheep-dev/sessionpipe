@@ -365,6 +365,33 @@ describe.runIf(unix)("messages for one session run in the order they were sent",
     expect(ran()).toEqual(["real"]);
   });
 
+  it("a message sent to a session's copy by its own name waits for the turn already running in that copy: never two at once in one transcript", async () => {
+    // The session's messages go to its copy, and the copy is on the board under its own
+    // id, so a person can message either. Both run in the copy's transcript.
+    transcript(COPY);
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({ copies: { [SID]: COPY }, copies_v2: { [SID]: { id: COPY, at: "", reason: "" } } }),
+    );
+    await startDaemon();
+    const viaSession = await sign("forever reply with just the word first");
+    poll(viaSession);
+    await until(() => ran().length === 1);
+    expect(argvs()[0]).toEqual(expect.arrayContaining(["--resume", COPY]));
+    const toCopy = await sign("reply with just the word second", { session: `claude-code:${COPY}` });
+    poll(toCopy);
+    await settle(600);
+    // Still only the first: the second has not been started beside it.
+    expect(ran()).toEqual(["first"]);
+    const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
+    poll(stop);
+    expect(await reply(stop)).toMatchObject({ outcome: "delivered" });
+    expect(await reply(toCopy)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "second" });
+    expect(ran()).toEqual(["first", "second"]);
+    expect(argvs()[1]).toEqual(expect.arrayContaining(["--resume", COPY]));
+  });
+
   it("another session's messages don't wait for this one's", async () => {
     transcript(OTHER);
     await startDaemon();
