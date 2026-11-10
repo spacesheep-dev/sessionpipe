@@ -197,6 +197,9 @@ const hook = (session, event) => new Promise((done) => {
 const i = a.indexOf("--resume"), j = a.indexOf("--session-id");
 const sid = a.includes("--fork-session") ? ${JSON.stringify(COPY)} : i >= 0 ? a[i + 1] : a[j + 1];
 const me = "claude-code:" + sid;
+// Its row in Claude Code's own session registry, as every \`claude -p\` files one.
+const row = path.join(${JSON.stringify(configDir)}, "sessions", process.pid + ".json");
+fs.writeFileSync(row, JSON.stringify({ pid: process.pid, sessionId: sid, kind: "print" }));
 (async () => {
   await hook(me, "SessionStart");
   await hook(me, "UserPromptSubmit");
@@ -208,6 +211,7 @@ const me = "claude-code:" + sid;
   }
   await hook(me, "Stop");
   await hook(me, "SessionEnd");
+  fs.rmSync(row);
   out({ type: "result", result: "did it", session_id: sid, is_error: false });
 })();
 `,
@@ -358,6 +362,44 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
     const again = await stopNow(SESSION);
     expect(await rx.waitAck(again.id)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
     expect(runs().map((x) => x.argv[x.argv.indexOf("--resume") + 1])).toEqual([COPY, COPY, COPY]);
+  });
+
+  it("a Stop addressed to the copy the turn runs in stops it: the copy is where the person was sent", async () => {
+    // The fork's ack names the copy in `session`, and its hooks put it on the board
+    // under its own id: that is the page a person presses Stop on.
+    transcript(COPY);
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({ copies: { [SID]: COPY }, copies_v2: { [SID]: { id: COPY, at: "", reason: "" } } }),
+    );
+    await startDaemon();
+    const long = await hand({ session: SESSION, text: "a long one" });
+    await until(() => rx.progress(long.id).length > 0);
+    const child = runs()[0]?.pid as number;
+    const stop = await stopNow(`claude-code:${COPY}`);
+    const ack = await rx.waitAck(stop.id);
+    // Not "a Claude Code process this computer's daemon didn't start (pid …)": it is its own.
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+    expect(String(ack.detail)).not.toContain(String(child));
+    expect(alive(child)).toBe(false);
+    expect(await rx.waitAck(long.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+  });
+
+  it("a Stop addressed to a copy that is still being made stops the run that is making it", async () => {
+    holds(SID, "interactive");
+    await startDaemon();
+    const long = await hand({ session: SESSION, text: "a long one" });
+    // The new copy has named itself (its init line), and its hooks have reported under that name.
+    await until(() => rx.progress(long.id).length > 0);
+    const stop = await stopNow(`claude-code:${COPY}`);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "fork", detail: CANCEL.stopped });
+    expect(await rx.waitAck(long.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "fork",
+      session: `claude-code:${COPY}`,
+      reply: `Pinging\n\n${CANCELLED_NOTE}`,
+    });
   });
 
   it("a turn that said nothing yet answers with the note alone; a turn waiting for its slot never starts", async () => {

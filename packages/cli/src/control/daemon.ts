@@ -490,8 +490,11 @@ interface OwnRun {
   ctl: AbortController;
   /** The message the turn is for. */
   id: string;
-  /** The session it is a turn of, by the id a `cancel` names. */
-  session: string;
+  /** The sessions it is a turn of, by every id a `cancel` may name it by: the one its
+   *  command named, the copy it runs in where that session's messages go to one, and
+   *  the copy it is making, once that has named itself. The ack and the board send a
+   *  person to the copy, so that is where they press Stop. */
+  sessions: string[];
   /** How that message is acked, once it is known which way it goes: what a `cancel`
    *  that stops it says it stopped. */
   mode: "resume" | "fork" | null;
@@ -2036,9 +2039,10 @@ export class ControlDaemon {
     );
   }
 
-  /** The turn a `cancel` for this session ends: the first the daemon took in hand for it. */
+  /** The turn a `cancel` for this session ends: the first the daemon took in hand for
+   *  it, under any of the names that turn's session has (`OwnRun.sessions`). */
   private runFor(session: string): OwnRun | undefined {
-    return this.runs.find((x) => x.session === session);
+    return this.runs.find((x) => x.sessions.includes(session));
   }
 
   /** The turn in hand for this message. Every path that delivers one took it in hand
@@ -2058,7 +2062,17 @@ export class ControlDaemon {
     const stoppedSoon = new Promise<typeof STOPPED>((res) => {
       ctl.signal.addEventListener("abort", () => res(STOPPED));
     });
-    const run: OwnRun = { ctl, id, session, mode: null, began: false, stopped: false, stoppedSoon, done, settle };
+    const run: OwnRun = {
+      ctl,
+      id,
+      sessions: [session],
+      mode: null,
+      began: false,
+      stopped: false,
+      stoppedSoon,
+      done,
+      settle,
+    };
     this.runs.push(run);
     try {
       await work(run);
@@ -2837,6 +2851,8 @@ export class ControlDaemon {
     this.finish(r, id, { outcome: "taken" });
     await this.serial(ref.id, async () => {
       const target = this.state.copies[ref.id]?.id ?? ref.id;
+      // The turn runs in the copy where there is one: a Stop may name either.
+      if (target !== ref.id) run.sessions.push(target);
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.
       const body = this.framed(r, cmd.text as string, false) + (why ? `\n\n${copyNote(why.held)}` : "");
@@ -2891,7 +2907,10 @@ export class ControlDaemon {
             ? {
                 onLine: (l: string) => {
                   stream.feed(l);
-                  said.session ??= initSession(l);
+                  if (said.session) return;
+                  said.session = initSession(l);
+                  // A copy being made has a name now: a Stop for it is a Stop for this run.
+                  if (said.session && !run.sessions.includes(said.session)) run.sessions.push(said.session);
                 },
               }
             : {}),
