@@ -8,7 +8,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACP_AGENTS,
   ACP_HARNESSES,
@@ -413,6 +413,23 @@ describe("one agent, driven", () => {
       expect(w.closed).toBe(true);
     });
   });
+  it.runIf(process.platform !== "win32")(
+    "a close after the agent has exited signals nothing: its group's number is no longer certain to be its own",
+    async () => {
+      const g = await open({ closeGraceMs: 50 });
+      await g.send("die");
+      const kill = vi.spyOn(process, "kill");
+      try {
+        g.close();
+        // Past both timers (SIGTERM at 50 ms, SIGKILL at 300): each was sent to the group of
+        // a process that had gone, by a number the system may have handed to another.
+        await new Promise((r) => setTimeout(r, 450));
+        expect(kill.mock.calls).toEqual([]);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
   it("reopening: session/load where the agent can, its replay is nobody's answer; an agent that can't is unsupported", async () => {
     const seen: string[] = [];
     const h = await open({ load: SESSION, onText: (t) => seen.push(t) });

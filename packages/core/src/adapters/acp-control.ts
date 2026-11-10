@@ -334,7 +334,11 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
     pending.clear();
   };
   child.on("error", (e) => left(`couldn't start ${label}: ${e.message}`));
+  // The process has exited (or never was): there is nothing left to end, and the number
+  // of its group is no longer certain to be its own.
+  let dead = false;
   const exited = (code: number | null, signal: NodeJS.Signals | null) => {
+    dead = true;
     const tail = errTail.trim().split("\n").slice(-3).join(" ").trim();
     left(`${label} exited (${signal || `code ${code}`})${tail ? `: ${tail}` : ""}`);
   };
@@ -350,6 +354,11 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
     try {
       child.stdin?.end();
     } catch {}
+    // Closed after it left (a held agent that exited is closed by whoever finds it gone):
+    // no signal follows it. The two timers below were armed all the same, their only
+    // disarming an `exit` that had already happened, and SIGTERM and then SIGKILL went to
+    // the group of a process that was gone.
+    if (dead) return;
     const grace = o.closeGraceMs ?? 2000;
     const t = setTimeout(() => kill("SIGTERM"), grace);
     t.unref();

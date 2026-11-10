@@ -769,7 +769,9 @@ Stops the current turn where the machine has a way of its own to stop it:
   30-minute cap — SIGTERM to the child's own process group (the harness and the tools it
   started), then SIGKILL to whatever is left, ten seconds later or as the child exits,
   whichever is first; on Windows the child is killed. Once the child has exited nothing
-  more is sent to that group: its number is no longer certain to be the daemon's own. The cancel is acked `taken`, then `delivered` once that process is gone, with
+  more is sent to that group: its number is no longer certain to be the daemon's own.
+  The same holds for an agent the daemon holds (`api` mode) and closes: one that has
+  already exited is sent no signal. The cancel is acked `taken`, then `delivered` once that process is gone, with
   the mode the turn was running in (`resume` or `fork`). The turn's own message still
   gets its one final ack: `delivered`, its `reply` what the turn had written, ending
   `(The turn was cancelled.)` as an ACP agent's cancelled turn does; a `fork` stopped
