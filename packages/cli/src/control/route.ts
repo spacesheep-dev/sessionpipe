@@ -162,6 +162,9 @@ export interface CancelView {
 export const CANCEL = {
   stopped: "stopped the turn this computer was running for that session",
   finished: "the turn this computer was running for that session finished before it could be stopped",
+  /** A start's own final ack (`failed`, code `cancelled`) when the Stop came before its
+   *  process began: nothing was started, so nothing is called delivered. */
+  unstarted: "stopped before it started, as asked: no session was created",
   open: "that session is open in Claude Code on this computer (a terminal window or the Claude app), and a turn there can only be stopped in its own window: press Esc there",
   foreign: (pid: number) =>
     `a Claude Code process this computer's daemon didn't start is running that session (pid ${pid}), and the daemon only stops turns it runs itself: stop it where it was started`,
