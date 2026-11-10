@@ -60,7 +60,9 @@ const permission = (title) => ask("session/request_permission", {
     { optionId: "reject-once", name: "Reject", kind: "reject_once" },
   ],
 });
-if (how === "stubborn") process.on("SIGTERM", () => {});
+if (how === "stubborn" || how === "deaf") process.on("SIGTERM", () => {});
+// "deaf": it stays when its input ends, too.
+if (how === "deaf") setInterval(() => {}, 1000);
 let cancelled = null;
 let buf = "";
 process.stdin.on("data", (b) => {
@@ -69,7 +71,7 @@ process.stdin.on("data", (b) => {
   buf = lines.pop();
   for (const line of lines) if (line.trim()) handle(JSON.parse(line));
 });
-process.stdin.on("end", () => { log({ stdin: "end" }); setTimeout(() => process.exit(0), 50); });
+process.stdin.on("end", () => { log({ stdin: "end" }); if (how !== "deaf") setTimeout(() => process.exit(0), 50); });
 if (how !== "quiet") process.stderr.write("fake-acp starting\\n");
 async function handle(m) {
   if (m.id !== undefined && m.method === undefined) { const w = waiting.get(m.id); waiting.delete(m.id); log({ answer: m }); w?.(m); return; }
@@ -401,7 +403,7 @@ describe("one agent, driven", () => {
     await new Promise((r) => setTimeout(r, 700));
     expect(h.closed).toBe(true);
     expect(await h.send("pong")).toEqual({ reply: "", error: "Codex was closed" });
-    // A close after the process left: the kill finds nobody and says nothing.
+    // A close after the process left is nothing either (and signals nothing: below).
     const g = await open({ closeGraceMs: 50 });
     await g.send("die");
     g.close();
@@ -413,6 +415,24 @@ describe("one agent, driven", () => {
       expect(w.closed).toBe(true);
     });
   });
+  it.runIf(process.platform !== "win32")(
+    "an agent that stays when its input ends and ignores SIGTERM is killed, once",
+    async () => {
+      const h = await open({ closeGraceMs: 50 }, "deaf");
+      const kill = vi.spyOn(process, "kill");
+      try {
+        h.close();
+        await new Promise((r) => setTimeout(r, 700));
+        // SIGTERM after the grace, SIGKILL after six of them, to its own group; nothing after it has gone.
+        expect(kill.mock.calls.map((c) => c[1])).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(new Set(kill.mock.calls.map((c) => c[0])).size).toBe(1);
+        expect(kill.mock.calls[0]?.[0]).toBeLessThan(0);
+      } finally {
+        kill.mockRestore();
+      }
+      expect(await h.send("pong")).toEqual({ reply: "", error: "Codex was closed" });
+    },
+  );
   it.runIf(process.platform !== "win32")(
     "a close after the agent has exited signals nothing: its group's number is no longer certain to be its own",
     async () => {

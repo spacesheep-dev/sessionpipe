@@ -358,9 +358,16 @@ describe.runIf(unix)("messages for one session run in the order they were sent",
     cut.cmd = `{"kind":"prompt","session":"${SESSION}`;
     const undated = await sign("reply with just the word undated");
     undated.cmd = JSON.stringify({ ...JSON.parse(undated.cmd), iat: "now" });
-    poll(cut, undated, real);
+    // No command at all, and one longer than any the machine reads.
+    const absent = await sign("reply with just the word absent");
+    (absent as { cmd: unknown }).cmd = 42;
+    const endless = await sign("reply with just the word endless");
+    endless.cmd = JSON.stringify({ ...JSON.parse(endless.cmd), text: "x".repeat(70_000) });
+    poll(cut, undated, absent, endless, real);
     expect(await reply(cut)).toMatchObject({ outcome: "refused", code: "malformed" });
     expect(await reply(undated)).toMatchObject({ outcome: "refused" });
+    expect(await reply(absent)).toMatchObject({ outcome: "refused", code: "malformed" });
+    expect(await reply(endless)).toMatchObject({ outcome: "refused", code: "malformed" });
     expect(await reply(real)).toMatchObject({ outcome: "delivered", reply: "real" });
     expect(ran()).toEqual(["real"]);
   });
