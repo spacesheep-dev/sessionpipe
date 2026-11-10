@@ -126,9 +126,15 @@ const ASK_LINES = [lineOf(frameAsk("", HOLE), "[^\\n]{1,300}")];
 const MARKED_ASK_LINES = [lineOf(frameAsk("", HOLE, MARK), "([^\\n]{1,300}?)")];
 /** The first paragraph, the answer after it: `frameHandoff`. */
 const HANDOFF_LINES = [lineOf(frameHandoff(HOLE, HOLE, ""))];
+/** What a copy was told by 0.13.0 to 0.13.2. Nothing says it now (told "nothing you do
+ *  here appears in it", a copy asked to change a page answered that a copy can't publish,
+ *  2026-11-05); every copy those versions made has it in its transcript, after the
+ *  person's words, so a reader still takes it off. Read, never written. */
+const COPY_NOTE_0_13_0 =
+  "You are a copy of that session, started to answer this message: the conversation above is a replay, the original session is somewhere else, and nothing you do here appears in it. Answer the message and stop; don't carry on the original's work.";
 /** What a copy is told, in each of its forms (two today: an original open in a window,
- *  and one something else is using). */
-const COPY_NOTES = [...new Set(COPY_WHYS.map(copyNote))];
+ *  and one something else is using), and what one was told before. */
+const COPY_NOTES = [...new Set(COPY_WHYS.map(copyNote)), COPY_NOTE_0_13_0];
 /** What the daemon may add, once, after the words of a message a receiver sent
  *  (control/daemon.ts: a Stop hook's block and the inbox, a copy, a waiter). */
 const NOTES = [IN_PLACE_ANSWER, ...COPY_NOTES, RE_ARM];
