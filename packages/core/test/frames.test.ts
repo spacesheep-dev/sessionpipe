@@ -202,4 +202,19 @@ describe("deliveredWords", () => {
     ])
       expect(deliveredWords(text)).toEqual({ text, via: null, delivered: false });
   });
+
+  it("still takes off what a copy was told by 0.13.0 to 0.13.2: the transcripts written then carry it", () => {
+    // No daemon says this any more (a copy told "nothing you do here appears in it" answered
+    // that a copy can't publish, 2026-11-05), and every copy made by those versions has it
+    // after the person's words.
+    const OLD =
+      "You are a copy of that session, started to answer this message: the conversation above is a replay, the original session is somewhere else, and nothing you do here appears in it. Answer the message and stop; don't carry on the original's work.";
+    expect(deliveredWords(`${frame(ASK, R)}\n\n${OLD}`)).toEqual(plain(ASK));
+    // An ask carrying it is an ask all the same: the paragraph that says who asked stays.
+    const asked = frameAsk(ASK, "codex:01a10860");
+    expect(deliveredWords(`${asked}\n\n${OLD}`)).toEqual({ text: asked, via: null, delivered: true });
+    // Written by the person, it is theirs.
+    expect(deliveredWords(OLD)).toEqual({ text: OLD, via: null, delivered: false });
+    expect(deliveredWords(`why did it say this?\n\n${OLD}`)).toMatchObject({ delivered: false });
+  });
 });
