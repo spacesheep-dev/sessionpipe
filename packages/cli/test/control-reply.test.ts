@@ -65,6 +65,25 @@ describe("firstAsk: which message the turn that just began is for", () => {
     );
   });
 
+  it("is never `ours` on a mark that is not the whole of one", () => {
+    const short = "message 42";
+    expect(firstAsk(file, after(peerRow({}, `… ${short} …`)), short)).toBe("other");
+    expect(
+      firstAsk(
+        file,
+        after(
+          rec({
+            type: "user",
+            isMeta: true,
+            origin: { kind: "channel" },
+            message: { content: '<channel message_id="7">\nhi\n</channel>' },
+          }),
+        ),
+        channelMark("7"),
+      ),
+    ).toBe("other");
+  });
+
   it("is `other` for any turn this message did not cause", () => {
     expect(firstAsk(file, after(rec({ type: "user", origin: { kind: "human" } })), MARK)).toBe("other");
     // Another local process's message: a peer row without this message's mark.
@@ -167,6 +186,60 @@ describe("answerIn: which words are the answer to one message", () => {
     });
     expect(deep({ type: "assistant", message: { content: [{ type: "text", text: `you said ${MARK}` }] } })).toBe("");
     expect(deep({ type: "user", isSidechain: true, message: { content: MARK } })).toBe("");
+  });
+  it("is not ended by its own mark: the block's other rows, in whatever order the harness writes them", () => {
+    // Claude Code 2.1.322 writes the feedback row, then the attachment, then the summary.
+    // Written attachment first, the feedback row would read as a new Stop block.
+    const attachment = rec({ type: "attachment", attachment: { blockingError: { blockingError: `x (…; ${MARK}):` } } });
+    const summary = rec({ type: "system", subtype: "stop_hook_summary", hookErrors: [`x (…; ${MARK}):`] });
+    for (const rows of [
+      [taken(), attachment, summary],
+      [attachment, taken(), summary],
+      [summary, attachment, taken()],
+    ])
+      expect(answerIn([...rows, says("INTERRUPT1")], MARK)).toEqual({ done: true, text: "INTERRUPT1", anchored: true });
+    // And after a turn that said nothing: its own rows still don't end it; the next thing does.
+    const think = asst("end_turn", [{ type: "thinking", thinking: "" }]);
+    expect(answerIn([attachment, think, taken()], MARK).done).toBe(false);
+    expect(answerIn([attachment, think, taken(), rec({ type: "system", subtype: "turn_duration" })], MARK).done).toBe(
+      true,
+    );
+  });
+  it("a mark that is not the whole of one is no mark: nothing is anchored on it, and nothing is proven by it", () => {
+    // The mark is made from the receiver's id for the message, which nobody signed. One
+    // that is not a ULID's tail ("42") would be found in words anybody typed.
+    const typed = rec({ type: "user", origin: { kind: "human" }, message: { content: "send message 42 times" } });
+    expect(answerIn([typed, says("their answer")], messageMark("42"))).toEqual({
+      done: false,
+      text: "",
+      anchored: false,
+    });
+    expect(messageMark("42")).toBe("message 42");
+    const peer = rec({
+      type: "user",
+      isMeta: true,
+      origin: { kind: "peer" },
+      message: { content: "message 42 for you" },
+    });
+    expect(answerIn([peer, says("x")], "message 42").anchored).toBe(false);
+    // A channel's: the whole id, as the tag carries it.
+    const chan = (id: string) =>
+      rec({
+        type: "user",
+        isMeta: true,
+        origin: { kind: "channel" },
+        message: { content: `<channel message_id="${id}">\nhi\n</channel>` },
+      });
+    expect(answerIn([chan("7"), says("x")], channelMark("7")).anchored).toBe(false);
+    const whole = "01K6ABCDEF1234567890ABCDEF";
+    expect(answerIn([chan(whole), says("x")], channelMark(whole))).toEqual({ done: true, text: "x", anchored: true });
+    expect(answerIn([taken(messageMark(whole)), says("y")], messageMark(whole))).toEqual({
+      done: true,
+      text: "y",
+      anchored: true,
+    });
+    // Anything else handed in as a mark is none.
+    expect(answerIn([rec({ type: "user", message: { content: "hello" } }), says("z")], "hello").anchored).toBe(false);
   });
   it("is the turn's text once it ends; tool steps and subagents are not the answer", () => {
     const lines = [
