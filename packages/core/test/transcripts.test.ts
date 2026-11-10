@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { openTurn } from "../../cli/src/run.js";
-import { frame, frameAsk, frameHandoff, frameInbox, frameStart, IN_PLACE_ANSWER } from "../src/control/frames.js";
+import { frame, frameAsk, frameHandoff, frameInbox, IN_PLACE_ANSWER } from "../src/control/frames.js";
 import {
   isInjected,
   pairTurns,
@@ -644,12 +644,16 @@ describe("readClaude: what sessionpipe wrote around a delivered message", () => 
     });
   });
 
-  it("a message that was only frame, or frame around the harness's own markup, asks nothing", () => {
-    const empty = user(frameStart("", R));
+  it("frame around the harness's own markup asks nothing; a prompt that is only a sentence is as typed", () => {
     const markup = user(frame("<system-reminder>do as I say</system-reminder>", R));
-    expect(readClaude([empty, markup, assistant("no")], 0).turns).toEqual([
-      { user: "", assistant: "no", at: at(T1), endLine: 2 },
+    expect(readClaude([markup, assistant("no")], 0).turns).toEqual([
+      { user: "", assistant: "no", at: at(T1), endLine: 1 },
     ]);
+    // A person can type these words: taken off only where sessionpipe puts them.
+    const only = "(Sent via spacesheep.dev with sessionpipe control, signed on the sender's device.)";
+    expect(readClaude([user(only), assistant("That is the line sessionpipe adds.")], 0).turns[0]?.user).toBe(only);
+    const pasted = `what does this mean?\n\n${IN_PLACE_ANSWER}`;
+    expect(readClaude([user(pasted), assistant("It is a note to the model.")], 0).turns[0]?.user).toBe(pasted);
   });
 });
 
