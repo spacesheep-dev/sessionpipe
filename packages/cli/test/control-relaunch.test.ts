@@ -4,13 +4,22 @@
 // what its own hooks reported. And what a copy is owed: the harness's own
 // source-is-alive contract, a note saying it is a copy, a link back on the ack, a cap
 // per day, and never a copy of a copy.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { claudeControl } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
-import { ask } from "../src/control/local.js";
+import { ask, askMany } from "../src/control/local.js";
 import type { ControlConfig } from "../src/control/store.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
@@ -274,6 +283,113 @@ describe.runIf(unix)("the mode a cold run is launched with", () => {
   });
 });
 
+describe.runIf(unix)("resume or copy: what holds the session (CONTROL.md §6, What counts as held)", () => {
+  /** The session's transcript as a run that just wrote it leaves it: touched `ago` ms ago. */
+  const written = (ago = 0, sid = SID) => {
+    const at = new Date(Date.now() - ago);
+    utimesSync(transcriptFile(sid), at, at);
+  };
+  const hook = (event: string, session = SESSION) => ask(sock, { op: "event", session, event }, 500);
+  const copies = () =>
+    (
+      JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
+        copies_v2: Record<string, { id: string; why?: string; reason: string }>;
+      }
+    ).copies_v2;
+
+  it("a session whose headless run has just exited is resumed in place at once, not copied", async () => {
+    // S1 on 2026-11-10: a `claude -p` at a terminal exited (its Stop and SessionEnd hooks
+    // fired), a message arrived 7 s later, and it ran in a copy "because the session is
+    // open in a window". No process held it, and the daemon's own log said so.
+    await startDaemon();
+    for (const e of ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]) await hook(e);
+    written();
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "seven seconds after it exited" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(ack).not.toHaveProperty("session");
+    expect(ack).not.toHaveProperty("copy_of");
+    expect(runs()[0]?.argv).toEqual(expect.arrayContaining(["--resume", SID]));
+    expect(runs()[0]?.argv).not.toContain("--fork-session");
+    expect(runs()[0]?.argv.at(-1)).not.toContain("You are a copy");
+    expect(existsSync(path.join(tmp, "state", "control", "state.json"))).toBe(false);
+  });
+
+  it("written to seconds ago, with no end reported and no process to be found: a copy, and that is the reason it gives", async () => {
+    // A writer the registry doesn't show may still be there (a process killed outright
+    // reports no end; a session can file its row under another id): never a second writer.
+    await startDaemon();
+    await hook("UserPromptSubmit");
+    await hook("Stop");
+    written(5000);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "is anyone writing this?" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "fork", session: `claude-code:${COPY}`, copy_of: SESSION });
+    expect(ack.detail).toBe(
+      "ran in a copy, because the transcript of the session had been written to in the last 90 seconds by a process this computer could not find; it could not be reached in place: no single live Claude Code process holds that session on this computer",
+    );
+    expect(copies()[SID]).toMatchObject({
+      id: COPY,
+      why: "recent",
+      reason:
+        "the transcript of the session had been written to in the last 90 seconds by a process this computer could not find",
+    });
+    // The copy is not told its original is open in a window: nobody knows that it is.
+    const told = runs()[0]?.argv.at(-1) as string;
+    expect(told).toContain("started because the original is in use by another process, and you have");
+    expect(told).toContain("the person reads your reply and not the original's: say what you did");
+    expect(told).not.toContain("window");
+  });
+
+  it("written to again after its end was reported: something else has it now, and it is copied", async () => {
+    await startDaemon();
+    await hook("SessionEnd");
+    // Later than the end by more than the last rows' two seconds.
+    const later = new Date(Date.now() + 4000);
+    utimesSync(transcriptFile(SID), later, later);
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "after the end" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    expect(copies()[SID]?.why).toBe("recent");
+  });
+
+  it("another process's run that is still going: a copy, saying so", async () => {
+    // A registry row that is not a window's: a `claude -p` someone started.
+    writeFileSync(
+      path.join(configDir, "sessions", `${process.pid}.json`),
+      JSON.stringify({ sessionId: SID, pid: process.pid, kind: "print" }),
+    );
+    await startDaemon();
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "while it runs" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: SESSION });
+    expect(String(ack.detail)).toMatch(
+      /^ran in a copy, because another Claude Code process on this computer was running the session; it could not be reached in place: /,
+    );
+    expect(copies()[SID]?.why).toBe("running");
+    expect(runs()[0]?.argv.at(-1)).toContain("the original is in use by another process");
+  });
+
+  it("an ask is copied for the same reasons, with no inbox to speak of", async () => {
+    liveNoInbox();
+    await startDaemon({ cfg: { ask: true } });
+    const end = await askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: SESSION, text: "a second opinion", cwd: project, chain: [] },
+      () => {},
+      15_000,
+    );
+    expect(end).toMatchObject({ op: "answer", session: `claude-code:${COPY}` });
+    expect(copies()[SID]).toMatchObject({ why: "open" });
+    expect(
+      log.some((l) =>
+        /: ran in a copy, because the session was open in Claude Code on this computer \(a terminal window or the Claude app\)$/.test(
+          l,
+        ),
+      ),
+    ).toBe(true);
+  });
+});
+
 describe.runIf(unix)("a copy, when nothing can reach the session", () => {
   it("is labelled, linked both ways, and told that the original is still open", async () => {
     liveNoInbox();
@@ -290,23 +406,67 @@ describe.runIf(unix)("a copy, when nothing can reach the session", () => {
       mode: "fork",
       session: `claude-code:${COPY}`,
       copy_of: SESSION,
-      // The mode the COPY's own turn ran in, from the copy's own rows.
-      detail: "the turn ran in acceptEdits, the mode the session itself was in",
     });
+    // Why a copy, as the machine found it; why its own inbox was no way in; and the mode
+    // the COPY's own turn ran in, from the copy's own rows.
+    expect(ack.detail).toBe(
+      "ran in a copy, because the session was open in Claude Code on this computer (a terminal window or the Claude app); it could not be reached in place: that session's Claude Code speaks inbox protocol none, not 1; the turn ran in acceptEdits, the mode the session itself was in",
+    );
     const run = runs()[0] as { argv: string[]; alive: string | null };
     expect(run.argv).toContain("--fork-session");
     // The harness's own contract for a fork whose source is still open.
     expect(run.alive).toMatch(new RegExp(`^${SID}\\|.+Z\\|${SID}$`));
-    expect(run.argv.at(-1)).toContain("You are a copy of that session");
-    // And the copy is remembered with a date and a reason, beside the plain id map a
-    // rollback would read.
+    expect(run.argv.at(-1)).toContain(
+      "You are a copy of that session, started because the original is open in a window, and you have",
+    );
+    expect(run.argv.at(-1)).toContain("the person reads your reply and not the original's window: say what you did");
+    // And the copy is remembered with a date and why, beside the plain id map a rollback
+    // would read.
     const state = JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
       copies: Record<string, string>;
-      copies_v2: Record<string, { id: string; at: string; reason: string }>;
+      copies_v2: Record<string, { id: string; at: string; reason: string; why: string }>;
     };
     expect(state.copies[SID]).toBe(COPY);
-    expect(state.copies_v2[SID]).toMatchObject({ id: COPY, reason: expect.stringContaining("couldn't be reached") });
+    expect(state.copies_v2[SID]).toMatchObject({
+      id: COPY,
+      why: "open",
+      reason: "the session was open in Claude Code on this computer (a terminal window or the Claude app)",
+    });
     expect(Date.parse(state.copies_v2[SID]?.at as string)).toBeGreaterThan(0);
+    expect(log.some((l) => l.startsWith(`${q.id.slice(-8)}: ran in a copy, because the session was open`))).toBe(true);
+    // The next message resumes that copy, and its ack says where it ran and why there is one.
+    const next = await rx.send({ session: SESSION, kind: "prompt", text: "and this" });
+    const again = await rx.waitAck(next.id);
+    expect(again).toMatchObject({ outcome: "delivered", mode: "resume", session: `claude-code:${COPY}` });
+    expect(String(again.detail)).toMatch(
+      /^ran in the copy made earlier, because the session was open in Claude Code on this computer \(a terminal window or the Claude app\)(; |$)/,
+    );
+    expect(runs()[1]?.argv).toEqual(expect.arrayContaining(["--resume", COPY]));
+  });
+
+  it("a copy an older daemon recorded: its reason is not repeated, only that the answer came from the copy", async () => {
+    // Up to 0.13.3 every copy was recorded as "the session was open", open or not.
+    transcript(COPY);
+    mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+    writeFileSync(
+      path.join(tmp, "state", "control", "state.json"),
+      JSON.stringify({
+        copies: { [SID]: COPY },
+        copies_v2: {
+          [SID]: {
+            id: COPY,
+            at: "2026-11-10T16:45:59.936Z",
+            reason: "the session was open on this computer and couldn't be reached in place",
+            why: "a word this version doesn't know",
+          },
+        },
+      }),
+    );
+    await startDaemon();
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "where does this go?" });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "resume", session: `claude-code:${COPY}` });
+    expect(ack.detail).toBe("ran in the copy this session's messages go to");
   });
 
   it("is never itself copied: the next message resumes it", async () => {

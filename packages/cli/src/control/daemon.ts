@@ -76,8 +76,11 @@ import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./re
 import {
   CANCEL,
   CLAUDE_NOT_FOUND,
-  COPY_NOTE,
+  COPY_AGAIN,
+  COPY_AGAIN_BARE,
+  COPY_RAN,
   channelMark,
+  copyNote,
   type DeliveryMode,
   earlier,
   frame,
@@ -86,6 +89,8 @@ import {
   frameMarked,
   frameStart,
   HEADLESS,
+  HELD,
+  type Holder,
   IN_PLACE_ANSWER,
   kindPath,
   messageMark,
@@ -117,7 +122,6 @@ const {
   findTranscript,
   initSession,
   isUuid,
-  liveProcess,
   loginHint,
   homeSettings,
   liveRecord,
@@ -485,6 +489,10 @@ interface Live {
   cwd?: string;
   transcript?: string;
   lastEvent: number;
+  /** When the session's own hooks last reported its end (`SessionEnd`): the process that
+   *  held it has let go of it, so what its transcript gained up to then was written by a
+   *  process that is done (view()). */
+  ended?: number;
 }
 
 interface PollState {
@@ -1054,10 +1062,12 @@ export class ControlDaemon {
       l.continued = false;
       return;
     }
-    if (e.event === "SessionEnd")
+    if (e.event === "SessionEnd") {
       // The session is gone: a message written into its inbox will never be taken, so
       // the lane is not kept shut for a window that has closed.
       this.unpark(named);
+      l.ended = this.deps.now();
+    }
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
       l.midTurn = false;
       l.continued = false;
@@ -2223,13 +2233,15 @@ export class ControlDaemon {
     const ref = parseSessionRef(session)!;
     const l = this.live.get(session);
     if (ref.harness !== "claude-code") {
-      // Codex: a rollout someone else wrote in the last 90 s is a session in use.
-      // Antigravity keeps no file that says so: only the daemon's own run (whose
-      // messages wait in line behind it) holds one.
-      const live =
+      // Codex: a rollout written in the last 90 s by something that isn't known to have
+      // finished is a session in use. Antigravity keeps no file that says so: only the
+      // daemon's own run (whose messages wait in line behind it) holds one.
+      const held: Holder | null =
         !this.ownRuns.has(ref.id) &&
-        !!place.file &&
-        recentlyWritten(place.file, this.lastEnd.get(ref.id), this.deps.now());
+        place.file &&
+        recentlyWritten(place.file, this.endedAt(session, ref.id), this.deps.now())
+          ? "recent"
+          : null;
       return {
         harness: ref.harness,
         sdk: this.sdkSessions.has(ref.id),
@@ -2237,7 +2249,7 @@ export class ControlDaemon {
         midTurn: !!l?.midTurn,
         // The inbox is Claude Code's own local socket; no other harness has one.
         inbox: false,
-        live,
+        held,
         known: true,
         canFork: false,
         copied: false,
@@ -2253,17 +2265,14 @@ export class ControlDaemon {
     const t = transcript;
     // The daemon's own run holding it is not "someone else's live process": the message
     // queues behind that run (serial per session) and resumes it.
-    const live =
-      !this.ownRuns.has(target) &&
-      !!t &&
-      (liveProcess(target, t.configDir) || recentlyWritten(t.file, this.lastEnd.get(target), this.deps.now()));
+    const held = !this.ownRuns.has(target) && t ? this.heldBy(target, t) : null;
     return {
       harness: ref.harness,
       sdk: this.sdkSessions.has(ref.id),
       waiter: this.waiterFits(l),
       midTurn: !!l?.midTurn,
       inbox: !!look && "rec" in look,
-      live,
+      held,
       known: !!t,
       canFork: !!claude?.caps.fork,
       installed: !!claude,
@@ -2272,6 +2281,29 @@ export class ControlDaemon {
       copied: !!this.state.copies[ref.id],
       api: false,
     };
+  }
+
+  /** What holds a Claude Code session's transcript right now, as far as this machine can
+   *  tell (CONTROL.md §6, What counts as held), or null: nothing does, and it may be
+   *  resumed in place.
+   *
+   *  A live process in Claude Code's own session registry holds it: a window (`open`) or
+   *  another kind of run (`running`). With no row naming it, a transcript written in the
+   *  last 90 seconds may still have a writer the registry doesn't show under that id
+   *  (`recent`) — unless the write is accounted for: no later than the end of a run of
+   *  the daemon's own, or than the session's own end as its hooks reported it. A headless
+   *  run someone started at a terminal that exited seven seconds ago is that last case:
+   *  it was copied for 90 seconds as "open in a window" (2026-11-10), and is resumed now. */
+  private heldBy(target: string, t: Transcript): Holder | null {
+    const rows = liveRecords(target, t.configDir);
+    if (rows.length) return rows.some((x) => x.kind === "interactive") ? "open" : "running";
+    return recentlyWritten(t.file, this.endedAt(`claude-code:${target}`, target), this.deps.now()) ? "recent" : null;
+  }
+
+  /** The last time a run of this session is known to have finished: one of the daemon's
+   *  own (its child process closed), or the session's own end as its hooks reported it. */
+  private endedAt(session: string, id: string): number | undefined {
+    return Math.max(this.lastEnd.get(id) ?? 0, this.live.get(session)?.ended ?? 0) || undefined;
   }
 
   private async prompt(
@@ -2290,10 +2322,12 @@ export class ControlDaemon {
     // settings file and a process's start time (a `ps`, on this one thread), and a
     // message that a rung above it takes — a held session, a parked waiter, a running
     // turn — was never going to use it.
-    const first = routePrompt(this.view(cmd.session, place, null));
+    const bare = this.view(cmd.session, place, null);
+    const first = routePrompt(bare);
     const over = o.noInbox || isSink(r) || ("mode" in first && earlier(first.mode, "inbox"));
     const look = over ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed });
-    const route = over ? first : routePrompt(this.view(cmd.session, place, look));
+    const seen = over ? bare : this.view(cmd.session, place, look);
+    const route = over ? first : routePrompt(seen);
     // Said before the message's own outcome: why the session was not reached in place is
     // the machine's own business, and it is the same fact whether the rung below it
     // delivered, refused, or wasn't there either.
@@ -2427,8 +2461,14 @@ export class ControlDaemon {
         return this.followAnswer(r, id, "inbox", key, from, sent, { mark: messageMark(id), end: "marked" });
       }
       case "resume":
+        return this.headless(r, id, cmd, place, "resume", sent);
       case "fork":
-        return this.headless(r, id, cmd, place, route.mode, sent);
+        // Why a copy and not the session: what holds it (the ladder only gets here for a
+        // held session), and why its own inbox was no way in, where that was looked at.
+        return this.headless(r, id, cmd, place, "fork", sent, {
+          held: seen.held as Holder,
+          ...(look && !("rec" in look) ? { inPlace: look.detail } : {}),
+        });
       /* v8 ignore next -- no harness has an input API wired yet (view() says api: false) */
       case "api":
         return this.finish(r, id, { outcome: "unsupported", detail: "no input API wired for this harness" });
@@ -2622,6 +2662,8 @@ export class ControlDaemon {
     place: Placed,
     mode: "resume" | "fork",
     sent: number,
+    /** A fork: what held the session, and what the inbox lane said when it was asked. */
+    why?: { held: Holder; inPlace?: string },
   ): Promise<void> {
     const harness = parseSessionRef(cmd.session)?.harness;
     if (acpControl.acpAgent(harness as string)) return this.resumeAcp(r, id, cmd, place, sent);
@@ -2647,7 +2689,7 @@ export class ControlDaemon {
       const target = this.state.copies[ref.id]?.id ?? ref.id;
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.
-      const body = this.framed(r, cmd.text as string, false) + (mode === "fork" ? `\n\n${COPY_NOTE}` : "");
+      const body = this.framed(r, cmd.text as string, false) + (why ? `\n\n${copyNote(why.held)}` : "");
       const built = claudeArgs({
         caps: claude.caps,
         level: o.permission,
@@ -2714,14 +2756,21 @@ export class ControlDaemon {
         : this.outcome(res);
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
-      if (mode === "fork" && ran !== target) {
-        this.state.copies[ref.id] = {
-          id: ran,
-          at: new Date(this.deps.now()).toISOString(),
-          reason: "the session was open on this computer and couldn't be reached in place",
-        };
+      // What the ack says about a copy (CONTROL.md §6 `prompt`): that the answer came
+      // from one, and why there is one, as the machine found it.
+      const notes: string[] = [];
+      if (why && ran !== target) {
+        const reason = HELD[why.held]("the session");
+        this.state.copies[ref.id] = { id: ran, at: new Date(this.deps.now()).toISOString(), reason, why: why.held };
         this.saveState(`the copy of ${shortId("claude-code", ref.id)}`);
         this.lastEnd.set(ran, this.deps.now());
+        notes.push(`${COPY_RAN} ${reason}${why.inPlace ? `; it could not be reached in place: ${why.inPlace}` : ""}`);
+        this.deps.log(`${id.slice(-8)}: ${notes[0]}`);
+      } else if (target !== ref.id) {
+        // A later message: it resumed the copy made earlier. A record this version
+        // wrote says why that was; an older one's reason is not repeated (store.ts).
+        const made = this.state.copies[ref.id];
+        notes.push(made?.why ? `${COPY_AGAIN} ${made.reason}` : COPY_AGAIN_BARE);
       }
       this.finish(
         r,
@@ -2735,13 +2784,16 @@ export class ControlDaemon {
           // A copy's turn is in the COPY's transcript, from its first row: the session
           // the command named gained nothing, and reading its file would say what the
           // person is doing in it rather than what this turn ran in.
-          ...(res.stopped
-            ? {}
-            : this.ranNote(
-                ran === target
-                  ? { file: own, from: before, narrow, home }
-                  : { file: findTranscript(ran, this.deps.claudeDirs())?.file ?? null, from: 0, narrow, home },
-              )),
+          ...this.detailOf([
+            ...notes,
+            ...(res.stopped
+              ? []
+              : this.ranNotes(
+                  ran === target
+                    ? { file: own, from: before, narrow, home }
+                    : { file: findTranscript(ran, this.deps.claudeDirs())?.file ?? null, from: 0, narrow, home },
+                )),
+          ]),
         },
         sent,
       );
@@ -2752,13 +2804,13 @@ export class ControlDaemon {
    *  `prompt`): what the new turn's own row recorded, which is what it ran in rather
    *  than what was asked for — and, on a machine set to auto whose Claude Code has auto
    *  turned off, that the turn ran in Manual mode and what fixes it. */
-  private ranNote(o: {
+  private ranNotes(o: {
     /** The transcript the new turn is in: the session's own, or the copy's. */
     file: string | null;
     from: number;
     narrow: string | null;
     home: claudeControl.HomeSettings;
-  }): { detail?: string } {
+  }): string[] {
     const notes: string[] = [];
     if (this.cfg.mode === "auto" && o.home.disableAutoMode) {
       const say =
@@ -2771,6 +2823,11 @@ export class ControlDaemon {
     }
     const ran = o.file ? ranInMode(o.file, o.from) : null;
     if (ran) notes.push(`the turn ran in ${ran}${o.narrow ? ", the mode the session itself was in" : ""}`);
+    return notes;
+  }
+
+  /** An ack's `detail` from what there is to say, or none. */
+  private detailOf(notes: string[]): { detail?: string } {
     return notes.length ? { detail: notes.join("; ") } : {};
   }
 

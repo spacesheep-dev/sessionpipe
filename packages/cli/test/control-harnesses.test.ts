@@ -338,7 +338,19 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     const OPEN = "0199c0de-1111-7222-8333-944455557777";
     rollout(OPEN, project, true);
     const open = await rx.send({ session: `codex:${OPEN}`, text: "hi" });
-    expect(await rx.waitAck(open.id)).toMatchObject({ outcome: "unsupported" });
+    expect(await rx.waitAck(open.id)).toMatchObject({
+      outcome: "unsupported",
+      // What the machine knows, and no more: a write that recent, not an open window.
+      detail:
+        "that codex session was written to in the last 90 seconds, so codex may still have it open, and a codex session can't be copied: send it again once it has been idle a couple of minutes",
+    });
+    expect(started()).toHaveLength(1);
+    // Its own hooks report its end: the run that wrote the rollout is over, so the next
+    // message resumes it at once rather than waiting out the 90 seconds.
+    await ask(sock, { op: "event", session: `codex:${OPEN}`, event: "SessionEnd", cwd: project }, 500);
+    const ended = await rx.send({ session: `codex:${OPEN}`, text: "now?" });
+    expect(await rx.waitAck(ended.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(started()).toHaveLength(2);
     // A folder off the list, and no such thread.
     const ELSE = "0199c0de-1111-7222-8333-944455558888";
     mkdirSync(path.join(tmp, "elsewhere"));
@@ -347,7 +359,7 @@ describe.runIf(unix)("Codex (codex exec)", () => {
     expect(await rx.waitAck(far.id)).toMatchObject({ outcome: "refused", code: "folder" });
     const none = await rx.send({ session: "codex:0199c0de-1111-7222-8333-944455559999", text: "hi" });
     expect(await rx.waitAck(none.id)).toMatchObject({ outcome: "refused", code: "no_session" });
-    expect(started()).toHaveLength(1);
+    expect(started()).toHaveLength(2);
   });
 
   it("signed out as the daemon sees it: failed with the command to run, and Codex never runs", async () => {

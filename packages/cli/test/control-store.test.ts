@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
 import {
   AckOutbox,
+  COPY_WHYS,
   dropControlSecret,
   moveControlSecrets,
   NonceStore,
@@ -239,6 +240,15 @@ describe("forks and aliases on disk", () => {
     });
     writeFileSync(f, JSON.stringify({ copies: { a: 7, b: {}, c: { id: "" }, d: { id: "x" } } }));
     expect(readState(f).copies).toEqual({ d: { id: "x", at: "", reason: "" } });
+    // What held the session when the copy was made, where the record says: one of the
+    // three the daemon writes, and nothing else is read as one.
+    for (const why of COPY_WHYS) {
+      writeState(f, { copies: { a: { ...copy, why } }, started: {}, modes: {}, parked: {} });
+      expect(readState(f).copies).toEqual({ a: { ...copy, why } });
+    }
+    writeFileSync(f, JSON.stringify({ copies_v2: { a: { ...copy, why: "window" }, b: { ...copy, why: 7 } } }));
+    expect(readState(f).copies).toEqual({ a: copy, b: copy });
+    expect(COPY_WHYS).toEqual(["open", "running", "recent"]);
     // A message written into a session's inbox that it hasn't taken: kept while the
     // hold window is open, and only in the shape the daemon wrote.
     const fresh = new Date().toISOString();

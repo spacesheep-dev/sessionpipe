@@ -306,15 +306,29 @@ export interface Copy {
   at: string;
   /** In the machine's own words, for the ack and the board: why a copy, not the session. */
   reason: string;
+  /** What held the session when the copy was made, as the machine found it: an open
+   *  window, another process's run, or only a write too recent to account for (route.ts
+   *  `Holder`). Absent on a record a daemon up to 0.13.3 wrote: those all say the session
+   *  "was open", whether it was or not, so their reason is not repeated to anyone. */
+  why?: CopyWhy;
 }
+
+export const COPY_WHYS = ["open", "running", "recent"] as const;
+export type CopyWhy = (typeof COPY_WHYS)[number];
 
 /** The id alone, as 0.10.0 and earlier wrote it, reads as a copy with nothing else known. */
 const asCopy = (v: unknown): Copy | null => {
   if (typeof v === "string" && v) return { id: v, at: "", reason: "" };
   if (!v || typeof v !== "object") return null;
-  const c = v as { id?: unknown; at?: unknown; reason?: unknown };
+  const c = v as { id?: unknown; at?: unknown; reason?: unknown; why?: unknown };
   if (typeof c.id !== "string" || !c.id) return null;
-  return { id: c.id, at: typeof c.at === "string" ? c.at : "", reason: typeof c.reason === "string" ? c.reason : "" };
+  const why = COPY_WHYS.find((w) => w === c.why);
+  return {
+    id: c.id,
+    at: typeof c.at === "string" ? c.at : "",
+    reason: typeof c.reason === "string" ? c.reason : "",
+    ...(why ? { why } : {}),
+  };
 };
 
 /** A message written into a session's own inbox that it has not taken yet

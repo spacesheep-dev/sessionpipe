@@ -399,7 +399,7 @@ describe("a session's transcript, folder and process", () => {
     writeFileSync(path.join(sessions, `${process.pid}.json`), JSON.stringify({ sessionId: SESSION }));
     expect(liveProcess(SESSION, dir)).toBe(true);
   });
-  it("recentlyWritten: within 90 s, and not by a job of ours", () => {
+  it("recentlyWritten: within 90 s, and not before an end the caller knows of (a job of its own, the session's own)", () => {
     const f = path.join(tmp, "recent.jsonl");
     writeFileSync(f, "");
     const now = Date.now();

@@ -25,7 +25,7 @@ import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
-import { CLAUDE_NOT_FOUND, routePrompt } from "../src/control/route.js";
+import { CLAUDE_NOT_FOUND, routePrompt, type SessionView } from "../src/control/route.js";
 import { type ControlConfig, readControl } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -190,13 +190,13 @@ afterEach(async () => {
 });
 
 describe("routing (CONTROL.md §6)", () => {
-  const base = {
+  const base: SessionView = {
     harness: "claude-code",
     sdk: false,
     waiter: false,
     midTurn: false,
     inbox: false,
-    live: false,
+    held: null,
     known: true,
     canFork: true,
     copied: false,
@@ -205,36 +205,59 @@ describe("routing (CONTROL.md §6)", () => {
   it("takes the first mode that fits", () => {
     expect(routePrompt({ ...base, sdk: true, waiter: true })).toEqual({ mode: "sdk" });
     expect(routePrompt({ ...base, waiter: true, midTurn: true })).toEqual({ mode: "waiter" });
-    expect(routePrompt({ ...base, midTurn: true, live: true })).toEqual({ mode: "turn" });
+    expect(routePrompt({ ...base, midTurn: true, held: "open" })).toEqual({ mode: "turn" });
     // The session's own inbox sits under the lanes it opened itself and above every
     // lane that starts a process (§6.3).
-    expect(routePrompt({ ...base, midTurn: true, inbox: true, live: true })).toEqual({ mode: "turn" });
-    expect(routePrompt({ ...base, inbox: true, live: true })).toEqual({ mode: "inbox" });
-    expect(routePrompt({ ...base, inbox: true, api: true, live: true })).toEqual({ mode: "inbox" });
+    expect(routePrompt({ ...base, midTurn: true, inbox: true, held: "open" })).toEqual({ mode: "turn" });
+    expect(routePrompt({ ...base, inbox: true, held: "open" })).toEqual({ mode: "inbox" });
+    expect(routePrompt({ ...base, inbox: true, api: true, held: "open" })).toEqual({ mode: "inbox" });
+    // Nothing holds it: resumed in place. Anything that does: a copy, whatever it is.
     expect(routePrompt({ ...base })).toEqual({ mode: "resume" });
-    expect(routePrompt({ ...base, live: true })).toEqual({ mode: "fork" });
-    expect(routePrompt({ ...base, live: true, canFork: false })).toHaveProperty("unsupported");
-    // A session that already has a copy is not copied again, and is told which it is.
-    expect(routePrompt({ ...base, live: true, copied: true })).toEqual({
-      unsupported: "the session is open, and so is the copy its messages already go to; a copy is never itself copied",
-    });
+    for (const held of ["open", "running", "recent"] as const)
+      expect(routePrompt({ ...base, held })).toEqual({ mode: "fork" });
+    expect(routePrompt({ ...base, held: "open", canFork: false })).toHaveProperty("unsupported");
     // No binary at all reads as no capabilities; it is said as such, not blamed on the flag.
-    expect(routePrompt({ ...base, live: true, canFork: false, installed: false })).toEqual({
+    expect(routePrompt({ ...base, held: "open", canFork: false, installed: false })).toEqual({
       unsupported: CLAUDE_NOT_FOUND,
-    });
-    expect(routePrompt({ ...base, live: true, canFork: false, installed: true })).toEqual({
-      unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
-    });
-    expect(routePrompt({ ...base, live: true, canFork: false })).toEqual({
-      unsupported: "the session is open and this Claude Code can't copy it (no --fork-session)",
     });
     expect(routePrompt({ ...base, known: false })).toEqual({ refused: "no_session" });
     expect(routePrompt({ ...base, harness: "kiro" })).toHaveProperty("unsupported");
     expect(routePrompt({ ...base, harness: "codex", midTurn: true })).toEqual({ mode: "turn" });
-    // Codex and Antigravity: resumed headlessly when idle, never copied when open.
+  });
+  it("a held session that can't be copied: says what holds it, as the machine found it, and no more", () => {
+    // A session that already has a copy is not copied again, and is told which of the two is held.
+    expect(routePrompt({ ...base, held: "open", copied: true })).toEqual({
+      unsupported:
+        "the copy this session's messages go to was open in Claude Code on this computer (a terminal window or the Claude app), and a copy is never itself copied",
+    });
+    expect(routePrompt({ ...base, held: "running", copied: true })).toEqual({
+      unsupported:
+        "another Claude Code process on this computer was running the copy this session's messages go to, and a copy is never itself copied",
+    });
+    expect(routePrompt({ ...base, held: "recent", copied: true })).toEqual({
+      unsupported:
+        "the transcript of the copy this session's messages go to had been written to in the last 90 seconds by a process this computer could not find, and a copy is never itself copied: send it again in a couple of minutes",
+    });
+    for (const installed of [true, undefined])
+      expect(routePrompt({ ...base, held: "open", canFork: false, ...(installed ? { installed } : {}) })).toEqual({
+        unsupported:
+          "the session was open in Claude Code on this computer (a terminal window or the Claude app), and this Claude Code can't copy it (no --fork-session)",
+      });
+    expect(routePrompt({ ...base, held: "running", canFork: false })).toEqual({
+      unsupported:
+        "another Claude Code process on this computer was running the session, and this Claude Code can't copy it (no --fork-session)",
+    });
+    expect(routePrompt({ ...base, held: "recent", canFork: false })).toEqual({
+      unsupported:
+        "the transcript of the session had been written to in the last 90 seconds by a process this computer could not find, and this Claude Code can't copy it (no --fork-session): send it again in a couple of minutes",
+    });
+    // Codex and Antigravity: resumed headlessly when idle, never copied; a rollout just
+    // written is all the machine knows, and it says no more than that.
     for (const harness of ["codex", "antigravity"]) {
       expect(routePrompt({ ...base, harness, canFork: false })).toEqual({ mode: "resume" });
-      expect(routePrompt({ ...base, harness, canFork: false, live: true })).toHaveProperty("unsupported");
+      expect(routePrompt({ ...base, harness, canFork: false, held: "recent" })).toEqual({
+        unsupported: `that ${harness} session was written to in the last 90 seconds, so ${harness} may still have it open, and a ${harness} session can't be copied: send it again once it has been idle a couple of minutes`,
+      });
     }
   });
 });
