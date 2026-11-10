@@ -195,7 +195,8 @@ const hook = (session, event) => new Promise((done) => {
     fakeClaude,
     `${head}
 const i = a.indexOf("--resume"), j = a.indexOf("--session-id");
-const sid = a.includes("--fork-session") ? ${JSON.stringify(COPY)} : i >= 0 ? a[i + 1] : a[j + 1];
+// "under its own name": a Claude Code that took no notice of --fork-session.
+const sid = a.includes("--fork-session") && !/under its own name/.test(prompt) ? ${JSON.stringify(COPY)} : i >= 0 ? a[i + 1] : a[j + 1];
 const me = "claude-code:" + sid;
 // Its row in Claude Code's own session registry, as every \`claude -p\` files one.
 const row = path.join(${JSON.stringify(configDir)}, "sessions", process.pid + ".json");
@@ -217,6 +218,9 @@ fs.writeFileSync(row, JSON.stringify({ pid: process.pid, sessionId: sid, kind: "
     out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Pinging" } } });
     return work();
   }
+  // "broken": it dies without an answer. "slow": it takes a moment, and ends by itself.
+  if (/broken/.test(prompt)) { fs.rmSync(row); process.stderr.write("it broke\\n"); process.exit(3); }
+  if (/slow/.test(prompt)) await new Promise((r) => setTimeout(r, 700));
   await hook(me, "Stop");
   await hook(me, "SessionEnd");
   fs.rmSync(row);
@@ -539,6 +543,93 @@ describe.runIf(unix)("a turn the daemon is running as its own child", () => {
       detail: "the turn this computer was running for that session finished before it could be stopped",
     });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "all done" });
+  });
+});
+
+describe.runIf(unix)("a copy's run is the copy's, never the original's", () => {
+  /** The original was written to a moment ago, and no process in the registry names it. */
+  const justWritten = (): void => {
+    const now = new Date();
+    utimesSync(transcriptFile(SID), now, now);
+  };
+
+  it("a copy's turn that ends does not end the turn the person is in, in their own window: the next message waits for their Stop", async () => {
+    holds(SID, "interactive");
+    await startDaemon();
+    const first = await hand({ session: SESSION, text: "a slow one" });
+    await until(() => runs().length === 1);
+    // The person starts a turn in the original while its copy works.
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
+    expect(await rx.waitAck(first.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "fork",
+      session: `claude-code:${COPY}`,
+      reply: "did it",
+    });
+    // The copy's own Stop ended the copy's turn. Theirs is still running.
+    expect(d?.status().mid_turn).toEqual([SESSION]);
+    const next = await hand({ session: SESSION, text: "and this" });
+    await until(() => acksOf(next.id).includes("taken"));
+    await sleep(600);
+    expect(acksOf(next.id)).toEqual(["taken"]);
+    expect(runs()).toHaveLength(1);
+    // It is handed to them where they are, when their turn ends.
+    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 500)).toMatchObject({ op: "block", id: next.id });
+  });
+
+  it("a copy stopped before it wrote anything leaves the original as it was: mid-turn and just written to, it is not resumed in place", async () => {
+    // Held by nothing but a write seconds old: no registry row names it.
+    justWritten();
+    await startDaemon();
+    const first = await hand({ session: SESSION, text: "a long unwritten one" });
+    await until(() => rx.progress(first.id).length > 0);
+    expect(runs()[0]?.argv).toEqual(expect.arrayContaining(["--resume", SID, "--fork-session"]));
+    // What wrote to it is still there: its own hooks say a turn began, and it writes again.
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
+    justWritten();
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "fork", detail: CANCEL.stopped });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    // The stopped child was the copy's: the copy is not left mid-turn, and the original still is.
+    expect(d?.status().mid_turn).toEqual([SESSION]);
+    const next = await hand({ session: SESSION, text: "and this" });
+    await until(() => acksOf(next.id).includes("taken"));
+    await sleep(600);
+    // Nothing ran: above all, no `claude -p --resume` of a session something else is in.
+    expect(acksOf(next.id)).toEqual(["taken"]);
+    expect(runs()).toHaveLength(1);
+  });
+
+  it("a run asked for a copy that says it is the original is still no run of the daemon's in the original", async () => {
+    justWritten();
+    await startDaemon();
+    const first = await hand({ session: SESSION, text: "a long one under its own name" });
+    await until(() => rx.progress(first.id).length > 0);
+    expect(runs()[0]?.argv).toContain("--fork-session");
+    const stop = await stopNow(SESSION);
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    const ack = await rx.waitAck(first.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "fork", reply: `Pinging\n\n${CANCELLED_NOTE}` });
+    expect(ack.copy_of).toBeUndefined();
+    // Its hooks marked the original mid-turn, and nothing here says that turn is over.
+    expect(d?.status().mid_turn).toEqual([SESSION]);
+    justWritten();
+    const next = await hand({ session: SESSION, text: "and this" });
+    await until(() => acksOf(next.id).includes("taken"));
+    await sleep(600);
+    expect(acksOf(next.id)).toEqual(["taken"]);
+    expect(runs()).toHaveLength(1);
+  });
+
+  it("a copy that fails accounts for no write to the original: a message a second later is copied again, not resumed in place", async () => {
+    justWritten();
+    await startDaemon();
+    const first = await hand({ session: SESSION, text: "a broken one" });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "failed" });
+    expect(existsSync(path.join(tmp, "state", "control", "state.json"))).toBe(false);
+    const next = await hand({ session: SESSION, text: "and this" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: SESSION });
+    expect(runs().map((x) => x.argv.includes("--fork-session"))).toEqual([true, true]);
   });
 });
 

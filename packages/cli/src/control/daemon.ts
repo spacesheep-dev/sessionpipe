@@ -2925,7 +2925,13 @@ export class ControlDaemon {
         }),
       );
       stream.close();
-      this.runOver("claude-code", target);
+      // A resume ran in `target`. A copy's run did not: it ran in the copy, whose hooks
+      // report under the copy's own id, so its end says nothing about the original —
+      // not that the turn the person is in there is over, and not that whatever wrote
+      // to its transcript a moment ago has finished. Told that it had, the next message
+      // was resumed in place in a session its own hooks said was mid-turn.
+      const ranIn = mode === "fork" ? (said.session === target ? null : said.session) : target;
+      if (ranIn) this.runOver("claude-code", ranIn);
       // Stopped on the person's request (a `cancel`): what it had said, and that it was
       // cancelled. Its mode is not reported: the turn it would describe never finished.
       // A copy it had named counts only if it is on disk: one stopped before it wrote

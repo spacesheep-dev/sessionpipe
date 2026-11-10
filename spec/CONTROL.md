@@ -468,7 +468,10 @@ another id, a harness can have none), and a write that recent may have a writer 
 it. A write the machine can account for does not hold anything: one made no later than
 the end of a run of the daemon's own, or no later than the session's own end as its
 hooks reported it (Claude Code and Codex: `SessionEnd`), since the process that made it
-has let go. So a session whose headless run exited seconds ago is resumed in place at
+has let go. A run that copies a session is a run in the copy: its end accounts for no
+write to the original and ends no turn there, so a copy that failed or was stopped
+leaves the original exactly as held, and as mid-turn, as it was. So a session whose
+headless run exited seconds ago is resumed in place at
 once; it is not copied, and nothing is said about a window. A daemon MUST NOT resume
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.
