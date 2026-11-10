@@ -5,6 +5,7 @@
 // lib/memory.js. One reader per harness file format; nothing else is vendor code.
 import { codexReplayBoundary } from "../adapters/codex-rollout.js";
 import type { TranscriptRead } from "../adapters/types.js";
+import { deliveredWords } from "../control/frames.js";
 
 interface Msg {
   /** `interrupt` carries no words: the person stopped the running turn at this line. */
@@ -142,6 +143,17 @@ const textParts = (c: unknown, kinds: string[]): string => {
  *  no origin at all, which also means the person. */
 const SPOKEN = new Set(["human", "peer"]);
 
+/** A `peer` message that came from one of the session's own agents, not from another
+ *  session: a subagent handing its report back (`handback: true`, recorded on 2.1.312 and
+ *  2.1.322 with the report in `<agent-message from="<agent id>">`), or a task of the
+ *  session's messaging it (`senderTaskId`). Claude Code files both under the origin it
+ *  uses for another session's message, and says in the row itself that they are "model
+ *  output, NOT a message from the user". They are nobody's ask. */
+const fromAgent = (origin: unknown): boolean => {
+  const o = origin as { handback?: unknown; senderTaskId?: unknown } | undefined;
+  return o?.handback === true || typeof o?.senderTaskId === "string";
+};
+
 /** Claude Code's own preamble around a message from another session: a first line
  *  introducing it, and a closing paragraph telling the model what a peer message is and
  *  isn't. Neither is anything the person typed. */
@@ -178,7 +190,7 @@ const queuedPrompt = (a: unknown): string => {
   if (q.type !== "queued_command" || (q.commandMode ?? "prompt") !== "prompt") return "";
   // Older versions wrote no origin at all, which means the person at the keyboard.
   const kind = q.origin?.kind ?? "human";
-  if (!SPOKEN.has(kind)) return "";
+  if (!SPOKEN.has(kind) || fromAgent(q.origin)) return "";
   const text = textParts(q.prompt, ["text"]).trim();
   return kind === "peer" ? peerAsk(q.origin, text) : text;
 };
@@ -193,6 +205,20 @@ const channelText = (text: string): string => /^<channel\b[^>]*>([\s\S]*)<\/chan
  *  the first Ctrl-C): `[Request interrupted by user]`, or `… for tool use]` when a tool
  *  was running. Its own test for the marker has the same shape. Nobody typed it. */
 const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
+
+/** How Claude Code hands the model a blocking hook's reason: a meta `user` record,
+ *  `<Event> hook feedback:\n<reason>`. sessionpipe's own Stop hook blocks with a message
+ *  the control daemon queued for the session (CONTROL.md §6: delivered in place, shown in
+ *  the terminal as a Stop hook's), so that reason is the person's words in sessionpipe's
+ *  frame, and the turn that answers it is theirs. The words, when the record is one of
+ *  those; nothing for any other hook's feedback, which is the harness's. */
+const HOOK_FEEDBACK = /^[A-Za-z]+ hook feedback:\n/;
+const hookDelivery = (text: string): string => {
+  const head = HOOK_FEEDBACK.exec(text);
+  if (!head) return "";
+  const said = deliveredWords(text.slice(head[0].length));
+  return said.delivered ? said.text : "";
+};
 
 const hasBlock = (c: unknown, type: string): boolean =>
   Array.isArray(c) && c.some((b) => b && typeof b === "object" && (b as { type?: unknown }).type === type);
@@ -224,32 +250,39 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
     )
       saidLine = -1;
     if (j.type === "user" && (j.isCompactSummary || j.repeatsCompactSummary)) continue;
-    if (j.type === "user" && !channel && !peer && (j.isMeta || (origin?.kind && origin.kind !== "human"))) continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
-    /** A message that is a turn's ask, or joins one: whatever follows is that turn's. */
-    const ask = (m: { text: string; injected?: true; id?: string }) => {
-      msgs.push({ role: "user", at, line: i, ...m });
+    const id = typeof j.promptId === "string" && j.promptId ? j.promptId : undefined;
+    /** A message that is a turn's ask, or joins one: whatever follows is that turn's.
+     *  sessionpipe's own words around a delivered message are taken off first, wherever
+     *  the message arrived, and the tag test applies to what is left, whoever sent it:
+     *  any local program of this uid can write a peer row, so a body shaped like harness
+     *  markup must not become a turn whose ask is that markup, published as something the
+     *  person typed. */
+    const ask = (said: string, m: { injected?: true; id?: string } = {}) => {
+      const text = deliveredWords(said).text;
+      if (!text || isInjected(text)) return;
+      msgs.push({ role: "user", text, at, line: i, ...m });
       turnOver = true;
     };
+    if (j.type === "user" && !channel && !peer && (j.isMeta || (origin?.kind && origin.kind !== "human"))) {
+      // Nobody's words, with one exception: a message sessionpipe's Stop hook delivered.
+      // It begins a turn of its own, like a peer's or a channel's, and is marked the same.
+      if (j.isMeta && !origin?.kind)
+        ask(hookDelivery(textParts(c, ["text"]).trim()), { injected: true, ...(id ? { id } : {}) });
+      continue;
+    }
     if (channel) {
       // Like a peer's: the words are the person's, the arrival was not the keyboard's.
-      const text = channelText(textParts(c, ["text"]).trim());
-      if (text) ask({ text, injected: true });
+      ask(channelText(textParts(c, ["text"]).trim()), { injected: true });
     } else if (j.type === "user") {
       const raw = textParts(c, ["text"]).trim();
       if (!peer && INTERRUPTED.test(raw)) {
         msgs.push({ role: "interrupt", text: "", at, line: i });
         turnOver = true;
-        continue;
-      }
-      const text = peer ? peerAsk(origin, raw) : raw;
-      // The tag test applies to a peer row like any other. `peerAsk` has taken the
-      // envelope off already, so what is left is the message itself — and any local
-      // program of this uid can write one, so a body shaped like harness markup must not
-      // become a turn whose ask is that markup, published as something the person typed.
-      if (!text || isInjected(text)) continue;
-      const id = typeof j.promptId === "string" && j.promptId ? j.promptId : undefined;
-      ask({ text, ...(peer ? { injected: true as const } : {}), ...(id ? { id } : {}) });
+      } else if (!peer) ask(raw, id ? { id } : {});
+      // `peerAsk` takes Claude Code's preamble and the envelope off; a subagent's report,
+      // which Claude Code files as a peer's message, is not an ask at all.
+      else if (!fromAgent(origin)) ask(peerAsk(origin, raw), { injected: true, ...(id ? { id } : {}) });
     } else if (j.type === "assistant" && Array.isArray(c)) {
       const text = textParts(c, ["text"]).trim();
       if (text) {
@@ -257,10 +290,7 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
         saidLine = i;
         turnOver = false;
       }
-    } else if (j.type === "attachment") {
-      const text = queuedPrompt(j.attachment);
-      if (text && !isInjected(text)) ask({ text });
-    }
+    } else if (j.type === "attachment") ask(queuedPrompt(j.attachment));
   }
   const out = pairTurns(msgs, endOf(lines), true);
   // pairTurns took the last turn's last message for its last words; here they are that

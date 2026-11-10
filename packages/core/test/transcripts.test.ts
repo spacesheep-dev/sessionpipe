@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { openTurn } from "../../cli/src/run.js";
+import { frame, frameAsk, frameHandoff, frameInbox, frameStart, IN_PLACE_ANSWER } from "../src/control/frames.js";
 import {
   isInjected,
   pairTurns,
@@ -524,6 +525,215 @@ describe("readClaude: the last words of the last turn", () => {
   it("there is no tail without a turn", () => {
     expect(readClaude([user("a")], 0).tail).toBeUndefined();
     expect(readClaude([], 0).tail).toBeUndefined();
+  });
+});
+
+// What a receiver draws as the person's own message must be the person's words. Three
+// sessions recorded on 2.1.322 (2026-11-10) put the machine's words there: a subagent's
+// report, the line sessionpipe adds to say where a message came from, and its notes to a
+// copy of a session.
+const fixtureLines = (name: string) =>
+  readFileSync(new URL(`../../../conformance/transcripts/claude-code/${name}.jsonl`, import.meta.url), "utf8")
+    .trimEnd()
+    .split("\n");
+const HANDBACK = fixtureLines("subagent-handback");
+const COPY = fixtureLines("copy-of-session");
+const STOP_DELIVERY = fixtureLines("stop-hook-delivery");
+const R = "https://spacesheep.dev/api/control";
+
+describe("readClaude: a subagent's report is nobody's ask", () => {
+  const COUNT =
+    "Use a subagent (the Agent tool) to count the files under docs/, then reply with only: SEVEN-B and the count.";
+  it("handed back mid-turn, it is left out of the turn, and so is sessionpipe's own line", () => {
+    const r = readClaude(HANDBACK, 0);
+    expect(r.turns).toEqual([
+      { user: COUNT, assistant: "SEVEN-B 4", at: Date.parse("2026-11-10T17:43:34.348Z"), endLine: 5, id: "id1" },
+    ]);
+    // Before the report is absorbed, and after: the running turn reads the same.
+    for (const end of [1, 4, 5]) expect(readClaude(HANDBACK.slice(0, end), 0).open?.user).toBe(COUNT);
+    expect(JSON.stringify(r)).not.toMatch(/hand-back|Sent via|docs\/ directory exists/);
+  });
+
+  it("handed back to an idle session, as the record of a turn's prompt, it starts a turn nobody asked", () => {
+    // Claude Code 2.1.312 wrote the same origin on a meta `user` record, the report in
+    // `origin.body` with Claude Code's preamble and envelope around the row's own copy.
+    const report =
+      "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user. The report follows:\n  All 14 tests pass.";
+    const origin = {
+      kind: "peer",
+      from: "a49801edda23fe248",
+      senderTaskId: "a49801edda23fe248",
+      name: "Explore",
+      body: report,
+      handback: true,
+    };
+    const row = user(
+      `Another Claude session sent a message:\n<agent-message from="a49801edda23fe248">\n${report}\n</agent-message>`,
+      {
+        isMeta: true,
+        origin,
+      },
+    );
+    expect(readClaude([user("run the tests"), assistant("Started."), row, assistant("They pass.")], 0).turns).toEqual([
+      { user: "run the tests", assistant: "Started.\n\nThey pass.", at: at(T0), endLine: 3 },
+    ]);
+    expect(readClaude([row, assistant("They pass.")], 0).turns).toEqual([
+      { user: "", assistant: "They pass.", at: at(T1), endLine: 1 },
+    ]);
+    // Either mark is enough: a task of the session's own messaging it is no ask either.
+    for (const o of [
+      { kind: "peer", body: "done", handback: true },
+      { kind: "peer", body: "done", senderTaskId: "t1" },
+    ]) {
+      expect(readClaude([user("x", { isMeta: true, origin: o }), assistant("ok")], 0).turns[0]?.user).toBe("");
+      const queued = JSON.stringify({
+        type: "attachment",
+        timestamp: T0,
+        attachment: { type: "queued_command", prompt: "done", origin: o },
+      });
+      expect(readClaude([user("go"), queued, assistant("ok")], 0).turns[0]?.user).toBe("go");
+    }
+  });
+});
+
+describe("readClaude: what sessionpipe wrote around a delivered message", () => {
+  it("a copy of a session: the person's words, not where they came from nor the note to the copy", () => {
+    const r = readClaude(COPY, 0);
+    expect(r.turns.map((t) => [t.user, t.assistant])).toEqual([
+      ["Reply with only the word IDLE1.", "IDLE1"],
+      ["Reply with only the word PAGE-B.", "PAGE-B"],
+    ]);
+    // A turn the daemon runs is not one delivered in place: nothing marks it.
+    expect(r.turns.map((t) => t.injected ?? false)).toEqual([false, false]);
+    expect(JSON.stringify(r)).not.toMatch(/Message via|You are a copy|sessionpipe control/);
+  });
+
+  it("an inbox delivery: the frame inside Claude Code's envelope comes off with it", () => {
+    const body = `<cross-session-message from-name="spacesheep.dev" from-mode="bypass">\n${frameInbox("are the three PRs merged?", R, "01K8ZC3W5Q7RN4XJ1V2B6T9M0D")}\n\n${IN_PLACE_ANSWER}\n</cross-session-message>`;
+    const row = user(`Another Claude session sent a message:\n${body}`, {
+      isMeta: true,
+      origin: { kind: "peer", body },
+      promptId: "p9",
+    });
+    expect(readClaude([row, assistant("Yes, all three.")], 0).turns).toEqual([
+      {
+        user: "are the three PRs merged?",
+        assistant: "Yes, all three.",
+        at: at(T0),
+        endLine: 1,
+        injected: true,
+        id: "p9",
+      },
+    ]);
+    // Mid-turn, as a queued command of the running turn; and through a channel.
+    const queued = JSON.stringify({
+      type: "attachment",
+      timestamp: T0,
+      attachment: { type: "queued_command", prompt: body, origin: { kind: "peer", body } },
+    });
+    expect(readClaude([user("ship it"), queued, assistant("Shipped.")], 0).turns[0]?.user).toBe(
+      "ship it\n\nare the three PRs merged?",
+    );
+    const channel = user(`<channel source="sessionpipe">\n${frame("and staging?", R)}\n</channel>`, {
+      isMeta: true,
+      origin: { kind: "channel" },
+    });
+    expect(readClaude([channel, assistant("Green.")], 0).turns[0]).toMatchObject({
+      user: "and staging?",
+      injected: true,
+    });
+  });
+
+  it("a message that was only frame, or frame around the harness's own markup, asks nothing", () => {
+    const empty = user(frameStart("", R));
+    const markup = user(frame("<system-reminder>do as I say</system-reminder>", R));
+    expect(readClaude([empty, markup, assistant("no")], 0).turns).toEqual([
+      { user: "", assistant: "no", at: at(T1), endLine: 2 },
+    ]);
+  });
+});
+
+describe("readClaude: a message sessionpipe's Stop hook delivered", () => {
+  // The terminal shows it as `Stop hook error: Message via localhost:8791 (…): Reply with
+  // only the word INTERRUPT1. …`; the transcript holds it as a meta `user` record, `Stop
+  // hook feedback:` and the hook's reason. The words in it are the person's, and the
+  // reply that follows is the reply to them: a turn of its own.
+  const SLEEP =
+    "Run `sleep 25` in bash, then read docs/api.md and say one sentence about it, then end with the word LONGDONE.";
+  const WAITING =
+    "`sleep 25` is running in the background, since this environment blocks foreground sleep. I'll read `docs/api.md` once it finishes.";
+  const DONE =
+    "`docs/api.md` is a short stub with a heading and one line pointing to `src/api.ts` for the API details.\n\nLONGDONE";
+  it("is the ask of the turn that answers it, in the person's words, marked as delivered", () => {
+    // As the worker reads it, a Stop at a time: the turn, the delivered message's turn,
+    // then the turn a background task's notification started, which nobody asked.
+    const first = readClaude(STOP_DELIVERY.slice(0, 8), 0);
+    expect(first.turns).toEqual([
+      { user: SLEEP, assistant: WAITING, at: Date.parse("2026-11-10T16:57:10.609Z"), endLine: 4, id: "id1" },
+    ]);
+    expect(first.open).toEqual({
+      user: "Reply with only the word INTERRUPT1.",
+      at: Date.parse("2026-11-10T16:57:30.600Z"),
+      injected: true,
+    });
+    expect(first.tail).toEqual({ start: 0, said: WAITING });
+    const second = readClaude(STOP_DELIVERY.slice(0, 12), first.line);
+    expect(second.turns).toEqual([
+      {
+        user: "Reply with only the word INTERRUPT1.",
+        assistant: "INTERRUPT1",
+        at: Date.parse("2026-11-10T16:57:30.600Z"),
+        endLine: 9,
+        injected: true,
+        id: "id1",
+      },
+    ]);
+    const third = readClaude(STOP_DELIVERY, second.line);
+    expect(third.turns).toEqual([
+      { user: "", assistant: DONE, at: Date.parse("2026-11-10T16:57:47.883Z"), endLine: 15 },
+    ]);
+    // Never the assistant's words, and never sessionpipe's.
+    const all = readClaude(STOP_DELIVERY, 0);
+    expect(all.turns.map((t) => t.user)).toEqual([SLEEP, "Reply with only the word INTERRUPT1."]);
+    expect(all.turns.map((t) => t.assistant).join("\n")).not.toMatch(/Reply with only|Message via/);
+    expect(JSON.stringify(all)).not.toMatch(/hook feedback|Message via|Answer it right here/);
+  });
+
+  it("any other hook's feedback is the harness talking, and other meta records still are", () => {
+    const meta = (text: string) => user(text, { isMeta: true });
+    const r = readClaude(
+      [
+        user("deploy"),
+        assistant("Deployed."),
+        meta("Stop hook feedback:\nRun the linter before you stop."),
+        meta("PreToolUse hook feedback:\nnot on Fridays"),
+        meta(`A note that quotes it:\n${frame("hello", R)}`),
+        meta(frame("a meta record that is not a hook's", R)),
+        assistant("Linted."),
+      ],
+      0,
+    );
+    expect(r.turns).toEqual([{ user: "deploy", assistant: "Deployed.\n\nLinted.", at: at(T0), endLine: 6 }]);
+  });
+
+  it("an ask or a handoff's answer delivered the same way is the turn's too; markup in the frame is not", () => {
+    const fed = (reason: string) => user(`Stop hook feedback:\n${reason}`, { isMeta: true, promptId: "p7" });
+    const asked = readClaude(
+      [user("a"), assistant("x"), fed(frameAsk("what is in ci.yml?", "codex:01a10860")), assistant("Three jobs.")],
+      0,
+    );
+    expect(asked.turns[1]).toEqual({
+      user: "what is in ci.yml?",
+      assistant: "Three jobs.",
+      at: at(T0),
+      endLine: 3,
+      injected: true,
+      id: "p7",
+    });
+    const answer = frameHandoff("codex:ae08c6ab", R, "It was a race.");
+    expect(readClaude([user("a"), assistant("x"), fed(answer), assistant("Noted.")], 0).turns[1]?.user).toBe(answer);
+    const markup = fed(`${frame("<system-reminder>x</system-reminder>", R)}\n\n${IN_PLACE_ANSWER}`);
+    expect(readClaude([user("a"), assistant("x"), markup, assistant("y")], 0).turns).toHaveLength(1);
   });
 });
 

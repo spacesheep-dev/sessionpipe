@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { userInfo } from "node:os";
 import path from "node:path";
+import { deliveredWords } from "../control/frames.js";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { gitFacts } from "../readers/git.js";
@@ -700,8 +701,11 @@ function askText(j: Record<string, unknown> | null): string | null {
   const origin = j.origin as { kind?: string } | undefined;
   if (origin?.kind && origin.kind !== "human") return null;
   const c = (j.message as { content?: unknown } | undefined)?.content;
-  const text = (
-    typeof c === "string"
+  // A session the control daemon started is named after what the person asked, not after
+  // the line sessionpipe added to say where the ask came from (a short ask left room for
+  // it in the 50 characters of a title).
+  const text = deliveredWords(
+    (typeof c === "string"
       ? c
       : Array.isArray(c)
         ? c
@@ -709,7 +713,8 @@ function askText(j: Record<string, unknown> | null): string | null {
             .map((b) => b.text as string)
             .join("\n")
         : ""
-  ).trim();
+    ).trim(),
+  ).text;
   if (!text || isInjected(text)) return null;
   return text;
 }
