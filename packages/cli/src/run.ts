@@ -535,8 +535,13 @@ export async function runJob(
         !read.turns.length &&
         (!read.open || (read.open.id !== undefined && read.open.id !== o.named));
       const waiting = c.waiting && !gone;
+      // A look between two hooks leaves alone the turn the hooks still hold as running,
+      // unless the person interrupted it: its own end is on its way (its worker lost the
+      // lock to this one) and sends it, after its turn.ended. So are the turns after it.
+      const held = o.open === undefined ? -1 : c.turns.findIndex((t) => t.id === o.open && !t.interrupted);
+      const turns = held < 0 ? c.turns : c.turns.slice(0, held);
       const out: Event[] = [];
-      for (const t of c.turns) {
+      for (const t of turns) {
         if (t.interrupted && o.open !== undefined && t.id === o.open) {
           out.push(
             stamp({ type: "turn.ended", harnessEvent: job.event, data: { turn_id: o.open, reason: "interrupt" } }),
@@ -557,14 +562,16 @@ export async function runJob(
           }),
         );
       }
-      const last = c.turns[c.turns.length - 1];
+      const last = turns[turns.length - 1];
       if (last)
         facts.save(job.harness, id, {
-          transcript_line: c.line,
+          // With a turn left alone the cursor stops after the last one sent: the rows
+          // between it and the next turn are no message.
+          transcript_line: held < 0 ? c.line : last.endLine + 1,
           transcript_turns: turnNo,
           // The last turn sent, when it is the last of the file, by its prompt's id and a
           // digest of its last words: what `gone` above knows it by.
-          ...(c.turns.length === read.turns.length && last.id && read.tail?.said !== undefined
+          ...(turns.length === read.turns.length && last.id && read.tail?.said !== undefined
             ? { transcript_sent: `${last.id}:${wordsDigest(read.tail.said)}` }
             : {}),
         });
@@ -629,7 +636,10 @@ export async function runJob(
       const how = { all: final === undefined, due: final, named: typeof named === "string" ? named : undefined };
       let got = turnEvents(transcript, how);
       events.push(...got.events);
-      for (const until = clock.now() + SETTLE_FAST_MS; got.waiting && opts.drain !== false && clock.now() < until; ) {
+      for (
+        const until = ticksOf(clock) + SETTLE_FAST_MS;
+        got.waiting && opts.drain !== false && ticksOf(clock) < until;
+      ) {
         await clock.sleep(SETTLE_STEP_MS);
         got = turnEvents(transcript, how);
         events.push(...got.events);
@@ -638,9 +648,11 @@ export async function runJob(
         facts.save(job.harness, id, { transcript_due: final, transcript_due_at: at });
         if (opts.drain !== false)
           settle = async (send) => {
-            const until = clock.now() + SETTLE_MS;
+            // The budget is counted in ticks; the worker's deadline is a time of day, and
+            // is only ever a reason to stop sooner.
+            const until = ticksOf(clock) + SETTLE_MS;
             while (
-              clock.now() + SETTLE_POLL_MS <= until &&
+              ticksOf(clock) + SETTLE_POLL_MS <= until &&
               (opts.deadline === undefined || clock.now() + SETTLE_POLL_MS + PASS_BUDGET_MS <= opts.deadline)
             ) {
               await clock.sleep(SETTLE_POLL_MS);
@@ -787,8 +799,17 @@ export async function appendObserved(
 export interface Clock {
   now(): number;
   sleep(ms: number): Promise<void>;
+  /** Milliseconds that only go forward, from any origin: what a wait's budget is counted
+   *  in, since `now` is the wall clock and a wait measured by it lasts as long again as
+   *  the clock is set back. A clock without one counts by `now`. */
+  ticks?(): number;
 }
-const REAL_CLOCK: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+const REAL_CLOCK: Clock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  ticks: () => performance.now(),
+};
+const ticksOf = (clock: Clock): number => (clock.ticks ? clock.ticks() : clock.now());
 
 /** A pass of the drain starts at least this long after the machine's last request to
  *  a receiver (issue #208): under a few hundred subagents a receiver gets one request
