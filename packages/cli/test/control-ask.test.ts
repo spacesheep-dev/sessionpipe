@@ -20,7 +20,7 @@ import {
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG, Outbox, runHeadless, shortId, takeLock, writeConfig } from "@sessionpipe/core";
+import { DEFAULT_CONFIG, isUlid, Outbox, runHeadless, shortId, takeLock, writeConfig } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { askCode, askProblem, ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
 import { type AskRequest, ask, askMany, type LocalReply } from "../src/control/local.js";
@@ -988,6 +988,47 @@ describe.runIf(unix)("a handoff (CONTROL.md §6 reply_to): the other modes and e
     const ev = await until(() => (events("claude-code", SID).length === 2 ? events("claude-code", SID) : null));
     expect(ev[1]?.data).toMatchObject({ relayed: "delivered" });
     expect(runs().map((r) => r.bin)).toEqual(["codex"]);
+  });
+
+  it("reply_to with the session parked on its channel: handed over there, proven by the row its turn begins with, and the channel stays open", {
+    timeout: 20_000,
+  }, async () => {
+    await startDaemon({ receivers: true });
+    const park = () => ask(sock, { op: "wait", session: ASKER, pid: 4242, channel: true }, 10_000);
+    const parked = park();
+    await new Promise((r) => setTimeout(r, 100));
+    const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go", reply_to: ASKER });
+    const ack = await rx.waitAck(q.id);
+    const handed = (await parked) as { op: string; id: string; text: string };
+    expect(handed).toMatchObject({
+      op: "message",
+      text: frameHandoff({ harness: "codex", id: RECV }, rx.url, ack.reply as string),
+    });
+    const f = path.join(configDir, "projects", project.replace(/[^a-zA-Z0-9]/g, "-"), `${SID}.jsonl`);
+    const row = {
+      type: "user",
+      isMeta: true,
+      origin: { kind: "channel", server: "sessionpipe" },
+      message: {
+        content: `<channel source="sessionpipe" via="localhost" message_id="${handed.id}">\n${handed.text}\n</channel>`,
+      },
+    };
+    writeFileSync(f, `${JSON.stringify(row)}\n`, { flag: "a" });
+    await ask(sock, { op: "event", session: ASKER, event: "UserPromptSubmit" }, 500);
+    const ev = await until(() => (events("claude-code", SID).length === 2 ? events("claude-code", SID) : null));
+    // The relay's id is a message id like any other: the channel puts it on its tag, and
+    // the tag is what proves the turn that began is this message's. (It was
+    // `relay:<ulid>`, which is no id a mark is made of: the hand-over was reported failed
+    // and the channel shut, though the session had the answer.)
+    expect(ev[1]?.data).toMatchObject({ ok: true, relayed: "delivered" });
+    expect(ev[1]?.data).not.toHaveProperty("error");
+    expect(isUlid(handed.id)).toBe(true);
+    // The turn ends, the channel parks again, and the next message goes through it.
+    await ask(sock, { op: "event", session: ASKER, event: "Stop" }, 500);
+    const again = park();
+    await new Promise((r) => setTimeout(r, 100));
+    const next = await rx.send({ session: ASKER, text: "and this" });
+    expect(await again).toMatchObject({ op: "message", id: next.id });
   });
 
   it("reply_to a Codex session the hooks reported: its thread resumed, the answer on the way", {

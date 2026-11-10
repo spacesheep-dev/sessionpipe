@@ -3881,7 +3881,10 @@ export class ControlDaemon {
     };
     if (!ok) return ended({});
     if (!ack.reply) return ended({ relayed: "failed", error: "the session finished its turn without a written reply" });
-    const id = `relay:${h.askId}`;
+    // An id of its own, and a whole one: handed to a session in place it is what the
+    // session's transcript is searched for (a channel puts it on its tag), and only a
+    // ULID makes a mark (core's `messageMark`). `relay:<the handoff's id>` made none.
+    const id = ulid(this.deps.now());
     const sink: AckSink = {
       label: `relay ${h.askId.slice(-8)}`,
       frame: (text) => text,
