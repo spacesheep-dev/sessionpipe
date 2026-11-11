@@ -553,9 +553,11 @@ describe("the service that keeps the daemon running", () => {
       ["launchctl", ["bootout", `user/${uid}/org.sessionpipe.control`]],
       ["launchctl", ["bootstrap", `gui/${uid}`, plist]],
     ]);
+    // Nobody at the screen: launchd has no gui domain to bootstrap into, or to print.
     exec.mockImplementation((_c, args) => {
       if (args[0] === "bootstrap" && args[1]?.startsWith("gui/"))
-        throw new Error("Bootstrap failed: 5: Input/output error");
+        throw new Error("Bootstrap failed: 125: Domain does not support specified action");
+      if (args[0] === "print") throw new Error("Bad request.");
       return "";
     });
     process.getuid = undefined as never;

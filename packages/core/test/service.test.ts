@@ -118,6 +118,90 @@ describe("installing and removing", () => {
       commands: [],
     });
   });
+  // launchd as it answers on a Mac with someone at the screen: `bootout` answers at once
+  // and the service stays until its process has exited (here: after `leaves` looks), a
+  // bootstrap of a label that is still there is refused in both domains, and `print`
+  // fails for what isn't there.
+  const launchd = (o: { running: boolean; leaves: number }) => {
+    let loaded = o.running;
+    let left = Number.POSITIVE_INFINITY;
+    const exec = vi.fn((_c: string, args: string[]) => {
+      const [verb, target] = args;
+      const mine = target?.startsWith("gui/501");
+      if (verb === "bootout") {
+        if (!mine || !loaded) throw new Error("Boot-out failed: 3: No such process");
+        left = o.leaves;
+      } else if (verb === "print") {
+        if (target === "gui/501") return "";
+        if (!mine || !loaded) throw new Error("Bad request.");
+      } else if (verb === "bootstrap") {
+        if (loaded) throw new Error("Bootstrap failed: 5: Input/output error");
+        if (!mine) throw new Error("Bootstrap failed: 134: Service cannot load in requested session");
+        loaded = true;
+        left = Number.POSITIVE_INFINITY;
+      }
+      return "";
+    });
+    const sleep = vi.fn((_ms: number) => {
+      if (--left <= 0) loaded = false;
+    });
+    return { exec, sleep, loaded: () => loaded };
+  };
+  const plistPath = () => path.join(home, "Library", "LaunchAgents", "org.sessionpipe.gui.plist");
+
+  it("darwin: a running service is replaced: the new one starts once launchd has let go of the old one", () => {
+    const l = launchd({ running: true, leaves: 4 });
+    const r = installService({ ...SPEC, home, exec: l.exec, sleep: l.sleep, platform: "darwin", uid: "501" });
+    expect(r).toMatchObject({ manager: "launchd", domain: "gui" });
+    expect(l.loaded()).toBe(true);
+    // The first bootstrap is the refused one; the looks in between aren't the plan's.
+    expect(r.commands).toEqual([
+      "launchctl bootout gui/501/org.sessionpipe.gui",
+      "launchctl bootout user/501/org.sessionpipe.gui",
+      `launchctl bootstrap gui/501 ${plistPath()}`,
+      `launchctl bootstrap gui/501 ${plistPath()}`,
+    ]);
+    expect(l.sleep.mock.calls).toEqual([[100], [100], [100], [100]]);
+    expect(l.exec).not.toHaveBeenCalledWith("launchctl", ["bootstrap", "user/501", plistPath()]);
+  });
+  it("darwin: nothing was running: one bootstrap, no look and no wait", () => {
+    const l = launchd({ running: false, leaves: 0 });
+    const r = installService({ ...SPEC, home, exec: l.exec, sleep: l.sleep, platform: "darwin", uid: "501" });
+    expect(r.domain).toBe("gui");
+    expect(l.exec.mock.calls.map((c) => c[1][0])).toEqual(["bootout", "bootout", "bootstrap"]);
+    expect(l.sleep).not.toHaveBeenCalled();
+  });
+  it("darwin: launchd never lets go, or nobody is at the screen and it refuses: the command that starts it", () => {
+    const stuck = launchd({ running: true, leaves: Number.POSITIVE_INFINITY });
+    expect(() =>
+      installService({ ...SPEC, home, exec: stuck.exec, sleep: stuck.sleep, platform: "darwin", uid: "501" }),
+    ).toThrow(
+      `launchd didn't start org.sessionpipe.gui, and nothing runs it now: \`launchctl bootstrap gui/501 ${plistPath()}\` starts it`,
+    );
+    // Ten seconds of looks, then one more try in each domain; the file is there for the command.
+    expect(stuck.sleep).toHaveBeenCalledTimes(100);
+    expect(stuck.exec.mock.calls.filter((c) => c[1][0] === "bootstrap").map((c) => c[1][1])).toEqual([
+      "gui/501",
+      "gui/501",
+      "user/501",
+    ]);
+    expect(existsSync(plistPath())).toBe(true);
+    const sleep = vi.fn();
+    expect(() =>
+      installService({
+        ...SPEC,
+        home,
+        exec: (_c, args) => {
+          if (args[0] === "bootout") return "";
+          throw new Error("no such domain");
+        },
+        sleep,
+        platform: "darwin",
+        uid: "501",
+      }),
+    ).toThrow("from a login that isn't at this Mac's screen: log in there and run `launchctl bootstrap gui/501 ");
+    expect(sleep).not.toHaveBeenCalled();
+  });
   it("linux: enabled now and lingering; written but unreachable without systemd --user", () => {
     const exec = vi.fn((_c: string, args: string[]) => (args[0] === "show-user" ? "Linger=yes\n" : ""));
     const r = installService({ ...SPEC, home, exec, platform: "linux", user: "misha" });
