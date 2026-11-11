@@ -1,5 +1,12 @@
 # sessionpipe
 
+## 0.13.6
+
+### Patch Changes
+
+- 310ba20: The `PermissionRequest` hook names a prompt by its tool call's id where Claude Code's payload carries one, as the `attention.needed` it reports already did. The hook always used the hash of the prompt, the tool and its input, so on a Claude Code that names the tool call the page's Allow / Deny would have named a prompt the daemon did not hold. None does to date: nothing changes on the versions recorded so far.
+- 85ef4ae: A permission question can be answered from the page while a subagent is running. The daemon holds a `PermissionRequest` hook so that the page's answer can be handed to it, and let go of it at the session's next tool result, Stop or new prompt, taking that to mean the terminal had answered. A session's hooks all report under its id, a subagent's among them: with a subagent reading files in the background, the main thread's question was let go at the subagent's next tool call, a second or two after it was asked and with the terminal still asking, and the answer was refused `no_attention`. A held question is now let go only by an event that says that question is over: a tool result of the thread that asked (or of its own tool call), a Stop or a new prompt where the main thread asked, the subagent's own stop (or a Stop with no background work left) where a subagent asked, and the session's end. A tool result, a Stop or a new prompt from another thread lets go of nothing, and neither does an event whose hook fired before the question, however late it is reported. The hook and the worker tell the daemon which thread and tool call each is about; a hook older than this talking to a newer daemon, or a newer hook to an older daemon, behaves as before. Two limits remain. A thread that runs several tool calls side by side still ends its own question at a sibling call's result, with the terminal still asking. And a question that is over with no event to say so (the terminal refused it and only other threads report afterwards, or a subagent asked and the turn was interrupted) stays held until the hook's 125 seconds are up: an answer in that time is acked `delivered` and changes nothing.
+
 ## 0.13.5
 
 ### Patch Changes

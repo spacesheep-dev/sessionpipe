@@ -1,5 +1,9 @@
 # @sessionpipe/core
 
+## 0.13.6
+
+No changes in this release.
+
 ## 0.13.5
 
 ### Patch Changes
