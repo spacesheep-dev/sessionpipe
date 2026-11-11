@@ -144,7 +144,14 @@ export interface RunOptions {
  *  the number is the kernel's to hand out again: so the last signal goes out as the
  *  child exits, when the group can only be its own, and nothing is sent to that number
  *  after — no timer left running, no Stop and no cap that arrives while the result waits
- *  on a tool still holding stdout. */
+ *  on a tool still holding stdout.
+ *
+ *  That is all a signal to a group can do, and it is not everything: it reaches the
+ *  processes that are in the group as it is sent. A tool that left the group is not
+ *  one, and neither, on macOS at least, is one a member is forking at that instant (a
+ *  shell forking `sleep` as the SIGKILL landed outlived it in 7 runs of 720). Nothing
+ *  goes after those. The run does not wait for them either: its result is out when the
+ *  child's stdout closes, and two seconds after the child's exit at the latest. */
 export function runHeadless(bin: string, args: string[], o: RunOptions): Promise<RunResult> {
   return new Promise((resolve) => {
     let out: Buffer[] = [];
