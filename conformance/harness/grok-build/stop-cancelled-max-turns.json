@@ -1,0 +1,39 @@
+{
+  "harness": "grok-build",
+  "event": "StopCancelled",
+  "recorded": {
+    "at": "2026-11-11T19:48:04.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "StopCancelled"
+    ],
+    "stdin": "{\"hookEventName\":\"stop_cancelled\",\"sessionId\":\"01a1cc27-2865-7bc3-b820-bc47c281d79f\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:48:04.566215+00:00\",\"transcriptPath\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-2865-7bc3-b820-bc47c281d79f/updates.jsonl\",\"promptId\":\"61ae1eb7-1aa1-40fd-9929-6097ffd38c02\",\"permissionMode\":\"bypassPermissions\",\"reason\":\"max_turns\",\"cancelledBy\":\"runtime\",\"lastAssistantMessage\":\"I'll run `ls`, then `pwd`, then `date`, one command at a time.\",\"hook_event_name\":\"StopCancelled\",\"session_id\":\"01a1cc27-2865-7bc3-b820-bc47c281d79f\",\"transcript_path\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-2865-7bc3-b820-bc47c281d79f/updates.jsonl\",\"permission_mode\":\"bypassPermissions\",\"last_assistant_message\":\"I'll run `ls`, then `pwd`, then `date`, one command at a time.\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "grok-build",
+        "event": "StopCancelled"
+      },
+      "session": {
+        "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+        "reason": "interrupt"
+      }
+    }
+  ]
+}

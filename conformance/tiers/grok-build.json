@@ -1,0 +1,2045 @@
+{
+  "recorded_from": "sessionpipe-core 0.13.8",
+  "cases": {
+    "notification-permission.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "grok-build",
+          "event": "Notification"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "attention_id": "*",
+          "kind": "permission",
+          "message": "Tool permission requested"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true,
+          "input": {
+            "target_file": "/tmp/rec/grok-proj/note.txt"
+          },
+          "output": {
+            "type": "ReadFile",
+            "FileContent": {
+              "content": "1→hello\n",
+              "content_concise": "1→hello\n",
+              "absolute_path": "/tmp/rec/grok-proj/note.txt",
+              "offset": null,
+              "raw_output": "hello\n",
+              "total_lines": 1
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "ms": 0,
+          "ok": true,
+          "input": {
+            "target_file": "/tmp/rec/grok-proj/note.txt"
+          },
+          "output": {
+            "type": "ReadFile",
+            "FileContent": {
+              "content": "1→hello\n",
+              "content_concise": "1→hello\n",
+              "absolute_path": "/tmp/rec/grok-proj/note.txt",
+              "offset": null,
+              "raw_output": "hello\n",
+              "total_lines": 1
+            }
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "input": {
+            "target_file": "/tmp/rec/grok-proj/note.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "tool": "read_file",
+          "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+          "input": {
+            "target_file": "/tmp/rec/grok-proj/note.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start-load.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-cancelled-max-turns.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-2865-7bc3-b820-bc47c281d79f",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "61ae1eb7-1aa1-40fd-9929-6097ffd38c02",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-cancelled-permission.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "StopCancelled"
+        },
+        "session": {
+          "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "grok-build",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "grok-build",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+          "seq": 0,
+          "cwd": "/tmp/rec/grok-proj"
+        },
+        "data": {
+          "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+          "prompt_chars": 131
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}

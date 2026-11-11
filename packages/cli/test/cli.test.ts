@@ -123,6 +123,7 @@ beforeAll(() => {
     CLAUDE_CONFIG_DIR: path.join(tmp, ".claude"),
     CODEX_HOME: path.join(tmp, ".codex"),
     GEMINI_CLI_HOME: path.join(tmp, ".gemini"),
+    GROK_HOME: path.join(tmp, ".grok"),
     SESSIONPIPE_CONFIG: config,
     SESSIONPIPE_STATE: state,
     SESSIONPIPE_SOCKET:
@@ -315,6 +316,7 @@ describe("status", () => {
       CLAUDE_CONFIG_DIR: path.join(absent, ".claude"),
       CODEX_HOME: path.join(absent, ".codex"),
       GEMINI_CLI_HOME: path.join(absent, ".gemini"),
+      GROK_HOME: path.join(absent, ".grok"),
       SESSIONPIPE_CONFIG: path.join(absent, "config.json"),
       SESSIONPIPE_STATE: path.join(absent, "state"),
     };

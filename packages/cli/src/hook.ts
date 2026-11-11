@@ -122,6 +122,9 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         // Devin's payload names no folder at all; this is the only thing that does.
         "DEVIN_PROJECT_DIR",
         "GEMINI_CLI_HOME",
+        // Where Grok Build keeps its hooks and its sessions; the folder when a payload names none.
+        "GROK_HOME",
+        "GROK_WORKSPACE_ROOT",
         // The session the control daemon ran this one for (PROTOCOL.md §3 delegated_by).
         "SESSIONPIPE_ASKED_BY",
         "SESSIONPIPE_CONTROL_JOB",
@@ -203,7 +206,10 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // waiting on an answer that is not coming. Same test as core's notClaudeCode
     // (claude-code.ts), which the worker applies; repeated here because this file imports
     // nothing but node builtins.
+    // Grok Build's payload has both (it writes Claude Code's keys for the hooks it imports
+    // from that file) and is told by its own two keys, as core's isGrokPayload tells it.
     if (typeof s.transcript_path !== "string" && !UUID.test(id)) return null;
+    if (typeof s.hookEventName === "string" && typeof s.workspaceRoot === "string") return null;
     const session = `claude-code:${id}`;
     // The session's own permission mode, in its own words. Every Claude Code hook
     // payload carries it, and it is the only place a mode the person chose at the

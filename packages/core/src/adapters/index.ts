@@ -10,9 +10,10 @@ import { codex } from "./codex.js";
 import { findCodex } from "./codex-control.js";
 import { devin } from "./devin.js";
 import { geminiCli } from "./gemini-cli.js";
+import { grokBuild } from "./grok-build.js";
 import type { Adapter } from "./types.js";
 
-export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity, devin];
+export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity, devin, grokBuild];
 export const adapterByName = (name: string): Adapter | undefined => ADAPTERS.find((a) => a.name === name);
 export * as acpControl from "./acp-control.js";
 export { AG_STALE_PRETOOL, antigravityAnswer } from "./antigravity.js";
@@ -21,6 +22,7 @@ export { claudeAccountDirs, claudeAccounts, claudeDirs, notClaudeCode } from "./
 export * as claudeControl from "./claude-code-control.js";
 export * as codexControl from "./codex-control.js";
 export { DEVIN_EVENTS, devinConfigDir, devinDataDir, readDevinChain } from "./devin.js";
+export { GROK_EVENTS, grokHome, isGrokPayload } from "./grok-build.js";
 export {
   deniedNote,
   JOB_TIMEOUT_MS,
@@ -61,4 +63,4 @@ export type {
   TranscriptRead,
   Turn,
 } from "./types.js";
-export { antigravity, claudeCode, codex, devin, geminiCli };
+export { antigravity, claudeCode, codex, devin, geminiCli, grokBuild };

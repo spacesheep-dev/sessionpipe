@@ -1,0 +1,39 @@
+{
+  "harness": "grok-build",
+  "event": "StopCancelled",
+  "recorded": {
+    "at": "2026-11-11T19:48:09.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "StopCancelled"
+    ],
+    "stdin": "{\"hookEventName\":\"stop_cancelled\",\"sessionId\":\"01a1cc27-3adb-7913-ac03-d253839111c3\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:48:09.513152+00:00\",\"transcriptPath\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-3adb-7913-ac03-d253839111c3/updates.jsonl\",\"promptId\":\"ded7cb45-4e90-4bdf-b9b0-a501c20260fc\",\"permissionMode\":\"default\",\"reason\":\"permission_cancelled\",\"cancelledBy\":\"user\",\"lastAssistantMessage\":\"I'll create `denied.txt` with the contents `x`.\",\"hook_event_name\":\"StopCancelled\",\"session_id\":\"01a1cc27-3adb-7913-ac03-d253839111c3\",\"transcript_path\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-3adb-7913-ac03-d253839111c3/updates.jsonl\",\"permission_mode\":\"default\",\"last_assistant_message\":\"I'll create `denied.txt` with the contents `x`.\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "grok-build",
+        "event": "StopCancelled"
+      },
+      "session": {
+        "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "ded7cb45-4e90-4bdf-b9b0-a501c20260fc",
+        "reason": "interrupt"
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "harness": "grok-build",
+  "event": "PreToolUse",
+  "recorded": {
+    "at": "2026-11-11T19:44:27.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "PreToolUse"
+    ],
+    "stdin": "{\"hookEventName\":\"pre_tool_use\",\"sessionId\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:44:27.274592+00:00\",\"transcriptPath\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc23-be41-73d0-be8a-6d4594c93ae2/updates.jsonl\",\"permissionMode\":\"bypassPermissions\",\"toolName\":\"read_file\",\"toolUseId\":\"call-df5d273e-c099-404c-8674-e065a6794b59-0\",\"toolInput\":{\"target_file\":\"/tmp/rec/grok-proj/note.txt\"},\"toolInputTruncated\":false,\"hook_event_name\":\"PreToolUse\",\"session_id\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"transcript_path\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc23-be41-73d0-be8a-6d4594c93ae2/updates.jsonl\",\"permission_mode\":\"bypassPermissions\",\"tool_name\":\"read_file\",\"tool_input\":{\"target_file\":\"/tmp/rec/grok-proj/note.txt\"},\"tool_use_id\":\"call-df5d273e-c099-404c-8674-e065a6794b59-0\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "tool.started",
+      "harness": {
+        "name": "grok-build",
+        "event": "PreToolUse"
+      },
+      "session": {
+        "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "tool": "read_file",
+        "call_id": "call-df5d273e-c099-404c-8674-e065a6794b59-0",
+        "input": {
+          "target_file": "/tmp/rec/grok-proj/note.txt"
+        }
+      }
+    }
+  ]
+}

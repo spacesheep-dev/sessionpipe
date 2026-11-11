@@ -1,0 +1,39 @@
+{
+  "harness": "grok-build",
+  "event": "Stop",
+  "recorded": {
+    "at": "2026-11-11T19:44:32.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "Stop"
+    ],
+    "stdin": "{\"hookEventName\":\"stop\",\"sessionId\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:44:32.574717+00:00\",\"transcriptPath\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc23-be41-73d0-be8a-6d4594c93ae2/updates.jsonl\",\"promptId\":\"e561d59f-8e35-4ef6-8752-c8a991a214b6\",\"permissionMode\":\"bypassPermissions\",\"reason\":\"end_turn\",\"stopHookActive\":false,\"lastAssistantMessage\":\"Read `note.txt`, wrote `out.txt` with \\\"done\\\", and `ls` shows both files.\",\"backgroundTasks\":[],\"sessionCrons\":[],\"hook_event_name\":\"Stop\",\"session_id\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"transcript_path\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc23-be41-73d0-be8a-6d4594c93ae2/updates.jsonl\",\"permission_mode\":\"bypassPermissions\",\"stop_hook_active\":false,\"last_assistant_message\":\"Read `note.txt`, wrote `out.txt` with \\\"done\\\", and `ls` shows both files.\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "grok-build",
+        "event": "Stop"
+      },
+      "session": {
+        "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+        "reason": "stop"
+      }
+    }
+  ]
+}

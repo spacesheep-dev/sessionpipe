@@ -1,7 +1,7 @@
 # sessionpipe
 
 **An open protocol, and a client, for what your coding agents are doing.** One
-install hooks Claude Code, Codex, Gemini CLI, Antigravity and Devin; every event is
+install hooks Claude Code, Codex, Gemini CLI, Antigravity, Devin and Grok Build; every event is
 filtered to a privacy tier you choose per destination, secrets are removed on your
 machine before anything leaves it, and it goes to your server, to a file, or nowhere
 at all. Messages come back the same way: answer a permission or queue the next prompt
@@ -104,6 +104,7 @@ fixtures recorded from real hook payloads ([`conformance/harness/`](conformance/
 | Gemini CLI | 8 events | the chat log | title, model | 14 |
 | Antigravity | 4 events | `brain/<id>` messages | title, url to the conversation, in a git checkout too | 8 |
 | Devin CLI | 8 events | its SQLite session store, read-only | title, model, times | 8 |
+| Grok Build | 11 events | the session's `updates.jsonl` | title, model, branch, times | 11 |
 
 Next in the registry ([ADAPTERS.md](spec/ADAPTERS.md)): Cursor, Copilot CLI, Droid,
 Kiro, OpenCode.

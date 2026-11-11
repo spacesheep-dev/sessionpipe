@@ -1,0 +1,39 @@
+{
+  "harness": "grok-build",
+  "event": "UserPromptSubmit",
+  "recorded": {
+    "at": "2026-11-11T19:44:17.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "UserPromptSubmit"
+    ],
+    "stdin": "{\"hookEventName\":\"user_prompt_submit\",\"sessionId\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:44:17.156340+00:00\",\"promptId\":\"e561d59f-8e35-4ef6-8752-c8a991a214b6\",\"permissionMode\":\"bypassPermissions\",\"prompt\":\"Read note.txt, then create a file out.txt containing the word done, then run the shell command 'ls'. Reply with one short sentence.\",\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"01a1cc23-be41-73d0-be8a-6d4594c93ae2\",\"permission_mode\":\"bypassPermissions\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.started",
+      "harness": {
+        "name": "grok-build",
+        "event": "UserPromptSubmit"
+      },
+      "session": {
+        "id": "01a1cc23-be41-73d0-be8a-6d4594c93ae2",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "turn_id": "e561d59f-8e35-4ef6-8752-c8a991a214b6",
+        "prompt_chars": 131
+      }
+    }
+  ]
+}

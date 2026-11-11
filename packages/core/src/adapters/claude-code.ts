@@ -30,6 +30,7 @@ import {
   uninstallClaudeShaped,
   writeBack,
 } from "./claude-shaped.js";
+import { isGrokPayload } from "./grok-build.js";
 import type {
   Adapter,
   BackfillRow,
@@ -465,9 +466,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  *  import `~/.claude/settings.json` hooks, so our entries there can be run by a tool
  *  that has its own adapter: it would arrive under the wrong name, with ids that mean
  *  nothing to a Claude Code reader. Every Claude Code payload names a transcript and a
- *  UUID session (all 21 recorded fixtures do); a payload with neither is somebody else's. */
+ *  UUID session (all 21 recorded fixtures do); a payload with neither is somebody else's.
+ *  Grok Build's has both — it writes Claude Code's keys for the hooks it imports — so it
+ *  is told by its own keys instead (`isGrokPayload`). */
 export function notClaudeCode(id: string, s: Record<string, unknown>): boolean {
-  return typeof s.transcript_path !== "string" && !UUID.test(id);
+  return (typeof s.transcript_path !== "string" && !UUID.test(id)) || isGrokPayload(s);
 }
 function pickSource(v: unknown): string {
   return typeof v === "string" && ["startup", "resume", "clear", "compact", "fork"].includes(v) ? v : "unknown";

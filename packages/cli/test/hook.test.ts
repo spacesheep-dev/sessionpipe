@@ -370,9 +370,17 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
       await run(["claude-code", "Stop"], JSON.stringify({ session_id: 7 }));
       // Another harness running our settings.json entry: no transcript, no UUID.
       await run(["claude-code", "Stop"], JSON.stringify({ session_id: "zest-lantana" }));
+      // Grok Build running it: a UUID and a transcript, like Claude Code's, and its own two keys.
+      await run(
+        ["claude-code", "Stop"],
+        claude({ transcript_path: "/g/updates.jsonl", hookEventName: "stop", workspaceRoot: "/w" }),
+      );
       expect(d.asked).toEqual([]);
       expect(out).toEqual([]);
-      expect(jobs()).toHaveLength(5);
+      expect(jobs()).toHaveLength(6);
+      // One of the two keys alone is not Grok's payload: the wait is asked.
+      await run(["claude-code", "Stop"], claude({ hookEventName: "stop" }));
+      expect(d.asked).toHaveLength(1);
     } finally {
       await d.close();
     }

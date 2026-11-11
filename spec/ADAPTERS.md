@@ -38,6 +38,7 @@ or a log. Only Claude Code has one (claude.ai, below).
 | `gemini-cli` | Gemini CLI (Google) | geminicli.com/docs/hooks/reference | yes | yes (AfterAgent) | M2 |
 | `antigravity` | Antigravity (Google) | antigravity.google/docs/hooks | **no** | no | M2 |
 | `devin` | Devin CLI (Cognition) | docs.devin.ai/cli/extensibility/hooks/overview | yes | yes (exit 2) | M2 |
+| `grok-build` | Grok Build (xAI) | the user guide the CLI installs (`~/.grok/docs/user-guide/10-hooks.md`) | yes | yes | M2 |
 | `cursor` | Cursor | cursor.com/docs/hooks | yes | yes (`followup_message`) | M7 |
 | `copilot-cli` | GitHub Copilot CLI | docs.github.com/en/copilot/reference/hooks-reference | yes | yes | M7 |
 | `droid` | Droid (Factory) | docs.factory.ai/reference/hooks-reference | yes | yes | M7 |
@@ -177,6 +178,28 @@ Fixtures recorded 2026-10-08 on Devin CLI 3000.11.3 (seven `devin --model swe-2-
 runs with a recording hook): `SessionStart` (`startup` and `resume`), `UserPromptSubmit`,
 `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop`, `SessionEnd`. Still pending a real
 payload: `PostCompaction` *(recording pending)* — the runs were far too short to compact.
+
+## Grok Build (`grok-build`) — M2
+
+| | |
+|---|---|
+| Config | A hooks file of sessionpipe's own: `~/.grok/hooks/sessionpipe.json` (`$GROK_HOME/hooks/sessionpipe.json` when set). Grok merges every `*.json` in that folder, so no other tool's file is written. Claude-shaped; an omitted `matcher` matches everything; timeouts in **seconds**. Grok skips an event name it does not know. |
+| Hook shape | `{"hooks":{"<Event>":[{"hooks":[{"type":"command","command":"…","timeout":5}]}]}}`; only `Notification` carries a matcher, `permission_prompt`. |
+| Mapping | `SessionStart` → `session.started` (`source`: `new` → `startup`, `load` → `resume`) · `UserPromptSubmit` → `turn.started` (`turn_id` ← `promptId`, `prompt_chars`) · `PreToolUse` → `tool.started` · `PostToolUse` → `tool.ended` (`ok: true`, `ms` ← `duration_ms`) · `PostToolUseFailure` → `tool.ended` (`ok: false`) · `Notification` (`permission_prompt` only) → `attention.needed` permission · `Stop` → `turn.ended` `stop` · `StopFailure` → `turn.ended` `error` · `StopCancelled` → `turn.ended` `interrupt` · `PreCompact` → `context.compacted` · `SessionEnd` → `session.ended` (`shutdown` → `exit`). |
+| Ids in stdin | Every key twice: Grok's own in camelCase (`hookEventName` with the event in snake_case, `sessionId`, `workspaceRoot`, `toolName`, `toolUseId`, `toolInput`, `toolResult`, `durationMs`, `transcriptPath`, `lastAssistantMessage`) and Claude Code's beside them (`hook_event_name`, `session_id`, `tool_name`, `tool_use_id`, `tool_input`, `tool_response`, `duration_ms`, `transcript_path`, `last_assistant_message`). `promptId` has no twin and is on turn events only. `session_id` is a UUIDv7. `cwd`, `timestamp` and `permissionMode` are in every payload. |
+| Env | `GROK_HOME` (where the hooks file and the sessions are); `GROK_WORKSPACE_ROOT`, the folder, read only when a payload names no `cwd`. |
+| stdout | **Nothing**, for every event. Grok reads a decision from a blocking hook's stdout; silence with exit 0 is "carry on". |
+| Transcript (tier 2) | `transcript_path`: `~/.grok/sessions/<url-encoded cwd>/<session id>/updates.jsonl`, the session's ACP update stream, one `{timestamp, method, params: {sessionId, update}}` per line with `timestamp` in unix **seconds**. `user_message_chunk` is the prompt and `agent_message_chunk` a message of the agent's; chunks that follow one another are one message. Thoughts, tool calls and Grok's `_x.ai/session/update` records are not words. `turn_completed.prompt_id` names the turn. |
+| Facts | `summary.json` beside the transcript: title ← `generated_title` (`harness`; a `/rename` replaces it), model ← `current_model_id`, `cwd` ← `info.cwd`, branch ← `head_branch`, times ← `created_at` / `last_active_at`. Version: `version.json` in Grok's home. |
+| Backfill | Every `sessions/*/*/summary.json` active since the cutoff, newest first, at most 500. |
+| Quirks | Grok **also runs the hooks in `~/.claude/settings.json`** (Claude Code compatibility, on by default) and hands them a payload with Claude Code's keys, a UUID session and a transcript path. sessionpipe's `claude-code` entry there fires in every Grok session; it tells a Grok payload by `hookEventName` + `workspaceRoot` and reports nothing, or the session would arrive as a Claude Code one (it did, until this adapter). A second `Stop` fires as the process ends, after `SessionEnd`, with `reason: "shutdown"` and no `promptId`: no turn ended, and nothing is reported. A headless run (`grok -p`) counts its folder as trusted for these hooks; an interactive session runs them once the folder is trusted. |
+| Control | Through ACP: `grok agent stdio` (*Agents driven through ACP*, below); a session the daemon started this way fires these same hooks under Grok's own session id. A `permission.answer` for a `grok-build` session is refused (the hook never prints). |
+
+Fixtures recorded 2026-11-11 on Grok Build 1.0.77 (four `grok -p` runs with a recording hook in
+`~/.grok/hooks`): `SessionStart` (`new` and `load`), `UserPromptSubmit`, `PreToolUse`,
+`PostToolUse`, `Notification` (`permission_prompt`), `Stop` (`end_turn` and `shutdown`),
+`StopCancelled` (`max_turns` and `permission_cancelled`), `SessionEnd`. Still pending a real
+payload: `PostToolUseFailure`, `StopFailure`, `PreCompact` *(recording pending)*.
 
 ## Cursor (`cursor`) — M7
 

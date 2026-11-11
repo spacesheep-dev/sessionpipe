@@ -362,6 +362,61 @@ export function readGemini(lines: string[], from: number): TranscriptRead {
   return pairTurns(msgs, endOf(lines));
 }
 
+/** Grok Build: `updates.jsonl`, the session's ACP update stream as Grok keeps it — one
+ *  `{timestamp, method, params: {sessionId, update}}` per line, `timestamp` in unix
+ *  SECONDS. A `user_message_chunk` is the person's prompt and an `agent_message_chunk` a
+ *  message of the agent's; thoughts, tool calls and Grok's own `_x.ai/session/update`
+ *  records (hook runs, `turn_completed`) are not words. Every file recorded holds a
+ *  message whole on one line; chunks that do follow one another with nothing between
+ *  are still one message, so they are joined as written. `turn_completed` names the
+ *  turn's `prompt_id`, the `promptId` of its hooks, so it becomes the turn's id. */
+export function readGrok(lines: string[], from: number): TranscriptRead {
+  const msgs: Msg[] = [];
+  /** The message the previous line added to, when that line was a chunk of it. */
+  let open: Msg | null = null;
+  let asked: Msg | null = null;
+  for (let i = from; i < lines.length; i++) {
+    const j = lines[i] ? parse(lines[i] as string) : null;
+    const params = j && typeof j.params === "object" && j.params ? (j.params as Record<string, unknown>) : null;
+    const u =
+      params && typeof params.update === "object" && params.update ? (params.update as Record<string, unknown>) : null;
+    const kind = u?.sessionUpdate;
+    const role = kind === "user_message_chunk" ? "user" : kind === "agent_message_chunk" ? "assistant" : null;
+    if (!j || !u || !role) {
+      if (j) open = null;
+      if (u && kind === "turn_completed" && asked && typeof u.prompt_id === "string" && u.prompt_id) {
+        asked.id = u.prompt_id;
+        asked = null;
+      }
+      continue;
+    }
+    const c = u.content as { type?: unknown; text?: unknown } | undefined;
+    const text = c && c.type === "text" && typeof c.text === "string" ? c.text : "";
+    if (!text) {
+      open = null;
+      continue;
+    }
+    if (open && open.role === role) {
+      open.text += text;
+      open.line = i;
+      continue;
+    }
+    const secs = Number(j.timestamp);
+    const at = Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : Date.now();
+    const said: string = role === "user" ? deliveredWords(text).text : text;
+    const msg: Msg = { role, text: said, at, line: i };
+    open = msg;
+    msgs.push(msg);
+    if (role === "user") asked = msg;
+  }
+  for (const m of msgs) m.text = m.text.trim();
+  return pairTurns(
+    msgs.filter((m) => m.text),
+    endOf(lines),
+    true,
+  );
+}
+
 /** Antigravity: one step per line, type USER_INPUT | PLANNER_RESPONSE, content with <USER_REQUEST> wrapping. */
 export function readAntigravity(lines: string[], from: number): TranscriptRead {
   const msgs: Msg[] = [];

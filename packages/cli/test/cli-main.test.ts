@@ -235,6 +235,7 @@ beforeEach(() => {
     CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
     CODEX_HOME: path.join(home, ".codex"),
     GEMINI_CLI_HOME: path.join(home, ".gemini"),
+    GROK_HOME: path.join(home, ".grok"),
     SESSIONPIPE_CONFIG: config,
     SESSIONPIPE_STATE: state,
     SESSIONPIPE_DATA: path.join(tmp, "data"),

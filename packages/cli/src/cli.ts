@@ -231,8 +231,8 @@ function help(): void {
 Usage:
   sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line]
                                   (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]
-  sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin | --all] [--keep-state]
+  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin --grok-build] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]
+  sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin --grok-build | --all] [--keep-state]
   sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--tools all|main|beat] [--name N]
   sessionpipe sink list | remove <name> | test <name>
   sessionpipe secrets [move keychain|secret-service|file]   (where the machine's keys live)
@@ -297,7 +297,7 @@ async function install(): Promise<void> {
   const adapters = selectedAdapters();
   if (!adapters.length) {
     out(
-      "  No supported harness found on this machine (Claude Code, Codex, Gemini CLI, Antigravity, Devin). Pass --<harness> to force one.",
+      "  No supported harness found on this machine (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Grok Build). Pass --<harness> to force one.",
     );
     return;
   }
@@ -442,7 +442,7 @@ async function connect(): Promise<void> {
   const adapters = ADAPTERS.filter((a) => a.detect());
   if (!adapters.length)
     out(
-      "  ! No coding agent here yet (Claude Code, Codex, Gemini CLI, Antigravity, Devin): run `sessionpipe install` once you have one.",
+      "  ! No coding agent here yet (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Grok Build): run `sessionpipe install` once you have one.",
     );
   else installHarnesses(adapters, cfg, tier < 1);
   writeConfig(cfg);
@@ -601,6 +601,7 @@ const AWAY_FROM_HOME: Record<string, string | null> = {
   "gemini-cli": "GEMINI_CLI_HOME",
   antigravity: "GEMINI_CLI_HOME",
   devin: "XDG_CONFIG_HOME",
+  "grok-build": "GROK_HOME",
 };
 /** Harnesses this process would read out of the real home although SESSIONPIPE_CONFIG
  *  or SESSIONPIPE_STATE say "not this machine". Setting those is how a test or an agent
