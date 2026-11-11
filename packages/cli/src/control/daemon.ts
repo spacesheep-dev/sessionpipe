@@ -130,6 +130,7 @@ const {
   parseResult,
   peerClass,
   recentlyWritten,
+  recentWrite,
   relaunchMode,
   resolveHome,
   sessionFolder,
@@ -632,6 +633,13 @@ export class ControlDaemon {
   /** Each session's messages, one at a time and in the order they were sent (line.ts). */
   private readonly lines = new Lines();
   private readonly lastEnd = new Map<string, number>();
+  /** Sessions (by ref) a run of the daemon's own was asked to COPY and is not known to
+   *  have run anywhere else, and when that run ended: a Claude Code that took no notice
+   *  of --fork-session ran in the original, wrote to it, and reported its own Stop and
+   *  SessionEnd under the original's id. Those are not the end of whatever held the
+   *  original, so for as long as a write of unknown hand holds a session (`heldBy`) the
+   *  original is held, whatever its hooks said meanwhile. */
+  private readonly strays = new Map<string, number>();
   /** Per session: who is waiting for its next `UserPromptSubmit` — the first half of an
    *  in-place delivery's proof. At most ONE per session: two waiters would both be
    *  settled by one turn, and that turn's answer acked as the answer to both. */
@@ -2470,10 +2478,23 @@ export class ControlDaemon {
    *  run someone started at a terminal that exited seven seconds ago is that last case:
    *  it was copied for 90 seconds as "open in a window" (2026-11-10), and is resumed now. */
   private heldBy(target: string, t: Transcript): Holder | null {
+    const key = `claude-code:${target}`;
+    const now = this.deps.now();
     return holderOf(
       liveRecords(target, t.configDir),
-      recentlyWritten(t.file, this.endedAt(`claude-code:${target}`, target), this.deps.now()),
+      recentlyWritten(t.file, this.endedAt(key, target), now) || this.strayedInto(key, now),
     );
+  }
+
+  /** A copy's run that may have run in this session ended in the last 90 seconds
+   *  (`strays`): what it wrote there, and the end its hooks reported, account for
+   *  nothing that was there before it. */
+  private strayedInto(key: string, now: number): boolean {
+    const at = this.strays.get(key);
+    if (at === undefined) return false;
+    if (recentWrite(at, undefined, now)) return true;
+    this.strays.delete(key);
+    return false;
   }
 
   /** The last time a run of this session is known to have finished: one of the daemon's
@@ -2980,13 +3001,6 @@ export class ControlDaemon {
         }),
       );
       stream.close();
-      // A resume ran in `target`. A copy's run did not: it ran in the copy, whose hooks
-      // report under the copy's own id, so its end says nothing about the original —
-      // not that the turn the person is in there is over, and not that whatever wrote
-      // to its transcript a moment ago has finished. Told that it had, the next message
-      // was resumed in place in a session its own hooks said was mid-turn.
-      const ranIn = mode === "fork" ? (said.session === target ? null : said.session) : target;
-      if (ranIn) this.runOver("claude-code", ranIn);
       // Stopped on the person's request (a `cancel`): what it had said, and that it was
       // cancelled. Its mode is not reported: the turn it would describe never finished.
       // A copy it had named counts only if it is on disk: one stopped before it wrote
@@ -2996,6 +3010,18 @@ export class ControlDaemon {
       const out = res.stopped
         ? { reply: this.stoppedReply(stream.soFar), ...(onDisk ? { session: onDisk } : {}) }
         : this.outcome(res);
+      // A resume ran in `target`. A copy's run did not: it ran in the copy, whose hooks
+      // report under the copy's own id, so its end says nothing about the original —
+      // not that the turn the person is in there is over, and not that whatever wrote
+      // to its transcript a moment ago has finished. Told that it had, the next message
+      // was resumed in place in a session its own hooks said was mid-turn.
+      const named = said.session ?? ("session" in out && isUuid(out.session) ? out.session : null);
+      if (mode === "resume") this.runOver("claude-code", target);
+      else if (named && named !== target) this.runOver("claude-code", named);
+      // A copy's run that named the original as itself, or named nothing: it may have
+      // run in the original, and then the Stop and SessionEnd its hooks sent were sent
+      // under the original's id. Its end is still not the original's (`strays`).
+      else this.strays.set(`claude-code:${target}`, this.deps.now());
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
       const ran = isUuid(out.session) ? out.session : target;
       // What the ack says about a copy (CONTROL.md §6 `prompt`): that the answer came

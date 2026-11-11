@@ -470,8 +470,12 @@ the end of a run of the daemon's own, or no later than the session's own end as 
 hooks reported it (Claude Code and Codex: `SessionEnd`), since the process that made it
 has let go. A run that copies a session is a run in the copy: its end accounts for no
 write to the original and ends no turn there, so a copy that failed or was stopped
-leaves the original exactly as held, and as mid-turn, as it was. So a session whose
-headless run exited seconds ago is resumed in place at
+leaves the original exactly as held, and as mid-turn, as it was. Where a run that was
+asked for a copy is not known to have run anywhere else — it named the original as
+itself, or named nothing — the Stop and the end its hooks reported may have been
+reported under the original's id, and they are that run's, not the original's: the
+original is held, as by a write of unknown hand, for 90 seconds after that run. So a
+session whose headless run exited seconds ago is resumed in place at
 once; it is not copied, and nothing is said about a window. A daemon MUST NOT resume
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.

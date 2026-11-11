@@ -289,5 +289,43 @@ describe.runIf(unix)("a session is known by the id its harness gave it, exactly"
   });
 });
 
+describe.runIf(unix)("a run asked for a copy that ran as the original instead", () => {
+  // A Claude Code that takes no notice of --fork-session runs in the session it was told
+  // to copy, and its hooks report under that session's id. Killed or failed, it leaves
+  // the original as it was (control-cancel.test.ts). Ending by itself, its own Stop and
+  // SessionEnd read as the original's: the turn there over, the last write accounted for.
+  for (const theirs of [false, true])
+    it(`ends by itself${theirs ? " while the original's own process begins a turn" : ""}: that is not the end of whatever wrote to the original, and the next message is not resumed in place`, async () => {
+      // Held by nothing but a write seconds old: no registry row names it.
+      touch(O);
+      await startDaemon();
+      const first = await hand({ session: cc(O), text: "first [ignorefork][slow]" });
+      await until(() => runs().length === 1);
+      await sleep(150);
+      if (theirs) await event(cc(O), "UserPromptSubmit");
+      touch(O);
+      const ack = await rx.waitAck(first.id);
+      expect(ack).toMatchObject({ outcome: "delivered", mode: "fork", reply: "did it" });
+      expect(ack.copy_of).toBeUndefined();
+      const second = await hand({ session: cc(O), text: "second" });
+      expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: cc(O) });
+      expect(ran()).toEqual([`fork ${O.slice(0, 8)}`, `fork ${O.slice(0, 8)}`]);
+    });
+
+  it("holds the original for as long as a write of unknown hand holds it, and no longer", async () => {
+    let ahead = 0;
+    clock = () => Date.now() + ahead;
+    touch(O);
+    await startDaemon();
+    const first = await hand({ session: cc(O), text: "first [ignorefork]" });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    // Ninety seconds on, with nothing written since and no process to be found.
+    ahead = 91_000;
+    const later = await hand({ session: cc(O), text: "later" });
+    expect(await rx.waitAck(later.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    expect(ran()).toEqual([`fork ${O.slice(0, 8)}`, `resume ${O.slice(0, 8)}`]);
+  });
+});
+
 // The helpers the later groups use.
-void [C, MADE, touch, copied, ran, stopNow, expect];
+void [C, MADE, copied, stopNow];
