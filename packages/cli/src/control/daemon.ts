@@ -234,6 +234,9 @@ interface Coming {
   ready: boolean;
 }
 
+/** The id of a session ref (`<harness>:<id>`; an id may hold colons of its own). */
+const idOf = (session: string): string => session.slice(session.indexOf(":") + 1);
+
 declare const __SESSIONPIPE_VERSION__: string;
 const VERSION = typeof __SESSIONPIPE_VERSION__ === "string" ? __SESSIONPIPE_VERSION__ : "0.0.0";
 
@@ -509,7 +512,7 @@ interface OwnRun {
   ctl: AbortController;
   /** The message the turn is for. */
   id: string;
-  /** The sessions it is a turn of, by every id a `cancel` may name it by: the one its
+  /** The sessions it is a turn of, by every ref a `cancel` may name it by: the one its
    *  command named and the copy that session's messages go to (both from the moment it
    *  is in hand, `namesOf`), and the copy it is making, once that has named itself. The
    *  ack and the board send a person to the copy, so that is where they press Stop. */
@@ -632,6 +635,7 @@ export const LIMITS = { startConcurrent: 2, startPerHour: 10, headless: 3, copie
 export class ControlDaemon {
   private server: net.Server | null = null;
   private readonly live = new Map<string, Live>();
+  /** Sessions the daemon holds (the Agent SDK's, an ACP agent's), by their ref. */
   private readonly sdkSessions = new Map<string, SdkSession>();
   private readonly nonces: NonceStore;
   private readonly acks: AckOutbox;
@@ -926,7 +930,7 @@ export class ControlDaemon {
       waiting: [...this.live].filter(([, l]) => l.waiter).map(([k]) => k),
       mid_turn: [...this.live].filter(([, l]) => l.midTurn).map(([k]) => k),
       attentions: [...this.live].flatMap(([k, l]) => [...l.attentions.keys()].map((id) => ({ session: k, id }))),
-      sdk: [...this.sdkSessions.keys()],
+      sdk: [...this.sdkSessions.keys()].map(idOf),
       nonces: this.nonces.size,
       acks_pending: this.acks.all().length,
       delivered: { ...this.delivered },
@@ -2098,19 +2102,20 @@ export class ControlDaemon {
    *  the person can stop it there. */
   private async cancel(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number): Promise<void> {
     const ref = parseSessionRef(cmd.session)!;
-    const held = this.sdkSessions.get(ref.id);
+    const held = this.sdkSessions.get(cmd.session);
     // The session and, for Claude Code, the copy its messages go to: either may be the
     // one a process holds, and a turn of the daemon's own may be in hand under either.
-    const ids = this.namesOf(ref);
-    const run = this.runFor(ids);
-    const rows = ref.harness === "claude-code" ? ids.flatMap((s) => liveRecords(s, this.deps.claudeDirs())) : [];
+    const names = this.namesOf(ref);
+    const run = this.runFor(names);
+    const rows =
+      ref.harness === "claude-code" ? names.flatMap((n) => liveRecords(idOf(n), this.deps.claudeDirs())) : [];
     const route = routeCancel({
       harness: ref.harness,
       held: !!held,
       own: !!run,
       open: rows.some((x) => x.kind === "interactive"),
       foreign: rows.find((x) => x.kind !== "interactive")?.pid ?? null,
-      midTurn: ids.some((s) => this.midTurnNow(this.live.get(`${ref.harness}:${s}`))),
+      midTurn: names.some((n) => this.midTurnNow(this.live.get(n))),
     });
     if ("outcome" in route) {
       this.deps.log(`${id.slice(-8)}: nothing stopped in ${cmd.session.slice(0, 24)} — ${route.detail}`);
@@ -2139,12 +2144,15 @@ export class ControlDaemon {
     );
   }
 
-  /** The names a session's turns go by on this machine: its own id and, for Claude
+  /** The names a session's turns go by on this machine: its own ref and, for Claude
    *  Code, the copy its messages go to. A message sent to either runs in the copy, and
-   *  a Stop pressed on either page is a Stop for whatever runs there. */
+   *  a Stop pressed on either page is a Stop for whatever runs there. Refs, harness and
+   *  all: by the bare id, a Stop for `claude-code:<id>` stopped the daemon's run of
+   *  `codex:<id>`. */
   private namesOf(ref: { harness: string; id: string }): string[] {
     const copy = ref.harness === "claude-code" ? this.state.copies[ref.id]?.id : undefined;
-    return copy ? [ref.id, copy] : [ref.id];
+    const own = `${ref.harness}:${ref.id}`;
+    return copy ? [own, `${ref.harness}:${copy}`] : [own];
   }
 
   /** The turn a `cancel` for a session ends, among those the daemon has in hand under
@@ -2152,8 +2160,8 @@ export class ControlDaemon {
    *  whose process is running, else the first taken in hand. The running one first: with
    *  a message for the session waiting behind a turn in its copy, the first in hand was
    *  whichever arrived first, and a Stop that picked the waiting one stopped nothing. */
-  private runFor(ids: string[]): OwnRun | undefined {
-    const mine = this.runs.filter((x) => x.sessions.some((s) => ids.includes(s)));
+  private runFor(names: string[]): OwnRun | undefined {
+    const mine = this.runs.filter((x) => x.sessions.some((s) => names.includes(s)));
     return mine.find((x) => x.began) ?? mine[0];
   }
 
@@ -2502,7 +2510,7 @@ export class ControlDaemon {
           : null;
       return {
         harness: ref.harness,
-        sdk: this.sdkSessions.has(ref.id),
+        sdk: this.sdkSessions.has(session),
         waiter: this.waiterFits(l, marked),
         midTurn: !!l?.midTurn,
         // The inbox is Claude Code's own local socket; no other harness has one.
@@ -2527,7 +2535,7 @@ export class ControlDaemon {
     const held = known ?? (!this.ownRuns.has(`claude-code:${target}`) && t ? this.heldBy(target, t) : null);
     return {
       harness: ref.harness,
-      sdk: this.sdkSessions.has(ref.id),
+      sdk: this.sdkSessions.has(session),
       waiter: this.waiterFits(l, marked),
       midTurn: !!l?.midTurn,
       inbox: !!look && "rec" in look,
@@ -2625,7 +2633,6 @@ export class ControlDaemon {
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });
-    const ref = parseSessionRef(cmd.session)!;
     switch (route.mode) {
       case "waiter": {
         const l = this.live.get(cmd.session)!;
@@ -2684,11 +2691,11 @@ export class ControlDaemon {
         return;
       }
       case "sdk": {
-        const s = this.sdkSessions.get(ref.id)!;
+        const s = this.sdkSessions.get(cmd.session)!;
         // A session the daemon holds: a Stop is its own interrupt, not the end of a run.
         this.letGo(this.runOf(id));
         this.finish(r, id, { outcome: "taken" });
-        const out = await this.sendHeld(ref.id, s, this.framed(r, text, false));
+        const out = await this.sendHeld(cmd.session, s, this.framed(r, text, false));
         return this.finish(
           r,
           id,
@@ -2775,11 +2782,11 @@ export class ControlDaemon {
 
   /** One message through a held session; one whose process left is let go of, so the
    *  next message reopens the session instead of finding it closed. */
-  private async sendHeld(id: string, s: SdkSession, text: string): Promise<{ reply: string; error?: string }> {
+  private async sendHeld(session: string, s: SdkSession, text: string): Promise<{ reply: string; error?: string }> {
     const out = await s.send(text);
     if (s.closed) {
       s.close();
-      this.sdkSessions.delete(id);
+      this.sdkSessions.delete(session);
     }
     return out;
   }
@@ -3099,7 +3106,8 @@ export class ControlDaemon {
                   if (said.session) return;
                   said.session = initSession(l);
                   // A copy being made has a name now: a Stop for it is a Stop for this run.
-                  if (said.session && !run.sessions.includes(said.session)) run.sessions.push(said.session);
+                  const name = `claude-code:${said.session}`;
+                  if (said.session && !run.sessions.includes(name)) run.sessions.push(name);
                 },
               }
             : {}),
@@ -3482,7 +3490,7 @@ export class ControlDaemon {
     if (ref.harness !== "claude-code") return this.startDriven(r, id, cmd, ref, cwd, sent, o);
     // Taken in any spelling: on a disk that ignores case, a new session whose id differs
     // from a session's only by case would be written into that session's own file.
-    if (findTranscript(ref.id, this.deps.claudeDirs(), { anySpelling: true }) || this.sdkSessions.has(ref.id))
+    if (findTranscript(ref.id, this.deps.claudeDirs(), { anySpelling: true }) || this.sdkSessions.has(cmd.session))
       return this.finish(r, id, {
         outcome: "refused",
         code: "bad_session",
@@ -3491,7 +3499,7 @@ export class ControlDaemon {
     const claude = this.deps.sdk ? null : this.deps.claude();
     if (!this.deps.sdk && !claude) return this.finish(r, id, { outcome: "failed", detail: CLAUDE_NOT_FOUND });
     // In hand from here: a Stop for the new session stops its start, wherever it has got to.
-    return this.inHand(id, [ref.id], async (run) => {
+    return this.inHand(id, [cmd.session], async (run) => {
       run.mode = "resume";
       const signedOut = await this.orStopped(run, this.loginProblem(this.deps.env?.CLAUDE_CONFIG_DIR));
       if (signedOut === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
@@ -3522,7 +3530,7 @@ export class ControlDaemon {
             allowedTools: this.allowedFor(r),
             ...(Object.keys(extra).length ? { env: extra } : {}),
           });
-          this.sdkSessions.set(ref.id, s);
+          this.sdkSessions.set(cmd.session, s);
           return s.send(this.framed(r, text, true));
         });
         return this.finish(
@@ -3600,7 +3608,7 @@ export class ControlDaemon {
         detail: "that new session's id is already taken",
       });
     // In hand from here: a Stop for the new session stops its start, wherever it has got to.
-    return this.inHand(id, [ref.id], async (run) => {
+    return this.inHand(id, [cmd.session], async (run) => {
       run.mode = "resume";
       const ready = await this.orStopped(run, this.drivenProblem(drv));
       if (ready === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
@@ -3633,7 +3641,7 @@ export class ControlDaemon {
     sent: number,
   ): Promise<void> {
     const label = this.label(ref.harness);
-    if (this.aliasOf(ref.harness, ref.id) || this.live.get(cmd.session)?.cwd || this.sdkSessions.has(ref.id))
+    if (this.aliasOf(ref.harness, ref.id) || this.live.get(cmd.session)?.cwd || this.sdkSessions.has(cmd.session))
       return this.finish(r, id, {
         outcome: "refused",
         code: "bad_session",
@@ -3651,9 +3659,9 @@ export class ControlDaemon {
       if ("failed" in opened) return { reply: "", error: opened.failed };
       /* v8 ignore next -- unsupported only comes of a session/load, which a start never asks for */
       if ("unsupported" in opened) return { reply: "", error: opened.unsupported };
-      this.sdkSessions.set(ref.id, opened.held);
+      this.sdkSessions.set(cmd.session, opened.held);
       this.setAlias(ref.harness, ref.id, opened.held.session, cwd, null);
-      return this.sendHeld(ref.id, opened.held, this.framed(r, text, true));
+      return this.sendHeld(cmd.session, opened.held, this.framed(r, text, true));
     });
     stream.close();
     this.finish(
@@ -3688,8 +3696,8 @@ export class ControlDaemon {
           });
           if ("unsupported" in opened) return { reply: "", unsupported: opened.unsupported };
           if ("failed" in opened) return { reply: "", error: opened.failed };
-          this.sdkSessions.set(ref.id, opened.held);
-          return this.sendHeld(ref.id, opened.held, this.framed(r, cmd.text as string, false));
+          this.sdkSessions.set(cmd.session, opened.held);
+          return this.sendHeld(cmd.session, opened.held, this.framed(r, cmd.text as string, false));
         }),
       );
       stream.close();
@@ -4192,12 +4200,12 @@ export class ControlDaemon {
 
   private closeIdleSdk(): void {
     const idle = this.deps.sdkIdleMs ?? 10 * 60_000;
-    for (const [id, s] of this.sdkSessions)
+    for (const [session, s] of this.sdkSessions)
       if (!s.busy && this.deps.now() - s.lastUsed > idle) {
         s.close();
-        this.sdkSessions.delete(id);
+        this.sdkSessions.delete(session);
         this.deps.log(
-          `sdk session ${id.slice(0, 8)} closed after ${Math.round(idle / 60_000)} min idle (it resumes on the next message)`,
+          `sdk session ${idOf(session).slice(0, 8)} closed after ${Math.round(idle / 60_000)} min idle (it resumes on the next message)`,
         );
       }
   }

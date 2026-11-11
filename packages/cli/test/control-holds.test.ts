@@ -20,8 +20,9 @@ import os from "node:os";
 import path from "node:path";
 import { claudeControl } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Carried, ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import { type Carried, ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
+import { CANCEL } from "../src/control/route.js";
 import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
 import { FakeReceiver, type Queued } from "./helpers/receiver.js";
 
@@ -32,6 +33,7 @@ const O = "8c132906-8c3f-4814-870a-afc3d05e1d2e"; // the original
 const C = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b"; // the copy its messages go to
 /** The ids the stand-in gives the copies it makes, in the order it makes them. */
 const MADE = ["c0000001-3d4a-4f1b-9c8e-2a1d5e6f7a8b", "c0000002-3d4a-4f1b-9c8e-2a1d5e6f7a8b"];
+const NEW = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7c01"; // an id no session has yet
 const cc = (id: string) => `claude-code:${id}`;
 const unix = process.platform !== "win32";
 
@@ -388,15 +390,18 @@ describe.runIf(unix)("a route chosen while a run of the daemon's own was in the 
   describe("another harness's session of the same id", () => {
     let fakeCodex: string;
     beforeEach(() => {
-      // `codex exec --json`: a thread, a message, and a moment's work.
+      // `codex exec --json`: a thread, a message, and a moment's work ("[long]": until
+      // it is stopped).
       fakeCodex = path.join(tmp, "bin", "codex");
       writeFileSync(
         fakeCodex,
         `#!/usr/bin/env node
+require("fs").writeFileSync(${JSON.stringify(path.join(tmp, "codex.pid"))}, String(process.pid));
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 out({ type: "thread.started", thread_id: "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c" });
 out({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "On it." } });
-setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); }, 900);
+if (process.argv[process.argv.length - 1].includes("[long]")) setInterval(() => {}, 1000);
+else setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); }, 900);
 `,
       );
       chmodSync(fakeCodex, 0o755);
@@ -413,6 +418,62 @@ setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); 
       expect(await rx.waitAck(prompt.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: cc(O) });
       expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: "On it." });
       expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
+    });
+
+    it("a Stop for the Claude Code session of that id is not a Stop for the Codex run, and the other way round", async () => {
+      await startDaemon({ extra: { codex: () => fakeCodex } });
+      const start = await hand({ kind: "start", session: `codex:${O}`, cwd: project, text: "a codex session [long]" });
+      await until(() => rx.progress(start.id).length > 0);
+      const codex = Number(readFileSync(path.join(tmp, "codex.pid"), "utf8"));
+      // Nothing runs in claude-code:<id>. It stopped the daemon's run of codex:<id>.
+      const theirs = await stopNow(cc(O));
+      expect(await rx.waitAck(theirs.id)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
+      expect(alive(codex)).toBe(true);
+      expect(rx.finalAck(start.id)).toBeUndefined();
+      const own = await stopNow(`codex:${O}`);
+      expect(await rx.waitAck(own.id)).toMatchObject({ outcome: "delivered", mode: "resume", detail: CANCEL.stopped });
+      expect(alive(codex)).toBe(false);
+      expect(await rx.waitAck(start.id)).toMatchObject({
+        outcome: "delivered",
+        reply: "On it.\n\n(The turn was cancelled.)",
+      });
+    });
+
+    it("nor is it one for a session of that id the daemon holds for another harness", async () => {
+      const seen: string[] = [];
+      let interrupted = (): void => {};
+      const host: SdkHost = {
+        start: () => ({
+          send: () =>
+            new Promise((res) => {
+              seen.push("send");
+              interrupted = () => res({ reply: "interrupted" });
+            }),
+          interrupt: async () => {
+            seen.push("interrupt");
+            interrupted();
+          },
+          close: () => {},
+          busy: true,
+          lastUsed: Date.now(),
+        }),
+      };
+      await startDaemon({ extra: { codex: () => fakeCodex, sdk: host } });
+      // A Codex session of this id, run and over; then a Claude Code session of the same
+      // id, which the daemon holds through the Agent SDK, in its first turn.
+      const codex = await hand({ kind: "start", session: `codex:${NEW}`, cwd: project, text: "a codex session" });
+      expect(await rx.waitAck(codex.id)).toMatchObject({ outcome: "delivered" });
+      const held = await hand({ kind: "start", session: cc(NEW), cwd: project, text: "a claude session" });
+      await until(() => seen.includes("send"));
+      transcript(NEW);
+      // The held session was found by the bare id, and interrupted for a Stop that named Codex's.
+      const theirs = await stopNow(`codex:${NEW}`);
+      expect(await rx.waitAck(theirs.id)).toMatchObject({ outcome: "unsupported", detail: CANCEL.other("codex") });
+      expect(seen).toEqual(["send"]);
+      const own = await stopNow(cc(NEW));
+      expect(await rx.waitAck(own.id)).toMatchObject({ outcome: "delivered", mode: "sdk" });
+      expect(seen).toEqual(["send", "interrupt"]);
+      expect(await rx.waitAck(held.id)).toMatchObject({ outcome: "delivered", mode: "sdk", reply: "interrupted" });
     });
 
     it("and its end accounts for no write to that Claude Code session", async () => {

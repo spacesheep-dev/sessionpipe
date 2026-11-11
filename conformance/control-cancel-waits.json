@@ -1,6 +1,6 @@
 {
   "spec": "CONTROL.md §6 `cancel`, A cancel is for what was sent before it",
-  "note": "Whether a cancel that is through its own checks waits before it acts. `in_hand`: a turn for its session is already the machine's to stop. `coming`: the starts and prompts that have arrived and are not in hand yet, each with `kind`, `session` (`same`: the session the cancel names; `copy`: the copy that session's messages go to, or the session whose copy the cancel names; `other`: another session), `signed_ms` (when it was signed, relative to the cancel: negative is earlier) and `ready` (nothing but its own checks stands between it and being in hand; a prompt that waits behind another message's turn is not, and neither is a start that waits behind another run of its session). `expect` is `waits` (until one of them is in hand or refused: milliseconds) or `acts` (at once, on whatever is in hand).",
+  "note": "Whether a cancel that is through its own checks waits before it acts. `in_hand`: a turn for its session is already the machine's to stop. `coming`: the starts and prompts that have arrived and are not in hand yet, each with `kind`, `session` (`same`: the session the cancel names; `copy`: the copy that session's messages go to, or the session whose copy the cancel names; `namesake`: another harness's session that has the same id, which is another session; `other`: another session), `signed_ms` (when it was signed, relative to the cancel: negative is earlier) and `ready` (nothing but its own checks stands between it and being in hand; a prompt that waits behind another message's turn is not, and neither is a start that waits behind another run of its session). `expect` is `waits` (until one of them is in hand or refused: milliseconds) or `acts` (at once, on whatever is in hand).",
   "cases": [
     {
       "name": "a start that came with the Stop and is still being verified",
@@ -87,6 +87,19 @@
         {
           "kind": "start",
           "session": "other",
+          "signed_ms": -40,
+          "ready": true
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "a start for another harness's session of the same id: a session is its harness and its id",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "start",
+          "session": "namesake",
           "signed_ms": -40,
           "ready": true
         }
