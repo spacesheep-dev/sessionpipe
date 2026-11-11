@@ -507,9 +507,13 @@ session's transcript under exactly that name, and MUST NOT take what a file syst
 ignores case answers for another spelling of it: the transcript would be found, and
 nothing that says it is held would be. A command that names a session in another
 spelling is acked `refused` with `no_session`, as it is on a disk that tells the two
-apart. A `start` is the one place the other rule holds: an id that matches an existing
-session's in any spelling is taken (`bad_session`), since on such a disk the new session
-would be written into that session's file.
+apart. A `start` is the one place the other rule holds: on a disk that ignores case, a
+new session whose id differs from an existing session's only by case would be written
+into that session's file, so there such an id MUST be refused as taken (`bad_session`).
+A machine SHOULD refuse it on any disk; the reference daemon asks the disk for the id as
+given, in lower case and in upper case. A machine SHOULD NOT list every transcript it has
+to answer either question: asking for the path, and then reading the one folder that
+answered to see under which name, is enough.
 
 Two rules hold across the in-place modes:
 
