@@ -17,7 +17,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AG_STALE_PRETOOL } from "@sessionpipe/core";
+import { AG_STALE_PRETOOL, claudeCode } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn(), unref: vi.fn() }));
@@ -513,6 +513,43 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
       expect(new Set(d.asked.map((a) => (a as { attention: unknown }).attention))).toEqual(
         new Set([attention("p3", "Bash", { command: "ls" })]),
       );
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("names the prompt as the adapter names it on attention.needed, whatever the payload carries", async () => {
+    // The page's Allow / Deny names the attention by the adapter's id, and the daemon
+    // finds the held hook by the hook's: two spellings of one rule, in two files.
+    const d = await daemon(sock, () => ({ op: "none" }));
+    try {
+      const payloads: Record<string, unknown>[] = [
+        { tool_name: "Bash", tool_input: { command: "ls" }, prompt_id: "p1" },
+        { tool_name: "Bash", tool_input: { command: "ls" } },
+        { tool_name: "Bash; rm -rf /", tool_input: null, prompt_id: 7 },
+        // No Claude Code names the tool call on a PermissionRequest to date; one that does is named by it.
+        {
+          tool_name: "Bash",
+          tool_input: { command: "ls" },
+          prompt_id: "p1",
+          tool_use_id: "toolu_01GoQcMkV7mkYk6sk1DE",
+        },
+        { tool_name: "Bash", tool_input: { command: "ls" }, prompt_id: "p1", tool_use_id: 7 },
+        { tool_name: "Read", tool_input: { file_path: "a" }, prompt_id: "p4", agent_id: "a42867b781ec114cb" },
+      ];
+      for (const extra of payloads) await perm(extra);
+      const theirs = payloads.map((extra) => {
+        const r = claudeCode.fromHook({
+          argv: ["claude-code", "PermissionRequest"],
+          stdin: claude(extra),
+          cwd: "/",
+          env: {},
+        });
+        return r?.events[0]?.data.attention_id;
+      });
+      expect(d.asked.map((a) => (a as { attention: string }).attention)).toEqual(theirs);
+      expect(theirs[3]).toBe("toolu_01GoQcMkV7mkYk6sk1DE");
+      expect(theirs[0]).toMatch(/^perm-[0-9a-f]{16}$/);
     } finally {
       await d.close();
     }
