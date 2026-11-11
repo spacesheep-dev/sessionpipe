@@ -3,7 +3,17 @@
 // says it can do and the permission flags each mode gets (never bypassPermissions),
 // its env, its sign-in status, a session's transcript and folder, whether a live
 // process holds it, and its result line. Binaries are shell scripts in a temp dir.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -12,6 +22,7 @@ import {
   claudeEnv,
   claudeLogin,
   cmpVersion,
+  type Disk,
   detectCaps,
   findClaude,
   findTranscript,
@@ -388,14 +399,35 @@ describe("a session's transcript, folder and process", () => {
       expect(vectors.cases).toHaveLength(8);
       expect(vectors.cases.filter((c) => c.found === null && c.taken).length).toBeGreaterThan(0);
     });
+    // The machine's own disk, and two that behave as the two kinds do whatever this one
+    // is: one that opens a file under any spelling of its name, one only under its own.
+    const real = { statSync, readdirSync: (folder: string) => readdirSync(folder) };
+    const as = (named: (n: string, want: string) => boolean): Disk => ({
+      readdirSync: real.readdirSync,
+      statSync: (file) => {
+        const folder = path.dirname(file);
+        const name = real.readdirSync(folder).find((n) => named(n, path.basename(file)));
+        return real.statSync(path.join(folder, name ?? "no such file"));
+      },
+    });
+    const disks: [string, Disk | undefined][] = [
+      ["this machine's disk", undefined],
+      ["a disk that ignores case", as((n, want) => n.toLowerCase() === want.toLowerCase())],
+      ["a disk that tells case apart", as((n, want) => n === want)],
+    ];
     it.each(vectors.cases.map((c, i) => ({ ...c, i })))("$name", (c) => {
-      const home = path.join(tmp, `ids-${c.i}`);
-      const folder = path.join(home, "projects", "-Users-dev-app");
-      mkdirSync(folder, { recursive: true });
-      for (const name of c.filed) writeFileSync(path.join(folder, name), "");
-      const found = findTranscript(c.asked, [home]);
-      expect(found ? path.basename(found.file) : null).toBe(c.found);
-      expect(findTranscript(c.asked, [home], { anySpelling: true }) !== null).toBe(c.taken);
+      // Filed as the case says on a disk that keeps the spelling; one that cannot hold
+      // two spellings side by side has nothing to say about the cases that need it.
+      for (const [which, disk] of disks) {
+        const home = path.join(tmp, `ids-${c.i}-${which.replace(/\W+/g, "-")}`);
+        const folder = path.join(home, "projects", "-Users-dev-app");
+        mkdirSync(folder, { recursive: true });
+        for (const name of c.filed) writeFileSync(path.join(folder, name), "");
+        const o = disk ? { disk } : {};
+        const found = findTranscript(c.asked, [home], o);
+        expect(found ? path.basename(found.file) : null, which).toBe(c.found);
+        expect(findTranscript(c.asked, [home], { ...o, anySpelling: true }) !== null, which).toBe(c.taken);
+      }
     });
   });
   it("sessionFolder: the cwd whose project name is the folder it is filed under, else the first; long lines skipped", () => {
