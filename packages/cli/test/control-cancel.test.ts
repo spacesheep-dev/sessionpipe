@@ -1030,6 +1030,91 @@ describe.runIf(unix)("a turn the daemon has in hand and has not started yet", ()
   });
 });
 
+describe.runIf(unix)("a Stop that is through its checks before the turn it was sent to stop", () => {
+  // A poll hands its messages over side by side, and each is in hand only when it is
+  // through its own checks. A Stop has the least to check. Finding nothing in hand yet,
+  // it said so ("nothing is running", or for a start "no Claude Code session … on this
+  // machine") and the turn it was pressed for then began.
+  const asked = { n: 0 };
+  beforeEach(() => {
+    asked.n = 0;
+  });
+
+  it("a start and its Stop in one poll, the Stop verified first: it waits for the start to be in hand, and stops it", async () => {
+    await startDaemon({ extra: { login: slowLogin(asked) } });
+    const session = `claude-code:${NEW}`;
+    const start = await rx.send(
+      { kind: "start", session, cwd: project, text: "a long one, verified late" },
+      { hold: true },
+    );
+    const stop = await rx.send({ kind: "cancel", session, text: undefined }, { hold: true });
+    verifiedLate("verified late");
+    void (d as ControlDaemon).handle(receiver, start as Carried);
+    void (d as ControlDaemon).handle(receiver, stop as Carried);
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(start.id)).toMatchObject({
+      outcome: "failed",
+      code: "cancelled",
+      detail: CANCEL.unstarted,
+    });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+  });
+
+  it("a message and its Stop in one poll, the Stop listed first: the same", async () => {
+    await startDaemon({ extra: { login: slowLogin(asked) } });
+    const q = await rx.send({ session: SESSION, text: "a long one" }, { hold: true });
+    await sleep(5);
+    const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
+    void (d as ControlDaemon).handle(receiver, stop as Carried);
+    void (d as ControlDaemon).handle(receiver, q as Carried);
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "delivered", detail: CANCEL.stopped });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: CANCELLED_NOTE });
+    await sleep(1000);
+    expect(runs()).toEqual([]);
+  });
+
+  it("a message sent after the Stop, though it came with it, is not what the Stop was for: it runs", async () => {
+    await startDaemon();
+    const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
+    await sleep(5);
+    const q = await rx.send({ session: SESSION, text: "and now this" }, { hold: true });
+    verifiedLate("and now this");
+    void (d as ControlDaemon).handle(receiver, q as Carried);
+    void (d as ControlDaemon).handle(receiver, stop as Carried);
+    // At once: it does not wait for a message signed after it.
+    const t0 = Date.now();
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
+    expect(Date.now() - t0).toBeLessThan(250);
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+  });
+
+  it("nor does it wait for another session's message, or for one that is refused", async () => {
+    transcript(OTHER);
+    await startDaemon();
+    const other = await rx.send(
+      { session: `claude-code:${OTHER}`, text: "another session's, verified late" },
+      { hold: true },
+    );
+    // Says it is a message for this session, signed long ago, and is nobody's.
+    const forged = await rx.send(
+      { session: SESSION, text: "not signed by anyone", iat: Date.now() - 60_000 },
+      { hold: true },
+    );
+    forged.csig = "AAAA";
+    const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
+    verifiedLate("verified late", 600);
+    void (d as ControlDaemon).handle(receiver, other as Carried);
+    void (d as ControlDaemon).handle(receiver, forged as Carried);
+    void (d as ControlDaemon).handle(receiver, stop as Carried);
+    const t0 = Date.now();
+    expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
+    expect(Date.now() - t0).toBeLessThan(400);
+    expect(await rx.waitAck(forged.id)).toMatchObject({ outcome: "refused" });
+    expect(await rx.waitAck(other.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+  });
+});
+
 describe.runIf(unix)("a turn in a process the daemon did not start", () => {
   it("open in its own window: unsupported, with the way to stop it; nothing is signalled", async () => {
     holds(SID, "interactive");

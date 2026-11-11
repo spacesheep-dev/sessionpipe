@@ -194,36 +194,41 @@ const POOL_CONFIRM = new Set(["on", "off", "remove", "order", "disable", "login.
 /** A failure the harness puts down to the model it was asked to run. */
 const MODEL_FAILURE_RE = /\bmodel\b/i;
 
-/** A start, read from the command before it is verified: only ever used to order a
- *  prompt behind it, never to run anything. Read as the verifier reads it, from the
- *  parsed command: the kind's own bytes say nothing, since JSON lets "start" be written
- *  with an escape. */
-function startNamed(cmd: unknown): string | null {
+/** What a command says it is, read before it is verified: its kind, the session it
+ *  names and when it was signed. Only ever used to order things, never to run anything:
+ *  to make a prompt wait for a start that came with it, to give a prompt its place in
+ *  its session's line (line.ts), and to let a Stop wait for the turn it was sent after
+ *  (`Coming`). The bytes are the ones the verifier then reads, and they are read the way
+ *  it reads them (parsed; a command longer than this is refused there), so a command
+ *  that verifies is one this read the same. Looking for the bytes `"prompt"` first found
+ *  none in a kind written `"\u0070rompt"`: that prompt verified with no place in line. */
+function peek(cmd: unknown): { kind: unknown; session: string; iat: number | null } | null {
   if (typeof cmd !== "string" || cmd.length > 64 * 1024) return null;
   try {
-    const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown };
-    return c?.kind === "start" && typeof c.session === "string" ? c.session : null;
+    const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown; iat?: unknown };
+    if (typeof c?.session !== "string") return null;
+    return {
+      kind: c.kind,
+      session: c.session,
+      iat: typeof c.iat === "number" && Number.isFinite(c.iat) ? c.iat : null,
+    };
   } catch {
     return null;
   }
 }
 
-/** A prompt's session and the time it was signed, read from the command before it is
- *  verified: only ever used to give it its place in that session's line (line.ts), never
- *  to run anything. The bytes are the ones the verifier then reads, and they are read
- *  the way it reads them (parsed; a command longer than this is refused there), so a
- *  prompt that verifies is one this found. Looking for the bytes `"prompt"` first found
- *  none in a kind written `"\u0070rompt"`: that prompt verified with no place in line. */
-function promptNamed(cmd: unknown): { session: string; iat: number } | null {
-  if (typeof cmd !== "string" || cmd.length > 64 * 1024) return null;
-  try {
-    const c = JSON.parse(cmd) as { kind?: unknown; session?: unknown; iat?: unknown };
-    return c?.kind === "prompt" && typeof c.session === "string" && typeof c.iat === "number" && Number.isFinite(c.iat)
-      ? { session: c.session, iat: c.iat }
-      : null;
-  } catch {
-    return null;
-  }
+/** A start or a prompt that has arrived and is on its way to being a turn in hand: still
+ *  in its own checks. A Stop has the fewest checks of any command, so one that came in
+ *  the same poll as the turn it was pressed for is through them first, and found nothing
+ *  to stop: it was refused, or expired, and the turn then began. It waits for these. */
+interface Coming {
+  ref: { harness: string; id: string };
+  /** When it was signed: a Stop is for what was sent before it, never after. */
+  iat: number;
+  /** Nothing but its own checks stands between it and being in hand: a start from the
+   *  moment it arrives, a prompt once it has its turn in its session's line. One that
+   *  waits behind another message's turn is not what a Stop waits for. */
+  ready: boolean;
 }
 
 declare const __SESSIONPIPE_VERSION__: string;
@@ -708,6 +713,10 @@ export class ControlDaemon {
    *  for that session that came in the same poll waits for its start rather than
    *  finding no session (2026-10-04: a start and a prompt queued back to back). */
   private readonly startsPending = new Map<string, Promise<void>>();
+  /** Starts and prompts on their way to being in hand, by message id (`Coming`), and
+   *  the Stops waiting to hear that one has got there or will not. */
+  private readonly coming = new Map<string, Coming>();
+  private stirred: (() => void)[] = [];
   /** Commands with `reply_to` in hand, by message id: their reply follows into that
    *  session after their own final ack (CONTROL.md §6). */
   private readonly handoffs = new Map<string, Handoff>();
@@ -1500,7 +1509,8 @@ export class ControlDaemon {
     // A start is marked now too, before its verification: messages of one poll are
     // handled side by side, and a prompt queued right behind its start may finish
     // verifying first. Marked unverified, it only ever makes such a prompt wait.
-    const starting = startNamed(m.cmd);
+    const said = peek(m.cmd);
+    const starting = said?.kind === "start" ? said.session : null;
     let done = (): void => {};
     if (starting) {
       const mine = new Promise<void>((res) => {
@@ -1517,14 +1527,56 @@ export class ControlDaemon {
     // more: the order two messages finish verifying in is not the order they were sent
     // in, and the line is the order they run in (CONTROL.md §6 `prompt`). Held until its
     // delivery is over, or it turns out to have none.
-    const named = promptNamed(m.cmd);
+    const named = said?.kind === "prompt" && said.iat !== null ? { session: said.session, iat: said.iat } : null;
     const turn = named ? this.lines.enter(named.session, named.iat) : null;
+    // And either is on its way to being a turn in hand, which a Stop that was sent
+    // after it and is through its checks before it waits for (`Coming`).
+    const coming = this.arriving(m.id, starting || named ? said : null);
+    if (coming && turn)
+      void turn.ready.then(() => {
+        coming.ready = true;
+        this.stir();
+      });
     try {
       await this.handleVerified(r, m, turn);
     } finally {
       done();
       turn?.leave();
+      this.arrived(m.id);
     }
+  }
+
+  /** A start or a prompt has arrived (`Coming`). Not one for an ACP agent: that is never
+   *  a turn in hand, the daemon holds its session and a Stop is the session's own. */
+  private arriving(id: string, said: ReturnType<typeof peek>): Coming | null {
+    const ref = said ? parseSessionRef(said.session) : null;
+    if (!said || !ref || said.iat === null || acpControl.acpAgent(ref.harness)) return null;
+    const coming: Coming = { ref, iat: said.iat, ready: said.kind === "start" };
+    this.coming.set(id, coming);
+    return coming;
+  }
+
+  /** It is in hand, or it never will be (refused, failed, parked behind its session's
+   *  start): no Stop waits for it any longer. Doing it again does nothing. */
+  private arrived(id: string): void {
+    if (this.coming.delete(id)) this.stir();
+  }
+
+  private stir(): void {
+    for (const wake of this.stirred.splice(0)) wake();
+  }
+
+  /** A Stop for a session waits here for a start or a prompt for it that was signed no
+   *  later than the Stop and is still in its own checks, until one is in hand or none is
+   *  left: milliseconds, the length of a signature check. Then it does what a Stop does
+   *  with whatever is in hand. Never for a turn's length: what waits behind another turn
+   *  is not `ready`, and what is parked behind a start has `arrived`. */
+  private async sentBefore(names: string[], iat: number): Promise<void> {
+    const due = (): boolean =>
+      [...this.coming.values()].some(
+        (c) => c.ready && c.iat <= iat && this.namesOf(c.ref).some((n) => names.includes(n)),
+      );
+    while (!this.runFor(names) && due()) await new Promise<void>((wake) => this.stirred.push(wake));
   }
 
   private async handleVerified(r: PairedReceiver, m: Carried, turn: Turn | null): Promise<void> {
@@ -1577,6 +1629,9 @@ export class ControlDaemon {
     if (typeof kp === "object") return this.finish(r, m.id, { outcome: "unsupported", detail: kp.unsupported });
     try {
       if (kp === "start") return await this.startSession(r, m.id, cmd, sent);
+      // A Stop is for what was sent before it: a start or a prompt that came with it and
+      // is still in its checks is waited for, the moment it takes to be in hand.
+      if (kp === "cancel") await this.sentBefore(this.namesOf(ref), cmd.iat);
       // A Stop for a turn the daemon has in hand: that turn was placed when it was taken,
       // and a start's session may have no transcript to place yet.
       if (kp === "cancel" && this.runFor(this.namesOf(ref))) return await this.cancel(r, m.id, cmd, sent);
@@ -1589,6 +1644,8 @@ export class ControlDaemon {
       // No such session, and no start of it to wait for: said now, not when its turn comes.
       if ("refused" in place && !forStart) return this.finish(r, m.id, refusal(place));
       if (forStart) this.finish(r, m.id, { outcome: "taken" });
+      // It waits for its session's start from here, and the start is what a Stop finds.
+      if (forStart) this.arrived(m.id);
       const started = async (): Promise<void> => {
         if (!forStart) return;
         await starting;
@@ -2119,6 +2176,7 @@ export class ControlDaemon {
       settle,
     };
     this.runs.push(run);
+    this.arrived(id);
     try {
       await work(run);
     } finally {
