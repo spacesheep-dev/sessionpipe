@@ -47,6 +47,9 @@ export interface SessionView {
   /** It already has a copy, which is where its messages go: a copy is a leaf and is
    *  never itself copied (§6 `prompt`). */
   copied: boolean;
+  /** It is itself a copy this machine made of another session, named here by its own
+   *  id: as much a leaf as when it is reached through the original's. */
+  isCopy?: boolean;
   /** The harness has an input API (OpenCode, Codex app-server) — none is wired yet. */
   api: boolean;
 }
@@ -110,7 +113,7 @@ const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
   inbox: (s) => s.inbox,
   api: (s) => s.api,
   resume: (s) => HEADLESS.has(s.harness) && s.known && !s.held,
-  fork: (s) => HEADLESS.has(s.harness) && s.known && !!s.held && s.canFork && !s.copied,
+  fork: (s) => HEADLESS.has(s.harness) && s.known && !!s.held && s.canFork && !s.copied && !s.isCopy,
 };
 
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
@@ -134,7 +137,9 @@ export function routePrompt(s: SessionView): Route {
       s.harness === "claude-code"
         ? s.copied
           ? `${HELD[held]("the copy this session's messages go to")}, and a copy is never itself copied${again}`
-          : `${HELD[held]("the session")}, and this Claude Code can't copy it (no --fork-session)${again}`
+          : s.isCopy
+            ? `${HELD[held]("that copy")}, and a copy is never itself copied${again}`
+            : `${HELD[held]("the session")}, and this Claude Code can't copy it (no --fork-session)${again}`
         : `that ${s.harness} session was written to in the last 90 seconds, so ${s.harness} may still have it open, and a ${s.harness} session can't be copied: send it again once it has been idle a couple of minutes`,
   };
 }
