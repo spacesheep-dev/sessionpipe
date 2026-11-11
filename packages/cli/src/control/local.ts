@@ -17,11 +17,30 @@ export type LocalRequest =
   /** A Stop hook asks for a queued message (turn mode). `mode` is the session's own
    *  permission mode, as its payload reports it (CONTROL.md §6, The session's mode). */
   | { op: "stop"; session: string; active: boolean; mode?: string }
-  /** A PermissionRequest hook parks until a verified answer, or until it's released. */
-  | { op: "permission"; session: string; attention: string; tool?: string }
+  /** A PermissionRequest hook parks until a verified answer, or until it's released:
+   *  by a later event of its session that says this question is over (attention.ts).
+   *  `agent` is the thread that asked, a subagent's id or "" for the main thread, and
+   *  `at` when the hook fired, by its own clock. A hook older than those two sends
+   *  neither, and is released as it always was: by the session's next closing event. */
+  | { op: "permission"; session: string; attention: string; tool?: string; agent?: string; at?: number }
   /** The worker reports a hook event: turn state, attention closure, and the session's
-   *  own permission mode where its payload named one. */
-  | { op: "event"; session: string; event: string; transcript?: string; cwd?: string; mode?: string }
+   *  own permission mode where its payload named one. For a Claude Code session, also
+   *  what a held prompt is let go by: the thread the event is about (`agent`, as above),
+   *  a tool event's own call id (`call`), when its hook fired (`at`), and how much work
+   *  a Stop says is still in flight (`background`). An older worker sends none of them,
+   *  and its events end every held prompt of the session, as they did. */
+  | {
+      op: "event";
+      session: string;
+      event: string;
+      transcript?: string;
+      cwd?: string;
+      mode?: string;
+      agent?: string;
+      call?: string;
+      at?: number;
+      background?: number;
+    }
   /** `sessionpipe control status`. */
   | { op: "status" }
   /** `sessionpipe update` installed a new copy: restart onto it once nothing is in hand. */
@@ -102,6 +121,16 @@ export type LocalReply =
 
 /** The replies that end an ask. */
 export type AskEnd = Extract<LocalReply, { op: "answer" | "refused" | "failed" }>;
+
+/** The thread a Claude Code hook fired in, and the tool call it is about, as its payload
+ *  names them: `agent_id` where a subagent's (none on the main thread, said here as ""),
+ *  and `tool_use_id` on a tool's hooks. The PermissionRequest hook and the worker both
+ *  tell the daemon with this, so a question and the events that end it are named alike. */
+export function threadOf(payload: Record<string, unknown>): { agent: string; call?: string } {
+  const agent = typeof payload.agent_id === "string" ? payload.agent_id : "";
+  const call = typeof payload.tool_use_id === "string" && payload.tool_use_id ? payload.tool_use_id : undefined;
+  return { agent, ...(call ? { call } : {}) };
+}
 
 /** Where the daemon listens. `SESSIONPIPE_SOCKET` overrides (tests). */
 export function socketPath(state: string, env: NodeJS.ProcessEnv = process.env): string {

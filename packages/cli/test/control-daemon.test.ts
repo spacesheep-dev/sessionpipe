@@ -1095,6 +1095,135 @@ describe.runIf(unix)("permission answers (CONTROL.md §6, §7)", () => {
     });
     expect(await rx.waitAck(b.id)).toMatchObject({ outcome: "expired" });
   });
+  // A session's hooks all report under its id, a subagent's among them. Any of them let
+  // go of every held prompt: with a subagent reading files in the background, the main
+  // thread's question was let go at the subagent's next tool call, while the terminal
+  // still asked, and the answer from the page was refused (three of three, 2026-11-11).
+  const T0 = 1_794_371_357_643;
+  const SUB = "a42867b781ec114cb";
+  const OTHER = "adc6e6cd36de3beea";
+  /** A PermissionRequest hook of today's, parked: which thread asks, and when. */
+  const parks = (attention: string, agent: string, at = T0) =>
+    ask(sock, { op: "permission", session: SESSION, attention, tool: "Bash", agent, at }, 10_000);
+  /** A hook event as today's worker reports it, `after` ms after the question. */
+  const fires = (event: string, more: Record<string, unknown> = {}, after = 1000) =>
+    ask(sock, { op: "event", session: SESSION, event, agent: "", at: T0 + after, ...more }, 500);
+  const held = () => (d?.status().attentions ?? []).map((a) => a.id);
+  const allow = (attention: string) =>
+    rx.send({ kind: "permission.answer", session: SESSION, text: undefined, for: attention, decision: "allow" });
+
+  it("the main thread asks while subagents work: their tools ending let go of nothing, and the page's answer is taken", async () => {
+    await startDaemon();
+    const hook = parks(ATT, "");
+    await new Promise((r) => setTimeout(r, 100));
+    // Two subagents, a tool ending every second or two, one stopping; the terminal still asks.
+    await fires("PostToolUse", { agent: SUB, call: "toolu_01CvZiCARP5rMi8pXcfL" }, 3146);
+    await fires("PostToolUse", { agent: OTHER, call: "toolu_01JJZV91KULbZJM6ey54" }, 3888);
+    await fires("PostToolUseFailure", { agent: SUB }, 5200);
+    await fires("SubagentStop", { agent: OTHER }, 6000);
+    expect(held()).toEqual([ATT]);
+    const q = await allow(ATT);
+    expect(await hook).toMatchObject({ op: "decision", behavior: "allow" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
+  });
+
+  it("the main thread's own events let go of its question: its tool ran, its turn ended, a new prompt, the session's end", async () => {
+    await startDaemon();
+    for (const [event, more] of [
+      ["PostToolUse", { call: "toolu_01GoQcMkV7mkYk6sk1DE" }],
+      ["PostToolUseFailure", {}],
+      ["Stop", { background: 1 }],
+      ["StopFailure", {}],
+      ["UserPromptSubmit", {}],
+      ["SessionEnd", {}],
+    ] as const) {
+      const hook = parks(ATT, "");
+      await new Promise((r) => setTimeout(r, 50));
+      await fires(event, more);
+      expect(await hook, event).toEqual({ op: "none" });
+      expect(held(), event).toEqual([]);
+    }
+  });
+
+  it("a background subagent asks: the main thread's turn ending and beginning, its tools and another subagent's let go of nothing; its own tool, its own stop, a turn that ends with nothing in flight and the session's end do", async () => {
+    await startDaemon();
+    const SUBQ = "perm-7e60e9b277381ea5";
+    for (const [event, more] of [
+      ["PostToolUse", { agent: SUB, call: "toolu_01GjFqCjwYwLDLWqBN" }],
+      ["SubagentStop", { agent: SUB }],
+      ["Stop", { background: 0 }],
+      ["SessionEnd", {}],
+    ] as const) {
+      const hook = parks(SUBQ, SUB);
+      await new Promise((r) => setTimeout(r, 50));
+      // As it went in a real session: the turn ended half a second after the subagent
+      // asked, with three pieces of work in flight, and another began before it was answered.
+      await fires("Stop", { background: 3 }, 538);
+      await fires("UserPromptSubmit", {}, 26_328);
+      await fires("Stop", {}, 29_845);
+      await fires("PostToolUse", { call: "toolu_017Wh5PqwkojywCUVR" }, 30_000);
+      await fires("PostToolUse", { agent: OTHER }, 30_100);
+      await fires("SubagentStop", { agent: OTHER }, 30_200);
+      expect(held(), event).toEqual([SUBQ]);
+      await fires(event, more, 36_217);
+      expect(await hook, event).toEqual({ op: "none" });
+      expect(held(), event).toEqual([]);
+    }
+  });
+
+  it("two questions at once, the main thread's and a subagent's: each is let go by its own thread", async () => {
+    await startDaemon();
+    const SUBQ = "perm-7e60e9b277381ea5";
+    const main = parks(ATT, "");
+    const sub = parks(SUBQ, SUB);
+    await new Promise((r) => setTimeout(r, 100));
+    await fires("PostToolUse", { agent: SUB });
+    expect(await sub).toEqual({ op: "none" });
+    expect(held()).toEqual([ATT]);
+    const q = await allow(ATT);
+    expect(await main).toMatchObject({ op: "decision", behavior: "allow" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
+  });
+
+  it("an event from before the question says nothing about it, though it is reported after", async () => {
+    await startDaemon();
+    const hook = parks(ATT, "");
+    await new Promise((r) => setTimeout(r, 100));
+    // The tool call before this one: its hook fired first, its worker reported last.
+    await fires("PostToolUse", { call: "toolu_01KX8e4dz2U2Rc9T2P2A" }, -180);
+    await fires("Stop", { background: 0 }, -900);
+    expect(held()).toEqual([ATT]);
+    await fires("PostToolUse", {}, 0);
+    expect(await hook).toEqual({ op: "none" });
+  });
+
+  it("hooks older than the rule: a question that names no thread is let go by the session's next event, and so is any question by an event that names none", async () => {
+    await startDaemon();
+    // An older hook's question, and a newer worker's report of a subagent's tool.
+    const old = ask(sock, { op: "permission", session: SESSION, attention: ATT }, 10_000);
+    await new Promise((r) => setTimeout(r, 100));
+    await fires("SubagentStop", { agent: SUB });
+    expect(held()).toEqual([ATT]);
+    await fires("PostToolUse", { agent: SUB });
+    expect(await old).toEqual({ op: "none" });
+    // A newer hook's question, and an older worker's report: whose tool it was is unknown.
+    const hook = parks(ATT, "");
+    await new Promise((r) => setTimeout(r, 100));
+    await ask(sock, { op: "event", session: SESSION, event: "SubagentStop" }, 500);
+    expect(held()).toEqual([ATT]);
+    await ask(sock, { op: "event", session: SESSION, event: "PostToolUse" }, 500);
+    expect(await hook).toEqual({ op: "none" });
+    // Fields of another shape are as good as none.
+    const odd = ask(sock, { op: "permission", session: SESSION, attention: ATT, agent: 7, at: "now" } as never, 10_000);
+    await new Promise((r) => setTimeout(r, 100));
+    await ask(
+      sock,
+      { op: "event", session: SESSION, event: "Stop", agent: 7, call: 7, at: "then", background: "0" } as never,
+      500,
+    );
+    expect(await odd).toEqual({ op: "none" });
+  });
+
   it("the terminal answered first: the next event releases the hook and a later answer expires", async () => {
     await startDaemon();
     const hook = ask(sock, { op: "permission", session: SESSION, attention: ATT }, 10_000);
@@ -1509,6 +1638,81 @@ describe.runIf(unix)("the built hook talks to the daemon", () => {
       });
       expect(await rx.waitAck(a.id)).toMatchObject({ outcome: "delivered" });
     },
+  );
+
+  // The whole path, as a session's hooks run it: the built hook parks the main thread's
+  // question, the built hook and its worker report a background subagent's tool, and the
+  // question is still there for the page's answer. Then the main thread's own turn ends.
+  it.runIf(existsSync(dist))(
+    "a subagent's tool, reported by the real hook and its worker, leaves the main thread's question for the page to answer",
+    async () => {
+      await startDaemon();
+      const jobsDir = path.join(env.SESSIONPIPE_STATE as string, "jobs");
+      const jobs = () => (existsSync(jobsDir) ? readdirSync(jobsDir) : []);
+      /** A hook with its worker, as the harness runs it; settled once the worker has
+       *  told the daemon and let go of the job this hook wrote. (The questions' own jobs
+       *  stay: their hooks are run without a worker here.) */
+      const fire = async (event: string, stdin: object) => {
+        const before = new Set(jobs());
+        const mine = () => jobs().filter((f) => !before.has(f));
+        const c = spawn(process.execPath, [dist, "claude-code", event], { env, cwd: project, stdio: "pipe" });
+        const done = new Promise<void>((r) => c.on("close", () => r()));
+        c.stdin.end(JSON.stringify(stdin));
+        await done;
+        for (let i = 0; i < 400 && mine().length; i++) await new Promise((r) => setTimeout(r, 25));
+        expect(mine()).toEqual([]);
+      };
+      const attentionOf = async (input: { prompt_id: string; tool_name: string; tool_input: unknown }) =>
+        `perm-${(await import("node:crypto"))
+          .createHash("sha256")
+          .update(`${input.prompt_id}|${input.tool_name}|${JSON.stringify(input.tool_input)}`)
+          .digest("hex")
+          .slice(0, 16)}`;
+      const held = () => (d?.status().attentions ?? []).map((a) => a.id);
+      const input = {
+        session_id: SID,
+        prompt_id: "p1",
+        tool_name: "Bash",
+        tool_input: { command: "touch /tmp/out.txt" },
+        cwd: project,
+      };
+      const att = await attentionOf(input);
+      const hook = runHook("PermissionRequest", input);
+      for (let i = 0; i < 200 && !held().length; i++) await new Promise((r) => setTimeout(r, 25));
+      expect(held()).toEqual([att]);
+      // The subagent it launched reads a file in the background, and the tool ends.
+      await fire("PostToolUse", {
+        session_id: SID,
+        prompt_id: "p1",
+        agent_id: "a42867b781ec114cb",
+        tool_name: "Read",
+        tool_use_id: "toolu_01CvZiCARP5rMi8pXcfL",
+        tool_input: { file_path: "README.md" },
+        cwd: project,
+      });
+      expect(held()).toEqual([att]);
+      const a = await rx.send({
+        kind: "permission.answer",
+        session: SESSION,
+        text: undefined,
+        for: att,
+        decision: "allow",
+      });
+      expect(JSON.parse(await hook)).toEqual({
+        hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } },
+      });
+      expect(await rx.waitAck(a.id)).toMatchObject({ outcome: "delivered" });
+      // A second question, answered in the terminal: the main thread's turn goes on to
+      // its end, and that lets go of the hook with nothing to print.
+      const next = { ...input, prompt_id: "p2" };
+      const second = runHook("PermissionRequest", next);
+      for (let i = 0; i < 200 && !held().length; i++) await new Promise((r) => setTimeout(r, 25));
+      expect(held()).toEqual([await attentionOf(next)]);
+      await fire("Stop", { session_id: SID, prompt_id: "p2", stop_hook_active: false, cwd: project });
+      expect(await second).toBe("");
+      expect(held()).toEqual([]);
+    },
+    30_000,
   );
 
   it.runIf(existsSync(dist))("with no daemon the hook prints nothing and exits at once", async () => {

@@ -809,8 +809,9 @@ Delivered through the harness's permission hook answer (Claude Code `PermissionR
 → `hookSpecificOutput.decision.behavior`; Codex `PermissionRequest`). The hook waits on
 the daemon's socket for a signed answer for up to its window (default 120 s) **while
 the terminal shows its own prompt**: whichever answers first wins. When the terminal
-answers first, the harness does not tell the hook; the daemon learns it from the next
-hook event of that session (a tool result, a Stop, a new prompt), closes the attention,
+answers first, the harness does not tell the hook; the daemon learns it from the first
+later hook event of that session that says this question is over (§7: its own thread's
+tool result, a Stop, a new prompt — never another thread's), closes the attention,
 releases the waiting hook without an answer, and acks a later answer `expired`. Gemini
 CLI's `Notification` of type `ToolPermission` has no answer channel: acked
 `unsupported`. **Nothing is ever auto-allowed**: a daemon MUST NOT answer `allow` for an
@@ -1101,10 +1102,43 @@ a handoff moves an answer, not a permission.
 `attention.needed` (kind `permission`) → optional verified `permission.answer` →
 `attention.cleared` with `how`: `answered` when a control answer or the terminal
 resolved it, `timeout` when the hook's window closed, `cancelled` when the turn ended
-without a decision, `unknown` when the sender cannot tell. An attention is **open**
-from its `attention.needed` until its `attention.cleared` or the session's next hook
-event, whichever comes first. A receiver SHOULD show the Allow / Deny pair only while
-the attention is open.
+without a decision, `unknown` when the sender cannot tell.
+
+An attention is **open** from its `attention.needed` until its `attention.cleared`, or
+until the first event of its session, timed at or after it, that says **its** question is
+over:
+
+- a `tool.ended` of the thread that asked — the same `agent_id`, or neither event
+  carrying one, which is the main thread — or one whose `call_id` is the attention's
+  id. The tool ran, or the thread went on to another: either way it is no longer
+  waiting. A `tool.ended` of **another** thread says nothing about it: a subagent's
+  tools go on ending in the background while the main thread asks, and the main
+  thread's while a subagent does;
+- where the main thread asked (no `agent_id`): a `turn.ended` or a `turn.started`. The
+  turn it asked in is over;
+- where a subagent asked (`agent_id`): that subagent's `subagent.ended`, or a
+  `turn.ended` whose `background` is 0, when nothing of the session's is left in
+  flight to be asking. Any other `turn.ended`, and every `turn.started`, leaves it
+  open: a main thread's turn ends half a second after a background subagent has
+  asked, and another begins when some other task wakes it, with the terminal still
+  asking for the subagent;
+- a `session.ended`.
+
+An event timed **before** the `attention.needed` says nothing about it, however late it
+arrives: a sender records a hook when it gets to it, and the tool call before the
+question can be recorded after it. Nothing else closes one: not a `tool.started`, a
+`subagent.started` or another `attention.needed`.
+
+A receiver SHOULD show the Allow / Deny pair only while the attention is open, and a
+machine holds the prompt's hook for an answer for exactly as long (§6
+`permission.answer`). Up to 0.13.5 the rule here was "the session's next hook event",
+and the reference daemon let go of every prompt at any tool result, Stop or new prompt
+of the session: with a subagent at work, the main thread's question was gone within a
+second or two and an answer to it was refused `no_attention`. A hook older than this
+rule tells the machine neither who asks nor when, and a machine SHOULD treat its
+prompts, and the events of a worker as old, as before. A receiver at tier 0 is sent no
+`agent_id` and no tool or subagent events (PROTOCOL.md §4): every question is the main
+thread's to it, and closes at the session's next turn event.
 
 ## 8. The waiter (`sessionpipe wait`, `sessionpipe channel`)
 
@@ -1231,6 +1265,10 @@ send → delivered time.
 - `conformance/control-session-ids.json` — which session an id names (§6, *A session is
   the one its harness filed under that id*): found under exactly its name, not found in
   another spelling, and taken for a new session in any.
+- `conformance/control-attention.json` — when an open attention is over (§7): each
+  kind of later event against a question the main thread asked and one a subagent
+  asked, with the events of another thread, an event timed before the question, and an
+  attention named by its tool call.
 - `conformance/control-busy-window.json` — when a message waits for a window's hooks
   before it is routed (§6.3, *A busy window is asked twice*): once, for a window that is
   busy by its registry row, whose hooks report to the machine, and that is the

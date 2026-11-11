@@ -49,7 +49,14 @@ afterEach(() => {
   rmSync(state, { recursive: true, force: true });
 });
 
-type Job = { harness: string; event: string; argv: string[]; stdin: string; env: Record<string, string> };
+type Job = {
+  harness: string;
+  event: string;
+  argv: string[];
+  stdin: string;
+  env: Record<string, string>;
+  at: number;
+};
 const jobs = (): Job[] => {
   const dir = path.join(state, "jobs");
   if (!existsSync(dir)) return [];
@@ -452,8 +459,13 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
           session: `claude-code:${SID}`,
           attention: attention("p1", "Bash", { command: "ls" }),
           tool: "Bash",
+          // The main thread asks, and when: the time its job carries, which becomes its
+          // attention.needed's.
+          agent: "",
+          at: jobs()[0]?.at,
         },
       ]);
+      expect(jobs()[0]?.at).toBeGreaterThan(0);
       expect(out).toEqual([
         `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } })}\n`,
       ]);
@@ -479,11 +491,28 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
           session: `claude-code:${SID}`,
           attention: attention("p2", "Bash", { command: "cp a b" }),
           tool: "Bash",
+          agent: "",
+          at: jobs()[0]?.at,
         },
       ]);
       expect(out).toEqual([
         `${JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } })}\n`,
       ]);
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("says which thread asks: a subagent's question carries its agent id, and an id that is no string is the main thread's", async () => {
+    const d = await daemon(sock, () => ({ op: "none" }));
+    try {
+      await perm({ tool_name: "Bash", tool_input: { command: "ls" }, prompt_id: "p3", agent_id: "a42867b781ec114cb" });
+      await perm({ tool_name: "Bash", tool_input: { command: "ls" }, prompt_id: "p3", agent_id: 7 });
+      expect(d.asked.map((a) => (a as { agent: unknown }).agent)).toEqual(["a42867b781ec114cb", ""]);
+      // The same question from either thread has the same id: the id is the adapter's.
+      expect(new Set(d.asked.map((a) => (a as { attention: unknown }).attention))).toEqual(
+        new Set([attention("p3", "Bash", { command: "ls" })]),
+      );
     } finally {
       await d.close();
     }
@@ -513,9 +542,10 @@ describe.runIf(process.platform !== "win32")("control: the PermissionRequest hoo
     try {
       await perm({ tool_name: "Bash; rm -rf /" });
       await perm({ tool_name: 5, tool_input: null });
+      const at = jobs().map((j) => j.at);
       expect(d.asked).toEqual([
-        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null) },
-        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null) },
+        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null), agent: "", at: at[0] },
+        { op: "permission", session: `claude-code:${SID}`, attention: attention("", "", null), agent: "", at: at[1] },
       ]);
       expect(out).toEqual([]);
     } finally {

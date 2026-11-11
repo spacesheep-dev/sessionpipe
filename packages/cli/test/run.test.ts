@@ -437,6 +437,80 @@ describe("sessions the control daemon named (control/aliases.ts)", () => {
       }
     },
   );
+
+  it.runIf(process.platform !== "win32")(
+    "a Claude Code session's events say which thread, which tool call and which moment they are about",
+    async () => {
+      // What the daemon lets go of a held permission prompt by (CONTROL.md §7): a
+      // session's hooks all report under its id, a subagent's tools among them.
+      mkdirSync(tmp, { recursive: true });
+      const sock = path.join(tmp, "control.sock");
+      const got: Record<string, unknown>[] = [];
+      const server = net.createServer((c) =>
+        c.once("data", (d) => {
+          got.push(JSON.parse(d.toString("utf8").split("\n")[0] as string));
+          c.end(`${JSON.stringify({ op: "ok" })}\n`);
+        }),
+      );
+      await new Promise<void>((r) => server.listen(sock, () => r()));
+      vi.stubEnv("SESSIONPIPE_SOCKET", sock);
+      try {
+        const SID = "0851aacd-4686-4279-bb7f-fb8604508572";
+        const SUB = "a42867b781ec114cb";
+        const ws = path.join(tmp, "ws-claude");
+        mkdirSync(ws, { recursive: true });
+        let at = 1_794_371_357_000;
+        const claude = (event: string, extra: Record<string, unknown> = {}) =>
+          runJob(
+            {
+              harness: "claude-code",
+              event,
+              argv: ["claude-code", event],
+              stdin: JSON.stringify({ session_id: SID, cwd: ws, ...extra }),
+              cwd: ws,
+              env: {},
+              at: ++at,
+            },
+            { state: tmp },
+          );
+        const said = (event: string, more: Record<string, unknown>) => ({
+          op: "event",
+          session: `claude-code:${SID}`,
+          event,
+          cwd: ws,
+          ...more,
+        });
+        await claude("UserPromptSubmit", { prompt: "go", permission_mode: "default" });
+        await claude("PostToolUse", { tool_name: "Read", tool_use_id: "toolu_01CvZiCARP5rMi8pXcfL", agent_id: SUB });
+        await claude("PostToolUseFailure", { tool_name: "Bash", tool_use_id: "toolu_01GoQcMkV7mkYk6sk1DE" });
+        // Still in flight as the turn ends: a subagent, and sessionpipe's own waiter, which is no work.
+        await claude("Stop", {
+          background_tasks: [
+            { id: SUB, type: "subagent", status: "running" },
+            { id: "b1", type: "shell", status: "running", command: "sessionpipe wait" },
+          ],
+        });
+        await claude("Stop", {});
+        await claude("SubagentStop", { agent_id: SUB, background_tasks: [{ id: SUB, type: "subagent" }] });
+        // A tool whose name is no name is no tool.ended, and still says whose it was.
+        await claude("PostToolUse", { tool_name: "not a name", tool_use_id: 7, agent_id: SUB });
+        await claude("SessionEnd", { reason: "exit" });
+        expect(got).toEqual([
+          said("UserPromptSubmit", { mode: "default", agent: "", at: 1_794_371_357_001 }),
+          said("PostToolUse", { agent: SUB, call: "toolu_01CvZiCARP5rMi8pXcfL", at: 1_794_371_357_002 }),
+          said("PostToolUseFailure", { agent: "", call: "toolu_01GoQcMkV7mkYk6sk1DE", at: 1_794_371_357_003 }),
+          said("Stop", { agent: "", at: 1_794_371_357_004, background: 1 }),
+          said("Stop", { agent: "", at: 1_794_371_357_005 }),
+          said("SubagentStop", { agent: SUB, at: 1_794_371_357_006 }),
+          said("PostToolUse", { agent: SUB, at: 1_794_371_357_007 }),
+          said("SessionEnd", { agent: "", at: 1_794_371_357_008 }),
+        ]);
+      } finally {
+        vi.unstubAllEnvs();
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    },
+  );
 });
 
 describe("claims and sweeps, the edges", () => {
