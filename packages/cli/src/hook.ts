@@ -219,14 +219,19 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         300,
       ).then((r) => (r?.op === "block" ? JSON.stringify({ decision: "block", reason: r.reason }) : null));
     // The attention id the adapter puts on attention.needed (claude-code.ts), so the
-    // receiver's Allow / Deny names this very prompt.
+    // receiver's Allow / Deny names this very prompt: the tool call's own id where the
+    // payload has one (none does to date), else a hash of the prompt, the tool and its
+    // input. Spelled out twice, here and there, and held to each other by a test.
     const tool =
       typeof s.tool_name === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(s.tool_name) ? s.tool_name : undefined;
     const turn = typeof s.prompt_id === "string" ? s.prompt_id : undefined;
-    const attention = `perm-${createHash("sha256")
-      .update(`${turn ?? ""}|${tool ?? ""}|${JSON.stringify(s.tool_input ?? null)}`)
-      .digest("hex")
-      .slice(0, 16)}`;
+    const attention =
+      typeof s.tool_use_id === "string"
+        ? s.tool_use_id
+        : `perm-${createHash("sha256")
+            .update(`${turn ?? ""}|${tool ?? ""}|${JSON.stringify(s.tool_input ?? null)}`)
+            .digest("hex")
+            .slice(0, 16)}`;
     // And the thread that asks, and when: a session's hooks all report under its id, so
     // these are what tell the daemon which later event is about THIS question (a
     // subagent's tool ending in the background says nothing about the main thread's).
