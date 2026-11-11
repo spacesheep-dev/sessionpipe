@@ -1,5 +1,22 @@
 # @sessionpipe/core
 
+## 0.13.5
+
+### Patch Changes
+
+- af298b3: An ACP agent that goes away with a message to it still unwritten no longer raises an error nobody catches. A message longer than a pipe holds waits in the pipe; when the agent then exits or is closed, the write fails afterwards, on the agent's input stream, which had no error listener: an uncaught `write EPIPE` in the daemon. The failed write is now heard like the agent's exit is: whoever is waiting for the answer gets "<agent> stopped taking input: …" (or its exit), and the session is closed so the next message opens another.
+- 54736f5: A turn that was stopped no longer reads as answered with "No response requested."
+  
+  When a Claude Code session is resumed after its last turn was ended mid-way (a Stop sent
+  through `sessionpipe control`, a killed process, a crash), Claude Code writes "No response
+  requested." into the transcript as the assistant's, under its own `<synthetic>` model.
+  sessionpipe sent that on as what the agent had said, so a receiver drew a stopped turn as
+  answered with those words. It is now read as the end of a turn that was stopped, the way
+  `[Request interrupted by user]` is: the turn goes out with what it had really said, which
+  may be nothing. Claude Code's other synthetic rows, such as an API error, are still the
+  turn's reply.
+- 4d1a18e: A Claude Code session is found only under the id its transcript is filed as. On a disk that ignores case (macOS, Windows) a command naming `claude-code:8C132906-…` opened the transcript of `8c132906-…`, while the session's registry row and its hooks, which are what say it is open in a window or mid-turn, are kept under the id as Claude Code wrote it: the session looked idle and was resumed in place, `claude -p --resume 8C132906-…`, beside the person's own window. Such a command is now refused `no_session` ("no Claude Code session 8C132906 on this machine") on every platform, as it already was on Linux. A new session's id that differs from an existing session's only by case is still refused as taken (`bad_session`): on such a disk it would be written into that session's file.
+
 ## 0.13.4
 
 ### Patch Changes
