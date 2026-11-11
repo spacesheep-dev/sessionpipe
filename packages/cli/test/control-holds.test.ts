@@ -402,15 +402,15 @@ setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); 
       chmodSync(fakeCodex, 0o755);
     });
 
-    it("a Codex session the daemon starts is not a run of its own in the Claude Code session of that id: the window's session is copied, and not made to wait", async () => {
+    it("a Codex session the daemon starts is not a run of its own in the Claude Code session of that id: the window's session is copied, never resumed", async () => {
       holds(O, "interactive");
       await startDaemon({ extra: { codex: () => fakeCodex } });
       const start = await hand({ kind: "start", session: `codex:${O}`, cwd: project, text: "a codex session" });
       await until(() => rx.progress(start.id).length > 0);
       const prompt = await hand({ session: cc(O), text: "for the claude session" });
-      // Answered while Codex still works: the two share an id and nothing else.
+      // A copy, as for any session a window has: the two share an id and nothing else.
+      // (Made to wait for Codex as a run of the daemon's own, it was resumed in place.)
       expect(await rx.waitAck(prompt.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: cc(O) });
-      expect(rx.finalAck(start.id)).toBeUndefined();
       expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: "On it." });
       expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
     });
