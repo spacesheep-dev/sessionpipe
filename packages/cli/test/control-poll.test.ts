@@ -19,6 +19,9 @@ let daemon: ControlDaemon;
 let config: ControlConfig;
 const poll = vi.fn<typeof fetch>();
 const hello = vi.fn<typeof fetch>();
+const wellKnown = vi.fn<typeof fetch>();
+// A request the runtime has lost: it says nothing, and aborting it ends nothing.
+const deaf: typeof fetch = () => new Promise(() => {});
 const run = vi.fn<DaemonDeps["run"]>();
 const log = vi.fn();
 const state = () => daemon.status().receivers[0]!;
@@ -49,6 +52,7 @@ beforeEach(async () => {
   rx.day = await DayKey.create();
   poll.mockReset().mockImplementation(emptyPoll);
   hello.mockReset().mockImplementation(async () => new Response(null, { status: 401 }));
+  wellKnown.mockReset().mockImplementation(async () => Response.json({}));
   log.mockReset();
   run.mockReset().mockResolvedValue({
     code: 0,
@@ -76,12 +80,13 @@ beforeEach(async () => {
   };
   const fetch: typeof globalThis.fetch = async (url, init) => {
     const u = new URL(String(url));
-    if (u.pathname === "/.well-known/sessionpipe") return Response.json({});
+    if (u.pathname === "/.well-known/sessionpipe") return wellKnown(url, init);
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${rx.token}`);
     if (u.pathname === "/control/hello") return hello(url, init);
     if (u.pathname === "/control/ack") {
       const status = ackStatus.shift() ?? 202;
       if (status === 0) throw new Error("ECONNRESET");
+      if (status === -1) return deaf(url, init);
       if (status === 202) rx.acks.push(...JSON.parse(String(init?.body)).acks);
       return new Response(null, { status });
     }
@@ -105,7 +110,8 @@ beforeEach(async () => {
 });
 const sock = () =>
   process.platform === "win32" ? `\\\\.\\pipe\\${path.basename(tmp)}` : path.join(tmp, "control.sock");
-/** What the ack endpoint answers next, in order (0: the connection fails); 202 when the list is empty. */
+/** What the ack endpoint answers next, in order (0: the connection fails; -1: it never
+ *  answers and never ends); 202 when the list is empty. */
 const ackStatus: number[] = [];
 let deps: DaemonDeps;
 /** The session's transcript in the daemon's Claude Code config dir, in the allowed folder. */
@@ -433,9 +439,123 @@ describe("what a poll can answer", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(poll).toHaveBeenCalledTimes(2);
   });
+
+  it("a poll that its abort does not end is left behind ten seconds later: said once, and asked again on a new request", async () => {
+    poll.mockImplementationOnce(deaf).mockImplementationOnce(deaf);
+    await start();
+    await vi.advanceTimersByTimeAsync(44_999);
+    expect(state()).toMatchObject({ polling: true, last_error: null });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state()).toMatchObject({
+      polling: false,
+      last_error: "a poll never ended, and aborting it ended nothing",
+    });
+    const said = () => log.mock.calls.filter(([line]) => String(line).includes("never ended"));
+    expect(said()).toEqual([
+      ["https://receiver.test: a poll never ended, and aborting it ended nothing; asking again"],
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(poll).toHaveBeenCalledTimes(2);
+    // The same again within one outage is not said again. Then a poll that answers: back.
+    await vi.advanceTimersByTimeAsync(45_000 + 2000);
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(said()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(state()).toMatchObject({ polling: true, last_error: null });
+    expect(log).toHaveBeenCalledWith("https://receiver.test: back after 48 s (2 failed tries)");
+  });
+
+  it("three polls in a row that never end: the host is asked for a new process, and the receiver is asked every ten minutes until there is one", async () => {
+    const onWedged = vi.fn();
+    deps.onWedged = onWedged;
+    poll.mockImplementation(deaf);
+    await start();
+    // Left behind at 45 s; a 1 s pause; again; a 2 s pause; the third.
+    await vi.advanceTimersByTimeAsync(45_000 + 1000 + 45_000 + 2000 + 44_999);
+    expect(onWedged).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onWedged.mock.calls).toEqual([["https://receiver.test: 3 polls in a row never ended"]]);
+    expect(poll).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(10 * MINUTE - 1);
+    expect(poll).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(poll).toHaveBeenCalledTimes(4);
+    // The fourth never ends either: asked again. Then one that answers: it is over.
+    poll.mockImplementation(emptyPoll);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(onWedged).toHaveBeenLastCalledWith("https://receiver.test: 4 polls in a row never ended");
+    await vi.advanceTimersByTimeAsync(10 * MINUTE + 25_000);
+    expect(state()).toMatchObject({ polling: true, last_error: null });
+    // One that never ends after that is a new outage's first: said again, and not wedged.
+    poll.mockImplementationOnce(deaf);
+    await vi.advanceTimersByTimeAsync(25_000 + 45_000 + 1000);
+    expect(log.mock.calls.filter(([line]) => String(line).includes("never ended"))).toHaveLength(2);
+    expect(onWedged).toHaveBeenCalledTimes(2);
+    expect(state().polling).toBe(true);
+  });
+
+  it("with no host to ask, a wedged receiver is still asked only every ten minutes", async () => {
+    poll.mockImplementation(deaf);
+    await start();
+    await vi.advanceTimersByTimeAsync(45_000 + 1000 + 45_000 + 2000 + 45_000);
+    expect(poll).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(10 * MINUTE - 1);
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(state()).toMatchObject({ polling: false, last_error: "a poll never ended, and aborting it ended nothing" });
+  });
+
+  it("a 200 whose body never ends is left behind the same way, and nothing stays 'just received'", async () => {
+    const endless = { status: 200, headers: new Headers(), json: () => new Promise(() => {}) };
+    poll.mockResolvedValueOnce(endless as unknown as Response);
+    await start();
+    expect(daemon.status().busy).toBe("messages just received");
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(state().last_error).toBe("a poll never ended, and aborting it ended nothing");
+    expect(daemon.status().busy).toBeNull();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+
+  it("a receiver whose well-known never ends does not keep the next receiver's from being read", async () => {
+    config.receivers.push({
+      ...config.receivers[0]!,
+      url: "https://second.test",
+      control: "https://second.test/control",
+      machine: "second",
+    });
+    wellKnown.mockImplementation((url, init) =>
+      new URL(String(url)).origin === "https://second.test"
+        ? Promise.resolve(Response.json({ control: { session_tools: ["mcp__second"] } }))
+        : deaf(url, init),
+    );
+    await start();
+    const read = "https://second.test: sessions it messages may use mcp__second without asking";
+    await vi.advanceTimersByTimeAsync(17_999);
+    expect(log).not.toHaveBeenCalledWith(read);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(log).toHaveBeenCalledWith(read);
+  });
 });
 
 describe("acks (CONTROL.md §10)", () => {
+  it("an ack that never ends is left behind: kept, sent with the next try, and 'acks being sent' does not stay", async () => {
+    transcript();
+    ackStatus.push(-1);
+    const message = await rx.send({ session: `claude-code:${SID}`, text: "hi" });
+    poll.mockResolvedValueOnce(Response.json({ messages: [message] }));
+    await start();
+    await vi.waitFor(() => expect(daemon.status().acks_pending).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(daemon.status().busy).toBe("acks being sent"));
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(daemon.status().busy).toBe("acks being sent");
+    expect(rx.acks).toEqual([]);
+    // Left behind at 25 s (15 s to its abort, 10 s more); the pause after a failed try; then accepted.
+    await vi.advanceTimersByTimeAsync(1 + 2000);
+    await vi.waitFor(() => expect(rx.finalAck(message.id)).toMatchObject({ outcome: "delivered" }));
+    expect(daemon.status().acks_pending).toBe(0);
+    await vi.waitFor(() => expect(daemon.status().busy).toBeNull());
+  });
+
   it("kept and sent again, with a growing pause, until the receiver accepts them; a receiver with none is skipped", async () => {
     config.receivers.push({
       ...config.receivers[0]!,

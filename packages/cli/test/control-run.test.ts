@@ -4,7 +4,16 @@
 // hook the daemon is given (which claude, its login, a token read again, the updater's
 // answers, a lost socket) and each way the process ends (a signal, a second daemon, a
 // restart onto a new copy) can be driven in-process.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { writeConfig } from "@sessionpipe/core";
@@ -75,6 +84,11 @@ vi.mock("../src/control/daemon.js", async (original) => {
     hellos = 0;
     poolChanged() {
       this.hellos++;
+    }
+    /** What the daemon has in hand, as busy() says it; null when idle. */
+    inHand: string | null = null;
+    busy() {
+      return this.inHand;
     }
   }
   return { ...real, ControlDaemon };
@@ -485,6 +499,88 @@ describe("control run", () => {
       (added(sig)[0] as () => void)();
       expect(sup.stop).toHaveBeenLastCalledWith(sig);
     }
+    expect(process.exit).not.toHaveBeenCalled();
+  });
+});
+
+describe("polls that go on never ending (the daemon's onWedged)", () => {
+  const WHY = "https://rx.test: 3 polls in a row never ended";
+  const mark = () => path.join(tmp, "state", "control", "wedged");
+  const said = (words: string) => out.filter((l) => l.includes(words));
+  const wedged = (why = WHY) => daemon().deps.onWedged?.(why);
+  const inHand = (what: string | null) => {
+    (daemon() as unknown as { inHand: string | null }).inHand = what;
+  };
+  beforeEach(() => {
+    paired();
+    vi.stubEnv("SESSIONPIPE_SERVICE", `supervisor:${process.ppid}`);
+  });
+
+  it("idle: marked, and restarted the way an update restarts it; asked again meanwhile, nothing more", async () => {
+    await run();
+    wedged();
+    wedged();
+    await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(UPDATE_EXIT));
+    expect(said(`${WHY}; restarting this daemon as soon as nothing is in hand`)).toHaveLength(1);
+    expect(readFileSync(mark(), "utf8")).toContain(WHY);
+    expect(daemon().stopped).toBe(1);
+    // Stopped now: a late call from the old loop is nobody's.
+    wedged();
+    expect(said("restarting this daemon")).toHaveLength(1);
+  });
+
+  it("something in hand: waits for it, like an update; a SIGTERM meanwhile ends the wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await run();
+      inHand("a headless agent run");
+      wedged();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(process.exit).not.toHaveBeenCalled();
+      inHand(null);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(process.exit).toHaveBeenCalledWith(UPDATE_EXIT);
+      // Another daemon, busy, and told to stop while it waits: stopped, never restarted.
+      vi.mocked(process.exit).mockClear();
+      rmSync(mark());
+      await run();
+      inHand("a session on this machine mid-turn");
+      wedged();
+      await (added("SIGTERM").at(-1) as () => Promise<void>)();
+      expect(process.exit).toHaveBeenCalledWith(0);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(process.exit).not.toHaveBeenCalledWith(UPDATE_EXIT);
+      expect(existsSync(mark())).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarted for it less than an hour ago: said once, not restarted; an hour on, restarted again", async () => {
+    mkdirSync(path.dirname(mark()), { recursive: true });
+    writeFileSync(mark(), "");
+    const ago = (min: number) => new Date(Date.now() - min * 60_000);
+    utimesSync(mark(), ago(20), ago(20));
+    await run();
+    wedged();
+    wedged("https://rx.test: 4 polls in a row never ended");
+    expect(said("this daemon was restarted for that 20 min ago, so not again within the hour")).toEqual([
+      expect.stringContaining(`${WHY}; this daemon was restarted for that 20 min ago`),
+    ]);
+    expect(process.exit).not.toHaveBeenCalled();
+    utimesSync(mark(), ago(61), ago(61));
+    wedged();
+    await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(UPDATE_EXIT));
+  });
+
+  it("a mark that can't be written: not restarted, and it says why", async () => {
+    // The state dir's `control` is a file: nothing can be made under it.
+    mkdirSync(path.join(tmp, "state"), { recursive: true });
+    writeFileSync(path.join(tmp, "state", "control"), "");
+    await run();
+    wedged();
+    await vi.waitFor(() => expect(said("not restarting: ")).toHaveLength(1));
+    expect(said("not restarting: ")[0]).toContain(`${mark()} can't be written (`);
     expect(process.exit).not.toHaveBeenCalled();
   });
 });
