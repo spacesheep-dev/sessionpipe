@@ -1,5 +1,28 @@
 # sessionpipe
 
+## 0.14.0
+
+### Minor Changes
+
+- 052c0c9: Grok Build: sessions report under their own name, `sessionpipe install --grok-build`
+  
+  - A new adapter, `grok-build`, for xAI's Grok Build CLI. `sessionpipe install` writes a hooks file of its own, `~/.grok/hooks/sessionpipe.json`, and reports the session, its turns and tools, a permission prompt that is waiting, and (at tier 2) the conversation from the session's `updates.jsonl`. Title, model, folder and times come from the session's `summary.json`. `backfill` lists past sessions.
+  - Grok Build also runs the hooks in `~/.claude/settings.json`, with a payload that looks like Claude Code's. Until now sessionpipe's Claude Code entry there reported every Grok session as a Claude Code session. That entry now tells a Grok payload apart and reports nothing; the Grok adapter reports it.
+  - Recorded on Grok Build 1.0.77; `PostToolUseFailure`, `StopFailure` and `PreCompact` are mapped from Grok's documentation and still wait for a recorded payload.
+
+### Patch Changes
+
+- 3173ef3: ask: a level or a model on a new ACP session is refused, and `ask status` lists ACP agents
+  
+  - `sessionpipe ask grok-build "…" --permission read` started the agent with the flag
+    dropped: an ACP agent takes no level (CONTROL.md §6) and ran as the machine's mode
+    said, so on an auto machine a "read" ask could write. It is refused now, in words
+    that name the mode, as an ask into an existing ACP session already was. `--model`
+    the same.
+  - `sessionpipe ask status` listed only the agents that take start options, so an
+    installed ACP agent (Grok Build, Gemini CLI, …) the daemon could start was missing.
+    It lists what the daemon says an ask can start.
+
 ## 0.13.8
 
 ### Patch Changes
