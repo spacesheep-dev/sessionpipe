@@ -227,9 +227,10 @@ interface Coming {
   ref: { harness: string; id: string };
   /** When it was signed: a Stop is for what was sent before it, never after. */
   iat: number;
-  /** Nothing but its own checks stands between it and being in hand: a start from the
-   *  moment it arrives, a prompt once it has its turn in its session's line. One that
-   *  waits behind another message's turn is not what a Stop waits for. */
+  /** Nothing but its own checks stands between it and being in hand: a prompt once it
+   *  has its turn in its session's line, a start from the moment it arrives unless it
+   *  finds another run in its session's queue (startSession). One that waits behind
+   *  another turn is not what a Stop waits for: that is a turn's length, not a check's. */
   ready: boolean;
 }
 
@@ -641,6 +642,9 @@ export class ControlDaemon {
    *  two sessions, and under the bare id a Codex session the daemon started stood for a
    *  run of its own in the Claude Code session a window had open. */
   private readonly queues = new Map<string, Promise<unknown>>();
+  /** How many jobs each of those queues has that are not over: one running, the rest
+   *  behind it. */
+  private readonly queued = new Map<string, number>();
   /** Each session's messages, one at a time and in the order they were sent (line.ts). */
   private readonly lines = new Lines();
   private readonly lastEnd = new Map<string, number>();
@@ -1572,7 +1576,8 @@ export class ControlDaemon {
    *  later than the Stop and is still in its own checks, until one is in hand or none is
    *  left: milliseconds, the length of a signature check. Then it does what a Stop does
    *  with whatever is in hand. Never for a turn's length: what waits behind another turn
-   *  is not `ready`, and what is parked behind a start has `arrived`. */
+   *  or another run of its session is not `ready`, and what is parked behind a start
+   *  has `arrived`. */
   private async sentBefore(names: string[], iat: number): Promise<void> {
     const waits = (): boolean =>
       cancelWaits(
@@ -2817,10 +2822,17 @@ export class ControlDaemon {
   /** Jobs for one session (and its copy) run one at a time, in order. */
   private serial<T>(key: string, task: () => Promise<T>): Promise<T> {
     const prev = this.queues.get(key) ?? Promise.resolve();
+    this.queued.set(key, (this.queued.get(key) ?? 0) + 1);
     const next = prev.then(task, task);
     this.queues.set(
       key,
-      next.catch(() => {}),
+      next
+        .catch(() => {})
+        .then(() => {
+          const left = (this.queued.get(key) as number) - 1;
+          if (left) this.queued.set(key, left);
+          else this.queued.delete(key);
+        }),
     );
     return next;
   }
@@ -3431,6 +3443,16 @@ export class ControlDaemon {
     }
     this.startsRunning++;
     this.startTimes.push(now);
+    // Behind another run in its session's queue (a second start for a session whose
+    // first is still in its first turn), it waits for the length of that run: a Stop
+    // does not wait with it (`Coming.ready`). A session the daemon holds is not a turn
+    // "in hand", so a Stop that waited was acked when the turn it was pressed for was
+    // over. With the queue free it is in hand, or refused, as soon as it is run.
+    const coming = this.coming.get(id);
+    if (coming && this.queued.has(cmd.session)) {
+      coming.ready = false;
+      this.stir();
+    }
     try {
       // On the session's own queue, and held as the daemon's own: a message sent while
       // the start still runs waits for it and resumes the session, never forks it.
