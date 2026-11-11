@@ -385,29 +385,46 @@ export interface Transcript {
   project: string;
 }
 
-/** <config dir>/projects/<folder>/<session>.jsonl in one Claude Code config dir. */
-function transcriptIn(session: string, dir: string): Transcript | null {
+/** <config dir>/projects/<folder>/<session>.jsonl in one Claude Code config dir.
+ *
+ *  The file is looked for by name in the folder's own listing, never by opening the
+ *  path: a disk that ignores case (macOS, Windows) opens `8c13….jsonl` for `8C13…`, and
+ *  the session that answers is then one that nothing else on the machine knows by that
+ *  spelling. Its registry row and its hooks name it as its harness wrote it, so a
+ *  session found the other way was open in a window, mid-turn, and looked idle
+ *  (spec/CONTROL.md §6, What counts as held). `anySpelling` asks the other question:
+ *  is there a file a NEW session of this id would be written into. */
+function transcriptIn(session: string, dir: string, anySpelling: boolean): Transcript | null {
   let projects: import("node:fs").Dirent[] = [];
   try {
     projects = readdirSync(path.join(dir, "projects"), { withFileTypes: true });
   } catch {
     return null;
   }
+  const want = `${session}.jsonl`;
+  const named = anySpelling ? (n: string) => n.toLowerCase() === want.toLowerCase() : (n: string) => n === want;
   for (const p of projects) {
     if (!p.isDirectory()) continue;
-    const file = path.join(dir, "projects", p.name, `${session}.jsonl`);
     try {
-      if (statSync(file).isFile()) return { file, configDir: dir, project: p.name };
+      const name = readdirSync(path.join(dir, "projects", p.name)).find(named);
+      const file = path.join(dir, "projects", p.name, name ?? want);
+      if (name && statSync(file).isFile()) return { file, configDir: dir, project: p.name };
     } catch {}
   }
   return null;
 }
 
-/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir. */
-export function findTranscript(session: string, dirs: readonly string[]): Transcript | null {
+/** <config dir>/projects/<folder>/<session>.jsonl in any Claude Code config dir: the
+ *  session of exactly that id, or with `anySpelling` whatever is filed under the id in
+ *  any case (the test for "this new session's id is taken"). */
+export function findTranscript(
+  session: string,
+  dirs: readonly string[],
+  o: { anySpelling?: boolean } = {},
+): Transcript | null {
   if (!UUID_RE.test(session)) return null;
   for (const dir of dirs) {
-    const t = transcriptIn(session, dir);
+    const t = transcriptIn(session, dir, !!o.anySpelling);
     if (t) return t;
   }
   return null;
@@ -422,7 +439,7 @@ export function findTranscripts(session: string, dirs: readonly string[]): Trans
   if (!UUID_RE.test(session)) return [];
   const out: Transcript[] = [];
   for (const dir of dirs) {
-    const t = transcriptIn(session, dir);
+    const t = transcriptIn(session, dir, false);
     if (t) out.push(t);
   }
   return out;

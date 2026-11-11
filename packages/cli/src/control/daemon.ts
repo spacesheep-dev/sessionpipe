@@ -3329,7 +3329,9 @@ export class ControlDaemon {
     const o = choice.options;
     if (acpControl.acpAgent(ref.harness)) return this.startAcp(r, id, cmd, ref, cwd, sent);
     if (ref.harness !== "claude-code") return this.startDriven(r, id, cmd, ref, cwd, sent, o);
-    if (findTranscript(ref.id, this.deps.claudeDirs()) || this.sdkSessions.has(ref.id))
+    // Taken in any spelling: on a disk that ignores case, a new session whose id differs
+    // from a session's only by case would be written into that session's own file.
+    if (findTranscript(ref.id, this.deps.claudeDirs(), { anySpelling: true }) || this.sdkSessions.has(ref.id))
       return this.finish(r, id, {
         outcome: "refused",
         code: "bad_session",

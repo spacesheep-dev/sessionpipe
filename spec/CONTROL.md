@@ -476,6 +476,17 @@ once; it is not copied, and nothing is said about a window. A daemon MUST NOT re
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.
 
+**A session is the one its harness filed under that id, spelled as the harness spelled
+it.** Everything that says a session is held is kept under its id: the registry row, the
+reports of its hooks, the machine's own record of its runs. A machine MUST find a
+session's transcript under exactly that name, and MUST NOT take what a file system that
+ignores case answers for another spelling of it: the transcript would be found, and
+nothing that says it is held would be. A command that names a session in another
+spelling is acked `refused` with `no_session`, as it is on a disk that tells the two
+apart. A `start` is the one place the other rule holds: an id that matches an existing
+session's in any spelling is taken (`bad_session`), since on such a disk the new session
+would be written into that session's file.
+
 Two rules hold across the in-place modes:
 
 - **A message never chooses a permission mode.** In an in-place mode no mode is picked

@@ -15,6 +15,7 @@ import {
   detectCaps,
   findClaude,
   findTranscript,
+  findTranscripts,
   helpFailure,
   homeSettings,
   hookMode,
@@ -33,6 +34,7 @@ import {
   peerClass,
   recentlyWritten,
   recentWrite,
+  resolveHome,
   runClaude,
   sessionFolder,
   versionManagerBins,
@@ -355,6 +357,28 @@ describe("a session's transcript, folder and process", () => {
     expect(findTranscript("11111111-1111-4111-8111-111111111111", [dir])).toBeNull();
     expect(isUuid(SESSION)).toBe(true);
     expect(isUuid("x")).toBe(false);
+  });
+  it("a session is the one filed under exactly that id: a disk that ignores case does not make another spelling the same session", () => {
+    mkdirSync(path.join(dir, "projects", project), { recursive: true });
+    writeFileSync(file, "");
+    const shouted = SESSION.toUpperCase();
+    expect(shouted).not.toBe(SESSION);
+    // On macOS and Windows the file opens under either spelling. Nothing else on the
+    // machine knows the session by the other one: not its registry row, not its hooks.
+    expect(findTranscript(shouted, [dir])).toBeNull();
+    expect(findTranscripts(shouted, [dir])).toEqual([]);
+    expect(resolveHome(shouted, [dir])).toBeNull();
+    expect(findTranscript(SESSION, [dir])).toEqual({ file, configDir: dir, project });
+    // Whether an id is free for a new session is the other question: one that differs
+    // from a session's only by case would be written into that session's file there.
+    expect(findTranscript(shouted, [dir], { anySpelling: true })).toEqual({ file, configDir: dir, project });
+    expect(findTranscript(SESSION, [dir], { anySpelling: true })).toEqual({ file, configDir: dir, project });
+    expect(findTranscript("11111111-1111-4111-8111-111111111111", [dir], { anySpelling: true })).toBeNull();
+    // A folder of that name is no transcript, under either rule.
+    const other = "22222222-2222-4222-8222-222222222222";
+    mkdirSync(path.join(dir, "projects", project, `${other}.jsonl`));
+    expect(findTranscript(other, [dir])).toBeNull();
+    expect(findTranscript(other, [dir], { anySpelling: true })).toBeNull();
   });
   it("sessionFolder: the cwd whose project name is the folder it is filed under, else the first; long lines skipped", () => {
     const t = { file, configDir: dir, project };
