@@ -831,6 +831,16 @@ Stops the current turn where the machine has a way of its own to stop it:
   the turn a cancel stops is that start, not a message waiting for it; a cancel never
   waits for a start to end.
 
+  A cancel is for **what was sent before it**, and it may be through its own checks
+  first: a machine takes the messages of one poll side by side, and a cancel has the
+  least to check. Where nothing is in hand for the session yet, a daemon MUST wait for a
+  `start` or a `prompt` for it that has already arrived, was signed no later than the
+  cancel (`iat`), and is still in its own checks, until that one is in hand or is
+  refused, and act then: a matter of milliseconds. Answered at once it said that
+  nothing was running, or that there was no such session, and the turn it was pressed
+  for then began. It MUST NOT wait for a command signed after it (the person stopped
+  one thing and then sent another), nor for a message that waits behind another turn.
+
   A turn that runs in a **copy** is that copy's turn as much as the session's: a cancel
   that names the copy — the one the session's messages go to, or the one a `fork` is
   making, once it has named itself — stops it exactly as one that names the session
