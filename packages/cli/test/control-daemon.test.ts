@@ -274,18 +274,23 @@ describe("when a cancel waits (conformance/control-cancel-waits.json)", () => {
   interface Case {
     name: string;
     in_hand: boolean;
-    coming: { kind: string; session: "same" | "copy" | "other"; signed_ms: number; ready: boolean }[];
+    coming: { kind: string; session: "same" | "copy" | "namesake" | "other"; signed_ms: number; ready: boolean }[];
     expect: "waits" | "acts";
   }
   const vectors = JSON.parse(
     readFileSync(path.resolve(here, "../../../conformance/control-cancel-waits.json"), "utf8"),
   ) as { cases: Case[] };
-  // The cancel names a copy; the names each session goes by on the machine (its own id,
+  // The cancel names a copy; the names each session goes by on the machine (its own ref,
   // and the copy its messages go to).
-  const NAMES = { same: ["copy"], copy: ["original", "copy"], other: ["elsewhere"] };
+  const NAMES = {
+    same: ["claude-code:copy"],
+    copy: ["claude-code:original", "claude-code:copy"],
+    namesake: ["codex:copy"],
+    other: ["claude-code:elsewhere"],
+  };
   const iat = Date.parse("2026-11-10T16:45:54.281Z");
   it("has both answers, and every reason for each", () => {
-    expect(vectors.cases).toHaveLength(11);
+    expect(vectors.cases).toHaveLength(12);
     expect(new Set(vectors.cases.map((c) => c.expect))).toEqual(new Set(["waits", "acts"]));
     // Each kind in each state: what is in its own checks, and what waits behind a turn.
     const kinds = vectors.cases.flatMap((c) => c.coming.map((x) => `${x.kind} ${x.ready}`));

@@ -856,6 +856,10 @@ Stops the current turn where the machine has a way of its own to stop it:
   running is the one a cancel stops; a message waiting behind it is neither stopped nor
   what the cancel waits for.
 
+A cancel names a session by its whole ref. `codex:<id>` and `claude-code:<id>` are two
+sessions: a cancel for the one stops no run of the other and interrupts no session the
+machine holds for the other, whatever their ids.
+
 **Never a signal to a pid the daemon did not start.** A session open in a terminal or in
 the Claude app, and a headless run someone else started, belong to that process, and
 nothing here reaches into it: the cancel is acked `unsupported`, and its `detail` says
