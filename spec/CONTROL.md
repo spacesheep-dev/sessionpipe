@@ -480,6 +480,14 @@ once; it is not copied, and nothing is said about a window. A daemon MUST NOT re
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.
 
+**Held is asked of the transcript the message would run in.** For a session whose
+messages go to a copy that is the copy, and the copy's registry row and its hooks are
+kept under the copy's own id. A turn that the copy's own hooks report as running holds
+it like a process in the registry does, for as long as their word is good (ten minutes
+without an event, as for a `cancel`): a message that names the original MUST NOT be
+resumed in the copy in the middle of that turn. The copy is never itself copied, so the
+message is acked `unsupported`, with that reason.
+
 **Held is asked when the run begins, not when the message was routed.** A machine's own
 run in a session does not hold it against the next message: that message waits for the
 run and resumes the session after it, where a copy would set two agents on one task.
