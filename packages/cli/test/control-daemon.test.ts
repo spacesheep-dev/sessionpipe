@@ -26,7 +26,14 @@ import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
-import { CLAUDE_NOT_FOUND, holderOf, routePrompt, type SessionView } from "../src/control/route.js";
+import {
+  CLAUDE_NOT_FOUND,
+  cancelWaits,
+  HOOKS_WORD_MS,
+  holderOf,
+  routePrompt,
+  type SessionView,
+} from "../src/control/route.js";
 import { type ControlConfig, readControl } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -275,12 +282,38 @@ describe("routing (CONTROL.md §6)", () => {
   });
 });
 
+describe("when a cancel waits (conformance/control-cancel-waits.json)", () => {
+  interface Case {
+    name: string;
+    in_hand: boolean;
+    coming: { kind: string; session: "same" | "copy" | "other"; signed_ms: number; ready: boolean }[];
+    expect: "waits" | "acts";
+  }
+  const vectors = JSON.parse(
+    readFileSync(path.resolve(here, "../../../conformance/control-cancel-waits.json"), "utf8"),
+  ) as { cases: Case[] };
+  // The cancel names a copy; the names each session goes by on the machine (its own id,
+  // and the copy its messages go to).
+  const NAMES = { same: ["copy"], copy: ["original", "copy"], other: ["elsewhere"] };
+  const iat = Date.parse("2026-11-10T16:45:54.281Z");
+  it("has both answers, and every reason for each", () => {
+    expect(vectors.cases).toHaveLength(10);
+    expect(new Set(vectors.cases.map((c) => c.expect))).toEqual(new Set(["waits", "acts"]));
+  });
+  it.each(vectors.cases)("$name", (c) => {
+    const coming = c.coming.map((x) => ({ iat: iat + x.signed_ms, ready: x.ready, names: NAMES[x.session] }));
+    expect(cancelWaits(c.in_hand, coming, NAMES.same, iat)).toBe(c.expect === "waits");
+  });
+});
+
 describe("what counts as held (conformance/control-held.json)", () => {
   interface Case {
     name: string;
     rows: { kind: string | null }[];
     written_ms_ago: number;
     ended_ms_ago?: number;
+    turn_ms_ago?: number;
+    strayed_ms_ago?: number;
     expect: "open" | "running" | "recent" | null;
   }
   const vectors = JSON.parse(readFileSync(path.resolve(here, "../../../conformance/control-held.json"), "utf8")) as {
@@ -288,16 +321,24 @@ describe("what counts as held (conformance/control-held.json)", () => {
   };
   const now = Date.parse("2026-11-10T16:45:54.281Z");
   it("has every case the spec names", () => {
-    expect(vectors.cases).toHaveLength(12);
+    expect(vectors.cases).toHaveLength(18);
+    expect(vectors.cases.filter((c) => c.turn_ms_ago !== undefined)).toHaveLength(4);
+    expect(vectors.cases.filter((c) => c.strayed_ms_ago !== undefined)).toHaveLength(2);
     expect(new Set(vectors.cases.map((c) => c.expect))).toEqual(new Set(["open", "running", "recent", null]));
   });
   it.each(vectors.cases)("$name", (c) => {
-    const recent = claudeControl.recentWrite(
-      now - c.written_ms_ago,
-      c.ended_ms_ago === undefined ? undefined : now - c.ended_ms_ago,
-      now,
-    );
-    expect(holderOf(c.rows, recent)).toBe(c.expect);
+    const recent =
+      claudeControl.recentWrite(
+        now - c.written_ms_ago,
+        c.ended_ms_ago === undefined ? undefined : now - c.ended_ms_ago,
+        now,
+      ) ||
+      // A copy's run that may have run in it: held as by a write nothing accounts for.
+      (c.strayed_ms_ago !== undefined && claudeControl.recentWrite(now - c.strayed_ms_ago, undefined, now));
+    // Its hooks' word that a turn is running, for as long as that word is good.
+    const turn = c.turn_ms_ago !== undefined && c.turn_ms_ago < HOOKS_WORD_MS;
+    expect(holderOf(c.rows, recent, turn)).toBe(c.expect);
+    expect(HOOKS_WORD_MS).toBe(600_000);
     // Held or not is all the ladder asks: a held session is never resumed.
     const view: SessionView = {
       harness: "claude-code",

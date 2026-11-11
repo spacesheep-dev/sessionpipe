@@ -3,7 +3,7 @@
 // says it can do and the permission flags each mode gets (never bypassPermissions),
 // its env, its sign-in status, a session's transcript and folder, whether a live
 // process holds it, and its result line. Binaries are shell scripts in a temp dir.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -379,6 +379,24 @@ describe("a session's transcript, folder and process", () => {
     mkdirSync(path.join(dir, "projects", project, `${other}.jsonl`));
     expect(findTranscript(other, [dir])).toBeNull();
     expect(findTranscript(other, [dir], { anySpelling: true })).toBeNull();
+  });
+  describe("which session an id names (conformance/control-session-ids.json)", () => {
+    const vectors = JSON.parse(
+      readFileSync(new URL("../../../conformance/control-session-ids.json", import.meta.url), "utf8"),
+    ) as { cases: { name: string; filed: string[]; asked: string; found: string | null; taken: boolean }[] };
+    it("has a session found, one that is not, and an id that is taken without being found", () => {
+      expect(vectors.cases).toHaveLength(8);
+      expect(vectors.cases.filter((c) => c.found === null && c.taken).length).toBeGreaterThan(0);
+    });
+    it.each(vectors.cases.map((c, i) => ({ ...c, i })))("$name", (c) => {
+      const home = path.join(tmp, `ids-${c.i}`);
+      const folder = path.join(home, "projects", "-Users-dev-app");
+      mkdirSync(folder, { recursive: true });
+      for (const name of c.filed) writeFileSync(path.join(folder, name), "");
+      const found = findTranscript(c.asked, [home]);
+      expect(found ? path.basename(found.file) : null).toBe(c.found);
+      expect(findTranscript(c.asked, [home], { anySpelling: true }) !== null).toBe(c.taken);
+    });
   });
   it("sessionFolder: the cwd whose project name is the folder it is filed under, else the first; long lines skipped", () => {
     const t = { file, configDir: dir, project };

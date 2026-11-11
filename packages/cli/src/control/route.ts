@@ -69,14 +69,46 @@ export const HELD: Record<Holder, (what: string) => string> = {
     `the transcript of ${what} had been written to in the last 90 seconds by a process this computer could not find`,
 };
 
+/** How long a session's own hooks are taken at their word that a turn is running in it,
+ *  counted from the last thing they said: a session killed mid-turn never sends its Stop. */
+export const HOOKS_WORD_MS = 10 * 60_000;
+
 /** What holds a Claude Code session, from what the machine can see of it (§6, What counts
  *  as held; conformance/control-held.json): the live rows of the harness's own session
  *  registry that name it — a window if any of them is one, else another process's run —
- *  and, with no row, whether its transcript was written to too recently to account for
- *  (core's `recentWrite`). Null: nothing holds it, and it is resumed in place. */
-export function holderOf(rows: readonly { kind: string | null }[], recent: boolean): Holder | null {
+ *  with no row, whether its transcript was written to too recently to account for
+ *  (core's `recentWrite`), and with neither, whether its own hooks say a turn is running
+ *  in it (`turn`: another process's run the registry does not show). Null: nothing holds
+ *  it, and it is resumed in place. */
+export function holderOf(rows: readonly { kind: string | null }[], recent: boolean, turn = false): Holder | null {
   if (rows.length) return rows.some((x) => x.kind === "interactive") ? "open" : "running";
-  return recent ? "recent" : null;
+  if (recent) return "recent";
+  return turn ? "running" : null;
+}
+
+/** A start or a prompt on its way to being a turn in hand, as a cancel sees it: when it
+ *  was signed, whether anything but its own checks stands between it and being in hand
+ *  (a prompt that waits behind another message's turn is not `ready`), and the names its
+ *  session goes by on this machine. */
+export interface ComingTurn {
+  iat: number;
+  ready: boolean;
+  names: readonly string[];
+}
+
+/** Does a cancel wait before it acts (§6 `cancel`; conformance/control-cancel-waits.json)?
+ *  Only with nothing in hand for its session, and only for a start or a prompt for that
+ *  session that has arrived, is in its own checks, and was signed no later than the
+ *  cancel: a Stop is for what was sent before it, and never for what was sent after. */
+export function cancelWaits(
+  inHand: boolean,
+  coming: Iterable<ComingTurn>,
+  names: readonly string[],
+  iat: number,
+): boolean {
+  if (inHand) return false;
+  for (const c of coming) if (c.ready && c.iat <= iat && c.names.some((n) => names.includes(n))) return true;
+  return false;
 }
 
 /** A copy's ack `detail` opens with this, then why (`HELD`). */

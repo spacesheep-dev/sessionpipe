@@ -79,6 +79,7 @@ import {
   COPY_AGAIN,
   COPY_AGAIN_BARE,
   COPY_RAN,
+  cancelWaits,
   channelMark,
   copyNote,
   type DeliveryMode,
@@ -90,6 +91,7 @@ import {
   frameStart,
   HEADLESS,
   HELD,
+  HOOKS_WORD_MS,
   type Holder,
   holderOf,
   IN_PLACE_ANSWER,
@@ -840,7 +842,7 @@ export class ControlDaemon {
     for (const l of this.live.values()) if (l.attentions.size) return "a permission prompt waiting for an answer";
     const now = this.deps.now();
     for (const l of this.live.values())
-      if (l.midTurn && now - l.lastEvent < 10 * 60_000) return "a session on this machine mid-turn";
+      if (l.midTurn && now - l.lastEvent < HOOKS_WORD_MS) return "a session on this machine mid-turn";
     if (this.receiving) return "messages just received";
     if (this.flushing) return "acks being sent";
     return null;
@@ -1572,11 +1574,14 @@ export class ControlDaemon {
    *  with whatever is in hand. Never for a turn's length: what waits behind another turn
    *  is not `ready`, and what is parked behind a start has `arrived`. */
   private async sentBefore(names: string[], iat: number): Promise<void> {
-    const due = (): boolean =>
-      [...this.coming.values()].some(
-        (c) => c.ready && c.iat <= iat && this.namesOf(c.ref).some((n) => names.includes(n)),
+    const waits = (): boolean =>
+      cancelWaits(
+        !!this.runFor(names),
+        [...this.coming.values()].map((c) => ({ iat: c.iat, ready: c.ready, names: this.namesOf(c.ref) })),
+        names,
+        iat,
       );
-    while (!this.runFor(names) && due()) await new Promise<void>((wake) => this.stirred.push(wake));
+    while (waits()) await new Promise<void>((wake) => this.stirred.push(wake));
   }
 
   private async handleVerified(r: PairedReceiver, m: Carried, turn: Turn | null): Promise<void> {
@@ -2210,7 +2215,7 @@ export class ControlDaemon {
   /** The session's own hooks say a turn is running, and said something in the last ten
    *  minutes: a session killed mid-turn never sends its Stop. */
   private midTurnNow(l: Live | undefined): boolean {
-    return !!l?.midTurn && this.deps.now() - l.lastEvent < 10 * 60_000;
+    return !!l?.midTurn && this.deps.now() - l.lastEvent < HOOKS_WORD_MS;
   }
 
   /** One headless turn as a child process of the daemon's own: in a slot, and stoppable
@@ -2553,17 +2558,17 @@ export class ControlDaemon {
   private heldBy(target: string, t: Transcript): Holder | null {
     const key = `claude-code:${target}`;
     const now = this.deps.now();
-    const held = holderOf(
+    return holderOf(
       liveRecords(target, t.configDir),
       recentlyWritten(t.file, this.endedAt(key), now) || this.strayedInto(key, now),
+      // And where neither says so, the word of the session's own hooks that a turn is
+      // running in it: another process's run, whatever the registry shows. `target` is
+      // the transcript the message would run in, the copy where the session's messages
+      // go to one, and the copy's hooks report under the copy's id. Looked at only
+      // under the original's, a copy mid-turn was resumed in the middle of that turn.
+      // (Not asked while a run of the daemon's own is in it: view(), headless().)
+      this.midTurnNow(this.live.get(key)),
     );
-    // And where neither says so, the word of the session's own hooks that a turn is
-    // running in it: another process's run, whatever the registry shows. `target` is
-    // the transcript the message would run in, the copy where the session's messages
-    // go to one, and the copy's hooks report under the copy's id. Looked at only
-    // under the original's, a copy mid-turn was resumed in the middle of that turn.
-    // (Not asked while a run of the daemon's own is in it: view(), headless().)
-    return held ?? (this.midTurnNow(this.live.get(key)) ? "running" : null);
   }
 
   /** A copy's run that may have run in this session ended in the last 90 seconds
