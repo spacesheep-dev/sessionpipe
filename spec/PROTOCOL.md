@@ -118,7 +118,7 @@ Per-type `data` shapes are normative in
 | `tool.ended` | 1 | `tool`, `call_id?`, `turn_id?`, `agent_id?`, `ms?`, `ok`, `error?`; tier 3 adds `input`, `output` (each ≤ 64 KB) | Post-tool hook. A tool name is `[A-Za-z0-9_.:-]{1,120}`; MCP tools keep the harness's own spelling. |
 | `files.changed` | 1 | `paths[]` (repo-relative or `~`-relative) | File-edit hooks (Cursor, Kiro, Goose), or paths lifted from a write tool's input. |
 | `attention.needed` | 0 | `attention_id`, `kind`: `permission` · `question` · `elicitation` · `idle` · `error`; tier 1 adds `tool`, `message` (redacted, ≤ 200), `agent_id` (set when a subagent asked) | PermissionRequest, Notification, permission.asked. Tier-0 receivers learn "needs you" without the words. |
-| `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool ran, a turn ended), or a control answer. |
+| `attention.cleared` | 0 | `attention_id`, `how`: `answered` · `cancelled` · `timeout` · `unknown` | The next event that proves the prompt was resolved (a tool of the thread that asked ran, its turn ended: [CONTROL.md §7](CONTROL.md#7-attention-lifecycle) says which events those are), or a control answer. No sender emits it yet; a receiver closes an attention by §7's rule. |
 | `subagent.started` / `subagent.ended` | 1 | `agent_id`, `agent_type?`; `subagent.ended` adds `background?` (integer) | Subagent hooks; the subagent's own events carry `session.parent_id`. `background` is the work still in flight once this subagent is out of it, counted as `turn.ended` counts it, so a receiver holding the session as waiting on its work learns the count fell before the session's next turn. Absent when the harness doesn't say. |
 | `context.compacted` | 1 | `trigger`: `manual` · `auto` | Compaction hooks. |
 | `limits.observed` | 1 | `windows[]` (1–8): `id` (the harness's own name for the window, passed through as the harness spells it: `five_hour`, `seven_day`, `primary` …), `used_percent` (0–100; above 100 once a spend limit is passed), `resets_at?`, `window_minutes?` (only where the harness or its documentation says the length); `plan?`; `account_id?` (the account the numbers belong to, spelled as `session.account_id` is) | The account's usage limits, when the harness reports new numbers: Codex's rollout after a turn, Claude Code's status line where the person made it ours, or the machine's account pool reading the vendor's rate-limit headers for a request it served (ADAPTERS.md). The numbers belong to the account, not the session: a receiver SHOULD keep the newest per (harness, `data.account_id`, else `session.account_id`), or per machine when there is neither. A sender MUST set `account_id` when the numbers belong to another account than the session's own (a pooled session served by a second account, CONTROL.md §6 `pool`) and MAY set it otherwise; absent, the numbers are the session's account's. Each event is the whole set: a window it leaves out is not reported (Claude Code drops one once it resets). A window whose `resets_at` has passed has reset; a receiver SHOULD NOT show its last `used_percent` as current. OPTIONAL for senders. |
@@ -155,8 +155,10 @@ Rules for all types:
   - MUST NOT read a `seq` gap as a lost event;
   - MUST NOT expect a `tool.ended` for every `tool.started`, or the reverse: a call's
     `call_id` may be seen once, or not at all;
-  - MAY read a session's `tool.ended` as a sign that it is working and that an open
-    prompt was answered, and MUST NOT present the number it got as the number of tool
+  - MAY read a session's `tool.ended` as a sign that it is working, and one of the
+    thread that asked as a sign that its open prompt was answered (CONTROL.md §7: a
+    subagent's `tool.ended` says nothing about a prompt the main thread opened, nor the
+    main thread's about a subagent's), and MUST NOT present the number it got as the number of tool
     calls the session made.
 
   Thinning is the receiver's to ask for, never done on nobody's say-so: a receiver that
