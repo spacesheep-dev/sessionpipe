@@ -1,5 +1,9 @@
 # @sessionpipe/receiver
 
+## 0.13.7
+
+No changes in this release.
+
 ## 0.13.6
 
 No changes in this release.
