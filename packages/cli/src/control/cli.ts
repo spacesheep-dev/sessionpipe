@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // `sessionpipe control pair | mode | folders | keys | off | run | status` and `sessionpipe wait`.
-import { existsSync, realpathSync, statSync, unwatchFile, watchFile } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -393,6 +393,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   if (!findClaude()) log(CLAUDE_NOT_FOUND);
   const sdk = await loadSdk({ claudeBin: findClaude(), env: process.env, log });
   let updater: AutoUpdater | null = null;
+  let unwedge: ((why: string) => Promise<void>) | null = null;
   d = new ControlDaemon(cfg, controlState(), socketPath(stateDir()), {
     now: Date.now,
     fetch,
@@ -412,6 +413,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     },
     token: (r) => (r.token_in ? secretGet(r.token_in, controlAccount(r.machine)) : null),
     onRestart: () => updater?.restartWhenIdle() ?? false,
+    onWedged: (why) => void unwedge?.(why),
     updateStatus: () => (updater ? updater.record() : null),
     // Two daemons started at once and the other one holds the socket: leave it to it.
     onLostSocket: () => process.exit(0),
@@ -478,6 +480,46 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     const sup = supervise({ node: process.execPath, args: [cli, "control", "run"], env: process.env, log });
     for (const sig of [...signals, "SIGHUP"] as const) process.on(sig, () => sup.stop(sig));
   };
+  // A daemon whose polls of a receiver go on never ending is restarted: on 2026-11-11
+  // a new process was what ended it, and nothing else is known to. When nothing is in
+  // hand, like an update; and not within an hour of the last such restart (the mark's
+  // date says when), so a machine where it goes on happening is restarted once an
+  // hour, not round and round.
+  const mark = path.join(controlState(), "wedged");
+  let unwedging = false;
+  let saidHeld = false;
+  unwedge = async (why) => {
+    if (unwedging || stopping) return;
+    let last = 0;
+    try {
+      last = statSync(mark).mtimeMs;
+    } catch {}
+    const ago = Date.now() - last;
+    if (ago < WEDGED_RESTART_EVERY_MS) {
+      if (!saidHeld)
+        log(
+          `${why}; this daemon was restarted for that ${Math.round(ago / 60_000)} min ago, so not again within the hour`,
+        );
+      saidHeld = true;
+      return;
+    }
+    unwedging = true;
+    log(`${why}; restarting this daemon as soon as nothing is in hand`);
+    while (d.busy()) {
+      await new Promise((r) => setTimeout(r, 5000).unref());
+      if (stopping) return;
+    }
+    // No mark, no restart: with nothing to say when the last one was (a full disk),
+    // this would restart every few minutes for as long as the polls never end.
+    try {
+      mkdirSync(path.dirname(mark), { recursive: true, mode: 0o700 });
+      writeFileSync(mark, `${new Date().toISOString()} ${why}\n`, { mode: 0o600 });
+    } catch (e) {
+      log(`not restarting: ${mark} can't be written (${(e as Error).message})`);
+      return;
+    }
+    await restart(VERSION, VERSION);
+  };
   updater = new AutoUpdater({
     now: Date.now,
     log,
@@ -493,6 +535,10 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   });
   updater.start();
 }
+
+/** A daemon restarted because its polls never ended is not restarted for that again
+ *  within this long. */
+const WEDGED_RESTART_EVERY_MS = 60 * 60_000;
 
 /** The pool's fake upstream for tests, and only there: honoured under vitest and only
  *  when it is a loopback address, so no plist, shell profile or .envrc in the daemon's

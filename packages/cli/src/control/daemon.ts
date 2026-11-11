@@ -492,6 +492,11 @@ export interface DaemonDeps {
   /** `sessionpipe update` installed a new copy: restart onto it once idle. True when
    *  accepted (autoupdate.ts). */
   onRestart?: () => boolean;
+  /** Three polls of one receiver in a row never ended (NeverEnded): this process is
+   *  wedged for it, and a new process is the one remedy known to work. The host
+   *  restarts the daemon when nothing is in hand; asked again every ten minutes for as
+   *  long as it lasts, so the host decides how often. */
+  onWedged?: (why: string) => void;
   /** The updater's view, for `control status`. */
   updateStatus?: () => unknown;
   /** Another daemon took the socket path: this one has stopped and should exit. */
@@ -1246,6 +1251,9 @@ export class ControlDaemon {
       });
     let backoff = 0;
     let downSince = 0;
+    /** Polls in a row that never ended, and whether this outage's log has said so. */
+    let lost = 0;
+    let saidLost = false;
     // A deploy takes the receiver away for seconds, not minutes: retry soon, capped at
     // 15 s (one request per machine), with jitter so every machine a deploy dropped
     // doesn't come back in the same instant. The old 60 s / 5 min steps left a
@@ -1281,22 +1289,43 @@ export class ControlDaemon {
       this.aborts.add(ctl);
       // A poll held past wait + 10 s is a dead connection (a laptop that slept, a
       // network that changed): give up on it and ask again.
-      const t = setTimeout(() => ctl.abort(), 35_000);
+      const t = setTimeout(() => ctl.abort(), POLL_ABORT_MS);
+      // The abort is what ends the request, and it can end nothing (NeverEnded). So ten
+      // seconds after it this round is over whether or not its request is, the answer
+      // or the reading of it: what is left is left behind, and the next round asks on
+      // a new request.
+      let leave!: (e: Error) => void;
+      const left = new Promise<never>((_resolve, reject) => {
+        leave = reject;
+      });
+      left.catch(() => {});
+      const dog = setTimeout(() => leave(new NeverEnded("a poll")), POLL_ABORT_MS + LEFT_AFTER_MS);
+      const over = () => {
+        clearTimeout(t);
+        clearTimeout(dog);
+      };
       try {
         const u = new URL(r.control);
         u.searchParams.set("machine", r.machine);
         u.searchParams.set("wait", "25");
         const asked = this.deps.now();
-        const res = await this.deps.fetch(u, { headers: { authorization: `Bearer ${r.token}` }, signal: ctl.signal });
+        const res = await Promise.race([
+          this.deps.fetch(u, { headers: { authorization: `Bearer ${r.token}` }, signal: ctl.signal }),
+          left,
+        ]);
         // The request deadline applies to reading the response, never to a retry
         // delay (which can be much longer than a long-poll).
-        if (res.status !== 200) clearTimeout(t);
+        if (res.status !== 200) {
+          over();
+          lost = 0;
+        }
         st.unauthorized = res.status === 401;
         if (downSince && (res.status === 200 || res.status === 204)) {
           // Timed to when this poll was sent: a long-poll that reconnected is then held
           // up to `wait` before it answers.
           this.deps.log(`${r.url}: back after ${Math.round((asked - downSince) / 1000)} s (${backoff} failed tries)`);
           downSince = 0;
+          saidLost = false;
         }
         if (res.status === 401) {
           st.error = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
@@ -1312,7 +1341,7 @@ export class ControlDaemon {
           let fresh = 0;
           this.receiving++;
           try {
-            const body = (await res.json()) as { messages?: Carried[] };
+            const body = (await Promise.race([res.json(), left])) as { messages?: Carried[] };
             // Looked up again: a key may have been added while this poll was parked.
             const cur = this.cfg.receivers.find((x) => x.control + x.machine === key) ?? r;
             // Not awaited: a headless turn can run for half an hour, and the next
@@ -1329,7 +1358,8 @@ export class ControlDaemon {
           } finally {
             this.receiving--;
           }
-          clearTimeout(t);
+          over();
+          lost = 0;
           st.last = this.deps.now();
           st.error = null;
           st.authBackoff = 0;
@@ -1359,13 +1389,26 @@ export class ControlDaemon {
         if (!this.running) break;
         // Paused for an update: the abort was ours, not the network's.
         if (this.paused) continue;
+        if (e instanceof NeverEnded) {
+          // Said once per outage, like the outage's end: it is the one failure that
+          // says something about this process rather than about the network.
+          if (!saidLost) this.deps.log(`${r.url}: ${e.message}; asking again`);
+          saidLost = true;
+          lost++;
+        } else lost = 0;
         st.error = String((e as Error)?.message || e).slice(0, 120);
         st.unauthorized = false;
         downSince ||= this.deps.now();
-        clearTimeout(t);
-        await retry(pause(backoff++));
+        over();
+        // Wedged: whether a new request fares better in this process is not known, and
+        // each one that never ends stays behind with whatever it holds. So the host is
+        // asked for a new process, and until there is one this receiver is asked every
+        // ten minutes, not every fifteen seconds.
+        const wedged = lost >= WEDGED_AFTER;
+        if (wedged) this.deps.onWedged?.(`${r.url}: ${lost} polls in a row never ended`);
+        await retry(wedged ? WEDGED_PAUSE_MS : pause(backoff++));
       } finally {
-        clearTimeout(t);
+        over();
         this.aborts.delete(ctl);
       }
     }
@@ -1385,11 +1428,16 @@ export class ControlDaemon {
   private async refreshSessionTools(): Promise<void> {
     for (const r of this.cfg.receivers) {
       try {
-        const res = await this.deps.fetch(`${r.url.replace(/\/$/, "")}/.well-known/sessionpipe`, {
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) continue;
-        const wk = (await res.json()) as { control?: { session_tools?: unknown } };
+        const wk = await orLeft(
+          this.deps
+            .fetch(`${r.url.replace(/\/$/, "")}/.well-known/sessionpipe`, {
+              signal: AbortSignal.timeout(WELL_KNOWN_ABORT_MS),
+            })
+            .then((res) => (res.ok ? (res.json() as Promise<{ control?: { session_tools?: unknown } }>) : null)),
+          WELL_KNOWN_ABORT_MS + LEFT_AFTER_MS,
+          "a look at the receiver's well-known",
+        );
+        if (!wk) continue;
         const tools = sessionToolsFrom(wk.control?.session_tools);
         const key = r.control + r.machine;
         if (JSON.stringify(tools) !== JSON.stringify(this.sessionTools.get(key) ?? []))
@@ -1463,14 +1511,18 @@ export class ControlDaemon {
 
   private async post(r: PairedReceiver, sub: string, body: unknown): Promise<Response> {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 15_000);
+    const t = setTimeout(() => ctl.abort(), POST_ABORT_MS);
     try {
-      return await this.deps.fetch(`${r.control.replace(/\/$/, "")}${sub}`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${r.token}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ctl.signal,
-      });
+      return await orLeft(
+        this.deps.fetch(`${r.control.replace(/\/$/, "")}${sub}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${r.token}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: ctl.signal,
+        }),
+        POST_ABORT_MS + LEFT_AFTER_MS,
+        `a post to ${sub}`,
+      );
     } finally {
       clearTimeout(t);
     }
@@ -4288,6 +4340,49 @@ export class ControlDaemon {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms).unref?.());
+
+/** A poll asks its receiver to hold it 25 s; ten seconds past that it is aborted. A
+ *  hello or an ack is aborted after 15 s, a look at the well-known after 8. */
+const POLL_ABORT_MS = 35_000;
+const POST_ABORT_MS = 15_000;
+const WELL_KNOWN_ABORT_MS = 8000;
+/** How long an aborted request is given to end before it is left behind. */
+const LEFT_AFTER_MS = 10_000;
+/** This many polls of one receiver in a row that never ended: the process is wedged
+ *  for it, and asks that receiver this seldom until it is restarted. */
+const WEDGED_AFTER = 3;
+const WEDGED_PAUSE_MS = 10 * 60_000;
+
+/** A request that neither answered nor ended when it was aborted. The abort is what
+ *  ends a request, and it can end nothing: on 2026-11-11 a daemon on Node 23.6.1, a
+ *  second after its clock was set forward thirteen minutes, sat in one poll for 103
+ *  minutes with no connection left and no error, reading "polling: yes" while its
+ *  receiver showed the machine offline, until it was restarted. Why is not known, nor
+ *  whether a new request from that process would have fared better. So nothing the
+ *  daemon awaits from the network may hold it that way (a poll loop, the one ack
+ *  flush, a run's progress), and polls that go on never ending end in a restart. */
+class NeverEnded extends Error {
+  constructor(what: string) {
+    super(`${what} never ended, and aborting it ended nothing`);
+  }
+}
+
+/** `p`, unless it is still pending `ms` from now: then this rejects, and `p` is left
+ *  behind (whatever it says later is nobody's). */
+const orLeft = <T>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new NeverEnded(what)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 
 /** dev:ino of the file at `p`, or null when there is none. */
 function socketId(p: string): string | null {
