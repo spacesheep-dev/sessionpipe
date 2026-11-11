@@ -2533,9 +2533,6 @@ export class ControlDaemon {
       // A message for a session that already has a copy goes to that copy; when the copy
       // is live too the person is told, rather than handed a copy of a copy.
       copied: !!this.state.copies[ref.id],
-      // The same for a copy named by its own id, which is how its page names it: a
-      // message sent from there made a copy of the copy.
-      isCopy: Object.values(this.state.copies).some((c) => c.id === ref.id),
       api: false,
     };
   }
