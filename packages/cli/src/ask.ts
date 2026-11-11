@@ -313,7 +313,9 @@ async function status(
       ? `  daemon: running (pid ${running.pid}, ${running.version})`
       : "  daemon: not running (`sessionpipe ask on` installs it as a service)",
   );
-  const have = Object.keys(running?.start ?? {});
+  // The agents an ask can start, as the daemon says (an ACP agent takes no start options,
+  // so `start` never lists it); a daemon from before `ask` in its status has only `start`.
+  const have = running?.ask?.harnesses ?? Object.keys(running?.start ?? {});
   io.out(agentsLine(have.length ? have : harnesses(env)));
   const folders = c?.folders ?? [];
   io.out(

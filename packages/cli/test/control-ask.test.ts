@@ -921,6 +921,20 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
       code: "bad_fields",
       detail: expect.stringMatching(/takes no permission/),
     });
+    // A new ACP session too: the level is refused in words, never dropped (it would run
+    // at the machine's mode), and so is a model.
+    await d?.stop();
+    await startDaemon({
+      extra: { acp: (h: string) => (h === "gemini-cli" ? { bin: "gemini", args: ["--acp"] } : null) },
+    });
+    for (const over of [{ permission: "read" as const }, { model: "m-1" }]) {
+      const fresh = await askIt(req({ harness: "gemini-cli", ...over }));
+      expect(fresh.end, JSON.stringify(fresh.end)).toMatchObject({
+        op: "refused",
+        code: "bad_fields",
+        detail: "Gemini CLI takes no permission level or model choice here: it runs as this machine's mode says (safe)",
+      });
+    }
     await d?.stop();
     await startDaemon({ extra: { claude: () => null, codex: () => null } });
     expect((await askIt(req())).end).toMatchObject({
