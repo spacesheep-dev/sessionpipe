@@ -27,6 +27,7 @@ import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHo
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
 import {
+  busyWindowWaits,
   CLAUDE_NOT_FOUND,
   cancelWaits,
   HOOKS_WORD_MS,
@@ -286,6 +287,29 @@ describe("routing (CONTROL.md §6)", () => {
         unsupported: `that ${harness} session was written to in the last 90 seconds, so ${harness} may still have it open, and a ${harness} session can't be copied: send it again once it has been idle a couple of minutes`,
       });
     }
+  });
+});
+
+describe("a busy window is asked twice (conformance/control-busy-window.json)", () => {
+  interface Case {
+    name: string;
+    look: string | null;
+    hooks_heard: boolean;
+    has_copy: boolean;
+    asked_before: boolean;
+    expect: "waits" | "routes";
+  }
+  const vectors = JSON.parse(
+    readFileSync(path.resolve(here, "../../../conformance/control-busy-window.json"), "utf8"),
+  ) as { cases: Case[] };
+  it("has the one case that waits, and each reason not to", () => {
+    expect(vectors.cases).toHaveLength(7);
+    expect(vectors.cases.filter((c) => c.expect === "waits")).toHaveLength(1);
+  });
+  it.each(vectors.cases)("$name", (c) => {
+    expect(busyWindowWaits({ look: c.look, heard: c.hooks_heard, copied: c.has_copy, asked: c.asked_before })).toBe(
+      c.expect === "waits",
+    );
   });
 });
 

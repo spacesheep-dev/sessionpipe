@@ -573,8 +573,80 @@ describe.runIf(unix)("what the lane will not write into", () => {
     row({ status: "busy" });
     await startDaemon();
     await sawMode("bypassPermissions");
+    // Its hooks are given their two seconds to say a turn began (below); they say
+    // nothing, the row still says busy, and the message runs in a copy.
     expect((await next("busy")).ack).toMatchObject({ outcome: "delivered", mode: "fork" });
     expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("its hooks said nothing more"))).toBe(true);
+  });
+
+  // The window's registry row says a turn is running a moment before its hooks do (their
+  // report comes through a worker), and a moment after they have said it is over. A
+  // message that lands in either moment found a busy window that was "not mid-turn" and
+  // was answered in a copy, and every later message for that session then went to the
+  // copy, though the window sat idle (QA, 2026-11-11: one message 82 ms into a typed
+  // turn, then four of four answered "in the copy made earlier").
+  it("busy by its registry row before its hooks have said so: the message waits for them, and is handed over at that turn's Stop", async () => {
+    row({ status: "busy" });
+    // Long enough that only the hooks' own word ends the wait.
+    await startDaemon({ extra: { busySettleMs: 30_000 } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "in the first moments of a typed turn" });
+    expect(await anyAck(q.id)).toMatchObject({ outcome: "taken" });
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await ask(sock, { op: "stop", session: SESSION, active: false }, 2000)).toMatchObject({
+      op: "block",
+      id: q.id,
+    });
+    // In place, in the window: nothing was started and no copy was made.
+    expect(written).toEqual([]);
+    expect(existsSync(claudeLog)).toBe(false);
+    const state = JSON.parse(readFileSync(path.join(tmp, "state", "control", "state.json"), "utf8")) as {
+      copies_v2?: Record<string, unknown>;
+    };
+    expect(state.copies_v2 ?? {}).toEqual({});
+    expect(log.some((l) => l.includes(q.id.slice(-8)) && l.includes("its hooks say a turn has begun"))).toBe(true);
+  });
+
+  it("busy by its registry row after its hooks said the turn was over: looked at again, idle by then, it takes the message in its inbox", async () => {
+    row({ status: "busy" });
+    await startDaemon({ extra: { busySettleMs: 400 } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "as a turn was ending" });
+    expect(await anyAck(q.id)).toMatchObject({ outcome: "taken" });
+    // The row catches up with the turn's end while the message waits.
+    row();
+    // (This daemon was told it is on a Mac, so a delivery is the one line, on any runner.)
+    await wrote(1);
+    expect(frameIn()).toContain(markOf(q.id));
+    answered(markOf(q.id));
+    await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit", mode: "bypassPermissions" }, 500);
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+    expect(existsSync(claudeLog)).toBe(false);
+  });
+
+  it("a busy window whose hooks this daemon has never heard from is not waited for", async () => {
+    row({ status: "busy" });
+    await startDaemon({ extra: { busySettleMs: 60_000 } });
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "no hooks here" });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
+  });
+
+  it("a Stop while the message waits for the hooks' word: it never runs", async () => {
+    row({ status: "busy" });
+    await startDaemon({ extra: { busySettleMs: 60_000 } });
+    await sawMode("bypassPermissions");
+    const q = await rx.send({ session: SESSION, kind: "prompt", text: "wait for it" });
+    expect(await anyAck(q.id)).toMatchObject({ outcome: "taken" });
+    const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined });
+    expect(await rx.waitAck(stop.id, 15_000)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", reply: "(The turn was cancelled.)" });
+    expect(existsSync(claudeLog)).toBe(false);
+    // The wait is over with it: the next message is looked at afresh.
+    row();
+    const again = await rx.send({ session: SESSION, kind: "prompt", text: "and now" });
+    await wrote(1);
+    expect(frameIn()).toContain(markOf(again.id));
   });
 
   it("a process that isn't one of the harness's own windows", async () => {
