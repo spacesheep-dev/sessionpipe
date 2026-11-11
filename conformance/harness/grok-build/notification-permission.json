@@ -1,0 +1,40 @@
+{
+  "harness": "grok-build",
+  "event": "Notification",
+  "recorded": {
+    "at": "2026-11-11T19:48:09.000Z",
+    "harness_version": "1.0.77",
+    "how": "grok -p with a recording hook in ~/.grok/hooks"
+  },
+  "input": {
+    "argv": [
+      "grok-build",
+      "Notification"
+    ],
+    "stdin": "{\"hookEventName\":\"notification\",\"sessionId\":\"01a1cc27-3adb-7913-ac03-d253839111c3\",\"cwd\":\"/tmp/rec/grok-proj\",\"workspaceRoot\":\"/tmp/rec/grok-proj\",\"timestamp\":\"2026-11-11T19:48:09.405913+00:00\",\"transcriptPath\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-3adb-7913-ac03-d253839111c3/updates.jsonl\",\"permissionMode\":\"default\",\"notificationType\":\"permission_prompt\",\"message\":\"Tool permission requested\",\"level\":\"info\",\"hook_event_name\":\"Notification\",\"session_id\":\"01a1cc27-3adb-7913-ac03-d253839111c3\",\"transcript_path\":\"/home/rec/.grok/sessions/%2Ftmp%2Frec%2Fgrok-proj/01a1cc27-3adb-7913-ac03-d253839111c3/updates.jsonl\",\"permission_mode\":\"default\",\"notification_type\":\"permission_prompt\"}",
+    "env": {},
+    "cwd": "/tmp/rec/grok-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "attention.needed",
+      "harness": {
+        "name": "grok-build",
+        "event": "Notification"
+      },
+      "session": {
+        "id": "01a1cc27-3adb-7913-ac03-d253839111c3",
+        "cwd": "/tmp/rec/grok-proj",
+        "seq": "*"
+      },
+      "data": {
+        "attention_id": "*",
+        "kind": "permission",
+        "message": "Tool permission requested"
+      }
+    }
+  ]
+}

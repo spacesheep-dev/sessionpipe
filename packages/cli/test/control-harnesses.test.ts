@@ -206,6 +206,7 @@ describe("which kinds go where", () => {
     expect(kindPath("permission.answer", "claude-code")).toBe("permission");
     expect(kindPath("permission.answer", "gemini-cli")).toHaveProperty("unsupported");
     expect(kindPath("permission.answer", "devin")).toHaveProperty("unsupported");
+    expect(kindPath("permission.answer", "grok-build")).toHaveProperty("unsupported");
   });
 });
 

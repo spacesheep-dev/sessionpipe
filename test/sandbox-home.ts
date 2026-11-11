@@ -30,6 +30,7 @@ const watched = [
   path.join(under(real.GEMINI_CLI_HOME, ".gemini"), "settings.json"),
   path.join(under(real.GEMINI_CLI_HOME, ".gemini"), "config", "hooks.json"),
   path.join(under(real.XDG_CONFIG_HOME, ".config"), "devin", "config.json"),
+  path.join(under(real.GROK_HOME, ".grok"), "hooks", "sessionpipe.json"),
 ];
 const stamp = (file: string): string => {
   const s = statSync(file, { throwIfNoEntry: false });
@@ -49,6 +50,7 @@ Object.assign(process.env, {
   CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
   CODEX_HOME: path.join(home, ".codex"),
   GEMINI_CLI_HOME: path.join(home, ".gemini"),
+  GROK_HOME: path.join(home, ".grok"),
   SESSIONPIPE_CONFIG: path.join(home, ".config", "sessionpipe", "config.json"),
   SESSIONPIPE_STATE: path.join(home, ".local", "state", "sessionpipe"),
   SESSIONPIPE_DATA: path.join(home, ".local", "share", "sessionpipe"),

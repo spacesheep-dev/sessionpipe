@@ -211,7 +211,9 @@ export function kindPath(
         ? { unsupported: "Gemini CLI has no permission answer channel" }
         : harness === "devin"
           ? { unsupported: "Devin has no permission answer channel" }
-          : "permission";
+          : harness === "grok-build"
+            ? { unsupported: "Grok Build has no permission answer channel" }
+            : "permission";
     case "cancel":
       return "cancel";
     case "start":
