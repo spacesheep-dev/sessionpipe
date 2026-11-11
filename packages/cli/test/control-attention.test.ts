@@ -4,7 +4,7 @@
 // what it does with hooks older than the rule, which name no thread.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { type Asked, CLOSERS, type Closer, questionOver, type Said } from "../src/control/attention.js";
+import { type Asked, CLOSERS, type Closer, closerOf, questionOver, type Said } from "../src/control/attention.js";
 
 interface Case {
   name: string;
@@ -90,5 +90,10 @@ describe("hooks older than the rule", () => {
       SessionEnd: "session.ended",
     });
     expect(CLOSERS.PreToolUse).toBeUndefined();
+    // By its own name only: an event named after something every object inherits is no closer.
+    expect(closerOf("PostToolUse")).toBe("tool.ended");
+    expect(closerOf("SubagentStop")).toBe("subagent.ended");
+    for (const name of ["PreToolUse", "constructor", "toString", "hasOwnProperty", "__proto__", ""])
+      expect(closerOf(name), name).toBeNull();
   });
 });
