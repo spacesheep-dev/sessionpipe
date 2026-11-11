@@ -4015,6 +4015,14 @@ export class ControlDaemon {
           "harness",
           `this machine can't start a ${req.harness} session; it can ask ${askable.join(", ") || "no agent"}`,
         );
+      // A new ACP session takes no level or model either (§6): refused in words, never
+      // dropped. (2026-11-11: `ask grok-build --permission read` ran at the machine's auto
+      // mode and wrote a file.)
+      if ((req.permission || req.model) && acpControl.acpAgent(req.harness))
+        return refuse(
+          "bad_fields",
+          `${this.label(req.harness)} takes no permission level or model choice here: it runs as this machine's mode says (${this.cfg.mode})`,
+        );
       const ok = this.allowed(req.cwd);
       if (!ok) return refuse("folder", `${req.cwd} isn't a folder this machine allows (sessionpipe control folders)`);
       session = `${req.harness}:${randomUUID()}`;

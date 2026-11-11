@@ -407,6 +407,20 @@ describe("ask on / off / status", () => {
     expect(r.out).toContain("  daemon: running (pid 42, 9.9.9)");
     expect(r.out).toContain("  agents: codex, claude-code");
   });
+  it.runIf(unix)("status lists the agents an ask can start, an ACP agent with no start options too", async () => {
+    await serve((_req, send) =>
+      send({
+        op: "status",
+        status: {
+          pid: 42,
+          version: "9.9.9",
+          start: { codex: {} },
+          ask: { on: true, harnesses: ["codex", "grok-build"] },
+        },
+      }),
+    );
+    expect((await run(["status"])).out).toContain("  agents: codex, grok-build");
+  });
 });
 
 describe("ask setup", () => {
