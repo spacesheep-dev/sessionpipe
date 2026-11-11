@@ -486,7 +486,11 @@ kept under the copy's own id. A turn that the copy's own hooks report as running
 it like a process in the registry does, for as long as their word is good (ten minutes
 without an event, as for a `cancel`): a message that names the original MUST NOT be
 resumed in the copy in the middle of that turn. The copy is never itself copied, so the
-message is acked `unsupported`, with that reason.
+message is acked `unsupported`, with that reason. The ack is final: nothing is delivered
+when that turn ends, and the message is the person's to send again. Its `detail` SHOULD
+say so, since this is a hold that ends by itself: with the turn, or, where the process
+died without its hooks saying so, ten minutes after its last word. A machine that saw
+the process go (a run of its own) MUST NOT go on taking it at its word.
 
 **Held is asked when the run begins, not when the message was routed.** A machine's own
 run in a session does not hold it against the next message: that message waits for the

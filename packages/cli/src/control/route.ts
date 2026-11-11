@@ -47,6 +47,10 @@ export interface SessionView {
   /** It already has a copy, which is where its messages go: a copy is a leaf and is
    *  never itself copied (§6 `prompt`). */
   copied: boolean;
+  /** What holds it is only its own hooks' word that a turn is running in it
+   *  (`onItsWord`): a hold that ends with that turn, or lapses when nothing more is
+   *  heard of it. A refusal for it says the message can be sent again. */
+  lapses?: boolean;
   /** The harness has an input API (OpenCode, Codex app-server) — none is wired yet. */
   api: boolean;
 }
@@ -82,6 +86,17 @@ export function holderOf(rows: readonly { kind: string | null }[], recent: boole
   if (recent) return "recent";
   return turn ? "running" : null;
 }
+
+/** Is the hooks' word the only thing that holds it (`holderOf` with the same three)?
+ *  No process in the registry and no write too recent to account for: nothing the
+ *  machine can see for itself, and nothing that says when the turn is over but the
+ *  hooks' own Stop, or `HOOKS_WORD_MS` of silence. */
+export const onItsWord = (rows: readonly unknown[], recent: boolean, turn: boolean): boolean =>
+  !rows.length && !recent && turn;
+
+/** Said after a refusal for a session held on its hooks' word alone. */
+export const SEND_AGAIN_AFTER_TURN =
+  "send it again once that turn has ended (a turn that was cut short stops counting ten minutes after it was last heard from)";
 
 /** A start or a prompt on its way to being a turn in hand, as a cancel sees it: when it
  *  was signed, whether anything but its own checks stands between it and being in hand
@@ -159,8 +174,10 @@ export function routePrompt(s: SessionView): Route {
   if (s.harness === "claude-code" && s.installed === false) return { unsupported: CLAUDE_NOT_FOUND };
   // Known, headless, and not resumed: something holds it (FITS.resume took every other case).
   const held = s.held as Holder;
-  // Only a write that recent passes on its own: the rest is for the person to end.
-  const again = held === "recent" ? ": send it again in a couple of minutes" : "";
+  // Only a write that recent passes on its own, and a turn only the hooks reported ends
+  // with them: the rest is for the person to end.
+  const again =
+    held === "recent" ? ": send it again in a couple of minutes" : s.lapses ? `: ${SEND_AGAIN_AFTER_TURN}` : "";
   return {
     unsupported:
       s.harness === "claude-code"
