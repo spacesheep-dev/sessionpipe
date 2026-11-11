@@ -122,21 +122,23 @@ describe("installing and removing", () => {
   // and the service stays until its process has exited (here: after `leaves` looks), a
   // bootstrap of a label that is still there is refused in both domains, and `print`
   // fails for what isn't there.
-  const launchd = (o: { running: boolean; leaves: number }) => {
+  // launchctl's failure as execFileSync throws it: the exit status beside the message.
+  const failed = (status: number, said: string) => Object.assign(new Error(said), { status });
+  const launchd = (o: { running: boolean; leaves: number; disabled?: boolean }) => {
     let loaded = o.running;
     let left = Number.POSITIVE_INFINITY;
     const exec = vi.fn((_c: string, args: string[]) => {
       const [verb, target] = args;
       const mine = target?.startsWith("gui/501");
       if (verb === "bootout") {
-        if (!mine || !loaded) throw new Error("Boot-out failed: 3: No such process");
+        if (!mine || !loaded) throw failed(3, "Boot-out failed: 3: No such process");
         left = o.leaves;
       } else if (verb === "print") {
         if (target === "gui/501") return "";
-        if (!mine || !loaded) throw new Error("Bad request.");
+        if (!mine || !loaded) throw failed(113, "Bad request.");
       } else if (verb === "bootstrap") {
-        if (loaded) throw new Error("Bootstrap failed: 5: Input/output error");
-        if (!mine) throw new Error("Bootstrap failed: 134: Service cannot load in requested session");
+        if (loaded || !mine) throw failed(5, "Bootstrap failed: 5: Input/output error");
+        if (o.disabled) throw failed(119, "Bootstrap failed: 119: Service is disabled");
         loaded = true;
         left = Number.POSITIVE_INFINITY;
       }
@@ -164,6 +166,19 @@ describe("installing and removing", () => {
     expect(l.sleep.mock.calls).toEqual([[100], [100], [100], [100]]);
     expect(l.exec).not.toHaveBeenCalledWith("launchctl", ["bootstrap", "user/501", plistPath()]);
   });
+  it("darwin: with no stand-in for the wait, this thread sleeps between looks", () => {
+    // Time passes for the stand-in at each look at the old service: gone at the second.
+    const l = launchd({ running: true, leaves: 2 });
+    const exec = (c: string, args: string[]) => {
+      if (args[0] === "print" && args[1] === "gui/501/org.sessionpipe.gui") l.sleep(0);
+      return l.exec(c, args);
+    };
+    const t0 = performance.now();
+    const r = installService({ ...SPEC, home, exec, platform: "darwin", uid: "501" });
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(95);
+    expect(r.domain).toBe("gui");
+    expect(l.loaded()).toBe(true);
+  });
   it("darwin: nothing was running: one bootstrap, no look and no wait", () => {
     const l = launchd({ running: false, leaves: 0 });
     const r = installService({ ...SPEC, home, exec: l.exec, sleep: l.sleep, platform: "darwin", uid: "501" });
@@ -176,7 +191,7 @@ describe("installing and removing", () => {
     expect(() =>
       installService({ ...SPEC, home, exec: stuck.exec, sleep: stuck.sleep, platform: "darwin", uid: "501" }),
     ).toThrow(
-      `launchd didn't start org.sessionpipe.gui, and nothing runs it now: \`launchctl bootstrap gui/501 ${plistPath()}\` starts it`,
+      `launchd didn't start the new org.sessionpipe.gui (launchctl answered 5): the one that was running is still loaded. \`launchctl bootout gui/501/org.sessionpipe.gui\`, then \`launchctl bootstrap gui/501 ${plistPath()}\``,
     );
     // Ten seconds of looks, then one more try in each domain; the file is there for the command.
     expect(stuck.sleep).toHaveBeenCalledTimes(100);
@@ -186,6 +201,14 @@ describe("installing and removing", () => {
       "user/501",
     ]);
     expect(existsSync(plistPath())).toBe(true);
+    // The old one left and launchd refuses the new one all the same (a label someone disabled).
+    const off = launchd({ running: true, leaves: 1, disabled: true });
+    expect(() =>
+      installService({ ...SPEC, home, exec: off.exec, sleep: off.sleep, platform: "darwin", uid: "501" }),
+    ).toThrow(
+      `launchd didn't start org.sessionpipe.gui (launchctl answered 119), and nothing runs it now: \`launchctl bootstrap gui/501 ${plistPath()}\` starts it`,
+    );
+    expect(off.sleep).toHaveBeenCalledTimes(1);
     const sleep = vi.fn();
     expect(() =>
       installService({
@@ -199,7 +222,9 @@ describe("installing and removing", () => {
         platform: "darwin",
         uid: "501",
       }),
-    ).toThrow("from a login that isn't at this Mac's screen: log in there and run `launchctl bootstrap gui/501 ");
+    ).toThrow(
+      "launchd didn't start org.sessionpipe.gui: no login at this Mac's screen can be seen from here (nobody is logged in there, or launchctl is blocked). From a login at the screen, `launchctl bootstrap gui/501 ",
+    );
     expect(sleep).not.toHaveBeenCalled();
   });
   it("linux: enabled now and lingering; written but unreachable without systemd --user", () => {
