@@ -1,0 +1,62 @@
+{
+  "spec": "CONTROL.md §6.3, A busy window is asked twice",
+  "note": "Whether a machine waits a moment for a window's hooks before it routes a message for it. `look` is why the window's own inbox was no way in (`busy`: its registry row says a turn is running; any other reason; or null: it could be written to, or was never looked at because a rung above took the message, which is where a window that is mid-turn by its hooks goes). `hooks_heard`: this session's hooks have reported to the machine at all. `has_copy`: the session's messages go to a copy, so the window looked at is the copy's. `asked_before`: this message has waited once already. `expect` is `waits` (for the hooks to say a turn began, a short while: two seconds in the reference daemon; then the message is routed again) or `routes` (at once, as the ladder says).",
+  "cases": [
+    {
+      "name": "the first moments of a turn typed in the window: the row says busy, the hooks' report is on its way",
+      "look": "busy",
+      "hooks_heard": true,
+      "has_copy": false,
+      "asked_before": false,
+      "expect": "waits"
+    },
+    {
+      "name": "it waited, and is looked at again: whatever the window says now is the answer",
+      "look": "busy",
+      "hooks_heard": true,
+      "has_copy": false,
+      "asked_before": true,
+      "expect": "routes"
+    },
+    {
+      "name": "a busy window whose hooks have never reported here: they never will",
+      "look": "busy",
+      "hooks_heard": false,
+      "has_copy": false,
+      "asked_before": false,
+      "expect": "routes"
+    },
+    {
+      "name": "the busy window is the copy's, and the turn rung reads the session the message names",
+      "look": "busy",
+      "hooks_heard": true,
+      "has_copy": true,
+      "asked_before": false,
+      "expect": "routes"
+    },
+    {
+      "name": "an idle window that can be written to",
+      "look": null,
+      "hooks_heard": true,
+      "has_copy": false,
+      "asked_before": false,
+      "expect": "routes"
+    },
+    {
+      "name": "no window at all",
+      "look": "no_record",
+      "hooks_heard": true,
+      "has_copy": false,
+      "asked_before": false,
+      "expect": "routes"
+    },
+    {
+      "name": "a process that is not a window",
+      "look": "not_a_window",
+      "hooks_heard": true,
+      "has_copy": false,
+      "asked_before": false,
+      "expect": "routes"
+    }
+  ]
+}

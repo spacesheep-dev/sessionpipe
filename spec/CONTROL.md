@@ -619,6 +619,20 @@ carries no claim the machine cannot vouch for. The frame is sent at the lowest p
 the inbox offers, so the message becomes a turn of its own rather than joining one in
 flight, and it carries a mark identifying the message.
 
+**A busy window is asked twice.** A window says that a turn is running in it in two
+places, and they are a moment apart at each end of the turn: its registry row says
+`busy` some hundreds of milliseconds before its hooks' report of the turn has reached
+the machine, and still says it for a moment after they have reported the turn's end. A
+message that lands in either moment finds a window that is busy, so its inbox is no way
+in, and not mid-turn, so its Stop is not waited for: routed on the spot it is answered
+in a copy, and every later message for the session then goes to that copy while the
+window sits idle. So where a window is busy by its row and not mid-turn by its hooks, and
+those hooks report to the machine at all, a daemon SHOULD wait a short while for them to
+say that a turn began (the reference daemon: two seconds, acking `taken` meanwhile) and
+then route the message again, once: `turn` if they have, the inbox if the window is idle
+after all, and otherwise what the ladder says. A `cancel` meanwhile ends the wait, and
+the message is acked as any stopped before it ran.
+
 **A write is not delivery, and a turn is not proof by itself.** The daemon MUST confirm
 within a short window (8 s here) that the session began a turn **for this message** —
 the row the harness writes for that turn says which message asked for it — and MUST NOT
@@ -1214,6 +1228,10 @@ send → delivered time.
 - `conformance/control-session-ids.json` — which session an id names (§6, *A session is
   the one its harness filed under that id*): found under exactly its name, not found in
   another spelling, and taken for a new session in any.
+- `conformance/control-busy-window.json` — when a message waits for a window's hooks
+  before it is routed (§6.3, *A busy window is asked twice*): once, for a window that is
+  busy by its registry row, whose hooks report to the machine, and that is the
+  session's own.
 - `conformance/control-cancel-waits.json` — when a `cancel` that is through its checks
   waits before it acts (§6 `cancel`): for a start or a prompt for its session that was
   signed no later than it and is still in its own checks, and for nothing else.

@@ -74,6 +74,7 @@ import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./loca
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./reply.js";
 import {
+  busyWindowWaits,
   CANCEL,
   CLAUDE_NOT_FOUND,
   COPY_AGAIN,
@@ -243,6 +244,11 @@ const VERSION = typeof __SESSIONPIPE_VERSION__ === "string" ? __SESSIONPIPE_VERS
 
 const MAX_REPLY = 20_000;
 const HELLO_EVERY_MS = 10 * 60_000;
+/** A window's registry row says it is busy and its hooks have not said a turn began:
+ *  how long a message waits for them to, before the window is looked at once more. The
+ *  hooks' report comes through a worker and is some hundreds of milliseconds behind the
+ *  row at a turn's start; at its end the row is a moment behind the hooks. */
+const BUSY_SETTLE_MS = 2000;
 /** A message waiting for a Stop that never comes goes another way after this. */
 const TURN_FALLBACK_MS = 30 * 60_000;
 /** How long the daemon follows a session's turn for the answer to an in-place
@@ -470,6 +476,9 @@ export interface DaemonDeps {
   sdkIdleMs?: number;
   /** How long one of a start's files may take to download (tests shorten it). */
   fileTimeoutMs?: number;
+  /** How long a message waits for a busy window's hooks to say its turn began before it
+   *  is looked at again (BUSY_SETTLE_MS; tests shorten it). */
+  busySettleMs?: number;
   env?: NodeJS.ProcessEnv;
   /** Is Claude Code signed in for this account, as this process sees it? Asked before
    *  a headless run, so a login the daemon can't read (a macOS keychain with nobody at
@@ -559,6 +568,9 @@ interface Live {
   cwd?: string;
   transcript?: string;
   lastEvent: number;
+  /** Its own hooks have reported to this daemon since it started: what they have not
+   *  said yet (that a turn began) can be waited for (`prompt`, a busy window). */
+  heard?: boolean;
   /** When the session's own hooks last reported its end (`SessionEnd`): the process that
    *  held it has let go of it, so what its transcript gained up to then was written by a
    *  process that is done (view()). */
@@ -1053,6 +1065,7 @@ export class ControlDaemon {
       case "stop": {
         const l = this.liveOf(req.session);
         l.lastEvent = this.deps.now();
+        l.heard = true;
         this.recordMode(req.session, req.mode);
         // A Stop: the turn, or the continuation the message before this one caused, is
         // over. Said before the next message is handed over, so each answer ends where
@@ -1128,6 +1141,7 @@ export class ControlDaemon {
     const named = this.named(e.session);
     const l = this.liveOf(named);
     l.lastEvent = this.deps.now();
+    l.heard = true;
     this.recordMode(named, e.mode);
     if (e.cwd) l.cwd = e.cwd;
     if (e.transcript) l.transcript = e.transcript;
@@ -2617,7 +2631,7 @@ export class ControlDaemon {
     sent: number,
     /** `held`: what holds the session, where the caller found out a moment ago and is
      *  routing the message again because of it (headless()). */
-    o: { noInbox?: boolean; held?: Holder } = {},
+    o: { noInbox?: boolean; held?: Holder; settled?: boolean } = {},
   ): Promise<void> {
     const text = cmd.text as string;
     // An ask (a sink caller) never takes the inbox rung: its cap holds only where the
@@ -2641,6 +2655,35 @@ export class ControlDaemon {
     // delivered, refused, or wasn't there either.
     if (look && !("rec" in look))
       this.deps.log(`${id.slice(-8)}: not in place via its own inbox (${look.code}: ${look.detail})`);
+    // A window that is busy by its own registry row, and not mid-turn by its hooks (the
+    // `turn` rung would have taken the message): the two are a moment apart at each end
+    // of a turn. At its start the row is first, and the hooks' word is on its way; at
+    // its end the hooks are first, and the row is about to say idle. Routed on the spot,
+    // the message was answered in a copy in both moments, and every later message for
+    // the session went to that copy. So, once, and only where this session's hooks have
+    // been heard from: wait for them to say the turn began, a short while, and route
+    // again. Then it is the `turn` rung, or the inbox of a window that is idle after
+    // all, or what it would have been.
+    const waits = busyWindowWaits({
+      look: look && "code" in look ? look.code : null,
+      heard: !!this.live.get(cmd.session)?.heard,
+      copied: seen.copied,
+      asked: !!o.settled,
+    });
+    if (waits) {
+      this.finish(r, id, { outcome: "taken" });
+      const began = this.awaitPrompted(cmd.session, this.deps.busySettleMs ?? BUSY_SETTLE_MS);
+      /* v8 ignore next -- one message per session at a time (its line); this is the backstop, as for the inbox */
+      const said = began ? await this.orStopped(this.runOf(id), began.ok) : false;
+      if (said === STOPPED) {
+        began?.cancel();
+        return this.finish(r, id, this.stoppedAck(null), sent);
+      }
+      this.deps.log(
+        `${id.slice(-8)}: ${cmd.session.slice(0, 24)} was busy by its registry row; ${said ? "its hooks say a turn has begun" : "its hooks said nothing more"}, so it is routed again`,
+      );
+      return this.prompt(r, id, cmd, place, sent, { ...o, settled: true });
+    }
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });

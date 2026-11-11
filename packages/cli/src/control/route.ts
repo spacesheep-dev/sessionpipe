@@ -98,6 +98,16 @@ export const onItsWord = (rows: readonly unknown[], recent: boolean, turn: boole
 export const SEND_AGAIN_AFTER_TURN =
   "send it again once that turn has ended (a turn that was cut short stops counting ten minutes after it was last heard from)";
 
+/** Does a message wait a moment for a window's hooks before it is routed (§6.3, A busy
+ *  window is asked twice; conformance/control-busy-window.json)? Where the window's own
+ *  registry row says it is busy (`look`: why its inbox was no way in) and its hooks have
+ *  not said a turn is running (or the `turn` rung would have taken the message), the two
+ *  are a moment apart: so once (`asked`), where this session's hooks report here at all
+ *  (`heard`), and where the window is the session's own and not its copy's (`copied`). */
+export function busyWindowWaits(s: { look: string | null; heard: boolean; copied: boolean; asked: boolean }): boolean {
+  return s.look === "busy" && s.heard && !s.copied && !s.asked;
+}
+
 /** A start or a prompt on its way to being a turn in hand, as a cancel sees it: when it
  *  was signed, whether anything but its own checks stands between it and being in hand
  *  (a prompt that waits behind another message's turn is not `ready`), and the names its

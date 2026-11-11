@@ -47,6 +47,11 @@
   `{ filed, asked, found, taken }`, the transcripts in a project folder, the id a command
   names, the file that is that session's (its exact name, or none), and whether the id is
   taken for a new session (in any spelling). Run by `packages/core/test/claude-control.test.ts`.
+- `control-busy-window.json` — when a message waits a moment for a window's hooks before it
+  is routed (spec/CONTROL.md §6.3): `{ look, hooks_heard, has_copy, asked_before, expect }`, why
+  the window's inbox was no way in, whether its hooks report to the machine, whether the window
+  is the session's copy's, whether the message has waited already, and `waits` or `routes`. Run
+  by `packages/cli/test/control-daemon.test.ts`.
 - `control-cancel-waits.json` — when a `cancel` waits before it acts (spec/CONTROL.md §6
   `cancel`): `{ in_hand, coming: [{ kind, session, signed_ms, ready }], expect }`, what is the
   machine's to stop already, what has arrived and is not in hand yet, and `waits` or `acts`.
