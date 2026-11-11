@@ -19,7 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { acpControl, claudeControl, type RunResult } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Carried, ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import { type Carried, ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { CANCEL, type CancelView, routeCancel } from "../src/control/route.js";
 import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
@@ -1086,6 +1086,45 @@ describe.runIf(unix)("a Stop that is through its checks before the turn it was s
     expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
     expect(acksOf(q.id)).toEqual([]);
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+  });
+
+  it("nor for a start that waits behind another run of its session: a session the daemon holds in its first turn is interrupted at once", async () => {
+    // The first start's turn, in a session the daemon holds through the Agent SDK: not
+    // a turn "in hand" (a Stop is the session's own interrupt), and it holds the
+    // session's queue until it ends. It ends here only when it is interrupted.
+    const seen: string[] = [];
+    let interrupted = (): void => {};
+    const host: SdkHost = {
+      start: () => ({
+        send: () =>
+          new Promise((res) => {
+            seen.push("send");
+            interrupted = () => res({ reply: "interrupted" });
+          }),
+        interrupt: async () => {
+          seen.push("interrupt");
+          interrupted();
+        },
+        close: () => {},
+        busy: true,
+        lastUsed: Date.now(),
+      }),
+    };
+    await startDaemon({ extra: { sdk: host } });
+    const session = `claude-code:${NEW}`;
+    const first = await hand({ kind: "start", session, cwd: project, text: "first" });
+    await until(() => seen.includes("send"));
+    // The held session has written its transcript by now, as a real one has.
+    transcript(NEW);
+    // A second start for the same session: it waits in the session's queue for the
+    // length of that turn. The Stop waited with it, and was acked when the turn was over.
+    const second = await hand({ kind: "start", session, cwd: project, text: "again" });
+    const stop = await stopNow(session);
+    expect(await rx.waitAck(stop.id, 3000)).toMatchObject({ outcome: "delivered", mode: "sdk" });
+    expect(seen).toEqual(["send", "interrupt"]);
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "sdk", reply: "interrupted" });
+    // Its turn comes when the first is over, and the id is the session's.
+    expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "refused", code: "bad_session" });
   });
 
   it("nor does it wait for another session's message, or for one that is refused", async () => {

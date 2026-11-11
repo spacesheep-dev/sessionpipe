@@ -836,7 +836,9 @@ Stops the current turn where the machine has a way of its own to stop it:
   refused, and act then: a matter of milliseconds. Answered at once it said that
   nothing was running, or that there was no such session, and the turn it was pressed
   for then began. It MUST NOT wait for a command signed after it (the person stopped
-  one thing and then sent another), nor for a message that waits behind another turn.
+  one thing and then sent another), nor for one that waits behind another turn: a
+  message behind the message before it, a second `start` for a session behind the first.
+  That wait is a turn long, and the turn is the one the cancel was pressed for.
 
   A turn that runs in a **copy** is that copy's turn as much as the session's: a cancel
   that names the copy — the one the session's messages go to, or the one a `fork` is

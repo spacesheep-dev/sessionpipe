@@ -285,8 +285,11 @@ describe("when a cancel waits (conformance/control-cancel-waits.json)", () => {
   const NAMES = { same: ["copy"], copy: ["original", "copy"], other: ["elsewhere"] };
   const iat = Date.parse("2026-11-10T16:45:54.281Z");
   it("has both answers, and every reason for each", () => {
-    expect(vectors.cases).toHaveLength(10);
+    expect(vectors.cases).toHaveLength(11);
     expect(new Set(vectors.cases.map((c) => c.expect))).toEqual(new Set(["waits", "acts"]));
+    // Each kind in each state: what is in its own checks, and what waits behind a turn.
+    const kinds = vectors.cases.flatMap((c) => c.coming.map((x) => `${x.kind} ${x.ready}`));
+    expect(new Set(kinds)).toEqual(new Set(["start true", "start false", "prompt true", "prompt false"]));
   });
   it.each(vectors.cases)("$name", (c) => {
     const coming = c.coming.map((x) => ({ iat: iat + x.signed_ms, ready: x.ready, names: NAMES[x.session] }));

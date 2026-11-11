@@ -1,6 +1,6 @@
 {
   "spec": "CONTROL.md §6 `cancel`, A cancel is for what was sent before it",
-  "note": "Whether a cancel that is through its own checks waits before it acts. `in_hand`: a turn for its session is already the machine's to stop. `coming`: the starts and prompts that have arrived and are not in hand yet, each with `kind`, `session` (`same`: the session the cancel names; `copy`: the copy that session's messages go to, or the session whose copy the cancel names; `other`: another session), `signed_ms` (when it was signed, relative to the cancel: negative is earlier) and `ready` (nothing but its own checks stands between it and being in hand; a prompt that waits behind another message's turn is not). `expect` is `waits` (until one of them is in hand or refused: milliseconds) or `acts` (at once, on whatever is in hand).",
+  "note": "Whether a cancel that is through its own checks waits before it acts. `in_hand`: a turn for its session is already the machine's to stop. `coming`: the starts and prompts that have arrived and are not in hand yet, each with `kind`, `session` (`same`: the session the cancel names; `copy`: the copy that session's messages go to, or the session whose copy the cancel names; `other`: another session), `signed_ms` (when it was signed, relative to the cancel: negative is earlier) and `ready` (nothing but its own checks stands between it and being in hand; a prompt that waits behind another message's turn is not, and neither is a start that waits behind another run of its session). `expect` is `waits` (until one of them is in hand or refused: milliseconds) or `acts` (at once, on whatever is in hand).",
   "cases": [
     {
       "name": "a start that came with the Stop and is still being verified",
@@ -60,6 +60,19 @@
       "coming": [
         {
           "kind": "prompt",
+          "session": "same",
+          "signed_ms": -900,
+          "ready": false
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "a second start for a session whose first start is still in its first turn: it waits for the length of that turn, and a Stop does not wait with it",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "start",
           "session": "same",
           "signed_ms": -900,
           "ready": false
