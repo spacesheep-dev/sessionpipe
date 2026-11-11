@@ -52,7 +52,7 @@ import {
 } from "@sessionpipe/core";
 import { deliveredWords } from "@sessionpipe/core/control";
 import { aliasFile, readAliases, receiverIdOf } from "./control/aliases.js";
-import { ask, socketPath } from "./control/local.js";
+import { ask, socketPath, threadOf } from "./control/local.js";
 import { sendTool, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
 import { HttpSink } from "./http-sink.js";
 import { sinkWithSecrets } from "./secrets.js";
@@ -62,7 +62,8 @@ async function tellDaemon(
   job: Job,
   session: string,
   cwd: string | undefined,
-  transcript?: string,
+  transcript: string | undefined,
+  events: readonly { type: string; data: Record<string, unknown> }[],
 ): Promise<void> {
   const sock = socketPath(state);
   if (process.platform !== "win32" && !existsSync(sock)) return;
@@ -70,10 +71,25 @@ async function tellDaemon(
   // session's mode): the daemon records it per session, and an in-place lane and a
   // relaunch's narrowing both rest on it. Read from the top-level field, never matched
   // out of the payload's text, so a tool input that quotes one cannot set it.
-  let mode: string | null = null;
+  let payload: unknown = null;
   try {
-    mode = claudeControl.hookMode(JSON.parse(job.stdin));
+    payload = JSON.parse(job.stdin);
   } catch {}
+  const mode = claudeControl.hookMode(payload);
+  // What a held permission prompt is let go by (CONTROL.md §7; control/attention.ts):
+  // the thread this event is about, its tool call, when its hook fired, and what a Stop
+  // says is still in flight. A Claude Code session's alone: the daemon holds a prompt for
+  // no other harness, and these are its payload's names.
+  const background = events.find((e) => e.type === "turn.ended")?.data.background;
+  const about =
+    job.harness === "claude-code"
+      ? {
+          // (An object: the adapter read a session id out of it.)
+          ...threadOf(Object(payload) as Record<string, unknown>),
+          at: job.at,
+          ...(typeof background === "number" ? { background } : {}),
+        }
+      : {};
   await ask(
     sock,
     {
@@ -83,6 +99,7 @@ async function tellDaemon(
       ...(cwd ? { cwd } : {}),
       ...(transcript ? { transcript } : {}),
       ...(mode ? { mode } : {}),
+      ...about,
     },
     300,
   );
@@ -411,7 +428,7 @@ export async function runJob(
   // The control daemon learns each session's turn state and folder from its events (a
   // message for a session mid-turn waits for its Stop; a pending permission prompt
   // closes when the tool runs). A local round trip, and nothing when no daemon runs.
-  if (!claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
+  if (!claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
   // Hooks of one session fire close together (parallel subagents, issue #9): poll
@@ -449,7 +466,7 @@ export async function runJob(
       releaseJob(opts.claimed);
       return { events: [], delivered: {} };
     }
-    if (claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript);
+    if (claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
     // Heartbeat-class events read no facts (they fire every tool call); the rest refresh them.
     const heavy = !/^(PreToolUse|PostToolUse|PostToolUseFailure|BeforeTool|AfterTool|PostInvocation)$/.test(job.event);
     let learned: Partial<Session> = {};

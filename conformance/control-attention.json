@@ -1,0 +1,278 @@
+{
+  "spec": "CONTROL.md §7, Attention lifecycle",
+  "note": "When an open attention is over without an `attention.cleared`. `asked` is the `attention.needed`: its `attention_id`, and `agent_id` where a subagent asked (absent: the main thread). `event` is a later event of the same session: its `type`, the `agent_id` and `call_id` it carries (a `tool.ended`'s thread and call; the subagent a `subagent.ended` is about), a `turn.ended`'s `background`, and `after_ms`, its `time` less the attention's (negative: timed before it, however late it is received). `closes` is whether that event ends the question: a receiver stops showing Allow / Deny, and a machine that holds the prompt's hook for an answer lets it go. An event that does not close it leaves it open: the terminal is still asking.",
+  "cases": [
+    {
+      "name": "the main thread asked, and its own tool ran: it was answered",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "tool.ended",
+        "call_id": "toolu_01GoQcMkV7mkYk6sk1DE",
+        "after_ms": 22866
+      },
+      "closes": true
+    },
+    {
+      "name": "the main thread asked, and a background subagent's tool ended: the terminal is still asking",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "a42867b781ec114cb",
+        "call_id": "toolu_01CvZiCARP5rMi8pXcfL",
+        "after_ms": 3146
+      },
+      "closes": false
+    },
+    {
+      "name": "the same with a second subagent's",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "adc6e6cd36de3beea",
+        "after_ms": 3888
+      },
+      "closes": false
+    },
+    {
+      "name": "the main thread asked, and its turn ended",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "turn.ended",
+        "background": 1,
+        "after_ms": 24491
+      },
+      "closes": true
+    },
+    {
+      "name": "the main thread asked, and a new prompt was submitted: the turn it asked in is over",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "turn.started",
+        "after_ms": 38000
+      },
+      "closes": true
+    },
+    {
+      "name": "the main thread asked, and a subagent stopped",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "subagent.ended",
+        "agent_id": "a42867b781ec114cb",
+        "after_ms": 9000
+      },
+      "closes": false
+    },
+    {
+      "name": "the main thread asked, and the session ended",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "session.ended",
+        "after_ms": 60000
+      },
+      "closes": true
+    },
+    {
+      "name": "a tool of the asking thread that ended BEFORE the question, reported after it: it says nothing about it",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "tool.ended",
+        "call_id": "toolu_01KX8e4dz2U2Rc9T2P2A",
+        "after_ms": -180
+      },
+      "closes": false
+    },
+    {
+      "name": "a turn that ended before the question",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "turn.ended",
+        "background": 0,
+        "after_ms": -900
+      },
+      "closes": false
+    },
+    {
+      "name": "a tool of the asking thread timed in the same millisecond: at or after",
+      "asked": {
+        "attention_id": "perm-1bb18c870624a063"
+      },
+      "event": {
+        "type": "tool.ended",
+        "after_ms": 0
+      },
+      "closes": true
+    },
+    {
+      "name": "a subagent asked, and its own tool ran",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "add26c8b22acac554",
+        "call_id": "toolu_01GjFqCjwYwLDLWqBN",
+        "after_ms": 30800
+      },
+      "closes": true
+    },
+    {
+      "name": "a subagent asked, and the main thread's tool ended",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "tool.ended",
+        "call_id": "toolu_017Wh5PqwkojywCUVR",
+        "after_ms": 1200
+      },
+      "closes": false
+    },
+    {
+      "name": "a subagent asked, and another subagent's tool ended",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "a0d1f18b1802231d3",
+        "after_ms": 4186
+      },
+      "closes": false
+    },
+    {
+      "name": "a background subagent asked, and the main thread's turn ended with work still in flight: it is still asking",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "turn.ended",
+        "background": 3,
+        "after_ms": 538
+      },
+      "closes": false
+    },
+    {
+      "name": "a subagent asked, and a turn ended with nothing left in flight: no subagent is there to ask",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "turn.ended",
+        "background": 0,
+        "after_ms": 40000
+      },
+      "closes": true
+    },
+    {
+      "name": "a subagent asked, and a turn ended that does not say what is in flight",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "turn.ended",
+        "after_ms": 538
+      },
+      "closes": false
+    },
+    {
+      "name": "a background subagent asked, and the main thread began a turn (a task that finished woke it)",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "turn.started",
+        "after_ms": 26328
+      },
+      "closes": false
+    },
+    {
+      "name": "a subagent asked, and it stopped",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "subagent.ended",
+        "agent_id": "add26c8b22acac554",
+        "after_ms": 36217
+      },
+      "closes": true
+    },
+    {
+      "name": "a subagent asked, and another subagent stopped",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "subagent.ended",
+        "agent_id": "ae0fd307cef39b3f1",
+        "after_ms": 5253
+      },
+      "closes": false
+    },
+    {
+      "name": "a subagent asked, and the session ended",
+      "asked": {
+        "attention_id": "perm-7e60e9b277381ea5",
+        "agent_id": "add26c8b22acac554"
+      },
+      "event": {
+        "type": "session.ended",
+        "after_ms": 90000
+      },
+      "closes": true
+    },
+    {
+      "name": "the attention is named by its tool call, and that call ended: whatever thread the event names",
+      "asked": {
+        "attention_id": "call_7Qm2"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "a1a29f3072dcd5de4",
+        "call_id": "call_7Qm2",
+        "after_ms": 5000
+      },
+      "closes": true
+    },
+    {
+      "name": "the attention is named by its tool call, and another thread's other call ended",
+      "asked": {
+        "attention_id": "call_7Qm2"
+      },
+      "event": {
+        "type": "tool.ended",
+        "agent_id": "a1a29f3072dcd5de4",
+        "call_id": "call_9Zk1",
+        "after_ms": 5000
+      },
+      "closes": false
+    }
+  ]
+}

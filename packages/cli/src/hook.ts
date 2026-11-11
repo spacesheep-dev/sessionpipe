@@ -11,7 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, stat
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ask, socketPath } from "./control/local.js";
+import { ask, socketPath, threadOf } from "./control/local.js";
 
 /** A Claude Code session id (the same test as core's notClaudeCode). */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -99,7 +99,7 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // A Stop asks the daemon BEFORE its event goes to the worker: the worker reports the
     // Stop to the daemon too, and a message queued for this Stop must be taken here,
     // not rerouted because the event got there first.
-    const stopAnswer = event === "Stop" ? await (controlAsk(stdin) ?? Promise.resolve(null)) : null;
+    const stopAnswer = event === "Stop" ? await (controlAsk(stdin, Date.now()) ?? Promise.resolve(null)) : null;
     mkdirSync(path.join(state, "jobs"), { recursive: true, mode: 0o700 });
     const job = {
       harness,
@@ -152,7 +152,7 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     }
     // A PermissionRequest waits AFTER its event is on its way, so the receiver already
     // shows the Allow / Deny this answer is for.
-    const ctl = event === "PermissionRequest" ? controlAsk(stdin) : null;
+    const ctl = event === "PermissionRequest" ? controlAsk(stdin, job.at) : null;
     if (ctl) {
       workMs = Number(process.hrtime.bigint() - t0) / 1e6;
       const out = await ctl;
@@ -171,8 +171,9 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
    *  for a message the daemon itself verified. A Stop hook asks for a queued message and
    *  answers a block with it; a PermissionRequest hook waits for the person's signed
    *  answer while the terminal shows its own prompt, first answer wins. Anything that
-   *  goes wrong (no daemon, a timeout) prints nothing: the harness carries on as usual. */
-  function controlAsk(stdin: string): Promise<string | null> | null {
+   *  goes wrong (no daemon, a timeout) prints nothing: the harness carries on as usual.
+   *  `at`: when this hook fired, which a permission question is told with. */
+  function controlAsk(stdin: string, at: number): Promise<string | null> | null {
     if (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest")) return null;
     // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
     // asks at its Stop: the daemon hands that session its next message itself. Its
@@ -226,7 +227,14 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       .update(`${turn ?? ""}|${tool ?? ""}|${JSON.stringify(s.tool_input ?? null)}`)
       .digest("hex")
       .slice(0, 16)}`;
-    return ask(sock, { op: "permission", session, attention, ...(tool ? { tool } : {}) }, 125_000).then((r) =>
+    // And the thread that asks, and when: a session's hooks all report under its id, so
+    // these are what tell the daemon which later event is about THIS question (a
+    // subagent's tool ending in the background says nothing about the main thread's).
+    return ask(
+      sock,
+      { op: "permission", session, attention, ...(tool ? { tool } : {}), agent: threadOf(s).agent, at },
+      125_000,
+    ).then((r) =>
       r?.op === "decision"
         ? JSON.stringify({
             hookSpecificOutput: {

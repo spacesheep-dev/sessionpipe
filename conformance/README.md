@@ -47,6 +47,12 @@
   `{ filed, asked, found, taken }`, the transcripts in a project folder, the id a command
   names, the file that is that session's (its exact name, or none), and whether the id is
   taken for a new session (in any spelling). Run by `packages/core/test/claude-control.test.ts`.
+- `control-attention.json` — when an open attention is over without an `attention.cleared`
+  (spec/CONTROL.md §7): `{ asked: { attention_id, agent_id? }, event: { type, agent_id?,
+  call_id?, background?, after_ms }, closes }`, the question, a later event of its session,
+  and whether that event ends it. A receiver runs it to know when to stop showing Allow /
+  Deny; the reference daemon lets go of the prompt's hook by the same answers. Run by
+  `packages/cli/test/control-attention.test.ts`.
 - `control-busy-window.json` — when a message waits a moment for a window's hooks before it
   is routed (spec/CONTROL.md §6.3): `{ look, hooks_heard, has_copy, asked_before, expect }`, why
   the window's inbox was no way in, whether its hooks report to the machine, whether the window

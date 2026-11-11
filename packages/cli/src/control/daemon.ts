@@ -67,6 +67,7 @@ import {
 import type { Pool } from "../pool/index.js";
 import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
+import { CLOSERS, questionOver } from "./attention.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
@@ -294,15 +295,15 @@ const CHANNEL_HELD_ACK = {
   detail:
     "handed to the session's sessionpipe channel on this computer; it didn't begin a turn for it, so Claude Code may have dropped the message or be holding it. Nothing was duplicated and nothing else was tried; the next message to it goes another way.",
 };
-/** Events that prove a pending permission prompt was resolved some other way. */
-const CLOSES_ATTENTION = new Set([
-  "PostToolUse",
-  "PostToolUseFailure",
-  "Stop",
-  "StopFailure",
-  "UserPromptSubmit",
-  "SessionEnd",
-]);
+/** A permission prompt whose hook is held for an answer (CONTROL.md §7): the hook's
+ *  connection, and what tells a later event of its session that THIS question is over
+ *  (attention.ts): the thread that asked and when. Null from a hook older than the rule,
+ *  whose prompt is let go by the session's next closing event, as it always was. */
+interface HeldPrompt {
+  hook: net.Socket;
+  agent: string | null;
+  at: number | null;
+}
 
 /** The message as the receiver carried it (control.json). */
 export interface Carried {
@@ -564,7 +565,8 @@ interface Live {
    *  `sessionpipe wait`, or no waiter. */
   channel: number | null;
   turnQueue: TurnPending[];
-  attentions: Map<string, net.Socket>;
+  /** Permission prompts whose hooks are held for an answer, by attention id. */
+  attentions: Map<string, HeldPrompt>;
   cwd?: string;
   transcript?: string;
   lastEvent: number;
@@ -800,7 +802,7 @@ export class ControlDaemon {
     for (const s of this.sdkSessions.values()) s.close();
     for (const l of this.live.values()) {
       l.waiter?.destroy();
-      for (const a of l.attentions.values()) a.destroy();
+      for (const a of l.attentions.values()) a.hook.destroy();
     }
     for (const c of this.conns) c.destroy();
     if (o.leaveSocket) {
@@ -1099,10 +1101,14 @@ export class ControlDaemon {
       case "permission": {
         const l = this.liveOf(req.session);
         const prev = l.attentions.get(req.attention);
-        if (prev && prev !== s) this.reply(prev, { op: "none" });
-        l.attentions.set(req.attention, s);
+        if (prev && prev.hook !== s) this.reply(prev.hook, { op: "none" });
+        l.attentions.set(req.attention, {
+          hook: s,
+          agent: typeof req.agent === "string" ? req.agent : null,
+          at: typeof req.at === "number" ? req.at : null,
+        });
         s.on("close", () => {
-          if (l.attentions.get(req.attention) === s) l.attentions.delete(req.attention);
+          if (l.attentions.get(req.attention)?.hook === s) l.attentions.delete(req.attention);
         });
         return;
       }
@@ -1145,9 +1151,25 @@ export class ControlDaemon {
     this.recordMode(named, e.mode);
     if (e.cwd) l.cwd = e.cwd;
     if (e.transcript) l.transcript = e.transcript;
-    if (CLOSES_ATTENTION.has(e.event) && l.attentions.size) {
-      for (const s of l.attentions.values()) this.reply(s, { op: "none" });
-      l.attentions.clear();
+    // A held permission prompt is let go by the event that says its question is over:
+    // the terminal answered it, or the turn it was asked in is gone (CONTROL.md §7). Not
+    // by any event of the session: a subagent's tool ending in the background let go of
+    // the main thread's prompt while the terminal still asked, and the answer from the
+    // page was refused, `no_attention`.
+    const type = CLOSERS[e.event];
+    if (type && l.attentions.size) {
+      const said = {
+        type,
+        agent: typeof e.agent === "string" ? e.agent : null,
+        call: typeof e.call === "string" ? e.call : null,
+        at: typeof e.at === "number" ? e.at : null,
+        background: typeof e.background === "number" ? e.background : null,
+      };
+      for (const [id, held] of l.attentions) {
+        if (!questionOver({ id, agent: held.agent, at: held.at }, said)) continue;
+        l.attentions.delete(id);
+        this.reply(held.hook, { op: "none" });
+      }
     }
     if (e.event === "UserPromptSubmit" || e.event === "SessionStart") {
       if (e.event === "UserPromptSubmit") {
@@ -2088,7 +2110,7 @@ export class ControlDaemon {
 
   private permission(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number) {
     const l = this.live.get(cmd.session);
-    const hook = l?.attentions.get(cmd.for as string);
+    const hook = l?.attentions.get(cmd.for as string)?.hook;
     if (!hook) {
       // Nothing is ever auto-allowed: an allow needs a prompt open right now.
       if (cmd.decision === "allow")
