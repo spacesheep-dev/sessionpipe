@@ -366,23 +366,27 @@ describe.runIf(unix)("a route chosen while a run of the daemon's own was in the 
     expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
   });
 
-  it("a copy that is open in a window is being copied: a message for the original meanwhile is not resumed in it", async () => {
+  it("a copy that is open in a window: named by its own id or by the original's, it is neither copied nor resumed", async () => {
     copied(O, C);
     holds(C, "interactive");
     await startDaemon();
+    // Named by its own id, as its own page names it. It was copied (a copy of a copy),
+    // and for the length of that copy counted as the daemon's own: a message for the
+    // original meanwhile was resumed in it, beside the window.
     const first = await hand({ session: cc(C), text: "first [slow]" });
-    await until(() => runs().length === 1);
-    expect(ran()).toEqual([`fork ${C.slice(0, 8)}`]);
-    // The run that copies a session runs in the copy it makes: the session it copies
-    // from is exactly as held as it was. Marked as the daemon's own for the length of
-    // the copy, it was resumed in place when the copy was done.
+    expect(await rx.waitAck(first.id)).toMatchObject({
+      outcome: "unsupported",
+      detail:
+        "that copy was open in Claude Code on this computer (a terminal window or the Claude app), and a copy is never itself copied",
+    });
     const second = await hand({ session: cc(O), text: "second" });
-    const ack = await rx.waitAck(second.id);
-    expect(ack).toMatchObject({ outcome: "unsupported" });
-    expect(String(ack.detail)).toContain(never);
-    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
-    await sleep(300);
-    expect(ran()).toEqual([`fork ${C.slice(0, 8)}`]);
+    expect(await rx.waitAck(second.id)).toMatchObject({
+      outcome: "unsupported",
+      detail:
+        "the copy this session's messages go to was open in Claude Code on this computer (a terminal window or the Claude app), and a copy is never itself copied",
+    });
+    expect(runs()).toEqual([]);
+    expect(never).toBe("a copy is never itself copied");
   });
 
   describe("another harness's session of the same id", () => {
