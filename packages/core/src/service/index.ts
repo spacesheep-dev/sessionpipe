@@ -123,7 +123,8 @@ export function ensureLinger(user: string, exec: Exec = execQuiet): { on: boolea
 export interface ServicePlan {
   /** The files written (or that would be). */
   files: ServiceFile[];
-  /** The commands run (or that would be), one string each, in order. */
+  /** The commands run (or that would be), one string each, in order; launchd's looks
+   *  at what it has (`launchctl print`) between them aren't among them. */
   commands: string[];
   /** Which manager runs it now: null on a platform with none, or where it isn't reachable. */
   manager: "launchd" | "systemd" | null;
@@ -181,11 +182,13 @@ export function installService(o: InstallOptions): ServicePlan {
       try {
         run("launchctl", ["bootout", `${d}/${uid}/${o.label}`]);
       } catch {}
+    let refusal: unknown;
     const gui = (): boolean => {
       try {
         run("launchctl", ["bootstrap", `gui/${uid}`, f.plist.path]);
         return true;
-      } catch {
+      } catch (e) {
+        refusal = e;
         return false;
       }
     };
@@ -202,6 +205,8 @@ export function installService(o: InstallOptions): ServicePlan {
       }
     };
     const atScreen = has(`gui/${uid}`);
+    // A service is in one domain, and a look at the other doesn't see it.
+    const there = () => has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
     if (atScreen) {
       // The gui domain is there, so the refusal is about the service: `bootout` answers
       // at once, and the service it booted out stays until its process has exited. A
@@ -209,7 +214,6 @@ export function installService(o: InstallOptions): ServicePlan {
       // the user domain too, and the machine is left with no service at all. So: wait
       // for the old one to be gone, then start the new one.
       const sleep = o.sleep ?? sleepSync;
-      const there = () => has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
       for (let waited = 0; waited < LET_GO_MS && there(); waited += LOOK_MS) sleep(LOOK_MS);
       if (gui()) return started;
     }
@@ -219,11 +223,15 @@ export function installService(o: InstallOptions): ServicePlan {
     try {
       run("launchctl", ["bootstrap", `user/${uid}`, f.plist.path]);
     } catch {
+      const code = (refusal as { status?: unknown }).status;
+      const said = typeof code === "number" ? ` (launchctl answered ${code})` : "";
       const by = `\`launchctl bootstrap gui/${uid} ${f.plist.path}\``;
       throw new Error(
-        atScreen
-          ? `launchd didn't start ${o.label}, and nothing runs it now: ${by} starts it (its file is written)`
-          : `launchd didn't start ${o.label} from a login that isn't at this Mac's screen: log in there and run ${by} (its file is written)`,
+        !atScreen
+          ? `launchd didn't start ${o.label}${said}: no login at this Mac's screen can be seen from here (nobody is logged in there, or launchctl is blocked). From a login at the screen, ${by} starts it (its file is written)`
+          : there()
+            ? `launchd didn't start the new ${o.label}${said}: the one that was running is still loaded. \`launchctl bootout gui/${uid}/${o.label}\`, then ${by} (its file is written)`
+            : `launchd didn't start ${o.label}${said}, and nothing runs it now: ${by} starts it (its file is written)`,
       );
     }
     return { files: [f.plist], commands, manager: "launchd", domain: "user" };
