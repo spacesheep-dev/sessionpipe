@@ -631,7 +631,10 @@ those hooks report to the machine at all, a daemon SHOULD wait a short while for
 say that a turn began (the reference daemon: two seconds, acking `taken` meanwhile) and
 then route the message again, once: `turn` if they have, the inbox if the window is idle
 after all, and otherwise what the ladder says. A `cancel` meanwhile ends the wait, and
-the message is acked as any stopped before it ran.
+the message is acked as any stopped before it ran. The second look is taken only where
+this mode is one the machine has at all: on a platform where it cannot read a window's
+inbox (Windows), and for a window that offers none, the row is not consulted and such a
+message is answered in a copy as before.
 
 **A write is not delivery, and a turn is not proof by itself.** The daemon MUST confirm
 within a short window (8 s here) that the session began a turn **for this message** —
