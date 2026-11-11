@@ -1,6 +1,0 @@
----
-"sessionpipe-core": patch
-"sessionpipe": patch
----
-
-Stop (`cancel`) now stops a turn the daemon itself is running. A session started or resumed from a page runs as a `claude -p` (or `codex exec`, `agy`) child of the daemon, and a Stop for it used to be acked `unsupported` while the turn ran to its end. The daemon now ends that child the way it ends one at the 30-minute cap (SIGTERM to its process group, then SIGKILL to whatever is left, ten seconds later or as the child exits), acks the cancel `taken` and then `delivered` with the turn's mode and "stopped the turn this computer was running for that session", and acks the stopped turn's own message `delivered` with what it had written, ending "(The turn was cancelled.)". A message queued behind the stopped turn still runs next, in order. A turn in a process the daemon did not start is never signalled: the cancel is `unsupported` and says who has the session ("…open in Claude Code on this computer (a terminal window or the Claude app)… press Esc there", or the pid of someone else's headless run), and a session nothing is running in is `expired` ("nothing is running in that session as far as this computer can tell, so there was nothing to stop"). spec/CONTROL.md §6 `cancel` says so, with fixtures `conformance/delivery/30`–`33`.
