@@ -462,6 +462,3 @@ describe.runIf(unix)("a turn running in the copy a session's messages go to", ()
     expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
   });
 });
-
-// The helpers the later groups use.
-void [MADE];
