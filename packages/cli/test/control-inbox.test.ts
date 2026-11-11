@@ -673,12 +673,15 @@ describe.runIf(unix)("what the lane will not write into", () => {
     row();
     await startDaemon();
     await sawMode("bypassPermissions");
-    // A run of its own holds it: the message queues behind that run and resumes the
-    // session, and nothing is written into an inbox the daemon itself is driving.
-    (d as unknown as { ownRuns: Map<string, number> }).ownRuns.set(SID, 1);
+    // A run of its own holds it: the message queues behind that run, and nothing is
+    // written into an inbox the daemon itself is driving. (Its runs are kept under the
+    // session's ref.) When the message's turn comes the window still has the session,
+    // so it is not resumed beside it either: it runs in a copy.
+    (d as unknown as { ownRuns: Map<string, number> }).ownRuns.set(SESSION, 1);
     const q = await rx.send({ session: SESSION, kind: "prompt", text: "mine already" });
-    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(await rx.waitAck(q.id, 15_000)).toMatchObject({ outcome: "delivered", mode: "fork" });
     expect(written).toEqual([]);
+    expect(log.some((l) => l.includes("is held now (open)") && l.includes("routed again"))).toBe(true);
   });
 
   it("off macOS it reads the inbox's key first, and sends it with the message", async () => {

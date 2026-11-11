@@ -327,5 +327,107 @@ describe.runIf(unix)("a run asked for a copy that ran as the original instead", 
   });
 });
 
+describe.runIf(unix)("a route chosen while a run of the daemon's own was in the way", () => {
+  // The daemon's own run in a session is not somebody else holding it: a message that
+  // comes meanwhile is to wait for that run and resume the session after it. Whether
+  // the session may be resumed is a fact about the moment the resume begins.
+  const never = "a copy is never itself copied";
+
+  it("a window opens the copy while the daemon runs in it: the message that waited is not resumed beside the window", async () => {
+    copied(O, C);
+    await startDaemon();
+    const first = await hand({ session: cc(C), text: "first [long]" });
+    await until(() => rx.progress(first.id).length > 0);
+    // Sent to the original, whose messages go to the copy: it waits for the run there.
+    const second = await hand({ session: cc(O), text: "second" });
+    await until(() => acksOf(second.id).includes("taken"));
+    // The person opens the copy in a window, and the daemon's run in it ends.
+    holds(C, "interactive");
+    const stop = await stopNow(cc(C));
+    expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "delivered" });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    // Its turn comes with the copy open in a window: routed as it would be sent now.
+    const ack = await rx.waitAck(second.id);
+    expect(ack).toMatchObject({ outcome: "unsupported" });
+    expect(String(ack.detail)).toContain("was open in Claude Code on this computer");
+    expect(String(ack.detail)).toContain(never);
+    expect(ran()).toEqual([`resume ${C.slice(0, 8)}`]);
+    expect(log.some((l) => l.includes(second.id.slice(-8)) && l.includes("routed again"))).toBe(true);
+  });
+
+  it("the same and nothing took the copy meanwhile: it is resumed after the run it waited for, as before", async () => {
+    copied(O, C);
+    await startDaemon();
+    const first = await hand({ session: cc(C), text: "first [slow]" });
+    await until(() => runs().length === 1);
+    const second = await hand({ session: cc(O), text: "second" });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+    expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
+  });
+
+  it("a copy that is open in a window is being copied: a message for the original meanwhile is not resumed in it", async () => {
+    copied(O, C);
+    holds(C, "interactive");
+    await startDaemon();
+    const first = await hand({ session: cc(C), text: "first [slow]" });
+    await until(() => runs().length === 1);
+    expect(ran()).toEqual([`fork ${C.slice(0, 8)}`]);
+    // The run that copies a session runs in the copy it makes: the session it copies
+    // from is exactly as held as it was. Marked as the daemon's own for the length of
+    // the copy, it was resumed in place when the copy was done.
+    const second = await hand({ session: cc(O), text: "second" });
+    const ack = await rx.waitAck(second.id);
+    expect(ack).toMatchObject({ outcome: "unsupported" });
+    expect(String(ack.detail)).toContain(never);
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    await sleep(300);
+    expect(ran()).toEqual([`fork ${C.slice(0, 8)}`]);
+  });
+
+  describe("another harness's session of the same id", () => {
+    let fakeCodex: string;
+    beforeEach(() => {
+      // `codex exec --json`: a thread, a message, and a moment's work.
+      fakeCodex = path.join(tmp, "bin", "codex");
+      writeFileSync(
+        fakeCodex,
+        `#!/usr/bin/env node
+const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+out({ type: "thread.started", thread_id: "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c" });
+out({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: "On it." } });
+setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); }, 900);
+`,
+      );
+      chmodSync(fakeCodex, 0o755);
+    });
+
+    it("a Codex session the daemon starts is not a run of its own in the Claude Code session of that id: the window's session is copied, and not made to wait", async () => {
+      holds(O, "interactive");
+      await startDaemon({ extra: { codex: () => fakeCodex } });
+      const start = await hand({ kind: "start", session: `codex:${O}`, cwd: project, text: "a codex session" });
+      await until(() => rx.progress(start.id).length > 0);
+      const prompt = await hand({ session: cc(O), text: "for the claude session" });
+      // Answered while Codex still works: the two share an id and nothing else.
+      expect(await rx.waitAck(prompt.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: cc(O) });
+      expect(rx.finalAck(start.id)).toBeUndefined();
+      expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered", reply: "On it." });
+      expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
+    });
+
+    it("and its end accounts for no write to that Claude Code session", async () => {
+      await startDaemon({ extra: { codex: () => fakeCodex } });
+      const start = await hand({ kind: "start", session: `codex:${O}`, cwd: project, text: "a codex session" });
+      await until(() => rx.progress(start.id).length > 0);
+      // Something writes to the Claude Code session while Codex works; no row names it.
+      touch(O);
+      expect(await rx.waitAck(start.id)).toMatchObject({ outcome: "delivered" });
+      const prompt = await hand({ session: cc(O), text: "for the claude session" });
+      expect(await rx.waitAck(prompt.id)).toMatchObject({ outcome: "delivered", mode: "fork", copy_of: cc(O) });
+      expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
+    });
+  });
+});
+
 // The helpers the later groups use.
-void [C, MADE, copied, stopNow];
+void [MADE];

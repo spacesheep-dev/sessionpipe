@@ -629,6 +629,10 @@ export class ControlDaemon {
   private readonly acks: AckOutbox;
   private readonly recentAcks = new Map<string, { ack: Ack; at: number }>();
   private readonly inflight = new Set<string>();
+  /** Each session's runs, one at a time (`serial`). Like `ownRuns` and `lastEnd`, kept
+   *  under the session's ref, harness and all: `codex:<id>` and `claude-code:<id>` are
+   *  two sessions, and under the bare id a Codex session the daemon started stood for a
+   *  run of its own in the Claude Code session a window had open. */
   private readonly queues = new Map<string, Promise<unknown>>();
   /** Each session's messages, one at a time and in the order they were sent (line.ts). */
   private readonly lines = new Lines();
@@ -1581,14 +1585,14 @@ export class ControlDaemon {
       // Antigravity, no name) yet: wait for that start, then place it again. Never a Stop:
       // one that waited for the start to end would find nothing left to stop.
       const starting = kp === "prompt" ? this.startsPending.get(cmd.session) : undefined;
-      const forStart = kp !== "cancel" && "refused" in place && (!!starting || this.ownRuns.has(ref.id));
+      const forStart = kp !== "cancel" && "refused" in place && (!!starting || this.ownRuns.has(cmd.session));
       // No such session, and no start of it to wait for: said now, not when its turn comes.
       if ("refused" in place && !forStart) return this.finish(r, m.id, refusal(place));
       if (forStart) this.finish(r, m.id, { outcome: "taken" });
       const started = async (): Promise<void> => {
         if (!forStart) return;
         await starting;
-        await this.serial(ref.id, async () => {});
+        await this.serial(cmd.session, async () => {});
       };
       const deliver = async (run: OwnRun | null): Promise<void> => {
         // Read again: the start has ended, or the message before this one may have moved
@@ -2178,8 +2182,9 @@ export class ControlDaemon {
    *  reports none of them, and the next message then waited up to half an hour for a
    *  Stop that was never coming. */
   private runOver(harness: string, id: string): void {
-    this.lastEnd.set(id, this.deps.now());
-    const l = this.live.get(`${harness}:${id}`);
+    const session = `${harness}:${id}`;
+    this.lastEnd.set(session, this.deps.now());
+    const l = this.live.get(session);
     if (l) this.notMidTurn(l);
   }
 
@@ -2243,7 +2248,7 @@ export class ControlDaemon {
     const key = `claude-code:${target}`;
     // A run of the daemon's own holding it is not a session to write into: the message
     // queues behind that run and resumes it.
-    if (this.ownRuns.has(target)) return null;
+    if (this.ownRuns.has(key)) return null;
     // The proof that the session took a message written here is the row its turn begins
     // with, found by the message's mark, and only a whole ULID makes one (core's
     // `messageMark`). A message with none could be written and never told from the
@@ -2412,6 +2417,10 @@ export class ControlDaemon {
     /** The message has a mark its turn can be recognised by (`waiterFits`). An ask and a
      *  relay always have: their ids are the daemon's own. */
     marked = true,
+    /** What holds the session, where the caller has just found out (a resume whose turn
+     *  came with the session held, `headless`): it is not looked up again, and the
+     *  daemon's own run does not stand for "not held". */
+    known: Holder | null = null,
   ) {
     const ref = parseSessionRef(session)!;
     const l = this.live.get(session);
@@ -2420,9 +2429,7 @@ export class ControlDaemon {
       // finished is a session in use. Antigravity keeps no file that says so: only the
       // daemon's own run (whose messages wait in line behind it) holds one.
       const held: Holder | null =
-        !this.ownRuns.has(ref.id) &&
-        place.file &&
-        recentlyWritten(place.file, this.endedAt(session, ref.id), this.deps.now())
+        !this.ownRuns.has(session) && place.file && recentlyWritten(place.file, this.endedAt(session), this.deps.now())
           ? "recent"
           : null;
       return {
@@ -2447,8 +2454,9 @@ export class ControlDaemon {
     const target = this.state.copies[ref.id]?.id ?? ref.id;
     const t = transcript;
     // The daemon's own run holding it is not "someone else's live process": the message
-    // queues behind that run (serial per session) and resumes it.
-    const held = !this.ownRuns.has(target) && t ? this.heldBy(target, t) : null;
+    // queues behind that run (serial per session) and resumes it, if it may be resumed
+    // when its turn comes (headless()).
+    const held = known ?? (!this.ownRuns.has(`claude-code:${target}`) && t ? this.heldBy(target, t) : null);
     return {
       harness: ref.harness,
       sdk: this.sdkSessions.has(ref.id),
@@ -2482,7 +2490,7 @@ export class ControlDaemon {
     const now = this.deps.now();
     return holderOf(
       liveRecords(target, t.configDir),
-      recentlyWritten(t.file, this.endedAt(key, target), now) || this.strayedInto(key, now),
+      recentlyWritten(t.file, this.endedAt(key), now) || this.strayedInto(key, now),
     );
   }
 
@@ -2499,8 +2507,8 @@ export class ControlDaemon {
 
   /** The last time a run of this session is known to have finished: one of the daemon's
    *  own (its child process closed), or the session's own end as its hooks reported it. */
-  private endedAt(session: string, id: string): number | undefined {
-    return Math.max(this.lastEnd.get(id) ?? 0, this.live.get(session)?.ended ?? 0) || undefined;
+  private endedAt(session: string): number | undefined {
+    return Math.max(this.lastEnd.get(session) ?? 0, this.live.get(session)?.ended ?? 0) || undefined;
   }
 
   private async prompt(
@@ -2509,7 +2517,9 @@ export class ControlDaemon {
     cmd: ControlCommand,
     place: Placed,
     sent: number,
-    o: { noInbox?: boolean } = {},
+    /** `held`: what holds the session, where the caller found out a moment ago and is
+     *  routing the message again because of it (headless()). */
+    o: { noInbox?: boolean; held?: Holder } = {},
   ): Promise<void> {
     const text = cmd.text as string;
     // An ask (a sink caller) never takes the inbox rung: its cap holds only where the
@@ -2522,11 +2532,11 @@ export class ControlDaemon {
     // What a session writes for a message handed to it in place is found by the message's
     // mark, which is made of its id and only of a whole ULID (core's `messageMark`).
     const marked = messageMark(id) !== null;
-    const bare = this.view(cmd.session, place, null, marked);
+    const bare = this.view(cmd.session, place, null, marked, o.held);
     const first = routePrompt(bare);
     const over = o.noInbox || isSink(r) || ("mode" in first && earlier(first.mode, "inbox"));
     const look = over ? null : this.inboxLook(cmd.session, place, { iat: cmd.iat, body: framed, id });
-    const seen = over ? bare : this.view(cmd.session, place, look, marked);
+    const seen = over ? bare : this.view(cmd.session, place, look, marked, o.held);
     const route = over ? first : routePrompt(seen);
     // Said before the message's own outcome: why the session was not reached in place is
     // the machine's own business, and it is the same fact whether the rung below it
@@ -2645,7 +2655,7 @@ export class ControlDaemon {
           // never used. The vetting happened a moment ago; what changes here is the
           // session ending between the look and the first byte.
           this.deps.log(`${id.slice(-8)}: the inbox lane refused before writing (${out.code}: ${out.detail})`);
-          return this.prompt(r, id, cmd, place, sent, { noInbox: true });
+          return this.prompt(r, id, cmd, place, sent, { ...o, noInbox: true });
         }
         this.deps.log(`${id.slice(-8)}: into ${key.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
         this.letGo(this.runOf(id));
@@ -2783,7 +2793,7 @@ export class ControlDaemon {
     if (ready === STOPPED) return this.finish(r, id, this.stoppedAck("resume"), sent);
     if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
     this.finish(r, id, { outcome: "taken" });
-    await this.serial(ref.id, async () => {
+    await this.serial(cmd.session, async () => {
       // Read again: the start this waited for may have named the session meanwhile.
       const alias = this.aliasOf(ref.harness, ref.id);
       /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
@@ -2849,7 +2859,7 @@ export class ControlDaemon {
       name();
     };
     const run = this.runOf(id);
-    const res = await this.owning(ref.id, () =>
+    const res = await this.owning(`${ref.harness}:${ref.id}`, () =>
       this.ownRun(run, bin, args, {
         cwd,
         env: { ...jobEnv(this.deps.env), ...extra },
@@ -2931,11 +2941,20 @@ export class ControlDaemon {
     // One run at a time in a transcript, whichever name the message came under: one
     // for the session and one sent to its copy by the copy's own id both run in the
     // copy, and queued under their own ids they ran in it side by side.
+    const key = `claude-code:${target}`;
     let entered = false;
-    const queued = this.serial(target, async () => {
+    let heldNow: Holder | null = null;
+    const queued = this.serial(key, async () => {
       // Stopped while it waited for the run before it: acked there and then (below), and
       // it never starts.
       if (run.ctl.signal.aborted) return;
+      // A resume was chosen when the message was routed, and that may have been while a
+      // run of the daemon's own was in this transcript, which stands for "not held"
+      // (view()). Its turn has come, that run is over, and whether the session may be
+      // resumed is a fact about now: a window that opened it meanwhile holds it. Held,
+      // it is not resumed: the message is routed again (below), as if it had just come.
+      if (mode === "resume") heldNow = this.heldBy(target, place.transcript as Transcript);
+      if (heldNow) return;
       entered = true;
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.
@@ -2970,7 +2989,7 @@ export class ControlDaemon {
       // The session the run says it is, as soon as it says so: a copy stopped before its
       // result line is still a copy on disk, and later messages must find it.
       const said: { session: string | null } = { session: null };
-      const res = await this.owning(target, () =>
+      const go = (): Promise<RunResult> =>
         this.ownRun(run, claude.bin, args, {
           cwd: place.folder,
           env: {
@@ -2998,8 +3017,12 @@ export class ControlDaemon {
                 },
               }
             : {}),
-        }),
-      );
+        });
+      // The daemon's own in `target` for as long as it runs there, which a copy's run
+      // never does: it runs in the copy it makes, and the session it copies from is
+      // exactly as held as it was. Marked as the daemon's own for the length of a copy,
+      // a session open in a window was resumed in place by the next message for it.
+      const res = await (mode === "fork" ? go() : this.owning(key, go));
       stream.close();
       // Stopped on the person's request (a `cancel`): what it had said, and that it was
       // cancelled. Its mode is not reported: the turn it would describe never finished.
@@ -3071,9 +3094,16 @@ export class ControlDaemon {
     // Once it has its place the run itself is what is stopped (ownRun).
     const ran = queued.then(() => null);
     const waited = await Promise.race([ran, run.stoppedSoon.then(() => (entered ? ran : STOPPED))]);
-    if (waited !== STOPPED) return;
-    run.stopped = true;
-    this.finish(r, id, this.stoppedAck(mode), sent);
+    if (waited === STOPPED) {
+      run.stopped = true;
+      return this.finish(r, id, this.stoppedAck(mode), sent);
+    }
+    const held = heldNow as Holder | null;
+    if (!held) return;
+    this.deps.log(
+      `${id.slice(-8)}: ${cmd.session.slice(0, 24)} is held now (${held}), so it is not resumed after the wait; routed again`,
+    );
+    return this.prompt(r, id, cmd, place, sent, { held });
   }
 
   /** What the ack says about the mode a cold run turned out to have (CONTROL.md §6
@@ -3327,11 +3357,10 @@ export class ControlDaemon {
     }
     this.startsRunning++;
     this.startTimes.push(now);
-    const sid = parseSessionRef(cmd.session)!.id;
     try {
       // On the session's own queue, and held as the daemon's own: a message sent while
       // the start still runs waits for it and resumes the session, never forks it.
-      await this.serial(sid, () => this.owning(sid, () => this.startOne(r, id, cmd, sent)));
+      await this.serial(cmd.session, () => this.owning(cmd.session, () => this.startOne(r, id, cmd, sent)));
     } finally {
       this.startsRunning--;
     }
@@ -3548,14 +3577,14 @@ export class ControlDaemon {
     const found = this.deps.acp?.(ref.harness) ?? null;
     if (!found) return this.finish(r, id, { outcome: "failed", detail: `${label} isn't installed on this machine` });
     this.finish(r, id, { outcome: "taken" });
-    await this.serial(ref.id, async () => {
+    await this.serial(cmd.session, async () => {
       /* v8 ignore next -- placeDriven() always names a target; the last fallback is for the type */
       const target = this.aliasOf(ref.harness, ref.id)?.id ?? place.target ?? ref.id;
       this.deps.log(
         `${id.slice(-8)}: ${found.bin} reopens ${target.slice(0, 8)} (${this.cfg.mode}) in ${place.folder}`,
       );
       const stream = this.answerStream(r, id);
-      const out = await this.owning(ref.id, () =>
+      const out = await this.owning(cmd.session, () =>
         this.slot(async () => {
           const opened = await this.openAcp(id, found, place.folder, label, stream, {
             load: target,
