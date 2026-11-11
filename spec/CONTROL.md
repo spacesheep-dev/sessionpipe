@@ -807,11 +807,12 @@ conversation unseen.
 
 Delivered through the harness's permission hook answer (Claude Code `PermissionRequest`
 → `hookSpecificOutput.decision.behavior`; Codex `PermissionRequest`). The hook waits on
-the daemon's socket for a signed answer for up to its window (default 120 s) **while
+the daemon's socket for a signed answer for up to its window (default 125 s) **while
 the terminal shows its own prompt**: whichever answers first wins. When the terminal
 answers first, the harness does not tell the hook; the daemon learns it from the first
 later hook event of that session that says this question is over (§7: its own thread's
-tool result, a Stop, a new prompt — never another thread's), closes the attention,
+tool result; a Stop or a new prompt where the main thread asked; where a subagent
+asked, its own stop or a Stop with nothing left in flight), closes the attention,
 releases the waiting hook without an answer, and acks a later answer `expired`. Gemini
 CLI's `Notification` of type `ToolPermission` has no answer channel: acked
 `unsupported`. **Nothing is ever auto-allowed**: a daemon MUST NOT answer `allow` for an
@@ -1128,6 +1129,18 @@ An event timed **before** the `attention.needed` says nothing about it, however 
 arrives: a sender records a hook when it gets to it, and the tool call before the
 question can be recorded after it. Nothing else closes one: not a `tool.started`, a
 `subagent.started` or another `attention.needed`.
+
+Two limits of reading a question's end off later events, both known:
+
+- A thread that runs several tool calls side by side ends its own question at a
+  sibling call's result, with the terminal still asking: a result does not say which
+  question, if any, was about its call. An answer after that is refused
+  `no_attention`, as any answer was up to 0.13.5 once a subagent's tool had ended.
+- A question can be over with no event that says so: the terminal refused it and only
+  other threads report afterwards, or a subagent asked and the turn was interrupted.
+  The machine goes on holding the hook until its window closes, and an answer in that
+  time is handed to a hook the harness no longer waits on: acked `delivered`, and it
+  changes nothing.
 
 A receiver SHOULD show the Allow / Deny pair only while the attention is open, and a
 machine holds the prompt's hook for an answer for exactly as long (§6

@@ -67,7 +67,7 @@ import {
 import type { Pool } from "../pool/index.js";
 import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
-import { CLOSERS, questionOver } from "./attention.js";
+import { closerOf, questionOver } from "./attention.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
@@ -1156,7 +1156,7 @@ export class ControlDaemon {
     // by any event of the session: a subagent's tool ending in the background let go of
     // the main thread's prompt while the terminal still asked, and the answer from the
     // page was refused, `no_attention`.
-    const type = CLOSERS[e.event];
+    const type = closerOf(e.event);
     if (type && l.attentions.size) {
       const said = {
         type,

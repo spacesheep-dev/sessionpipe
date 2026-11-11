@@ -30,6 +30,13 @@ export const CLOSERS: Readonly<Record<string, Closer>> = {
   SessionEnd: "session.ended",
 };
 
+/** The closer a hook event is, or null. By its own name only: a plain object also
+ *  answers to `constructor`, `toString` and the rest of what it inherits, and an event
+ *  so named would have been taken for one that ends a question. */
+export function closerOf(event: string): Closer | null {
+  return Object.hasOwn(CLOSERS, event) ? (CLOSERS[event] as Closer) : null;
+}
+
 /** A question as it was asked. */
 export interface Asked {
   /** Its `attention_id`: the tool call's own id where the harness names one. */
