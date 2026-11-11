@@ -143,12 +143,23 @@ export interface InstallOptions extends ServiceSpec {
   /** The user's id (launchd's domains) and name (linger); this process's by default. */
   uid?: string;
   user?: string;
+  /** How a wait for launchd passes; this thread sleeps by default. */
+  sleep?: (ms: number) => void;
 }
 
 const line = (cmd: string, args: string[]) => [cmd, ...args].join(" ");
 
+const sleepSync = (ms: number) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/** How long launchd is given to let go of a service it was told to boot out. It signals
+ *  the process and removes the service when that exits, killing it after 5 s by default. */
+const LET_GO_MS = 10_000;
+const LOOK_MS = 100;
+
 /** Write the service for this platform and start it now; a service already there is
- *  replaced (launchd: booted out first). */
+ *  replaced (launchd: booted out first, and started once the old one is gone). */
 export function installService(o: InstallOptions): ServicePlan {
   const f = serviceFiles(o);
   const platform = o.platform ?? process.platform;
@@ -170,14 +181,51 @@ export function installService(o: InstallOptions): ServicePlan {
       try {
         run("launchctl", ["bootout", `${d}/${uid}/${o.label}`]);
       } catch {}
-    try {
-      run("launchctl", ["bootstrap", `gui/${uid}`, f.plist.path]);
-      return { files: [f.plist], commands, manager: "launchd", domain: "gui" };
-    } catch {}
+    const gui = (): boolean => {
+      try {
+        run("launchctl", ["bootstrap", `gui/${uid}`, f.plist.path]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const started: ServicePlan = { files: [f.plist], commands, manager: "launchd", domain: "gui" };
+    if (gui()) return started;
+    // `launchctl print` exits non-zero for a domain or a service launchd doesn't have.
+    // A look, not a step: it isn't one of the plan's commands.
+    const has = (target: string): boolean => {
+      try {
+        real("launchctl", ["print", target]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const atScreen = has(`gui/${uid}`);
+    if (atScreen) {
+      // The gui domain is there, so the refusal is about the service: `bootout` answers
+      // at once, and the service it booted out stays until its process has exited. A
+      // bootstrap in between is refused (5, or 37 "Operation already in progress"), in
+      // the user domain too, and the machine is left with no service at all. So: wait
+      // for the old one to be gone, then start the new one.
+      const sleep = o.sleep ?? sleepSync;
+      const there = () => has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
+      for (let waited = 0; waited < LET_GO_MS && there(); waited += LOOK_MS) sleep(LOOK_MS);
+      if (gui()) return started;
+    }
     // No one logged in at the screen (an ssh session to a Mac mini): the gui domain
     // doesn't exist. The user domain runs it now; after a restart it starts again at
     // the next login at the screen.
-    run("launchctl", ["bootstrap", `user/${uid}`, f.plist.path]);
+    try {
+      run("launchctl", ["bootstrap", `user/${uid}`, f.plist.path]);
+    } catch {
+      const by = `\`launchctl bootstrap gui/${uid} ${f.plist.path}\``;
+      throw new Error(
+        atScreen
+          ? `launchd didn't start ${o.label}, and nothing runs it now: ${by} starts it (its file is written)`
+          : `launchd didn't start ${o.label} from a login that isn't at this Mac's screen: log in there and run ${by} (its file is written)`,
+      );
+    }
     return { files: [f.plist], commands, manager: "launchd", domain: "user" };
   }
   if (platform === "linux") {
