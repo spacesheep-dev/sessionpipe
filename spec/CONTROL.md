@@ -480,6 +480,18 @@ once; it is not copied, and nothing is said about a window. A daemon MUST NOT re
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.
 
+**Held is asked when the run begins, not when the message was routed.** A machine's own
+run in a session does not hold it against the next message: that message waits for the
+run and resumes the session after it, where a copy would set two agents on one task.
+This is the one case in which a resume is chosen while a process is in the transcript,
+so a daemon MUST look again when the waiting message's turn comes. Where something
+holds the session then — a window that opened it meanwhile — it MUST NOT be resumed:
+the message is routed afresh, as if it had just arrived (an in-place mode, a copy, or
+the reason neither is possible). A run that copies a session is not a run in the
+session it copies from and never stands for one. And a machine's record of its own runs
+is kept per session, harness and all: `codex:<id>` and `claude-code:<id>` are two
+sessions, and a run of the one says nothing about the other.
+
 **A session is the one its harness filed under that id, spelled as the harness spelled
 it.** Everything that says a session is held is kept under its id: the registry row, the
 reports of its hooks, the machine's own record of its runs. A machine MUST find a
