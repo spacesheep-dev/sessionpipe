@@ -1,0 +1,141 @@
+{
+  "spec": "CONTROL.md §6 `cancel`, A cancel is for what was sent before it",
+  "note": "Whether a cancel that is through its own checks waits before it acts. `in_hand`: a turn for its session is already the machine's to stop. `coming`: the starts and prompts that have arrived and are not in hand yet, each with `kind`, `session` (`same`: the session the cancel names; `copy`: the copy that session's messages go to, or the session whose copy the cancel names; `other`: another session), `signed_ms` (when it was signed, relative to the cancel: negative is earlier) and `ready` (nothing but its own checks stands between it and being in hand; a prompt that waits behind another message's turn is not). `expect` is `waits` (until one of them is in hand or refused: milliseconds) or `acts` (at once, on whatever is in hand).",
+  "cases": [
+    {
+      "name": "a start that came with the Stop and is still being verified",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "start",
+          "session": "same",
+          "signed_ms": -40,
+          "ready": true
+        }
+      ],
+      "expect": "waits"
+    },
+    {
+      "name": "a prompt signed 5 ms before the Stop, listed after it in the poll",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": -5,
+          "ready": true
+        }
+      ],
+      "expect": "waits"
+    },
+    {
+      "name": "signed in the same millisecond",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": 0,
+          "ready": true
+        }
+      ],
+      "expect": "waits"
+    },
+    {
+      "name": "a prompt signed after the Stop: the person stopped one thing and sent another",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": 5,
+          "ready": true
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "a prompt that waits behind another message's turn is not cancelled, and not waited for",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": -900,
+          "ready": false
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "another session's start",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "start",
+          "session": "other",
+          "signed_ms": -40,
+          "ready": true
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "a prompt for the session whose copy the Stop names: it will run in that copy",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "copy",
+          "signed_ms": -5,
+          "ready": true
+        }
+      ],
+      "expect": "waits"
+    },
+    {
+      "name": "a turn is in hand already: that is what a Stop stops",
+      "in_hand": true,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": -5,
+          "ready": true
+        }
+      ],
+      "expect": "acts"
+    },
+    {
+      "name": "nothing in hand and nothing coming",
+      "in_hand": false,
+      "coming": [],
+      "expect": "acts"
+    },
+    {
+      "name": "one that must not be waited for and one that must",
+      "in_hand": false,
+      "coming": [
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": 20,
+          "ready": true
+        },
+        {
+          "kind": "start",
+          "session": "other",
+          "signed_ms": -20,
+          "ready": true
+        },
+        {
+          "kind": "prompt",
+          "session": "same",
+          "signed_ms": -20,
+          "ready": true
+        }
+      ],
+      "expect": "waits"
+    }
+  ]
+}

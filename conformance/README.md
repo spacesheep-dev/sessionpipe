@@ -38,9 +38,19 @@
   `stop-hook-ask.jsonl`, the same block carrying another session's ask (§13): the answer is
   found by the mark in the ask's paragraph, and a reader gives that paragraph back plain.
 - `control-held.json` — whether a Claude Code session is held, and by what (spec/CONTROL.md §6,
-  *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, expect }`, the registry rows
-  that name it, when its transcript was last written, and when a run of it is known to have
-  ended. Run by `packages/cli/test/control-daemon.test.ts`.
+  *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, turn_ms_ago?,
+  strayed_ms_ago?, expect }`, the registry rows that name it, when its transcript was last
+  written, when a run of it is known to have ended, when its own hooks last spoke of a turn
+  running in it, and when a run that was asked to copy it and may have run in it ended. Run by
+  `packages/cli/test/control-daemon.test.ts`.
+- `control-session-ids.json` — which Claude Code session an id names (spec/CONTROL.md §6):
+  `{ filed, asked, found, taken }`, the transcripts in a project folder, the id a command
+  names, the file that is that session's (its exact name, or none), and whether the id is
+  taken for a new session (in any spelling). Run by `packages/core/test/claude-control.test.ts`.
+- `control-cancel-waits.json` — when a `cancel` waits before it acts (spec/CONTROL.md §6
+  `cancel`): `{ in_hand, coming: [{ kind, session, signed_ms, ready }], expect }`, what is the
+  machine's to stop already, what has arrived and is not in hand yet, and `waits` or `acts`.
+  Run by `packages/cli/test/control-daemon.test.ts`.
 - `control-marks.json` — what a machine names a message by when it hands it to a live session
   (spec/CONTROL.md §6 `prompt`): `{ id, mark, channel }`, the receiver's unsigned `id`, the mark
   it makes for a frame and for a channel's tag, and null for every id that is not a whole ULID.

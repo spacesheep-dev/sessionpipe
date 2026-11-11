@@ -1198,7 +1198,14 @@ send → delivered time.
 - `conformance/control-held.json` — whether a session is held, and by what (§6, *What
   counts as held*): registry rows of a window and of another process's run, a transcript
   written seconds ago with and without an end that accounts for it, and the edges of the
-  two seconds and the ninety.
+  two seconds and the ninety; a turn its own hooks report, for the ten minutes their word
+  is good for; and a run asked to copy it that may have run in it instead.
+- `conformance/control-session-ids.json` — which session an id names (§6, *A session is
+  the one its harness filed under that id*): found under exactly its name, not found in
+  another spelling, and taken for a new session in any.
+- `conformance/control-cancel-waits.json` — when a `cancel` that is through its checks
+  waits before it acts (§6 `cancel`): for a start or a prompt for its session that was
+  signed no later than it and is still in its own checks, and for nothing else.
 - `conformance/transcripts/claude-code/stop-hook-ask.jsonl` — an ask handed to a live
   session at its Stop (§13): the paragraph that names the message, by which the daemon
   finds the answer, and which a reader gives back in its plain form.

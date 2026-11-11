@@ -1,18 +1,153 @@
 {
   "spec": "CONTROL.md §6, What counts as held",
-  "note": "Whether a Claude Code session is held, and by what, from what a machine can see of it: `rows` are the live rows of the harness's own session registry that name the session (`kind` as the row says it; a row whose process is gone is not one), `written_ms_ago` is how long ago its transcript was last written, and `ended_ms_ago`, where present, how long ago a run of it is known to have finished: a run of the machine's own, whose process it saw close, or the session's own end as its hooks reported it (SessionEnd). `expect` is `open` (a window has it), `running` (another process's run has it), `recent` (no row names it, and its transcript was written in the last 90 seconds by something that end does not account for) or null: nothing holds it, and a message resumes it in place. A held session is never resumed; it gets an in-place mode or a copy, and the copy's ack says which of the three it was.",
+  "note": "Whether a Claude Code session is held, and by what, from what a machine can see of it: `rows` are the live rows of the harness's own session registry that name the session (`kind` as the row says it; a row whose process is gone is not one), `written_ms_ago` is how long ago its transcript was last written, and `ended_ms_ago`, where present, how long ago a run of it is known to have finished: a run of the machine's own, whose process it saw close, or the session's own end as its hooks reported it (SessionEnd). `expect` is `open` (a window has it), `running` (another process's run has it), `recent` (no row names it, and its transcript was written in the last 90 seconds by something that end does not account for) or null: nothing holds it, and a message resumes it in place. A held session is never resumed; it gets an in-place mode or a copy, and the copy's ack says which of the three it was. Two more things a machine may know of the transcript a message would run in (the session's copy, where its messages go to one): `turn_ms_ago`, that its own hooks said a turn began in it and last said anything that long ago, with no end since, which holds it as `running` for ten minutes of silence and no longer; and `strayed_ms_ago`, that a run of the machine's own which was asked to COPY this session, and is not known to have run anywhere else, ended that long ago: whatever end the hooks reported then was that run's and accounts for nothing, so the session is held as `recent` for 90 seconds after it.",
   "cases": [
-    { "name": "a window has it open, idle for ten minutes", "rows": [{ "kind": "interactive" }], "written_ms_ago": 600000, "expect": "open" },
-    { "name": "another process's run of it (a headless run someone started)", "rows": [{ "kind": "print" }], "written_ms_ago": 1000, "expect": "running" },
-    { "name": "a row that says no kind is still a process that has it", "rows": [{ "kind": null }], "written_ms_ago": 600000, "expect": "running" },
-    { "name": "a run and a window: the window is what the person is told", "rows": [{ "kind": "print" }, { "kind": "interactive" }], "written_ms_ago": 1000, "expect": "open" },
-    { "name": "a window, though the session's end was once reported: the row is the harness's present word", "rows": [{ "kind": "interactive" }], "written_ms_ago": 5000, "ended_ms_ago": 4000, "expect": "open" },
-    { "name": "no row, written long ago: nothing holds it", "rows": [], "written_ms_ago": 600000, "expect": null },
-    { "name": "no row, written 5 s ago, and nothing known to have ended: a writer may still be there", "rows": [], "written_ms_ago": 5000, "expect": "recent" },
-    { "name": "no row, written 7 s ago by a headless run that exited then (its SessionEnd reported 6.9 s ago): resumed at once", "rows": [], "written_ms_ago": 7000, "ended_ms_ago": 6900, "expect": null },
-    { "name": "the last rows land up to two seconds after the end is reported: still that run's", "rows": [], "written_ms_ago": 3000, "ended_ms_ago": 4500, "expect": null },
-    { "name": "written again more than two seconds after the end: something else has it now", "rows": [], "written_ms_ago": 1000, "ended_ms_ago": 5000, "expect": "recent" },
-    { "name": "89 seconds after an unaccounted write", "rows": [], "written_ms_ago": 89000, "expect": "recent" },
-    { "name": "91 seconds after it", "rows": [], "written_ms_ago": 91000, "expect": null }
+    {
+      "name": "a window has it open, idle for ten minutes",
+      "rows": [
+        {
+          "kind": "interactive"
+        }
+      ],
+      "written_ms_ago": 600000,
+      "expect": "open"
+    },
+    {
+      "name": "another process's run of it (a headless run someone started)",
+      "rows": [
+        {
+          "kind": "print"
+        }
+      ],
+      "written_ms_ago": 1000,
+      "expect": "running"
+    },
+    {
+      "name": "a row that says no kind is still a process that has it",
+      "rows": [
+        {
+          "kind": null
+        }
+      ],
+      "written_ms_ago": 600000,
+      "expect": "running"
+    },
+    {
+      "name": "a run and a window: the window is what the person is told",
+      "rows": [
+        {
+          "kind": "print"
+        },
+        {
+          "kind": "interactive"
+        }
+      ],
+      "written_ms_ago": 1000,
+      "expect": "open"
+    },
+    {
+      "name": "a window, though the session's end was once reported: the row is the harness's present word",
+      "rows": [
+        {
+          "kind": "interactive"
+        }
+      ],
+      "written_ms_ago": 5000,
+      "ended_ms_ago": 4000,
+      "expect": "open"
+    },
+    {
+      "name": "no row, written long ago: nothing holds it",
+      "rows": [],
+      "written_ms_ago": 600000,
+      "expect": null
+    },
+    {
+      "name": "no row, written 5 s ago, and nothing known to have ended: a writer may still be there",
+      "rows": [],
+      "written_ms_ago": 5000,
+      "expect": "recent"
+    },
+    {
+      "name": "no row, written 7 s ago by a headless run that exited then (its SessionEnd reported 6.9 s ago): resumed at once",
+      "rows": [],
+      "written_ms_ago": 7000,
+      "ended_ms_ago": 6900,
+      "expect": null
+    },
+    {
+      "name": "the last rows land up to two seconds after the end is reported: still that run's",
+      "rows": [],
+      "written_ms_ago": 3000,
+      "ended_ms_ago": 4500,
+      "expect": null
+    },
+    {
+      "name": "written again more than two seconds after the end: something else has it now",
+      "rows": [],
+      "written_ms_ago": 1000,
+      "ended_ms_ago": 5000,
+      "expect": "recent"
+    },
+    {
+      "name": "89 seconds after an unaccounted write",
+      "rows": [],
+      "written_ms_ago": 89000,
+      "expect": "recent"
+    },
+    {
+      "name": "91 seconds after it",
+      "rows": [],
+      "written_ms_ago": 91000,
+      "expect": null
+    },
+    {
+      "name": "its own hooks say a turn is running in it, and last spoke 30 s ago; no row, nothing written lately",
+      "rows": [],
+      "written_ms_ago": 600000,
+      "turn_ms_ago": 30000,
+      "expect": "running"
+    },
+    {
+      "name": "the same turn, silent for ten minutes and a second: a session killed mid-turn never sends its Stop",
+      "rows": [],
+      "written_ms_ago": 700000,
+      "turn_ms_ago": 601000,
+      "expect": null
+    },
+    {
+      "name": "a turn by its hooks, in a session a window has open: the window is what the person is told",
+      "rows": [
+        {
+          "kind": "interactive"
+        }
+      ],
+      "written_ms_ago": 600000,
+      "turn_ms_ago": 30000,
+      "expect": "open"
+    },
+    {
+      "name": "a turn by its hooks and a write nothing accounts for: the write is what the machine found",
+      "rows": [],
+      "written_ms_ago": 5000,
+      "turn_ms_ago": 3000,
+      "expect": "recent"
+    },
+    {
+      "name": "a run asked to copy it ended 30 s ago and may have run in it; the end its hooks reported then is not the session's",
+      "rows": [],
+      "written_ms_ago": 30500,
+      "ended_ms_ago": 30000,
+      "strayed_ms_ago": 30000,
+      "expect": "recent"
+    },
+    {
+      "name": "91 seconds after such a run, nothing written since",
+      "rows": [],
+      "written_ms_ago": 91500,
+      "ended_ms_ago": 91000,
+      "strayed_ms_ago": 91000,
+      "expect": null
+    }
   ]
 }
