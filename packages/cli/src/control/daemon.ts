@@ -2484,14 +2484,25 @@ export class ControlDaemon {
    *  (`recent`) — unless the write is accounted for: no later than the end of a run of
    *  the daemon's own, or than the session's own end as its hooks reported it. A headless
    *  run someone started at a terminal that exited seven seconds ago is that last case:
-   *  it was copied for 90 seconds as "open in a window" (2026-11-10), and is resumed now. */
+   *  it was copied for 90 seconds as "open in a window" (2026-11-10), and is resumed now.
+   *
+   *  The session's own hooks holding it mid-turn count as `running` too, for the ten
+   *  minutes their word is good for (`midTurnNow`). For a session named by its own id
+   *  that never decides anything: the `turn` rung comes first on the ladder. */
   private heldBy(target: string, t: Transcript): Holder | null {
     const key = `claude-code:${target}`;
     const now = this.deps.now();
-    return holderOf(
+    const held = holderOf(
       liveRecords(target, t.configDir),
       recentlyWritten(t.file, this.endedAt(key), now) || this.strayedInto(key, now),
     );
+    // And where neither says so, the word of the session's own hooks that a turn is
+    // running in it: another process's run, whatever the registry shows. `target` is
+    // the transcript the message would run in, the copy where the session's messages
+    // go to one, and the copy's hooks report under the copy's id. Looked at only
+    // under the original's, a copy mid-turn was resumed in the middle of that turn.
+    // (Not asked while a run of the daemon's own is in it: view(), headless().)
+    return held ?? (this.midTurnNow(this.live.get(key)) ? "running" : null);
   }
 
   /** A copy's run that may have run in this session ended in the last 90 seconds

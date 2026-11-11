@@ -429,5 +429,35 @@ setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit(0); 
   });
 });
 
+describe.runIf(unix)("a turn running in the copy a session's messages go to", () => {
+  // The copy's hooks report under the copy's own id. A message that names the original
+  // runs in the copy, and looked only at whether the ORIGINAL was mid-turn.
+  it("its own hooks say so and no registry row does: a message for the original is not resumed in the middle of it", async () => {
+    let ahead = 0;
+    clock = () => Date.now() + ahead;
+    copied(O, C);
+    await startDaemon();
+    await event(cc(C), "UserPromptSubmit");
+    expect(midTurn()).toEqual([cc(C)]);
+    const first = await hand({ session: cc(O), text: "to the original" });
+    expect(await rx.waitAck(first.id)).toMatchObject({
+      outcome: "unsupported",
+      detail:
+        "another Claude Code process on this computer was running the copy this session's messages go to, and a copy is never itself copied",
+    });
+    expect(runs()).toEqual([]);
+    // The turn there ends: the copy is resumed, as any idle session is.
+    await event(cc(C), "Stop");
+    const second = await hand({ session: cc(O), text: "and now" });
+    expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+    // A copy killed mid-turn never sends its Stop: ten silent minutes later it is not in one.
+    await event(cc(C), "UserPromptSubmit");
+    ahead = 10 * 60_000 + 1000;
+    const third = await hand({ session: cc(O), text: "much later" });
+    expect(await rx.waitAck(third.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+    expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
+  });
+});
+
 // The helpers the later groups use.
 void [MADE];
