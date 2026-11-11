@@ -894,6 +894,12 @@ export class ControlDaemon {
     p?.go();
   }
 
+  /** Intake is paused: an update is being installed. Nothing is in hand then (busy()
+   *  is null), and it is no moment to restart. */
+  intakePaused(): boolean {
+    return this.paused !== null;
+  }
+
   /** The socket path still holds this daemon's file. Gone: listen again. Replaced:
    *  another daemon took over (two started at once), so this one steps aside. */
   private async checkSocket(): Promise<void> {
@@ -1406,7 +1412,8 @@ export class ControlDaemon {
         // ten minutes, not every fifteen seconds.
         const wedged = lost >= WEDGED_AFTER;
         if (wedged) this.deps.onWedged?.(`${r.url}: ${lost} polls in a row never ended`);
-        await retry(wedged ? WEDGED_PAUSE_MS : pause(backoff++));
+        const usual = pause(backoff++);
+        await retry(wedged ? WEDGED_PAUSE_MS : usual);
       } finally {
         over();
         this.aborts.delete(ctl);

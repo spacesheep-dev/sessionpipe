@@ -413,7 +413,8 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     },
     token: (r) => (r.token_in ? secretGet(r.token_in, controlAccount(r.machine)) : null),
     onRestart: () => updater?.restartWhenIdle() ?? false,
-    onWedged: (why) => void unwedge?.(why),
+    onWedged: (why) =>
+      void unwedge?.(why).catch((e) => log(`restarting for polls that never end failed: ${(e as Error).message}`)),
     updateStatus: () => (updater ? updater.record() : null),
     // Two daemons started at once and the other one holds the socket: leave it to it.
     onLostSocket: () => process.exit(0),
@@ -494,8 +495,9 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     try {
       last = statSync(mark).mtimeMs;
     } catch {}
+    // A mark dated ahead of now (the clock was set back since) says nothing about when.
     const ago = Date.now() - last;
-    if (ago < WEDGED_RESTART_EVERY_MS) {
+    if (ago >= 0 && ago < WEDGED_RESTART_EVERY_MS) {
       if (!saidHeld)
         log(
           `${why}; this daemon was restarted for that ${Math.round(ago / 60_000)} min ago, so not again within the hour`,
@@ -505,7 +507,10 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     }
     unwedging = true;
     log(`${why}; restarting this daemon as soon as nothing is in hand`);
-    while (d.busy()) {
+    // Idle, and not while an update is being installed: the updater waits for the same
+    // idle moment, pauses intake and runs npm, with nothing in hand; a restart then
+    // would end npm with this process and could leave the package half installed.
+    while (d.busy() || d.intakePaused()) {
       await new Promise((r) => setTimeout(r, 5000).unref());
       if (stopping) return;
     }

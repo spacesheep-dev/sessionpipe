@@ -494,6 +494,28 @@ describe("what a poll can answer", () => {
     expect(state().polling).toBe(true);
   });
 
+  it("a failure of another kind first, then polls that never end: still said once, and the tries are all counted", async () => {
+    poll.mockRejectedValueOnce(new Error("ECONNRESET")).mockImplementation(deaf);
+    await start();
+    // The reset; 1 s; three that never end (2 s and 5 s between them); ten minutes; one that answers.
+    await vi.advanceTimersByTimeAsync(1000 + 45_000 + 2000 + 45_000 + 5000 + 45_000);
+    expect(log.mock.calls.filter(([line]) => String(line).includes("never ended"))).toHaveLength(1);
+    poll.mockImplementation(emptyPoll);
+    await vi.advanceTimersByTimeAsync(10 * MINUTE + 25_000);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/^https:\/\/receiver\.test: back after \d+ s \(4 failed tries\)$/),
+    );
+  });
+
+  it("intake paused for an update says so, and says nothing once it is back", async () => {
+    await start();
+    expect(daemon.intakePaused()).toBe(false);
+    daemon.pauseIntake();
+    expect(daemon.intakePaused()).toBe(true);
+    daemon.resumeIntake();
+    expect(daemon.intakePaused()).toBe(false);
+  });
+
   it("with no host to ask, a wedged receiver is still asked only every ten minutes", async () => {
     poll.mockImplementation(deaf);
     await start();
