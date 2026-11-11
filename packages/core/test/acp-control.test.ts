@@ -90,6 +90,8 @@ async function handle(m) {
     if (how === "auth" || how === "authbare") return out({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "Authentication required" } });
     if (how === "provider") return out({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "Internal error", data: "Failed to resolve provider: Configuration value not found: GOOSE_PROVIDER" } });
     if (how === "noid") return reply(m.id, {});
+    // "shut": it opens a session, stops reading its input, and stays.
+    if (how === "shut") { setInterval(() => {}, 1000); process.stdin.pause(); }
     return reply(m.id, { sessionId: ${JSON.stringify(SESSION)}, models: { availableModels: [] } });
   }
   if (m.method === "session/load") {
@@ -415,6 +417,31 @@ describe("one agent, driven", () => {
       expect(w.closed).toBe(true);
     });
   });
+  it.runIf(process.platform !== "win32")(
+    "an agent that goes with a message to it still unwritten: the failed write is nobody's uncaught error",
+    async () => {
+      const uncaught: string[] = [];
+      const seen = (e: Error) => uncaught.push(e.message);
+      process.on("uncaughtException", seen);
+      try {
+        // It has stopped reading. A message longer than a pipe holds is written to it,
+        // and waits in the pipe.
+        const h = await open({ closeGraceMs: 50 }, "shut");
+        const sent = h.send("x".repeat(2_000_000));
+        await new Promise((r) => setTimeout(r, 200));
+        // It is closed, and goes: the write fails on the pipe, long after write() returned.
+        // Nothing was listening on that stream, so the error was the whole process's.
+        h.close();
+        const out = await Promise.race([sent, new Promise<null>((r) => setTimeout(() => r(null), 3000))]);
+        expect(out).toMatchObject({ reply: "", error: expect.stringMatching(/^Codex (stopped taking input|exited)/) });
+        await new Promise((r) => setTimeout(r, 300));
+        expect(uncaught).toEqual([]);
+        expect(h.closed).toBe(true);
+      } finally {
+        process.off("uncaughtException", seen);
+      }
+    },
+  );
   it.runIf(process.platform !== "win32")(
     "an agent that stays when its input ends and ignores SIGTERM is killed, once",
     async () => {

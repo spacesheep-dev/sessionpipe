@@ -334,6 +334,12 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
     pending.clear();
   };
   child.on("error", (e) => left(`couldn't start ${label}: ${e.message}`));
+  // An agent that has stopped reading (it closed its input, and may still be running):
+  // a write to it fails on the pipe, after write() has returned. With nobody listening
+  // that was an error no one caught, in the daemon, and the message waited out its whole
+  // limit for an answer. Whoever is waiting hears it now, and the session reads as
+  // gone, so its holder closes it and the next message opens another.
+  child.stdin?.on("error", (e) => left(`${label} stopped taking input: ${e.message}`));
   // The process has exited (or never was): there is nothing left to end, and the number
   // of its group is no longer certain to be its own.
   let dead = false;
