@@ -1079,13 +1079,12 @@ describe.runIf(unix)("a Stop that is through its checks before the turn it was s
     const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
     await sleep(5);
     const q = await rx.send({ session: SESSION, text: "and now this" }, { hold: true });
-    verifiedLate("and now this");
+    verifiedLate("and now this", 1500);
     void (d as ControlDaemon).handle(receiver, q as Carried);
     void (d as ControlDaemon).handle(receiver, stop as Carried);
-    // At once: it does not wait for a message signed after it.
-    const t0 = Date.now();
+    // At once: it does not wait for a message signed after it, which is still in its checks.
     expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
-    expect(Date.now() - t0).toBeLessThan(250);
+    expect(acksOf(q.id)).toEqual([]);
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
   });
 
@@ -1103,13 +1102,13 @@ describe.runIf(unix)("a Stop that is through its checks before the turn it was s
     );
     forged.csig = "AAAA";
     const stop = await rx.send({ kind: "cancel", session: SESSION, text: undefined }, { hold: true });
-    verifiedLate("verified late", 600);
+    verifiedLate("verified late", 1500);
     void (d as ControlDaemon).handle(receiver, other as Carried);
     void (d as ControlDaemon).handle(receiver, forged as Carried);
     void (d as ControlDaemon).handle(receiver, stop as Carried);
-    const t0 = Date.now();
+    // Answered while the other session's message is still in its checks.
     expect(await rx.waitAck(stop.id, 5000)).toMatchObject({ outcome: "expired", detail: CANCEL.nothing });
-    expect(Date.now() - t0).toBeLessThan(400);
+    expect(acksOf(other.id)).toEqual([]);
     expect(await rx.waitAck(forged.id)).toMatchObject({ outcome: "refused" });
     expect(await rx.waitAck(other.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
   });
