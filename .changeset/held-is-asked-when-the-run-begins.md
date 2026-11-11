@@ -1,5 +1,0 @@
----
-"sessionpipe": patch
----
-
-A session that a window has open is no longer resumed in place because a run of the daemon's own was in the way when the message was routed. While the daemon runs a turn in a session, the next message for it is not copied: it waits for that run and resumes the session afterwards. Whether it may be resumed was decided when the message arrived and never looked at again, so a message that waited was run with `claude -p --resume` beside a window that had opened the session meanwhile; a run that was only copying a session counted as a run in it; and a Codex session the daemon started counted as a run in the Claude Code session of the same id. The daemon now looks again when the waiting message's turn comes, and if something holds the session by then the message is routed afresh: into the window's own inbox, into a copy, or acked `unsupported` with the reason. A copy's run no longer stands for a run in the session it copies, and the daemon's record of its own runs is kept per harness.
