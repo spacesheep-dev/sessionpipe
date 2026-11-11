@@ -1,5 +1,11 @@
 # sessionpipe
 
+## 0.13.8
+
+### Patch Changes
+
+- ae93ff7: A poll that never ends no longer holds the control daemon for ever, unseen. The daemon ends a request it has held too long by aborting it, and then waited for the abort to take effect; where it took none, it waited without limit. Seen on a laptop on Node 23.6.1, a second after its clock was set forward thirteen minutes: one poll held for 103 minutes with no connection left and no error, `sessionpipe control status` reading "polling: yes" while the receiver showed the machine offline, until the daemon was restarted. Why the request never ended is not known. Now, ten seconds after its abort a poll is left behind and asked again on a new request; the log says so ("a poll never ended, and aborting it ended nothing; asking again") and `sessionpipe doctor` shows it as the receiver's last error. Three in a row and the daemon restarts itself when nothing is in hand, the one remedy known to work, at most once an hour; until then that receiver is asked every ten minutes. A hello, an ack and the look at a receiver's well-known are left behind the same way: an ack that never ended kept every later ack from being sent, and the daemon from ever being idle enough to update.
+
 ## 0.13.7
 
 ### Patch Changes
