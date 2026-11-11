@@ -771,10 +771,7 @@ the session's own inbox was looked at, why that was no way in. A later message's
 which resumes the copy, opens `ran in the copy made earlier, because` with the same
 reason. A receiver SHOULD show the machine's reason and not one of its own: "open in a
 window" is one case of three. A copy is a leaf: later messages for that session resume the copy, and a
-copy is never itself copied — neither for a message that names the session nor for one
-that names the copy by its own id, which is how the copy's own events name it. Where
-the copy is held and no in-place mode takes the message, it is acked `unsupported` with
-what holds the copy. A machine MAY cap how many copies it makes in a day (each
+copy is never itself copied. A machine MAY cap how many copies it makes in a day (each
 replays a whole conversation) and refuses beyond that `copy_limit`, with a reason. Where
 the harness has a contract for copying a session something else still holds — Claude
 Code's `CLAUDE_CODE_RESUME_SOURCE_ALIVE` — a daemon MUST use it, or the copy claims the

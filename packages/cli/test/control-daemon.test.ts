@@ -246,18 +246,6 @@ describe("routing (CONTROL.md §6)", () => {
       unsupported:
         "the transcript of the copy this session's messages go to had been written to in the last 90 seconds by a process this computer could not find, and a copy is never itself copied: send it again in a couple of minutes",
     });
-    // The same for a copy named by its own id, which is how its own page names it.
-    expect(routePrompt({ ...base, held: "open", isCopy: true })).toEqual({
-      unsupported:
-        "that copy was open in Claude Code on this computer (a terminal window or the Claude app), and a copy is never itself copied",
-    });
-    expect(routePrompt({ ...base, held: "recent", isCopy: true })).toEqual({
-      unsupported:
-        "the transcript of that copy had been written to in the last 90 seconds by a process this computer could not find, and a copy is never itself copied: send it again in a couple of minutes",
-    });
-    // Idle, it is resumed like any session; in a turn, it takes the message at its Stop.
-    expect(routePrompt({ ...base, isCopy: true })).toEqual({ mode: "resume" });
-    expect(routePrompt({ ...base, isCopy: true, midTurn: true, held: "open" })).toEqual({ mode: "turn" });
     for (const installed of [true, undefined])
       expect(routePrompt({ ...base, held: "open", canFork: false, ...(installed ? { installed } : {}) })).toEqual({
         unsupported:
