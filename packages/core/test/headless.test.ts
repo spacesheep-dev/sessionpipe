@@ -187,7 +187,11 @@ describe("runHeadless: nothing is signalled once the child is gone", () => {
     async () => {
       const pidFile = path.join(tmp, "stubborn-tool.pid");
       // The harness dies of SIGTERM; a tool it started ignores it and holds its stdout.
-      const bin = script("with-tool", `(trap '' TERM; sleep 30) &\necho $! > ${pidFile}\necho ready\nwait`);
+      // `exec`, so the tool is one process from before "ready" is said: left to the
+      // shell, `sleep` is forked inside the subshell a moment later, and a SIGKILL to a
+      // group can miss a process that is being forked into it as it lands (macOS: this
+      // case hung in 7 runs of 720, for the 30 seconds of the sleep that got away).
+      const bin = script("with-tool", `(trap '' TERM; exec sleep 30) &\necho $! > ${pidFile}\necho ready\nwait`);
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const ctl = new AbortController();
       let ready = () => {};
