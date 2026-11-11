@@ -90,6 +90,11 @@ vi.mock("../src/control/daemon.js", async (original) => {
     busy() {
       return this.inHand;
     }
+    /** Intake paused by an update being installed. */
+    paused = false;
+    intakePaused() {
+      return this.paused;
+    }
   }
   return { ...real, ControlDaemon };
 });
@@ -554,6 +559,47 @@ describe("polls that go on never ending (the daemon's onWedged)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("an update being installed (intake paused, nothing in hand): waits for it to be over", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await run();
+      const d = daemon() as unknown as { paused: boolean };
+      d.paused = true;
+      wedged();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(existsSync(mark())).toBe(false);
+      // The install failed and intake is back: now.
+      d.paused = false;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(process.exit).toHaveBeenCalledWith(UPDATE_EXIT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a restart that fails is said, and is nobody's unhandled rejection", async () => {
+    await run();
+    (daemon() as unknown as { stop: () => Promise<void> }).stop = async () => {
+      throw new Error("the pool won't stop");
+    };
+    wedged();
+    await vi.waitFor(() =>
+      expect(said("restarting for polls that never end failed: the pool won't stop")).toHaveLength(1),
+    );
+  });
+
+  it("a mark dated ahead of the clock says nothing: restarted", async () => {
+    mkdirSync(path.dirname(mark()), { recursive: true });
+    writeFileSync(mark(), "");
+    const ahead = new Date(Date.now() + 2 * 60 * 60_000);
+    utimesSync(mark(), ahead, ahead);
+    await run();
+    wedged();
+    await vi.waitFor(() => expect(process.exit).toHaveBeenCalledWith(UPDATE_EXIT));
+    expect(said("so not again within the hour")).toEqual([]);
   });
 
   it("restarted for it less than an hour ago: said once, not restarted; an hour on, restarted again", async () => {
