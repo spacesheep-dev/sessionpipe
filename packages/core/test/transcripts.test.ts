@@ -486,6 +486,65 @@ describe("readClaude: a turn the person interrupted", () => {
   });
 });
 
+// A session the daemon started and then stopped mid-turn (sessionpipe 0.13.4's Stop, on
+// 2.1.322, 2026-11-11), and the next message to it. The stopped turn wrote no assistant
+// record at all; on the resume Claude Code wrote "No response requested." under the
+// model `<synthetic>`, and receivers drew that as what the agent had answered.
+const KILLED = readFileSync(
+  new URL("../../../conformance/transcripts/claude-code/killed-turn.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n");
+const COUNT =
+  "Do not use any tools. Write the numbers 1 to 1500, one per line, and then on the last line just the word indiaa in capital letters";
+
+describe("readClaude: a turn whose process was ended mid-turn", () => {
+  it("is a turn of its own with nothing said, and Claude Code's placeholder is nobody's words", () => {
+    const r = readClaude(KILLED, 0);
+    expect(r.turns).toEqual([
+      {
+        user: COUNT,
+        assistant: "",
+        at: Date.parse("2026-11-11T01:42:48.961Z"),
+        endLine: 1,
+        id: "id1",
+        interrupted: true,
+      },
+      {
+        user: "Reply with just the word indiab in capital letters",
+        assistant: "INDIAB",
+        at: Date.parse("2026-11-11T01:43:22.970Z"),
+        endLine: 3,
+        id: "id5",
+      },
+    ]);
+    expect(r.open).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain("No response requested");
+    // Before the resume there is no placeholder: the prompt is open, as any running turn's is.
+    const before = readClaude(KILLED.slice(0, 1), 0);
+    expect(before.turns).toEqual([]);
+    expect(before.open?.user).toBe(COUNT);
+    // The placeholder is never the turn's last words either.
+    expect(readClaude(KILLED.slice(0, 2), 0).tail?.said).toBeUndefined();
+  });
+
+  it("keeps what the turn had said before it was ended, and every other synthetic row", () => {
+    const synthetic = (text: string) =>
+      assistant(text, { message: { model: "<synthetic>", role: "assistant", content: [{ type: "text", text }] } });
+    const partial = readClaude([user("a"), assistant("so far"), synthetic("No response requested."), user("b")], 0);
+    expect(partial.turns).toEqual([{ user: "a", assistant: "so far", at: at(T0), endLine: 2, interrupted: true }]);
+    expect(partial.open).toEqual({ user: "b", at: at(T0) });
+    // An API error is the turn's real outcome, and the same words from the model are the model's.
+    expect(readClaude([user("a"), synthetic("API Error: 529 Overloaded")], 0).turns.map((t) => t.assistant)).toEqual([
+      "API Error: 529 Overloaded",
+    ]);
+    expect(readClaude([user("a"), assistant("No response requested.")], 0).turns.map((t) => t.assistant)).toEqual([
+      "No response requested.",
+    ]);
+  });
+});
+
 describe("readClaude: the last words of the last turn", () => {
   // Claude Code names a turn's last words in its Stop (`last_assistant_message`) and
   // writes its transcript rows up to 100 ms late, so a reader has to know whether the

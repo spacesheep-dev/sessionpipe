@@ -210,6 +210,10 @@ const channelText = (text: string): string => /^<channel\b[^>]*>([\s\S]*)<\/chan
  *  the first Ctrl-C): `[Request interrupted by user]`, or `… for tool use]` when a tool
  *  was running. Its own test for the marker has the same shape. Nobody typed it. */
 const INTERRUPTED = /^\[Request interrupted by user[^\]]*\]$/;
+/** What Claude Code writes as the assistant's, under its own `<synthetic>` model, when it
+ *  resumes a session whose last prompt never got an answer: the process was ended
+ *  mid-turn (the daemon's Stop, a kill, a crash). Nobody said it. Recorded on 2.1.322. */
+const NO_REPLY = "No response requested.";
 
 /** How Claude Code hands the model a blocking hook's reason: a meta `user` record,
  *  `<Event> hook feedback:\n<reason>`. sessionpipe's own Stop hook blocks with a message
@@ -290,7 +294,13 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
       else if (!fromAgent(origin)) ask(peerAsk(origin, raw), { injected: true, ...(id ? { id } : {}) });
     } else if (j.type === "assistant" && Array.isArray(c)) {
       const text = textParts(c, ["text"]).trim();
-      if (text) {
+      if (text === NO_REPLY && (j.message as { model?: unknown }).model === "<synthetic>") {
+        // The turn before it was ended where it stood, like one the person stopped with
+        // Esc: whole as it is, and this row is not what it said. Claude Code's other
+        // synthetic rows (an API error, a spent balance) are the turn's real outcome.
+        msgs.push({ role: "interrupt", text: "", at, line: i });
+        turnOver = true;
+      } else if (text) {
         msgs.push({ role: "assistant", text, at, line: i });
         saidLine = i;
         turnOver = false;
