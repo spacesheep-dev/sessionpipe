@@ -491,6 +491,22 @@ else setTimeout(() => { out({ type: "turn.completed", usage: {} }); process.exit
 });
 
 describe.runIf(unix)("a turn running in the copy a session's messages go to", () => {
+  it("the daemon's own run in the copy, killed from outside: the copy is not held on the word of a child that is gone", async () => {
+    copied(O, C);
+    await startDaemon();
+    const first = await hand({ session: cc(O), text: "first [long]" });
+    await until(() => rx.progress(first.id).length > 0);
+    // The child's own hooks said a turn began in the copy; killed, it says nothing more.
+    expect(midTurn()).toEqual([cc(C)]);
+    process.kill(runs()[0]?.pid as number, "SIGKILL");
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "failed" });
+    // The daemon saw its child go: no ten minutes of taking a dead process at its word.
+    expect(midTurn()).toEqual([]);
+    const next = await hand({ session: cc(O), text: "next" });
+    expect(await rx.waitAck(next.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+    expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
+  });
+
   // The copy's hooks report under the copy's own id. A message that names the original
   // runs in the copy, and looked only at whether the ORIGINAL was mid-turn.
   it("its own hooks say so and no registry row does: a message for the original is not resumed in the middle of it", async () => {
@@ -501,14 +517,21 @@ describe.runIf(unix)("a turn running in the copy a session's messages go to", ()
     await event(cc(C), "UserPromptSubmit");
     expect(midTurn()).toEqual([cc(C)]);
     const first = await hand({ session: cc(O), text: "to the original" });
+    // Refused, once and for good, with what to do about it: this hold is the hooks' word
+    // and nothing else, and it ends when they say the turn has.
     expect(await rx.waitAck(first.id)).toMatchObject({
       outcome: "unsupported",
       detail:
-        "another Claude Code process on this computer was running the copy this session's messages go to, and a copy is never itself copied",
+        "another Claude Code process on this computer was running the copy this session's messages go to, and a copy is never itself copied: send it again once that turn has ended (a turn that was cut short stops counting ten minutes after it was last heard from)",
     });
     expect(runs()).toEqual([]);
-    // The turn there ends: the copy is resumed, as any idle session is.
+    // The turn there ends. Nothing runs for the message that was refused: it has had its
+    // one final ack, and is the person's to send again.
     await event(cc(C), "Stop");
+    await sleep(300);
+    expect(runs()).toEqual([]);
+    expect(rx.acks.filter((a) => a.id === first.id).map((a) => a.outcome)).toEqual(["unsupported"]);
+    // Sent again, it is resumed in the copy, as in any idle session.
     const second = await hand({ session: cc(O), text: "and now" });
     expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
     // A copy killed mid-turn never sends its Stop: ten silent minutes later it is not in one.

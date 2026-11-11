@@ -97,6 +97,7 @@ import {
   IN_PLACE_ANSWER,
   kindPath,
   messageMark,
+  onItsWord,
   routeCancel,
   routePrompt,
 } from "./route.js";
@@ -2532,7 +2533,8 @@ export class ControlDaemon {
     // The daemon's own run holding it is not "someone else's live process": the message
     // queues behind that run (serial per session) and resumes it, if it may be resumed
     // when its turn comes (headless()).
-    const held = known ?? (!this.ownRuns.has(`claude-code:${target}`) && t ? this.heldBy(target, t) : null);
+    const seen = t && (known || !this.ownRuns.has(`claude-code:${target}`)) ? this.seenOf(target, t) : null;
+    const held = known ?? (seen ? holderOf(...seen) : null);
     return {
       harness: ref.harness,
       sdk: this.sdkSessions.has(session),
@@ -2546,6 +2548,8 @@ export class ControlDaemon {
       // A message for a session that already has a copy goes to that copy; when the copy
       // is live too the person is told, rather than handed a copy of a copy.
       copied: !!this.state.copies[ref.id],
+      // Held on its hooks' word alone: the refusal says when to send it again.
+      lapses: !!seen && onItsWord(...seen),
       api: false,
     };
   }
@@ -2566,9 +2570,16 @@ export class ControlDaemon {
    *  minutes their word is good for (`midTurnNow`). For a session named by its own id
    *  that never decides anything: the `turn` rung comes first on the ladder. */
   private heldBy(target: string, t: Transcript): Holder | null {
+    return holderOf(...this.seenOf(target, t));
+  }
+
+  /** What the machine can see of a transcript, for `holderOf` and `onItsWord`: the live
+   *  registry rows that name it, whether it was written to too recently to account for,
+   *  and whether its own hooks say a turn is running in it. */
+  private seenOf(target: string, t: Transcript): [LiveRecord[], boolean, boolean] {
     const key = `claude-code:${target}`;
     const now = this.deps.now();
-    return holderOf(
+    return [
       liveRecords(target, t.configDir),
       recentlyWritten(t.file, this.endedAt(key), now) || this.strayedInto(key, now),
       // And where neither says so, the word of the session's own hooks that a turn is
@@ -2578,7 +2589,7 @@ export class ControlDaemon {
       // under the original's, a copy mid-turn was resumed in the middle of that turn.
       // (Not asked while a run of the daemon's own is in it: view(), headless().)
       this.midTurnNow(this.live.get(key)),
-    );
+    ];
   }
 
   /** A copy's run that may have run in this session ended in the last 90 seconds

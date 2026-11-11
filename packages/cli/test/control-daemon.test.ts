@@ -31,7 +31,9 @@ import {
   cancelWaits,
   HOOKS_WORD_MS,
   holderOf,
+  onItsWord,
   routePrompt,
+  SEND_AGAIN_AFTER_TURN,
   type SessionView,
 } from "../src/control/route.js";
 import { type ControlConfig, readControl } from "../src/control/store.js";
@@ -246,6 +248,23 @@ describe("routing (CONTROL.md §6)", () => {
       unsupported:
         "the transcript of the copy this session's messages go to had been written to in the last 90 seconds by a process this computer could not find, and a copy is never itself copied: send it again in a couple of minutes",
     });
+    // Held on nothing but its own hooks' word that a turn is running: the refusal says
+    // when to send it again, since that is a hold that ends by itself.
+    expect(routePrompt({ ...base, held: "running", copied: true, lapses: true })).toEqual({
+      unsupported:
+        "another Claude Code process on this computer was running the copy this session's messages go to, and a copy is never itself copied: send it again once that turn has ended (a turn that was cut short stops counting ten minutes after it was last heard from)",
+    });
+    expect(routePrompt({ ...base, held: "running", canFork: false, lapses: true })).toEqual({
+      unsupported: `another Claude Code process on this computer was running the session, and this Claude Code can't copy it (no --fork-session): ${SEND_AGAIN_AFTER_TURN}`,
+    });
+    // What the hooks' word alone means: no process to be seen, no write to account for.
+    expect(onItsWord([], false, true)).toBe(true);
+    for (const [rows, recent, turn] of [
+      [[{ kind: "interactive" }], false, true],
+      [[], true, true],
+      [[], false, false],
+    ] as const)
+      expect(onItsWord(rows, recent, turn)).toBe(false);
     for (const installed of [true, undefined])
       expect(routePrompt({ ...base, held: "open", canFork: false, ...(installed ? { installed } : {}) })).toEqual({
         unsupported:
