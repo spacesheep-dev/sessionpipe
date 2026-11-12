@@ -7,20 +7,31 @@
 // a dev build is somebody's deliberate choice of code, and npm installing over it
 // would be wrong or impossible: for those `globalPrefix` is null and nothing happens.
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, realpathSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { viaNpx } from "./runtime.js";
 
 export const REGISTRY_LATEST = "https://registry.npmjs.org/sessionpipe/latest";
 
 // How versions order lives in core, beside the restart they lead to.
-import { parseVersion } from "@sessionpipe/core/version";
+import { isNewer, parseVersion } from "@sessionpipe/core/version";
 
 export { compareVersions, isNewer } from "@sessionpipe/core/version";
 
+/** Where `latest` is read: the registry npm itself is told to use (`npm_config_registry`,
+ *  a company's mirror), since that is where the install will come from; else npm's own. */
+export function registryLatest(env: NodeJS.ProcessEnv = process.env): string {
+  const own = env.npm_config_registry || env.NPM_CONFIG_REGISTRY;
+  return own && /^https?:\/\//.test(own) ? `${own.replace(/\/+$/, "")}/sessionpipe/latest` : REGISTRY_LATEST;
+}
+
 /** The registry's `latest` for sessionpipe: one GET, nothing sent but the request. */
-export async function latestVersion(f: typeof fetch = fetch, timeoutMs = 8000): Promise<string> {
-  const r = await f(REGISTRY_LATEST, {
+export async function latestVersion(
+  f: typeof fetch = fetch,
+  timeoutMs = 8000,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const r = await f(registryLatest(env), {
     signal: AbortSignal.timeout(timeoutMs),
     headers: { accept: "application/json" },
   });
@@ -48,6 +59,44 @@ export function globalPrefix(distDir: string, platform: NodeJS.Platform = proces
   if (!prefix) return null;
   const bin = platform === "win32" ? path.join(prefix, "sessionpipe.cmd") : path.join(prefix, "bin", "sessionpipe");
   return existsSync(bin) ? prefix : null;
+}
+
+/** The dist folder of the `sessionpipe` a shell with this PATH would run, when that is a
+ *  global npm install: what a person types, as far as a process that isn't their shell
+ *  can tell. Null when PATH has none, or it is no global install. */
+export function copyOnPath(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const bin = platform === "win32" ? "sessionpipe.cmd" : "sessionpipe";
+  for (const dir of (env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    const file = path.join(dir, bin);
+    // npm's bin is a link to dist/cli.js; on Windows it is a shim in the prefix itself.
+    let dist: string;
+    if (platform === "win32") {
+      if (!existsSync(file)) continue;
+      dist = path.join(dir, "node_modules", "sessionpipe", "dist");
+    } else
+      try {
+        dist = path.dirname(realpathSync(file));
+      } catch {
+        // Not in this folder, or a link to nowhere: a shell would look further too.
+        continue;
+      }
+    return globalPrefix(dist, platform) ? dist : null;
+  }
+  return null;
+}
+
+/** The version of the copy in a dist folder, from its package.json; null when unreadable. */
+export function versionAt(distDir: string): string | null {
+  try {
+    const v = (JSON.parse(readFileSync(path.join(distDir, "..", "package.json"), "utf8")) as { version?: unknown })
+      .version;
+    return typeof v === "string" && parseVersion(v) ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Why npm can't write this prefix (installed with sudo, a read-only image), or null. */
@@ -136,7 +185,15 @@ export interface InstallOptions {
 }
 
 export type InstallResult =
-  | { ok: true; ms: number; hooks: string }
+  | {
+      ok: true;
+      ms: number;
+      hooks: string;
+      rearmed: boolean;
+      /** Other copies brought to the same version, and those that couldn't be. */
+      along?: string[];
+      others?: { dir: string; error: string }[];
+    }
   | { ok: false; ms: number; error: string; stage: "prefix" | "npm" | "verify" };
 
 const lastLine = (r: ExecResult): string =>
@@ -157,21 +214,18 @@ export async function installedVersion(o: {
   return r.code === 0 && parseVersion(v) ? v : null;
 }
 
-/** `npm install -g sessionpipe@<version>` into the prefix the running copy came from,
- *  check the copy on disk says that version, then re-copy the hook launcher's files
- *  (the hooks run copies in ~/.local/share/sessionpipe, which npm never touches) for
- *  the harnesses already set up here. Lifecycle scripts are off: sessionpipe has none,
- *  and an unattended install runs nothing it fetched. */
-export async function installVersion(version: string, o: InstallOptions): Promise<InstallResult> {
-  const t0 = Date.now();
+/** `npm install -g sessionpipe@<version>` into the prefix the copy in `distDir` came
+ *  from, then check the copy on disk says that version. Lifecycle scripts are off:
+ *  sessionpipe has none, and an unattended install runs nothing it fetched. */
+async function npmInstall(
+  version: string,
+  o: InstallOptions,
+): Promise<{ ok: true } | { ok: false; error: string; stage: "prefix" | "npm" | "verify" }> {
   const platform = o.platform ?? process.platform;
   const exec = o.exec ?? execCapture;
-  const base = o.env ?? process.env;
-  // npm and anything it starts find this node first.
-  const env = { ...base, PATH: [path.dirname(o.node), base.PATH].filter(Boolean).join(path.delimiter) };
+  const env = withNode(o);
   const prefix = globalPrefix(o.distDir, platform);
-  if (!prefix)
-    return { ok: false, ms: Date.now() - t0, stage: "prefix", error: "this copy isn't a global npm install" };
+  if (!prefix) return { ok: false, stage: "prefix", error: "this copy isn't a global npm install" };
   const npm = npmArgv(o.node, platform);
   const r = await exec(
     [
@@ -187,25 +241,86 @@ export async function installVersion(version: string, o: InstallOptions): Promis
     ],
     { env, timeoutMs: 5 * 60_000 },
   );
-  if (r.code !== 0) return { ok: false, ms: Date.now() - t0, stage: "npm", error: `npm install: ${lastLine(r)}` };
+  if (r.code !== 0) return { ok: false, stage: "npm", error: `npm install: ${lastLine(r)}` };
   const now = await installedVersion({ node: o.node, distDir: o.distDir, env, exec });
   if (now !== version)
     return {
       ok: false,
-      ms: Date.now() - t0,
       stage: "verify",
       error: `npm finished, but the copy in ${prefix} says ${now ?? "nothing"}, not ${version}`,
     };
-  let hooks = "no harness set up here; nothing to re-arm";
-  if (o.harnesses.length) {
-    const h = await exec(
-      [o.node, path.join(o.distDir, "cli.js"), "install", "--backfill", "0", ...o.harnesses.map((n) => `--${n}`)],
-      { env, timeoutMs: 2 * 60_000 },
-    );
-    hooks =
-      h.code === 0
-        ? `hooks re-armed for ${o.harnesses.join(", ")}`
-        : `re-arming the hooks failed (${lastLine(h)}); \`sessionpipe install\` does it`;
+  return { ok: true };
+}
+
+/** Install `version` into the running copy's prefix, check it, then write the hooks
+ *  again from it (the hooks run copies in ~/.local/share/sessionpipe, which npm never
+ *  touches) for the harnesses already set up here. */
+export const installVersion = (version: string, o: InstallOptions): Promise<InstallResult> =>
+  installEverywhere(version, { ...o, others: [] });
+
+/** The same, for every copy of sessionpipe that matters on this computer: the running
+ *  one first, then each of `others` (the dist folder of another global install: the copy
+ *  a person types when the background service runs a different one, or the service's
+ *  when it can't be moved onto this one yet) that is older than `version`. This is the
+ *  one way a copy is updated, for `sessionpipe update` and for the service's own daily
+ *  update. The running copy failing fails it; another copy failing is said (`others`)
+ *  and the rest goes on, so a copy this user can't write never holds the others back. */
+export async function installEverywhere(
+  version: string,
+  o: InstallOptions & { others: readonly string[] },
+): Promise<InstallResult> {
+  const t0 = Date.now();
+  const own = await npmInstall(version, o);
+  if (!own.ok) return { ...own, ms: Date.now() - t0 };
+  const failed: { dir: string; error: string }[] = [];
+  const along: string[] = [];
+  for (const dir of new Set(o.others)) {
+    if (samePath(dir, o.distDir)) continue;
+    const has = versionAt(dir);
+    if (has && !isNewer(version, has, true)) continue;
+    const r = await npmInstall(version, { ...o, distDir: dir });
+    if (r.ok) along.push(dir);
+    else failed.push({ dir, error: r.error });
   }
-  return { ok: true, ms: Date.now() - t0, hooks };
+  const hooks = await rearmHooks(o);
+  return {
+    ok: true,
+    ms: Date.now() - t0,
+    hooks: hooks.said,
+    rearmed: hooks.ok,
+    ...(along.length ? { along } : {}),
+    ...(failed.length ? { others: failed } : {}),
+  };
+}
+
+/** Two paths to one place. */
+export function samePath(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+/** The environment for npm and anything it starts: this node is found first. */
+function withNode(o: Pick<InstallOptions, "node" | "env">): NodeJS.ProcessEnv {
+  const base = o.env ?? process.env;
+  return { ...base, PATH: [path.dirname(o.node), base.PATH].filter(Boolean).join(path.delimiter) };
+}
+
+/** Write the hooks again from the copy on disk in `distDir` (its own `install`, so the
+ *  newest code writes them), for the harnesses already set up here: the hooks run copies
+ *  in ~/.local/share/sessionpipe, which npm never touches. */
+export async function rearmHooks(o: InstallOptions): Promise<{ ok: boolean; said: string }> {
+  if (!o.harnesses.length) return { ok: true, said: "no harness set up here; nothing to re-arm" };
+  const h = await (o.exec ?? execCapture)(
+    [o.node, path.join(o.distDir, "cli.js"), "install", "--backfill", "0", ...o.harnesses.map((n) => `--${n}`)],
+    { env: withNode(o), timeoutMs: 2 * 60_000 },
+  );
+  return h.code === 0
+    ? { ok: true, said: `hooks re-armed for ${o.harnesses.join(", ")}` }
+    : { ok: false, said: `re-arming the hooks failed (${lastLine(h)}); \`sessionpipe install\` does it` };
 }

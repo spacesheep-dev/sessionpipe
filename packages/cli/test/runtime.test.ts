@@ -85,7 +85,7 @@ describe.skipIf(process.platform === "win32")("assertSetupVersion", () => {
     writeFileSync(path.join(tmp, "worker.js"), "");
     const { launcher } = installLauncher({ distDir: tmp, node: process.execPath, version: "99.0.0" });
     expect(() => assertSetupVersion(false)).toThrow(
-      `refusing to downgrade sessionpipe: 99.0.0 is installed at ${launcher}; this command would install ${VERSION}. Use the installed newer CLI, or pass --allow-downgrade to force ${VERSION}.`,
+      `refusing to downgrade sessionpipe: 99.0.0 is installed at ${launcher}; this command would install ${VERSION}. \`sessionpipe update\` brings this copy up to date; --allow-downgrade forces ${VERSION}.`,
     );
     expect(execFileSync).not.toHaveBeenCalled();
   });

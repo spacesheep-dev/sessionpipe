@@ -22,7 +22,7 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     backfill: `backfill [--days 30] [${harnesses.map((h) => `--${h}`).join(" ")}]`,
     forget: "forget <harness> <session>",
     replay: "replay [--sink NAME] [--from-start] [--tools all|main|beat]",
-    update: "update [off|on] (install the latest now; off/on: the daemon's daily update)",
+    update: "update [off|on] (bring this whole computer up to date now; off/on: the background service's daily update)",
     "update off": "update off",
     "update on": "update on",
     titles:

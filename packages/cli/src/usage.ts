@@ -14,7 +14,7 @@ export const GROUPS: readonly { title: string; rows: readonly (readonly [string,
       ["connect <receiver>", "All in one go: hooks, a sink, messages, keys"],
       ["install", "Only the hooks; nothing is sent anywhere"],
       ["uninstall", "Take the hooks out again"],
-      ["update [off|on]", "Update now; or turn the daily update off or on"],
+      ["update [off|on]", "Bring this whole computer up to date, in one step"],
     ],
   },
   {

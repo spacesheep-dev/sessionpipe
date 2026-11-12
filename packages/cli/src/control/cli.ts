@@ -24,11 +24,11 @@ const { claudeLogin, detectCaps, findClaude, isUuid, runClaude } = claudeControl
 import { isBroad, tierArg } from "../connect.js";
 import { openPool, readPool } from "../pool/index.js";
 import { appendObserved, drain, VERSION } from "../run.js";
-import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
+import { cliPath, rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { shq } from "../shell.js";
 import { clean, PLAIN, table, tint, type Ui } from "../style.js";
-import { installedVersion, installVersion, latestVersion } from "../update.js";
+import { copyOnPath, installEverywhere, installedVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
 import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
 import { ControlDaemon, DaemonRunning, type Status } from "./daemon.js";
@@ -451,6 +451,10 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     onWedged: (why) =>
       void unwedge?.(why).catch((e) => log(`restarting for polls that never end failed: ${(e as Error).message}`)),
     updateStatus: () => (updater ? updater.record() : null),
+    copy: () => ({
+      cli: cliPath(distDir),
+      via: restartVia({ env: process.env, platform: process.platform, pid: process.pid, ppid: process.ppid }),
+    }),
     // Two daemons started at once and the other one holds the socket: leave it to it.
     onLostSocket: () => process.exit(0),
     pool,
@@ -568,8 +572,16 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     off: () => autoUpdateOff({ env: process.env, config: readConfig(), distDir }),
     latest: () => latestVersion(fetch),
     installed: () => installedVersion({ node: process.execPath, distDir }),
+    // The same steps `sessionpipe update` takes (current.ts): every copy that matters,
+    // then the hooks. The copy a person types is the one on the PATH this service was
+    // given; when that is another install than this one, it is brought along.
     install: (v) =>
-      installVersion(v, { node: process.execPath, distDir, harnesses: enabledHarnesses(readConfig().harnesses) }),
+      installEverywhere(v, {
+        node: process.execPath,
+        distDir,
+        others: [copyOnPath(process.env)].filter((d): d is string => !!d),
+        harnesses: enabledHarnesses(readConfig().harnesses),
+      }),
     daemon: d,
     restart,
   });

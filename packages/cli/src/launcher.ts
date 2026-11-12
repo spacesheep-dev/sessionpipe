@@ -121,7 +121,7 @@ export function launcherState(version: string, env: NodeJS.ProcessEnv = process.
     }
   if (v && v !== version)
     problems.push(
-      `the hooks run sessionpipe ${v}, this is ${version}; run \`sessionpipe install\` to bring them up to date`,
+      `the hooks run sessionpipe ${v}, this is ${version}; run \`sessionpipe update\` to bring both up to date`,
     );
   return { file, present: true, node, nodeOk, version: v, problems };
 }
