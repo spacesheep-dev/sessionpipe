@@ -25,6 +25,11 @@ import { type AccountState, choose, observe, type PolicyState, pin, roomAt, with
 import type { PoolAdapter, PoolLimits } from "./types.js";
 
 export const BODY_CAP = 32 * 1024 * 1024;
+/** How much of a body past the cap is read and dropped before the 413 goes out anyway
+ *  (a quarter of the cap: a request somewhat over it is drained whole, which takes
+ *  milliseconds on loopback), and for how long at most. */
+export const DRAIN_BYTES = 8 * 1024 * 1024;
+export const DRAIN_MS = 5_000;
 
 export interface PoolServerDeps {
   adapter: Pick<PoolAdapter, "POOL_ENDPOINTS" | "readLimits" | "parseUserId" | "withAccount" | "upstreamHeaders">;
@@ -55,6 +60,8 @@ export interface PoolServerDeps {
   /** Where requests go (tests: the fake upstream). */
   upstream?: string;
   bodyCap?: number;
+  /** Bytes past the cap drained before the 413 (DRAIN_BYTES). */
+  drainBytes?: number;
 }
 
 export interface PoolStats {
@@ -176,31 +183,56 @@ function sendJson(res: http.ServerResponse, status: number, body: string, extra:
   res.end(body);
 }
 
-/** The body, whole, or null once it passed the cap (a 413 was sent). The client is
- *  still writing when the cap is hit: a socket destroyed on the spot reaches it as
- *  EPIPE, not as the 413. So the answer goes out with `connection: close` and the rest
- *  is dropped; node ends the socket once the answer is flushed, and the sender stops
- *  there. */
-function readBody(req: http.IncomingMessage, res: http.ServerResponse, cap: number): Promise<Buffer | null> {
+/** The body, whole, or null once it passed the cap (the 413 is then this function's to
+ *  send, and the caller does nothing more). The client is still writing when the cap
+ *  is hit, and node ends the socket once an answer is flushed: the bytes the client
+ *  sends after that meet a closed socket, the reset that comes back can throw away the
+ *  413 it has not read yet (macOS, Windows), and it sees EPIPE or ECONNRESET instead.
+ *  So nothing is answered mid-body: the rest is read and dropped (never kept), and the
+ *  413 goes out when the request ends, or once `drain` bytes past the cap or DRAIN_MS
+ *  have gone by, whichever comes first, so an endless or stalled upload holds nothing.
+ *  The answer says `connection: close`; one sent on a budget may still meet a reset. */
+function readBody(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  cap: number,
+  drain: number,
+): Promise<Buffer | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    let over = false;
-    req.on("data", (c: Buffer) => {
+    let timer: NodeJS.Timeout | undefined;
+    // Once the answer is out or the client gone, nothing of this request is left
+    // running: no timer, no listener but the error one (an error with none throws).
+    const stop = () => {
+      clearTimeout(timer);
+      req.off("data", onData);
+      req.off("end", onEnd);
+      res.off("close", stop);
+    };
+    const answer = () => {
+      stop();
+      sendJson(res, 413, errorBody("request_too_large", `sessionpipe pool: request body over ${cap} bytes`), {
+        connection: "close",
+      });
+    };
+    const onData = (c: Buffer) => {
       size += c.length;
-      if (over) return;
-      if (size > cap) {
-        over = true;
-        chunks.length = 0;
-        sendJson(res, 413, errorBody("request_too_large", `sessionpipe pool: request body over ${cap} bytes`), {
-          connection: "close",
-        });
-        resolve(null);
+      if (size <= cap) {
+        chunks.push(c);
         return;
       }
-      chunks.push(c);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+      if (timer === undefined) {
+        chunks.length = 0;
+        resolve(null);
+        timer = setTimeout(answer, DRAIN_MS);
+        res.once("close", stop);
+      }
+      if (size > cap + drain) answer();
+    };
+    const onEnd = () => (timer === undefined ? resolve(Buffer.concat(chunks)) : answer());
+    req.on("data", onData);
+    req.on("end", onEnd);
     req.on("error", () => resolve(null));
   });
 }
@@ -209,6 +241,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
   const stats: PoolStats = { requests: 0, upstream: 0, retries: 0, refused: 0, aborted: 0, in_flight: 0 };
   const base = (deps.upstream ?? deps.adapter.POOL_ENDPOINTS.api).replace(/\/$/, "");
   const cap = deps.bodyCap ?? BODY_CAP;
+  const drain = deps.drainBytes ?? DRAIN_BYTES;
   const short = (s: string | undefined) => (s ? s.slice(0, 8) : "-");
 
   /** When no account has room, the account whose own answer should pass through: the
@@ -445,7 +478,7 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
     }
     stats.in_flight++;
     res.once("close", () => stats.in_flight--);
-    void readBody(req, res, cap).then(async (body) => {
+    void readBody(req, res, cap, drain).then(async (body) => {
       if (body === null) return;
       try {
         await forward(req, res, body, where.url);

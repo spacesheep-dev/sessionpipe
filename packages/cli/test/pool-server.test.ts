@@ -6,13 +6,14 @@
 // client that leaves, a 10 MiB body, no account with room, no account at all, a port
 // that is taken, and logs with no secret in them.
 import http from "node:http";
-import type net from "node:net";
+import net from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Credentials } from "../src/pool/credentials.js";
 import { type AccountState, HOLD_MS, type PolicyState } from "../src/pool/policy.js";
 import {
   BODY_CAP,
   bearerOk,
+  DRAIN_MS,
   hostOk,
   normalPath,
   type PoolServer,
@@ -154,6 +155,45 @@ const raw = (o: { path: string; method?: string; host?: string; token?: string |
     req.end(o.method === "GET" ? undefined : body(S1, uuidOf("own"), o.big ? { pad: "x".repeat(o.big) } : {}));
   });
 
+/** The pool, with its own request and response objects kept, to see what is left on them. */
+async function watched(over: Partial<PoolServerDeps>) {
+  const seen = { requests: [] as http.IncomingMessage[], res: [] as http.ServerResponse[] };
+  const real = http.createServer;
+  const spy = vi.spyOn(http, "createServer").mockImplementation((...a: Parameters<typeof http.createServer>) =>
+    real.apply(http, a).on("request", (req: http.IncomingMessage, res: http.ServerResponse) => {
+      seen.requests.push(req);
+      seen.res.push(res);
+    }),
+  );
+  try {
+    await start(over);
+  } finally {
+    spy.mockRestore();
+  }
+  return seen;
+}
+
+/** A client that sends the headers and `bytes` of a body that says it is `length`
+ *  long, then stops writing and reads whatever comes back until the socket closes. */
+const partial = (bytes: number, length: number) => {
+  const sock = net.connect(srv!.port, "127.0.0.1");
+  const got: Buffer[] = [];
+  const closed = new Promise<string>((r) => sock.on("close", () => r(Buffer.concat(got).toString())));
+  sock.on("data", (c: Buffer) => got.push(c));
+  sock.on("error", () => {});
+  sock.write(
+    `POST /v1/messages HTTP/1.1\r\nhost: 127.0.0.1:${srv!.port}\r\nauthorization: Bearer ${TOKEN}\r\n` +
+      `content-type: application/json\r\ncontent-length: ${length}\r\n\r\n`,
+  );
+  sock.write(Buffer.alloc(bytes, "x"));
+  return { sock, got, closed };
+};
+
+/** Waits on real I/O turns (setImmediate is never faked here) until `f` holds. */
+const until = async (f: () => boolean) => {
+  while (!f()) await new Promise((r) => setImmediate(r));
+};
+
 beforeEach(async () => {
   up = await upstream();
   now = T0;
@@ -183,6 +223,7 @@ beforeEach(async () => {
   up.handler = (_req, res) => json(res, 200, limitHeaders(0.1), { id: "msg_1", content: [] });
 });
 afterEach(async () => {
+  vi.useRealTimers();
   await srv?.close();
   srv = null;
   await up.close();
@@ -968,9 +1009,75 @@ describe("what the soak found", () => {
       expect([i, r.status]).toEqual([i, 413]);
     }
     expect(up.seen).toEqual([]);
-    // Far past the cap: the answer still arrives, then node ends the socket.
-    const far = await raw({ path: "/v1/messages", big: 512 * 1024 }).catch(() => ({ status: -1, body: "closed" }));
-    expect(far.status).toBe(413);
+    // Far past the cap: the rest is read and dropped, and the answer goes out when the
+    // request ends, so it is never thrown away by a reset of bytes still on their way.
+    for (let i = 0; i < 10; i++) {
+      const far = await raw({ path: "/v1/messages", big: 512 * 1024 }).catch((e: Error) => ({
+        status: -1,
+        body: e.message,
+      }));
+      expect([i, far.status]).toEqual([i, 413]);
+      expect(JSON.parse(far.body)).toMatchObject({ error: { type: "request_too_large" } });
+    }
+    expect(up.seen).toEqual([]);
+    expect(logs).toEqual([]);
+    expect(srv!.stats).toMatchObject({ requests: 13, upstream: 0, refused: 0, aborted: 0, in_flight: 0 });
     expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
+  });
+  it("F8: a body past the cap and the drain budget gets its answer when the budget is spent, nothing kept", async () => {
+    const pool = await watched({ bodyCap: 64 * 1024, drainBytes: 256 * 1024 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // It says 64 MiB and stops writing one byte past cap + budget: the answer comes
+    // without the request ever ending.
+    const c = partial(64 * 1024 + 256 * 1024 + 1, 64 * 1024 * 1024);
+    const text = await c.closed;
+    expect(text).toMatch(/^HTTP\/1\.1 413 /);
+    expect(text).toMatch(/connection: close/i);
+    expect(text).toContain('"request_too_large"');
+    const req = pool.requests[0]!;
+    // Ours are gone (node keeps one of its own on "end" for a request that never ended).
+    expect([req.listenerCount("data"), req.readableLength]).toEqual([0, 0]);
+    expect(req.listeners("end").map((f) => f.name)).not.toContain("onEnd");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(up.seen).toEqual([]);
+    expect(logs).toEqual([]);
+    await until(() => srv!.stats.in_flight === 0);
+    expect(srv!.stats).toMatchObject({ requests: 1, upstream: 0, refused: 0, aborted: 0, in_flight: 0 });
+  });
+  it("F8: a client that stalls past the cap gets its answer when the time budget is spent", async () => {
+    await watched({ bodyCap: 64 * 1024 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const c = partial(64 * 1024 + 1000, 1024 * 1024);
+    await until(() => vi.getTimerCount() === 1);
+    await vi.advanceTimersByTimeAsync(DRAIN_MS - 1);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    expect(c.got).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    const text = await c.closed;
+    expect(text).toMatch(/^HTTP\/1\.1 413 /);
+    expect(text).toContain('"request_too_large"');
+    expect(vi.getTimerCount()).toBe(0);
+    expect(up.seen).toEqual([]);
+    await until(() => srv!.stats.in_flight === 0);
+    expect(srv!.stats).toMatchObject({ requests: 1, upstream: 0, refused: 0, aborted: 0, in_flight: 0 });
+  });
+  it("F8: a client that leaves while its body is drained leaves nothing behind", async () => {
+    const pool = await watched({ bodyCap: 64 * 1024 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const c = partial(64 * 1024 + 1000, 1024 * 1024);
+    await until(() => vi.getTimerCount() === 1);
+    c.sock.destroy();
+    await until(() => srv!.stats.in_flight === 0);
+    const req = pool.requests[0]!;
+    expect(vi.getTimerCount()).toBe(0);
+    expect([req.listenerCount("data"), req.listenerCount("end"), pool.res[0]!.listenerCount("close")]).toEqual([
+      0, 0, 0,
+    ]);
+    expect(up.seen).toEqual([]);
+    expect(logs).toEqual([]);
+    expect(srv!.stats).toMatchObject({ requests: 1, upstream: 0, refused: 0, aborted: 0, in_flight: 0 });
+    vi.useRealTimers();
+    expect((await send("/v1/messages", { body: body(S1) })).status).toBe(200);
+    expect(srv!.stats).toMatchObject({ requests: 2, aborted: 0, in_flight: 0 });
   });
 });
