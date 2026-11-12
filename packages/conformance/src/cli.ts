@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // npx @sessionpipe/conformance <fixture dir | file>   run adapter fixtures
 // npx @sessionpipe/conformance https://host [--token] run the receiver scenarios (M3)
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runAdapterFixtures } from "./index.js";
+import { printable, runAdapterFixtures } from "./index.js";
 
+// The folder named on the command line is the one that is read: a symbolic link under it
+// would bring in a file from somewhere else, so one is an error that names it.
 const walk = (d: string): string[] =>
   readdirSync(d).flatMap((n) => {
     const p = path.join(d, n);
-    return statSync(p).isDirectory() ? walk(p) : p.endsWith(".json") ? [p] : [];
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) throw new Error(`${p} is a symbolic link; fixtures are plain files in plain folders`);
+    return st.isDirectory() ? walk(p) : p.endsWith(".json") ? [p] : [];
   });
 
 /** The command: `argv` is what follows the script; the exit code comes back. */
@@ -30,12 +34,12 @@ export async function main(argv: string[], io: { stdout: { write(s: string): unk
     files = statSync(target).isDirectory() ? walk(target) : [target];
   } catch (e) {
     // Node's words name the code and the path that failed: the target, or an entry under
-    // it (a broken symlink, a locked folder).
-    io.stdout.write(`sessionpipe-conformance: ${(e as Error).message}\n`);
+    // it (a locked folder); a symbolic link under it is named in ours.
+    io.stdout.write(`sessionpipe-conformance: ${printable((e as Error).message)}\n`);
     return 2;
   }
   if (!files.length) {
-    io.stdout.write(`sessionpipe-conformance: no .json fixtures under ${target}\n`);
+    io.stdout.write(`sessionpipe-conformance: no .json fixtures under ${printable(target)}\n`);
     return 2;
   }
   const r = await runAdapterFixtures(files);
