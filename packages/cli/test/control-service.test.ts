@@ -45,6 +45,10 @@ describe.skipIf(process.platform === "win32")("POSIX control service paths", () 
     home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sessionpipe-service-")));
     vi.spyOn(os, "homedir").mockReturnValue(home);
     vi.stubEnv("XDG_STATE_HOME", path.join(home, "state"));
+    // The test's sandbox points sessionpipe away from this computer's files, where it
+    // would leave the real service alone: here the real one is meant, and launchctl and
+    // systemctl are stood in for.
+    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.control");
     vi.clearAllMocks();
     vi.mocked(execFileSync).mockReset();
   });

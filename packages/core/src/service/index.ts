@@ -12,7 +12,7 @@
  *  here needs root, and a dry run touches nothing: it answers the files it would write
  *  and the commands it would run. */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -264,6 +264,32 @@ export interface ServiceState {
   installed: boolean;
   /** The manager has the service now (launchd: in either domain; systemd: active). */
   loaded: boolean;
+  /** The program and arguments the file names; null when there is no file or it has none. */
+  argv: string[] | null;
+}
+
+const unxml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** The program and its arguments a service file names, as `serviceFiles` wrote them: a
+ *  plist's ProgramArguments, a unit's ExecStart. Null when the text has neither. */
+export function serviceArgv(text: string): string[] | null {
+  const plist = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1];
+  if (plist !== undefined)
+    return [...plist.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1] as string));
+  const unit = /^ExecStart=(.*)$/m.exec(text)?.[1];
+  if (unit === undefined) return null;
+  return [...unit.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+    (m[1] as string).replace(/\\(.)/g, "$1").replace(/%%/g, "%"),
+  );
+}
+
+/** A service file's ProgramArguments or ExecStart, read from disk; null when it can't be. */
+function argvOf(file: string): string[] | null {
+  try {
+    return serviceArgv(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 /** Whether this platform's manager has the service now. A look only: nothing is
@@ -288,6 +314,7 @@ export function serviceState(o: UninstallOptions): ServiceState {
       installed: existsSync(f.plist.path),
       loaded:
         ok("launchctl", ["print", `gui/${uid}/${o.label}`]) || ok("launchctl", ["print", `user/${uid}/${o.label}`]),
+      argv: argvOf(f.plist.path),
     };
   if (platform === "linux")
     return {
@@ -295,8 +322,9 @@ export function serviceState(o: UninstallOptions): ServiceState {
       file: f.unit.path,
       installed: existsSync(f.unit.path),
       loaded: ok("systemctl", ["--user", "is-active", o.unit]),
+      argv: argvOf(f.unit.path),
     };
-  return { manager: null, file: null, installed: false, loaded: false };
+  return { manager: null, file: null, installed: false, loaded: false, argv: null };
 }
 
 export interface UninstallOptions {

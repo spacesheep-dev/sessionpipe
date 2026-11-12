@@ -805,9 +805,11 @@ describe("the service that keeps the daemon running", () => {
 
   it("uninstall: unloads and removes the file this platform has, and nothing where there is none", () => {
     const f = serviceFiles({ node: "", cli: "", logDir: "", home });
+    // This computer's own service, named outright: the sandbox alone would leave it be.
+    const real = { ...env, SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.control" };
     for (const p of ["darwin", "linux"] as const) {
       on(p);
-      uninstallService(env);
+      uninstallService(real);
       expect(execFileSync).not.toHaveBeenCalled();
     }
     on("darwin");
@@ -816,7 +818,7 @@ describe("the service that keeps the daemon running", () => {
     vi.mocked(execFileSync).mockImplementationOnce(() => {
       throw new Error("not loaded");
     });
-    uninstallService(env);
+    uninstallService(real);
     expect(existsSync(f.plist.path)).toBe(false);
     expect(vi.mocked(execFileSync).mock.calls.map((c) => c[1])).toEqual([
       ["bootout", `gui/${process.getuid?.() ?? ""}/org.sessionpipe.control`],
@@ -825,13 +827,13 @@ describe("the service that keeps the daemon running", () => {
     vi.mocked(execFileSync).mockClear();
     process.getuid = undefined as never;
     writeFileSync(f.plist.path, "plist");
-    uninstallService(env);
+    uninstallService(real);
     expect(vi.mocked(execFileSync).mock.calls[0]?.[1]).toEqual(["bootout", "gui//org.sessionpipe.control"]);
     vi.mocked(execFileSync).mockClear();
     on("linux");
     mkdirSync(path.dirname(f.unit.path), { recursive: true });
     writeFileSync(f.unit.path, "unit");
-    uninstallService(env);
+    uninstallService(real);
     expect(existsSync(f.unit.path)).toBe(false);
     expect(vi.mocked(execFileSync).mock.calls.map((c) => c[1])).toEqual([
       ["--user", "disable", "--now", "sessionpipe-control.service"],
@@ -839,7 +841,7 @@ describe("the service that keeps the daemon running", () => {
     ]);
     on("win32");
     vi.mocked(execFileSync).mockClear();
-    uninstallService(env);
+    uninstallService(real);
     expect(execFileSync).not.toHaveBeenCalled();
   });
 });

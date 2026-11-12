@@ -73,6 +73,7 @@ describe("a look at the service", () => {
       file: plist,
       installed: false,
       loaded: false,
+      argv: null,
     });
     expect(asked.every((a) => a.startsWith("launchctl print "))).toBe(true);
     expect(asked.map((a) => a.split(" ")[2]?.split("/")[0])).toEqual(["gui", "user"]);
@@ -82,6 +83,7 @@ describe("a look at the service", () => {
     expect(serviceLook({ ...o, exec: exec({ [`user/${uid}/${SERVICE_LABEL}`]: true }) })).toMatchObject({
       installed: true,
       loaded: true,
+      argv: null,
     });
     expect(serviceLook({ ...o, exec: exec({ [`gui/${uid}/${SERVICE_LABEL}`]: true }) })?.loaded).toBe(true);
   });
@@ -93,6 +95,7 @@ describe("a look at the service", () => {
       file: path.join(tmp, ".config", "systemd", "user", SERVICE_UNIT),
       installed: false,
       loaded: true,
+      argv: null,
     });
     expect(
       serviceLook({

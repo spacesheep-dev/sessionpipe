@@ -21,6 +21,8 @@ export const SERVICE_UNIT = "sessionpipe-control.service";
  *  so it is not asked about; SESSIONPIPE_SERVICE_LABEL names a service of its own. */
 export function serviceNames(env: NodeJS.ProcessEnv = process.env): { label: string; unit: string } | null {
   const own = env.SESSIONPIPE_SERVICE_LABEL;
+  // Named outright, this computer's real service is meant after all.
+  if (own === SERVICE_LABEL) return { label: SERVICE_LABEL, unit: SERVICE_UNIT };
   if (own) return /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(own) ? { label: own, unit: `${own}.service` } : null;
   if (env.SESSIONPIPE_STATE || env.SESSIONPIPE_CONFIG) return null;
   return { label: SERVICE_LABEL, unit: SERVICE_UNIT };
