@@ -146,7 +146,9 @@ describe("the schemas command", () => {
     expect(existsSync(path.join(fake, "schemas/v1/extra.json"))).toBe(false);
     expect(run({ root: fake, check: true, ...io })).toBe(0);
     expect(log.at(-1)).toMatch(/in sync with proto\/ \(17 files\)/);
-  });
+    // Six runs of the generator over a copied tree: about five seconds on a Windows
+    // runner, where the default 5 s limit failed it twice in one day (2026-11-11).
+  }, 30_000);
   it("on this repository, with the default output, everything is in sync", () => {
     expect(run({ root, check: true })).toBe(0);
   });
