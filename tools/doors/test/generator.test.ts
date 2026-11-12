@@ -2,7 +2,7 @@
 // The generator's own rules, on small protos compiled for the test: what it refuses, and the
 // shapes the wire protos don't use yet (a map of words, a float with a ceiling). The parity tests
 // cover the rest through the real proto. Together they keep tools/doors at the 100 % rule.
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,50 @@ describe("the schemas command", () => {
     // Six runs of the generator over a copied tree: about five seconds on a Windows
     // runner, where the default 5 s limit failed it twice in one day (2026-11-11).
   }, 30_000);
+  // Making a symbolic link to a file needs a privilege on Windows.
+  it.skipIf(process.platform === "win32")(
+    "a symbolic link where a generated file or its folder goes is refused, not read or written through",
+    () => {
+      const outside = mkdtempSync(path.join(os.tmpdir(), "sp-doors-outside-"));
+      writeFileSync(path.join(outside, "victim.json"), "mine\n");
+      writeFileSync(path.join(outside, "victim.ts"), "mine\n");
+      const io = { log: () => {}, error: () => {} };
+      const fake = (): string => {
+        const dir = mkdtempSync(path.join(os.tmpdir(), "sp-doors-link-"));
+        cpSync(protoDir, path.join(dir, "proto"), { recursive: true });
+        symlinkSync(path.join(root, "node_modules"), path.join(dir, "node_modules"));
+        return dir;
+      };
+      // The schemas folder itself.
+      const folder = fake();
+      mkdirSync(path.join(folder, "schemas"));
+      symlinkSync(outside, path.join(folder, "schemas/v1"));
+      for (const check of [true, false])
+        expect(() => run({ root: folder, check, ...io })).toThrow(`${path.join("schemas", "v1")} is a symbolic link`);
+      // A stale schema (one the proto no longer makes, which a write would delete).
+      const stale = fake();
+      mkdirSync(path.join(stale, "schemas/v1"), { recursive: true });
+      symlinkSync(path.join(outside, "victim.json"), path.join(stale, "schemas/v1/extra.json"));
+      expect(() => run({ root: stale, check: false, ...io })).toThrow(/extra\.json is a symbolic link/);
+      // A generated schema, the types file, and a folder on the way to it.
+      const schema = fake();
+      mkdirSync(path.join(schema, "schemas/v1"), { recursive: true });
+      symlinkSync(path.join(outside, "victim.json"), path.join(schema, "schemas/v1/event.json"));
+      expect(() => run({ root: schema, check: false, ...io })).toThrow(/event\.json is a symbolic link/);
+      const types = fake();
+      mkdirSync(path.join(types, "packages/core/gen"), { recursive: true });
+      symlinkSync(path.join(outside, "victim.ts"), path.join(types, "packages/core/gen/v1.ts"));
+      expect(() => run({ root: types, check: false, ...io })).toThrow(/v1\.ts is a symbolic link/);
+      const parent = fake();
+      mkdirSync(path.join(parent, "packages/core"), { recursive: true });
+      symlinkSync(outside, path.join(parent, "packages/core/gen"));
+      expect(() => run({ root: parent, check: false, ...io })).toThrow(/gen is a symbolic link/);
+      expect(readFileSync(path.join(outside, "victim.json"), "utf8")).toBe("mine\n");
+      expect(readFileSync(path.join(outside, "victim.ts"), "utf8")).toBe("mine\n");
+      expect(existsSync(path.join(outside, "v1.ts"))).toBe(false);
+    },
+    30_000,
+  );
   it("on this repository, with the default output, everything is in sync", () => {
     expect(run({ root, check: true })).toBe(0);
   });

@@ -9,10 +9,11 @@
 //
 // The envelope around a fixture's expected event is scripts/lib/envelope.mjs, shared with the
 // conformance check and the golden test.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { envelope } from "./lib/envelope.mjs";
+import { refuseLink, walkFiles } from "./lib/walk.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const coreArg = process.argv[2];
@@ -30,9 +31,15 @@ export const CASES = [0, 1, 2, 3].flatMap((t) => [`${t}`, `${t}+pii`]);
 
 const harnessDir = path.join(root, "conformance/harness");
 const outDir = path.join(root, "conformance/tiers");
+// Nothing here is read or written through a symbolic link (scripts/lib/walk.mjs): the fixtures
+// are the ones under conformance/harness, and the goldens land under conformance/tiers.
+for (const p of [path.join(root, "conformance"), harnessDir, outDir]) refuseLink(p);
+walkFiles(harnessDir);
 mkdirSync(outDir, { recursive: true });
 let n = 0;
-for (const harness of readdirSync(harnessDir).filter((h) => statSync(path.join(harnessDir, h)).isDirectory())) {
+for (const harness of readdirSync(harnessDir, { withFileTypes: true })
+  .filter((h) => h.isDirectory())
+  .map((h) => h.name)) {
   const golden = { recorded_from: `sessionpipe-core ${version}`, cases: {} };
   for (const f of readdirSync(path.join(harnessDir, harness))
     .filter((x) => x.endsWith(".json"))
@@ -50,12 +57,16 @@ for (const harness of readdirSync(harnessDir).filter((h) => statSync(path.join(h
     });
   }
   const file = path.join(outDir, `${harness}.json`);
-  if (existsSync(file)) {
+  try {
+    // "wx": the file is made here or not at all, so a golden that exists, and a link left where
+    // one would go, are both refused rather than written through.
+    writeFileSync(file, `${JSON.stringify(golden, null, 2)}\n`, { flag: "wx" });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
     console.error(
       `${path.relative(root, file)} exists; the goldens are recorded once. Delete it on purpose to re-record.`,
     );
     process.exit(1);
   }
-  writeFileSync(file, `${JSON.stringify(golden, null, 2)}\n`);
 }
 console.log(`recorded ${n} events × ${CASES.length} cases from sessionpipe-core ${version} into conformance/tiers/`);

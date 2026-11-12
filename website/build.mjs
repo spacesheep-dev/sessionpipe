@@ -3,7 +3,17 @@
 // files with marked into one HTML template, copies schemas/v1 (the $ids), writes
 // website/dist/. No analytics, no external requests, no cookies.
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
@@ -14,7 +24,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const _src = path.join(root, "website/src");
 const out = path.join(root, "website/dist");
 const SITE = "https://sessionpipe.org";
-const read = (p) => readFileSync(path.join(root, p), "utf8");
+// Every source the site is built from is a file of this repository, by its own name: a path
+// that leaves the checkout (`../`, an absolute path) or reaches its file through a symbolic
+// link is a build error, so nothing from the machine that builds the site is published.
+const realRoot = realpathSync(root);
+const read = (p) => {
+  const rel = path.relative(root, path.resolve(root, p));
+  const outside = rel.startsWith("..") || path.isAbsolute(rel);
+  const real = outside ? null : realpathSync(path.join(root, rel));
+  if (real !== path.join(realRoot, rel))
+    throw new Error(`${p}: the site is built from this repository's own files, by their own names`);
+  return readFileSync(real, "utf8");
+};
+// The same for a folder copied whole (the Pages upload follows links when it packs the site).
+const plain = (src) => {
+  if (lstatSync(src).isSymbolicLink()) throw new Error(`${src} is a symbolic link; the site copies plain files`);
+  return true;
+};
 const version = JSON.parse(read("packages/core/package.json")).version;
 // The sessionpipe-gui release the home page offers, with each file's size in bytes as the
 // release lists it: the one place to bump. The page prints decimal MB, as Finder does.
@@ -43,9 +69,9 @@ const withGui = (text, file) =>
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-cpSync(path.join(root, "website/public"), out, { recursive: true });
+cpSync(path.join(root, "website/public"), out, { recursive: true, filter: plain });
 mkdirSync(path.join(out, "schema/v1"), { recursive: true });
-cpSync(path.join(root, "schemas/v1"), path.join(out, "schema/v1"), { recursive: true });
+cpSync(path.join(root, "schemas/v1"), path.join(out, "schema/v1"), { recursive: true, filter: plain });
 
 const css = read("website/src/site.css");
 // A light or dark chosen with the header's button, applied before the first paint, and a "js"
@@ -596,6 +622,8 @@ const publicCommands = Object.keys(usage).filter(
       return render(usageLine(cmd));
     });
   let md = read(src).replace(/^\{\{include ([^#}]+)(?:#(.+?))?\}\}$/gm, (_, file, heading) => {
+    // An include brings in one of the repository's Markdown files, and nothing else.
+    if (!file.endsWith(".md")) throw new Error(`${src}: {{include ${file}}} is not a Markdown file`);
     const lines = read(file).split("\n");
     let from = 0;
     if (heading) {
