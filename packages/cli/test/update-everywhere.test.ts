@@ -5,7 +5,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   copyOnPath,
   type Exec,
@@ -24,16 +24,18 @@ beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), "sp-every-"));
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(tmp, { recursive: true, force: true });
 });
 
-/** A global npm install of sessionpipe under `<tmp>/<name>`: its dist folder. */
+/** A global npm install of sessionpipe under `<tmp>/<name>`: its dist folder. With no
+ *  version it has the shape and no package.json. */
 function copy(name: string, version: string | null): string {
   const pkg = path.join(tmp, name, "lib", "node_modules", "sessionpipe");
   mkdirSync(path.join(pkg, "dist"), { recursive: true });
   mkdirSync(path.join(tmp, name, "bin"), { recursive: true });
   writeFileSync(path.join(pkg, "dist", "cli.js"), "");
-  if (version !== null) writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ version }));
+  if (version !== null) writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "sessionpipe", version }));
   if (posix) symlinkSync(path.join(pkg, "dist", "cli.js"), path.join(tmp, name, "bin", "sessionpipe"));
   return path.join(pkg, "dist");
 }
@@ -64,12 +66,17 @@ describe("the registry that is asked", () => {
 });
 
 describe("the version of a copy on disk", () => {
-  it("is its package.json's; null when that can't be read or says none", () => {
+  it("is its package.json's; null when that can't be read as sessionpipe's, or says no version", () => {
     expect(versionAt(copy("a", "1.2.3"))).toBe("1.2.3");
     expect(versionAt(copy("b", null))).toBeNull();
     expect(versionAt(copy("c", "latest"))).toBeNull();
     const d = copy("d", null);
     writeFileSync(path.join(d, "..", "package.json"), JSON.stringify({ name: "sessionpipe" }));
+    expect(versionAt(d)).toBeNull();
+    // Another package's, and a file that is no object at all.
+    writeFileSync(path.join(d, "..", "package.json"), JSON.stringify({ name: "left-pad", version: "1.2.3" }));
+    expect(versionAt(d)).toBeNull();
+    writeFileSync(path.join(d, "..", "package.json"), "null");
     expect(versionAt(d)).toBeNull();
   });
 });
@@ -92,8 +99,11 @@ describe("the copy a person types", () => {
     expect(samePath(copyOnPath({ PATH }) as string, a)).toBe(true);
     expect(copyOnPath({ PATH: path.join(tmp, "empty") })).toBeNull();
     expect(copyOnPath({})).toBeNull();
-    // This process's own PATH: whatever is there, it is only looked at.
-    expect([null, "string"]).toContain(copyOnPath() === null ? null : typeof copyOnPath());
+    // Asked nothing, it reads this process's own PATH.
+    vi.stubEnv("PATH", path.join(tmp, "b", "bin"));
+    expect(samePath(copyOnPath() as string, path.join(tmp, "b", "lib", "node_modules", "sessionpipe", "dist"))).toBe(
+      true,
+    );
   });
 
   it.runIf(posix)("not a script of that name, nor a link to nowhere", () => {
@@ -107,12 +117,38 @@ describe("the copy a person types", () => {
     expect(copyOnPath({ PATH: dead })).toBeNull();
   });
 
-  it("on Windows it is the shim's own folder that holds the install", () => {
+  it.runIf(posix)("nor a folder that has an install's shape and no package.json that says sessionpipe", () => {
+    // A link someone planted ahead of the real install on PATH (a project's node_modules/.bin).
+    const shaped = copy("elsewhere", null);
+    const planted = path.join(tmp, "proj", "node_modules", ".bin");
+    mkdirSync(planted, { recursive: true });
+    symlinkSync(path.join(shaped, "cli.js"), path.join(planted, "sessionpipe"));
+    copy("real", "1.0.0");
+    const PATH = [planted, path.join(tmp, "real", "bin")].join(path.delimiter);
+    // The first one decides, as in a shell; it is no install, so there is none to write to.
+    expect(copyOnPath({ PATH })).toBeNull();
+    writeFileSync(path.join(shaped, "..", "package.json"), JSON.stringify({ name: "other", version: "1.0.0" }));
+    expect(copyOnPath({ PATH })).toBeNull();
+    writeFileSync(path.join(shaped, "..", "package.json"), JSON.stringify({ name: "sessionpipe", version: "1.0.0" }));
+    expect(samePath(copyOnPath({ PATH }) as string, shaped)).toBe(true);
+  });
+
+  it("on Windows it is the shim's own folder, when that holds the install and not just the name", () => {
     const prefix = path.join(tmp, "win");
-    const dist = path.join(prefix, "node_modules", "sessionpipe", "dist");
-    mkdirSync(dist, { recursive: true });
+    const pkg = path.join(prefix, "node_modules", "sessionpipe");
+    const dist = path.join(pkg, "dist");
+    const PATH = [path.join(tmp, "other"), prefix].join(path.delimiter);
+    mkdirSync(prefix, { recursive: true });
+    // A wrapper script someone called sessionpipe.cmd: its folder is no npm prefix.
     writeFileSync(path.join(prefix, "sessionpipe.cmd"), "");
-    expect(copyOnPath({ PATH: [path.join(tmp, "other"), prefix].join(path.delimiter) }, "win32")).toBe(dist);
+    expect(copyOnPath({ PATH }, "win32")).toBeNull();
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(path.join(dist, "cli.js"), "");
+    expect(copyOnPath({ PATH }, "win32")).toBeNull();
+    writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "sessionpipe", version: "1.0.0" }));
+    expect(copyOnPath({ PATH }, "win32")).toBe(dist);
+    rmSync(path.join(dist, "cli.js"));
+    expect(copyOnPath({ PATH }, "win32")).toBeNull();
   });
 });
 
@@ -127,7 +163,7 @@ describe.runIf(posix)("installEverywhere (npm stood in for)", () => {
         if (o.fail && prefix.endsWith(o.fail)) return { code: 1, stdout: "", stderr: "npm error EACCES" };
         writeFileSync(
           path.join(prefix, "lib", "node_modules", "sessionpipe", "package.json"),
-          JSON.stringify({ version: (argv.at(-1) as string).split("@")[1] }),
+          JSON.stringify({ name: "sessionpipe", version: (argv.at(-1) as string).split("@")[1] }),
         );
         return { code: 0, stdout: "", stderr: "" };
       }
@@ -179,7 +215,7 @@ describe.runIf(posix)("installEverywhere (npm stood in for)", () => {
 
   it("another copy that can't be updated is said, and never holds the rest back", async () => {
     const mine = copy("mine", "1.0.0");
-    const typed = copy("typed", null);
+    const typed = copy("typed", "0.9.0");
     const { exec } = fake({ fail: "typed" });
     const r = await installEverywhere("1.1.0", {
       node: "n",
@@ -194,6 +230,31 @@ describe.runIf(posix)("installEverywhere (npm stood in for)", () => {
       others: [{ dir: typed, error: expect.stringContaining("EACCES") }],
     });
     expect(versionAt(mine)).toBe("1.1.0");
+  });
+
+  it("npm is never run on a folder that doesn't say it holds sessionpipe", async () => {
+    const mine = copy("mine", "1.0.0");
+    const shaped = copy("shaped", null);
+    const other = copy("other", null);
+    writeFileSync(path.join(other, "..", "package.json"), JSON.stringify({ name: "other", version: "0.1.0" }));
+    const { calls, exec } = fake();
+    const r = await installEverywhere("1.1.0", {
+      node: "n",
+      distDir: mine,
+      others: [shaped, other],
+      harnesses: [],
+      exec,
+    });
+    expect(npmRuns(calls)).toEqual([path.join(tmp, "mine")]);
+    const error = "no package.json there says it is sessionpipe, so npm was not run on it";
+    expect(r).toMatchObject({
+      ok: true,
+      others: [
+        { dir: shaped, error },
+        { dir: other, error },
+      ],
+    });
+    expect(r).not.toHaveProperty("along");
   });
 
   it("the running copy failing is the whole thing failing: nothing else is tried", async () => {
