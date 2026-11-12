@@ -45,6 +45,9 @@ export type LocalRequest =
   | { op: "status" }
   /** `sessionpipe update` installed a new copy: restart onto it once nothing is in hand. */
   | { op: "restart" }
+  /** `sessionpipe doctor`: what the daemon can see that the shell asking may not (a
+   *  sign-in kept in a Mac's login keychain, which an ssh shell can't read). */
+  | { op: "health" }
   /** `sessionpipe pool …` while the daemon runs: the daemon holds the pool's engine
    *  (pins, credentials, the listener), so a change goes through it. `status` reads;
    *  the rest are CONTROL.md §6's actions, plus `import` (reads this machine's own
@@ -96,6 +99,7 @@ export type LocalReply =
   | { op: "replaced" }
   | { op: "ok" }
   | { op: "status"; status: unknown }
+  | { op: "health"; health: Health }
   /** A pool op's answer: the ack it would earn (CONTROL.md §6) and the pool as it now
    *  stands (`status`: the façade's PoolStatus; `detail`: the summary line, or a
    *  login.begin's "<pending id> <URL>"). */
@@ -118,6 +122,13 @@ export type LocalReply =
   /** ask_off · harness · folder · depth · loop · start_limit · bad_fields */
   | { op: "refused"; code: string; detail: string }
   | { op: "failed"; detail: string };
+
+/** What the daemon sees from where it runs (`health`). */
+export interface Health {
+  /** Each Claude Code account on this machine: its config dir, and whether Claude Code
+   *  says it is signed in as the daemon sees it (null: it couldn't say). */
+  accounts: { dir: string; signed_in: boolean | null }[];
+}
 
 /** The replies that end an ask. */
 export type AskEnd = Extract<LocalReply, { op: "answer" | "refused" | "failed" }>;

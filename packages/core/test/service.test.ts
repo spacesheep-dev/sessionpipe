@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureLinger, installService, serviceFiles, uninstallService } from "../src/service/index.js";
+import { ensureLinger, installService, serviceFiles, serviceState, uninstallService } from "../src/service/index.js";
 import { compareVersions, isNewer, parseVersion, UPDATE_EXIT } from "../src/version.js";
 
 let home: string;
@@ -263,6 +263,102 @@ describe("installing and removing", () => {
       commands: ["launchctl bootout gui/7/org.sessionpipe.gui", "launchctl bootout user/7/org.sessionpipe.gui"],
     });
     expect(existsSync(f.plist.path)).toBe(true);
+  });
+});
+
+describe("a look at the service", () => {
+  const NAMES = { label: SPEC.label, unit: SPEC.unit };
+  /** A manager that has exactly the targets named, and remembers what it was asked. */
+  const manager = (...has: string[]) => {
+    const asked: string[] = [];
+    const exec = (cmd: string, args: string[]) => {
+      asked.push([cmd, ...args].join(" "));
+      if (!has.includes(args.at(-1) as string)) throw new Error("Could not find service");
+      return "";
+    };
+    return { asked, exec };
+  };
+
+  it("darwin: launchd has it in the gui domain, in the user domain, or in neither; the file is there or not", () => {
+    const o = { ...NAMES, home, platform: "darwin" as const, uid: "501" };
+    const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.gui.plist");
+    const neither = manager();
+    expect(serviceState({ ...o, exec: neither.exec })).toEqual({
+      manager: "launchd",
+      file: plist,
+      installed: false,
+      loaded: false,
+    });
+    // A look, in both domains: nothing but `print`.
+    expect(neither.asked).toEqual([
+      "launchctl print gui/501/org.sessionpipe.gui",
+      "launchctl print user/501/org.sessionpipe.gui",
+    ]);
+    mkdirSync(path.dirname(plist), { recursive: true });
+    writeFileSync(plist, "");
+    const gui = manager("gui/501/org.sessionpipe.gui");
+    expect(serviceState({ ...o, exec: gui.exec })).toEqual({
+      manager: "launchd",
+      file: plist,
+      installed: true,
+      loaded: true,
+    });
+    // Found at the screen: the other domain is not asked.
+    expect(gui.asked).toEqual(["launchctl print gui/501/org.sessionpipe.gui"]);
+    const user = manager("user/501/org.sessionpipe.gui");
+    expect(serviceState({ ...o, exec: user.exec }).loaded).toBe(true);
+    expect(user.asked).toHaveLength(2);
+    // The file was looked at and left as it was.
+    expect(readFileSync(plist, "utf8")).toBe("");
+  });
+
+  it("linux: the unit is active or it isn't; the file is there or not", () => {
+    const o = { ...NAMES, home, platform: "linux" as const };
+    const unit = path.join(home, ".config", "systemd", "user", "sessionpipe-gui.service");
+    const active = manager("sessionpipe-gui.service");
+    expect(serviceState({ ...o, exec: active.exec })).toEqual({
+      manager: "systemd",
+      file: unit,
+      installed: false,
+      loaded: true,
+    });
+    expect(active.asked).toEqual(["systemctl --user is-active sessionpipe-gui.service"]);
+    mkdirSync(path.dirname(unit), { recursive: true });
+    writeFileSync(unit, "");
+    expect(serviceState({ ...o, exec: manager().exec })).toEqual({
+      manager: "systemd",
+      file: unit,
+      installed: true,
+      loaded: false,
+    });
+  });
+
+  it("another platform has no manager, and nothing is asked", () => {
+    const none = manager();
+    const nothing = { manager: null, file: null, installed: false, loaded: false };
+    expect(serviceState({ ...NAMES, home, platform: "win32", exec: none.exec })).toEqual(nothing);
+    expect(none.asked).toEqual([]);
+    // With no stand-in either: there is still nothing to run.
+    expect(serviceState({ ...NAMES, home, platform: "win32" })).toEqual(nothing);
+  });
+
+  it("asks about this process's own user; where the system has no uid, about none", () => {
+    const own = manager();
+    serviceState({ ...NAMES, home, platform: "darwin", exec: own.exec });
+    expect(own.asked[0]).toBe(`launchctl print gui/${process.getuid?.() ?? ""}/org.sessionpipe.gui`);
+    const getuid = Object.getOwnPropertyDescriptor(process, "getuid");
+    Object.defineProperty(process, "getuid", { value: undefined, configurable: true, writable: true });
+    try {
+      const without = manager();
+      expect(serviceState({ ...NAMES, home, platform: "darwin", exec: without.exec }).loaded).toBe(false);
+      expect(without.asked).toEqual([
+        "launchctl print gui//org.sessionpipe.gui",
+        "launchctl print user//org.sessionpipe.gui",
+      ]);
+    } finally {
+      if (getuid) Object.defineProperty(process, "getuid", getuid);
+      else delete (process as { getuid?: unknown }).getuid;
+    }
   });
 });
 
