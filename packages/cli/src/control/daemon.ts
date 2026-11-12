@@ -499,6 +499,8 @@ export interface DaemonDeps {
   onWedged?: (why: string) => void;
   /** The updater's view, for `control status`. */
   updateStatus?: () => unknown;
+  /** Which copy of sessionpipe this daemon is, and who restarts it (`health`). */
+  copy?: () => NonNullable<Health["copy"]>;
   /** Another daemon took the socket path: this one has stopped and should exit. */
   onLostSocket?: () => void;
   /** The machine's account pool (pool/index.ts): its listener runs in this process,
@@ -700,6 +702,8 @@ export class ControlDaemon {
    *  off): the person reads the ack, the machine's log doesn't need it every time. */
   private readonly warned = new Set<string>();
   private state: DaemonState;
+  /** state.json named sessions mid-turn when this daemon read it. */
+  private readonly turnsOnFile: boolean;
   private running = false;
   private readonly polling = new Map<string, PollState>();
   private readonly delivered: Record<string, number> = {};
@@ -766,6 +770,19 @@ export class ControlDaemon {
     this.acks = new AckOutbox(path.join(dir, "acks.jsonl"));
     this.state = readState(path.join(dir, "state.json"), deps.now());
     this.aliases = readAliases(aliasFile(dir));
+    // The sessions that were mid-turn when the last daemon stopped still are, until
+    // their hooks say otherwise or have been silent too long.
+    for (const [ref, m] of Object.entries(this.state.mid_turn)) {
+      const l = this.liveOf(ref);
+      l.midTurn = true;
+      l.heard = true;
+      l.lastEvent = Date.parse(m.at);
+      if (m.cwd) l.cwd = m.cwd;
+      if (m.transcript) l.transcript = m.transcript;
+    }
+    // Taken up: from here the file says what the next stop writes, not this.
+    this.turnsOnFile = Object.keys(this.state.mid_turn).length > 0;
+    this.state.mid_turn = {};
   }
 
   // --- lifecycle ------------------------------------------------------------------
@@ -797,6 +814,8 @@ export class ControlDaemon {
    *  server makes Node unlink its path whoever holds it, so this one's server is left
    *  open for the process's exit to drop. */
   async stop(o: { leaveSocket?: boolean } = {}): Promise<void> {
+    // Not for a daemon that only steps aside: the one that took over has heard for itself.
+    if (this.running && !o.leaveSocket) this.rememberTurns();
     this.running = false;
     this.paused?.go();
     for (const a of this.aborts) a.abort();
@@ -827,6 +846,24 @@ export class ControlDaemon {
     await this.deps.pool?.stop();
   }
 
+  /** Which sessions are mid-turn is known only from having been told. Written where the
+   *  next daemon reads it (state.json `mid_turn`), so a restart doesn't cost that: a
+   *  message to a session someone is working in still waits for its Stop. */
+  private rememberTurns(): void {
+    const mid: DaemonState["mid_turn"] = {};
+    for (const [ref, l] of this.live)
+      if (this.midTurnNow(l))
+        mid[ref] = {
+          at: new Date(l.lastEvent).toISOString(),
+          ...(l.cwd ? { cwd: l.cwd } : {}),
+          ...(l.transcript ? { transcript: l.transcript } : {}),
+        };
+    // Nothing to say and nothing on file to take back: leave the file alone.
+    if (!Object.keys(mid).length && !this.turnsOnFile) return;
+    this.state.mid_turn = mid;
+    this.saveState("the sessions that are mid-turn");
+  }
+
   /** The pool's listener and its idle usage poll run exactly while the pool is on
    *  (PRIVACY.md §3: the vendor is called only for a pool the person turned on):
    *  up after `on`, down after `off`, whatever accounts exist. Idempotent either way. */
@@ -855,11 +892,16 @@ export class ControlDaemon {
     if (this.running) void this.helloAll();
   }
 
-  /** Null when nothing is in hand, so a restart would interrupt nothing; otherwise what
-   *  is. Parked waiters don't count: a waiter reconnects in silence (CONTROL.md §8). A
-   *  session someone is working in mid-turn does (a restart forgets it is mid-turn, so a
-   *  message to it would fork rather than wait for its Stop), unless it has been silent
-   *  for ten minutes: a session killed mid-turn never sends its Stop. */
+  /** Null when the daemon holds nothing, so a restart would interrupt nothing; otherwise
+   *  what it holds. Only what is the daemon's own to finish counts: a request it is
+   *  answering, a message in hand, a turn it runs, a prompt it holds for an answer.
+   *  Parked waiters don't: a waiter reconnects in silence (CONTROL.md §8). Nor does a
+   *  session someone is working in, mid-turn in its own window: that turn is not the
+   *  daemon's to wait for, and what the daemon knows of it (that it is mid-turn, so a
+   *  message waits for its Stop rather than copying it) is written down at a stop and
+   *  read back at the next start (`rememberTurns`). Before 0.15 such a session held a
+   *  restart back, and on a computer where some session is always working an update's
+   *  restart never came. */
   busy(): string | null {
     const pooled = this.deps.pool?.status().in_flight ?? 0;
     if (pooled) return `${pooled} pooled request(s) being answered`;
@@ -868,9 +910,6 @@ export class ControlDaemon {
     if (this.startsRunning) return "a session starting";
     for (const s of this.sdkSessions.values()) if (s.busy) return "an Agent SDK session mid-turn";
     for (const l of this.live.values()) if (l.attentions.size) return "a permission prompt waiting for an answer";
-    const now = this.deps.now();
-    for (const l of this.live.values())
-      if (l.midTurn && now - l.lastEvent < HOOKS_WORD_MS) return "a session on this machine mid-turn";
     if (this.receiving) return "messages just received";
     if (this.flushing) return "acks being sent";
     return null;
@@ -980,6 +1019,7 @@ export class ControlDaemon {
     );
     return {
       accounts: dirs.map((dir, i) => ({ dir, signed_in: signedIn[i] as boolean | null })),
+      ...(this.deps.copy ? { copy: this.deps.copy() } : {}),
     };
   }
 

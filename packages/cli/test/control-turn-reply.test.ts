@@ -184,6 +184,7 @@ describe.runIf(unix)("a message delivered at a Stop: its reply is what the sessi
       started: {},
       modes: {},
       parked: {},
+      mid_turn: {},
       copies: { [SID]: { id: COPY, at: new Date().toISOString(), reason: "" } },
     });
     await startDaemon();
