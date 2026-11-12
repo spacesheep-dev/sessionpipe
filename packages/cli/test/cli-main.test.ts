@@ -41,6 +41,7 @@ import { installLauncher } from "../src/launcher.js";
 import { factsState, VERSION } from "../src/run.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
 import { bestStore, dropSinkSecrets, fileKept, moveSinkSecrets, sinkWithSecrets, storeLabel } from "../src/secrets.js";
+import { PLAIN, plain } from "../src/style.js";
 import { globalPrefix, installVersion, latestVersion } from "../src/update.js";
 
 type Cli = typeof import("../src/cli.js");
@@ -107,8 +108,16 @@ vi.mock("../src/ask.js", async (original) => ({
 // A code alone is refused at the open, as Node does; `@write` fails in the write, after
 // the open has truncated the file. Empty, every write goes through.
 const unwritable = vi.hoisted(() => ({ files: new Map<string, string>() }));
+// How much room the disk says it has: bytes, null when the system won't say, and left
+// undefined the real answer.
+const disk = vi.hoisted(() => ({ free: undefined as number | null | undefined }));
 vi.mock("node:fs", async (original) => {
   const real = await original<typeof import("node:fs")>();
+  const statfsSync = ((p: string) => {
+    if (disk.free === undefined) return real.statfsSync(p);
+    if (disk.free === null) throw new Error("ENOSYS: function not implemented, statfs");
+    return { bavail: Math.floor(disk.free / 4096), bsize: 4096 };
+  }) as typeof real.statfsSync;
   const write = real.writeFileSync as (...a: unknown[]) => void;
   const writeFileSync = ((p: unknown, ...rest: unknown[]) => {
     const [code, syscall = "open"] = (typeof p === "string" ? unwritable.files.get(p) : undefined)?.split("@") ?? [];
@@ -116,7 +125,7 @@ vi.mock("node:fs", async (original) => {
     if (syscall === "write") write(p, "");
     throw Object.assign(new Error(`${code}: refused, ${syscall} '${p}'`), { code, syscall });
   }) as typeof real.writeFileSync;
-  return { ...real, writeFileSync };
+  return { ...real, writeFileSync, statfsSync };
 });
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -140,10 +149,55 @@ const onPlatform = (p: NodeJS.Platform) => Object.defineProperty(process, "platf
 
 /** One run of the CLI: what it printed, and what it did at the end. */
 async function run(...argv: string[]) {
+  return runAt({}, ...argv);
+}
+/** The same where the output is what `where` says: a terminal, its width, a terminal for errors. */
+async function runAt(where: { tty?: boolean; columns?: number; errTty?: boolean }, ...argv: string[]) {
   const lines: string[] = [];
-  const io = { out: (s = "") => void lines.push(s), err: vi.fn(), exit: vi.fn() };
+  const io = { out: (s = "") => void lines.push(s), err: vi.fn(), exit: vi.fn(), ...where };
   await cli.main(argv, io);
   return { lines, text: lines.join("\n"), err: io.err, exit: io.exit };
+}
+const ESC = String.fromCharCode(27);
+const quoted = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** A row of the page: its mark, its label and what it says, however wide the label's column. */
+const row = (mark: string, label: string, value: string) =>
+  new RegExp(`^ {2}${quoted(mark)} ${quoted(label)} +${quoted(value)}$`, "m");
+/** A group's rows, without its heading. */
+function group(r: { lines: string[] }, title: string): string[] {
+  const from = r.lines.indexOf(title) + 1;
+  const to = r.lines.indexOf("", from);
+  return from ? r.lines.slice(from, to < 0 ? undefined : to) : [];
+}
+/** What `status` says of a group in its one line: the group's mark, then its words. */
+function said(r: { lines: string[] }, title: string): string | undefined {
+  const m = r.lines.map((l) => new RegExp(`^ {2}(.) ${quoted(title)} +(.*)$`).exec(l)).find(Boolean);
+  return m ? `${m[1]} ${m[2]}` : undefined;
+}
+/** Doctor's "To fix", from its heading on. */
+const fixes = (r: { lines: string[] }): string[] =>
+  r.lines.includes("To fix") ? r.lines.slice(r.lines.indexOf("To fix")) : [];
+/** Doctor times the hook by this clock: each of its eight runs takes one millisecond. */
+function steadyHook(): void {
+  let tick = 0n;
+  vi.spyOn(process.hrtime, "bigint").mockImplementation(() => (tick += 1_000_000n));
+}
+/** This computer paired with one receiver (or what `over` says instead). */
+function paired(over: Record<string, unknown> = {}): void {
+  put(path.join(tmp, "config", "control.json"), {
+    name: "box",
+    folders: [],
+    mode: "safe",
+    receivers: [{ url: "https://rx.invalid", machine: "m", token: "t", keys: [] }],
+    ...over,
+  });
+}
+/** The clock doctor reads, held still: `minutesAgo` is a time in a log or a record. */
+const NOW = Date.parse("2026-11-12T10:00:00.000Z");
+const minutesAgo = (n: number) => new Date(NOW - n * 60_000).toISOString();
+function holdClock(): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
 }
 
 /** A receiver on localhost: its well-known file, and an events endpoint that answers `status`. */
@@ -243,7 +297,12 @@ beforeEach(() => {
     SESSIONPIPE_SECRETS: "file",
     SESSIONPIPE_CLAUDE: path.join(tmp, "no-claude"),
     SESSIONPIPE_NO_UPDATE_CHECK: undefined,
+    SESSIONPIPE_SERVICE_LABEL: undefined,
     SSH_CONNECTION: undefined,
+    // The runner's own colour settings say nothing here: a pipe is plain, a terminal coloured.
+    FORCE_COLOR: undefined,
+    NO_COLOR: undefined,
+    TERM: "xterm-256color",
   }))
     vi.stubEnv(k, v as string);
   vi.resetAllMocks();
@@ -251,6 +310,8 @@ beforeEach(() => {
 afterEach(async () => {
   Object.defineProperty(process, "platform", platform);
   process.exitCode = undefined;
+  disk.free = undefined;
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   for (const s of servers.splice(0)) await new Promise<void>((r) => s.close(() => r()));
@@ -263,27 +324,29 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     expect((await run("control", "keys", "remove", "-h")).text).toContain("control keys remove <id>");
     for (const argv of [[], ["help"], ["--help"], ["bogus"], ["bogus", "-h"]]) {
       const { text } = await run(...argv);
-      expect(text).toContain(`sessionpipe ${VERSION} — an open protocol`);
-      expect(text).toContain("sessionpipe control pair <receiver>");
+      expect(text).toContain(`sessionpipe ${VERSION} · what your coding agents are doing, sent where you choose`);
+      expect(text).toContain("Usage: sessionpipe <command> [options]");
+      expect(text).toMatch(/^ {2}control pair <receiver> {2,}Trust a device's key, at this computer's terminal$/m);
     }
     expect(controlMain).not.toHaveBeenCalled();
-    expect((await run("help")).text).toContain("sessionpipe pool [--json]");
+    expect((await run("help")).text).toMatch(/^ {2}pool {2,}The accounts in order, and the room each has left$/m);
     expect((await run("pool", "add", "--help")).text).toMatch(/^Usage: sessionpipe pool add --import \| --login/);
   });
 
   it("pool: the family runs in this process when no daemon answers; status and uninstall know about it", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     expect((await run("pool")).lines[0]).toBe("  pool:     off · 0 accounts");
-    expect((await run("status")).text).not.toContain("pool:");
+    expect(said(await run("status"), "Accounts")).toBeUndefined();
     const on = await run("pool", "on");
     expect(on.lines[0]).toMatch(/^ {2}✓ .*settings\.json: env block written/);
     expect(on.lines).toContain(
       "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
     );
-    expect(on.lines.some((l) => l.startsWith("  Daemon: "))).toBe(true);
-    expect((await run("status")).text).toMatch(
-      / {2}pool: {5}on · 0 accounts · 127\.0\.0\.1:\d+ \(`sessionpipe pool` has the room each has left\)/,
-    );
+    expect(on.lines.some((l) => l.startsWith("  Background service: "))).toBe(true);
+    // On, the pool is what Accounts names, and what makes the background service wanted.
+    const pooled = await run("status");
+    expect(said(pooled, "Accounts")).toBe("✓ pool");
+    expect(said(pooled, "This computer")).toMatch(/^✗ \S+ \(sessionpipe 0\.0\.0\), background service: not running$/);
     expect(JSON.parse((await run("status", "--json")).lines.join("\n")).pool).toMatchObject({ on: true, accounts: 0 });
     // uninstall: the pool's env block goes first, then the hooks.
     await run("install", "--claude-code", "--backfill", "0");
@@ -308,16 +371,19 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
         },
       ],
     });
-    expect((await run("status")).text).toContain(
-      "  pool:     off · 1 account (`sessionpipe pool` has the room each has left)",
-    );
+    steadyHook();
+    expect((await run("doctor")).text).toMatch(row("·", "pool", "off · 1 account"));
   });
 
   it("the version, the hook note, and the control, wait and channel dispatch", async () => {
     for (const v of ["version", "--version", "-v"]) expect((await run(v)).lines).toEqual([VERSION]);
     expect((await run("hook")).lines).toEqual(["sessionpipe hook is dist/hook.js; harnesses run it directly"]);
     await run("control", "status");
-    expect(controlMain).toHaveBeenCalledWith(["control", "status"], expect.any(Function), realDist);
+    // Into a pipe `control status` is for a program: it is handed a pipe's look.
+    expect(controlMain).toHaveBeenCalledWith(["control", "status"], expect.any(Function), realDist, {
+      ui: PLAIN,
+      say: expect.any(Function),
+    });
     await run("wait", "--session", "claude-code:x");
     expect(waitMain).toHaveBeenCalledWith(["wait", "--session", "claude-code:x"], expect.any(Function));
     // `ask` answers with an exit code of its own: 0 leaves the process's alone, anything else is kept.
@@ -343,7 +409,9 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
 
   it("a failing command says why on stderr and exits 1", async () => {
     const r = await run("install", "--machine");
-    expect(r.err).toHaveBeenCalledWith("sessionpipe: --machine NAME is required when naming or renaming a machine\n");
+    expect(r.err).toHaveBeenCalledWith(
+      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
+    );
     expect(r.exit).toHaveBeenCalledWith(1);
     expect(r.lines).toEqual([]);
   });
@@ -355,7 +423,9 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     await cli.main(["version"]);
     expect(stdout).toHaveBeenCalledWith(`${VERSION}\n`);
     await cli.main(["install", "--machine"]);
-    expect(stderr).toHaveBeenCalledWith("sessionpipe: --machine NAME is required when naming or renaming a machine\n");
+    expect(stderr).toHaveBeenCalledWith(
+      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
+    );
     expect(exit).toHaveBeenCalledWith(1);
   });
 
@@ -392,13 +462,13 @@ describe.skipIf(process.platform === "win32")("install", () => {
     });
     const first = await run("install");
     expect(first.text).toContain("✓ hook launcher:");
-    expect(first.text).toContain("Machine: ");
+    expect(first.text).toMatch(/^ {2}This computer: \S+$/m);
     expect(first.text).toContain("No sink above tier 0: hooking one tool event per harness");
     expect(first.text).toMatch(/✓ claude-code: .*settings\.json written/);
     expect(first.text).toContain("note: Gemini CLI's own telemetry");
     expect(first.text).toContain("note: Codex runs non-managed hooks only after you approve them");
     expect(first.text).toContain("✓ Backfill: 2 sessions from the last 30 days queued as session.backfill");
-    expect(first.text).toContain("Nothing leaves this machine yet");
+    expect(first.text).toContain("Nothing leaves this computer yet");
     expect(cfg().harnesses["claude-code"]).toMatchObject({
       enabled: true,
       created: [expect.stringMatching(/\.claude/)],
@@ -482,7 +552,7 @@ describe.skipIf(process.platform === "win32")("install", () => {
 
   it("with no harness here it says so and writes nothing", async () => {
     const { text } = await run("install");
-    expect(text).toContain("No supported harness found on this machine");
+    expect(text).toContain("No coding agent found on this computer");
     expect(existsSync(config)).toBe(false);
   });
 
@@ -517,7 +587,7 @@ describe.skipIf(process.platform === "win32")("install", () => {
   it("refuses --machine without a name; an explicit rename renames the paired daemon too", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     expect((await run("install", "--rename-machine")).err).toHaveBeenCalledWith(
-      "sessionpipe: --machine NAME is required when naming or renaming a machine\n",
+      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
     );
     expect((await run("install", "--machine", "--backfill")).err).toHaveBeenCalled();
     const control = path.join(tmp, "config", "control.json");
@@ -528,12 +598,12 @@ describe.skipIf(process.platform === "win32")("install", () => {
     // A rename moves both names together, so the hooks and the daemon stay one machine.
     const r = await run("install", "--rename-machine", "--machine", "other", "--backfill", "0");
     expect(r.err).not.toHaveBeenCalled();
-    expect(r.text).toContain("Renamed the control daemon paired-box → other; its next hello tells each receiver.");
+    expect(r.text).toContain("Renamed the background service paired-box → other; its next hello tells each receiver.");
     expect(cfg().machine).toBe("other");
     expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({ name: "other", folders: ["/p"], mode: "safe" });
     // Already the same name: nothing to say, nothing rewritten.
     const again = await run("install", "--rename-machine", "--machine", "other", "--backfill", "0");
-    expect(again.text).not.toContain("Renamed the control daemon");
+    expect(again.text).not.toContain("Renamed the background service");
   });
 
   it("a config without a name keeps the hooks' hostname name and renames a daemon paired under another", async () => {
@@ -547,7 +617,7 @@ describe.skipIf(process.platform === "win32")("install", () => {
     expect(r.err).not.toHaveBeenCalled();
     expect(cfg().machine).toBe(hooks);
     expect(r.text).toContain(
-      `Renamed the control daemon ${hooks}.local → ${hooks}; its next hello tells each receiver.`,
+      `Renamed the background service ${hooks}.local → ${hooks}; its next hello tells each receiver.`,
     );
     expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({ name: hooks, folders: ["/p"], mode: "safe" });
   });
@@ -734,11 +804,11 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     expect(loud.text).toContain("A sink above tier 0: hooking every event.");
     expect(loud.text).toMatch(/✓ claude-code: .*settings\.json written/);
     expect(hooks()).toContain("PreToolUse");
-    expect((await run("status")).text).toMatch(/claude-code .*settings\.json\s+current/);
+    expect(said(await run("status"), "Agents")).toBe("✓ claude-code");
     const gone = await run("sink", "remove", "loud");
     expect(gone.text).toContain("No sink above tier 0 now: hooking one tool event per harness (the heartbeat's).");
     expect(hooks()).not.toContain("PreToolUse");
-    expect((await run("status")).text).toMatch(/claude-code .*settings\.json\s+current/);
+    expect(said(await run("status"), "Agents")).toBe("✓ claude-code");
   });
   it("a sink crossing tier 0 with no harness hooked leaves the hooks alone", async () => {
     const rx = await receiver();
@@ -815,15 +885,23 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     const file = `file:${path.join(tmp, "t.jsonl")}`;
     for (const tier of [["--tier"], ["--tier", "one"], ["--tier", "1.5"], ["--tier", "--name", "x"]]) {
       const r = await run("sink", "add", file, ...tier);
-      expect(r.err).toHaveBeenCalledWith(expect.stringMatching(/^sessionpipe: --tier takes 0, 1, 2 or 3/));
+      expect(r.err).toHaveBeenCalledWith(
+        expect.stringMatching(/^error {2}--tier takes 0, 1, 2 or 3[^\n]*\ntry {4}sessionpipe sink add --help\n$/),
+      );
       expect(r.exit).toHaveBeenCalledWith(1);
     }
     const install = await run("install", "--sink", file, "--tier", "two");
-    expect(install.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "two"\n');
+    expect(install.err).toHaveBeenCalledWith(
+      'error  --tier takes 0, 1, 2 or 3, not "two"\ntry    sessionpipe install --help\n',
+    );
     expect(install.lines).toEqual([]);
+    // The help it points at is the command's own, down to the subcommand.
     for (const argv of [["connect", "r.invalid"], ["control", "pair", "r.invalid"], ["tail"]]) {
       const r = await run(...argv, "--tier", "x");
-      expect(r.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "x"\n');
+      const about = argv[0] === "control" ? "control pair" : argv[0];
+      expect(r.err).toHaveBeenCalledWith(
+        `error  --tier takes 0, 1, 2 or 3, not "x"\ntry    sessionpipe ${about} --help\n`,
+      );
       expect(r.lines).toEqual([]);
     }
     expect(cfg().sinks).toEqual([]);
@@ -1189,7 +1267,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
 });
 
 describe.skipIf(process.platform === "win32")("status", () => {
-  it("the human table: harnesses, sinks with undelivered sessions, control, update, timing, jobs", async () => {
+  it("a few lines: the verdict, then each group with what is wrong said and what is fine named; the rest is doctor's and the JSON's", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     await run("install", "--claude-code", "--backfill", "0");
     writeConfig({
@@ -1211,18 +1289,48 @@ describe.skipIf(process.platform === "win32")("status", () => {
     put(path.join(state, "jobs", "b.tmp"), {});
     // A session file that vanished between the listing and its size.
     symlinkSync(path.join(state, "gone.jsonl"), path.join(state, "outbox", "claude-code", "dangling.jsonl"));
-    const { text } = await run("status");
-    expect(text).toContain(`sessionpipe ${VERSION}   state ${state}`);
-    expect(text).toMatch(/claude-code {2}.*settings\.json +current\n/);
-    expect(text).toMatch(/gemini-cli {3}.*settings\.json +missing — could not run/);
-    expect(text).toMatch(/sink {6}rx {15}tier 1 {2}PAUSED HTTP 401/);
-    expect(text).toMatch(/sink {6}out {14}tier 0 {2}2 session file\(s\) with undelivered events/);
-    expect(text).toMatch(/sink {6}done {13}tier 0 {2}up to date/);
-    expect(text).toContain("control:  not paired");
-    expect(text).toContain("update:   not automatic: this copy isn't a global npm install");
-    expect(text).toContain("hook:     in-process p50 9 ms over 2 runs");
-    expect(text).toContain("jobs:     1 waiting");
+    const { lines } = await run("status");
+    // The verdict counts what needs a look (the sink that stopped); what to do is doctor's.
+    expect(lines).toEqual([
+      "! 1 thing needs attention",
+      "",
+      expect.stringMatching(new RegExp(`^ {2}✓ This computer {2}\\S+ \\(sessionpipe ${quoted(VERSION)}\\), hooks$`)),
+      "  ✓ Agents         claude-code",
+      "  ✗ Reports to     rx: tier 1 · stopped: HTTP 401, out, done",
+      "  · Messages from  nobody: this computer takes no messages",
+      "  · Updates        by hand: this copy isn't a global npm install (npx, a checkout or a dev build)",
+      "",
+      "  `sessionpipe doctor` says what to do about it.",
+    ]);
+    // Doctor's page has what those lines leave out: the agent that is gone, what waits.
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    const d = await run("doctor");
+    expect(d.text).toMatch(
+      new RegExp(`\\nThis computer\\n {2}✓ \\S+ +sessionpipe ${quoted(VERSION)} · node ${quoted(process.version)}\\n`),
+    );
+    expect(d.text).toContain("  · background service  not set up: nothing here needs it yet\n");
+    expect(d.text).toContain(`  ✓ hooks               run sessionpipe ${VERSION}\n`);
+    expect(group(d, "Agents")).toEqual([
+      "  ✓ claude-code  hooked · ~/.claude/settings.json",
+      // In config.json, and its folder is gone.
+      "  · gemini-cli   was hooked here, and is no longer found on this computer",
+    ]);
+    expect(group(d, "Reports to")).toEqual([
+      "  ✗ rx               tier 1 · stopped: HTTP 401",
+      "  ✓ out              tier 0 · 2 sessions waiting to be sent",
+      "  ✓ done             tier 0 · up to date",
+      "  · still to handle  1 hook event waiting on this computer",
+    ]);
+    expect(group(d, "Messages from")).toEqual(["  · nobody  this computer takes no messages"]);
+    expect(group(d, "Updates")).toEqual([
+      "  · by hand  this copy isn't a global npm install (npx, a checkout or a dev build)",
+    ]);
+    process.exitCode = undefined;
+    // The hooks' in-process timing is for a program now: the JSON has it, and the jobs too.
     const j = JSON.parse((await run("status", "--json")).lines.join("\n"));
+    expect(j.timing).toEqual({ n: 2, p50: 9, p95: 9 });
+    expect(j.jobs).toBe(1);
     expect(j.harnesses["claude-code"]).toEqual([{ file: "~/.claude/settings.json", state: "current" }]);
     expect(j.harnesses["gemini-cli"][0]).toMatchObject({ state: "missing", note: expect.stringContaining("gemini") });
     expect(j.sinks.map((s: { pending_sessions: number }) => s.pending_sessions)).toEqual([2, 2, 0]);
@@ -1259,10 +1367,20 @@ describe.skipIf(process.platform === "win32")("status", () => {
     expect(lines.join("\n")).not.toContain("tok_hidden");
   });
 
-  it("with no sinks it says where events stay; a status line even when the outbox is empty", async () => {
-    const { text } = await run("status");
-    expect(text).toContain("sinks:    none (events stay in the local outbox)");
-    expect(text).not.toContain("jobs:");
+  it("with nothing set up it is all good: each group says what there is none of, and where events stay", async () => {
+    const { lines } = await run("status");
+    expect(lines).toEqual([
+      "✓ All good",
+      "",
+      expect.stringMatching(new RegExp(`^ {2}✓ This computer {2}\\S+ \\(sessionpipe ${quoted(VERSION)}\\)$`)),
+      "  · Agents         none: no coding agent was found on this computer",
+      "  · Reports to     nowhere: events stay on this computer until you add a sink",
+      "  · Messages from  nobody: this computer takes no messages",
+      "  · Updates        by hand: this copy isn't a global npm install (npx, a checkout or a dev build)",
+      "",
+      "  `sessionpipe doctor` looks closer.",
+    ]);
+    expect(process.exitCode).toBeUndefined();
   });
 
   it("control health: not running, a receiver without the age field, one polling, one never polled", async () => {
@@ -1273,12 +1391,29 @@ describe.skipIf(process.platform === "win32")("status", () => {
       receivers: [{ url: "https://rx.invalid", machine: "m", token: "t", keys: [] }],
     });
     const down = await run("status");
-    expect(down.text).toContain("control:  daemon not running or not responding; polling: no");
+    expect(said(down, "This computer")).toMatch(/, background service: not running$/);
+    expect(said(down, "Messages from")).toBe("✗ rx.invalid: not live: the background service isn't running");
+    // The receivers the daemon answers about are this computer's own, and one more that
+    // it has not taken up yet.
+    put(path.join(tmp, "config", "control.json"), {
+      name: "box",
+      folders: ["/p"],
+      mode: "auto",
+      receivers: [
+        { url: "https://a", machine: "m", token: "t", keys: [] },
+        { url: "https://b", machine: "m", token: "t", keys: [{ id: "k1" }] },
+        { url: "https://c", machine: "m", token: "t", keys: [{ id: "k1" }, { id: "k2" }] },
+        { url: "https://rx.invalid", machine: "m", token: "t", keys: [] },
+      ],
+    });
+    // The age of a poll with no age field is read off the clock: held still, it is exactly three minutes.
+    holdClock();
     const now = Date.now();
     const close = await daemon({
       status: {
         op: "status",
         status: {
+          version: VERSION,
           receivers: [
             { url: "https://a", polling: false, last_poll: now - 3 * 60_000, last_error: "401" },
             { url: "https://b", polling: true, last_poll: now, last_error: null, last_poll_age_ms: 10 },
@@ -1294,16 +1429,23 @@ describe.skipIf(process.platform === "win32")("status", () => {
       expect(control.receivers[0].last_poll_age_ms).toBeGreaterThanOrEqual(3 * 60_000);
       expect(control.receivers[1].last_poll_age_ms).toBe(10);
       expect(control.receivers[2].last_poll_age_ms).toBeNull();
-      const text = (await run("status")).text;
-      expect(text).toContain(
-        "control:  https://a · polling: no · last successful poll: 3 minutes ago · last error: 401",
-      );
-      expect(text).toContain(
-        "control:  https://b · polling: yes · last successful poll: 0 minutes ago · last error: none",
-      );
-      expect(text).toContain(
-        "control:  https://c · polling: yes · last successful poll: never (unknown since start) · last error: none",
-      );
+      // `status` names who is heard, and says what is wrong with who isn't.
+      const brief = await run("status");
+      expect(said(brief, "This computer")).toMatch(/, background service$/);
+      expect(said(brief, "Messages from")).toBe("✗ a: not live for 3 min: 401, b, c");
+      // Doctor has a row for each: since when, how many keys, and the one not taken up yet.
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      onPlatform("darwin");
+      const d = await run("doctor");
+      expect(d.text).toContain("  ✓ background service  running\n");
+      expect(group(d, "Messages from")).toEqual([
+        "  ✗ a                     not live for 3 min: 401",
+        "  ✓ b                     live · heard just now · 1 key trusted",
+        "  ✓ c                     live · just connected · 2 keys trusted",
+        "  · rx.invalid            the background service is taking it up · 0 keys trusted",
+        "  · sessions you message  run in auto mode, in 1 folder",
+      ]);
     } finally {
       await close();
     }
@@ -1311,7 +1453,7 @@ describe.skipIf(process.platform === "win32")("status", () => {
 });
 
 describe.skipIf(process.platform === "win32")("doctor", () => {
-  it("a healthy machine: every section, no warnings; the JSON says the same", async () => {
+  it("a healthy machine: every group, no warnings, all good once the stopped sink is seen to; the JSON says the same", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     put(path.join(home, ".claude-second", "settings.json"), {});
     vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
@@ -1326,26 +1468,44 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     vi.mocked(sinkWithSecrets).mockImplementation((s) => ({ ...s, token: "x" }));
     await run("install", "--claude-code", "--backfill", "0");
     put(path.join(state, "timing.jsonl"), '{"ms":4}\n');
-    const { text } = await run("doctor");
-    expect(text).toContain(`sessionpipe ${VERSION} · node ${process.version} at `);
-    expect(text).toContain(`config ${config} · state ${state}`);
-    expect(text).toMatch(/claude-code {2}.*settings\.json +current/);
-    expect(text).toContain("sink rx               tier 2 (receiver max 3)");
-    expect(text).toContain("sink kc               tier 1 PAUSED HTTP 401");
-    expect(text).toContain("control:  not paired");
-    expect(text).toMatch(/hooks run .*sessionpipe-hook → node /);
-    expect(text).toContain(`key  sink rx                      ${storeLabel("file")}\n`);
-    expect(text).toContain("key  sink kc                      the macOS Keychain\n");
-    expect(text).toMatch(/claude .*\.claude +signed in\n/);
-    expect(text).toMatch(/claude .*\.claude-second +NOT signed in from here\n/);
-    expect(text).toContain("update not automatic");
-    expect(text).toContain("hook wall clock (what the harness waits): p50 ");
-    expect(text).toContain("ms over 8 spawns");
-    expect(text).toContain("hook in-process: p50 4 ms · p95 4 ms over the last 1 runs");
-    expect(text).toContain("no warnings");
+    // Each of the hook's eight timed runs takes 4 ms by this clock.
+    let tick = 0n;
+    vi.spyOn(process.hrtime, "bigint").mockImplementation(() => (tick += 4_000_000n));
+    const { lines, text } = await run("doctor");
+    expect(text).toMatch(
+      new RegExp(`\\nThis computer\\n {2}✓ \\S+ +sessionpipe ${VERSION} · node ${process.version}\\n`),
+    );
+    expect(text).toContain("  · background service  not set up: nothing here needs it yet\n");
+    expect(text).toContain(`  ✓ hooks               run sessionpipe ${VERSION}\n`);
+    expect(text).toContain("  ✓ hook speed          4 ms each (95 in 100 under 4 ms)\n");
+    expect(text).toContain("\nAgents\n  ✓ claude-code  hooked · ~/.claude/settings.json\n");
+    expect(text).toContain("\nReports to\n  ✓ rx   tier 2 · up to date\n  ✗ kc   tier 1 · stopped: HTTP 401\n");
+    expect(text).toContain("\nMessages from\n  · nobody  this computer takes no messages\n");
+    expect(text).toContain("\nAccounts\n  ✓ Claude Code ~/.claude         signed in\n");
+    // Nobody messages this computer, so a signed-out account is only said, not a thing to fix.
+    expect(text).toContain("  · Claude Code ~/.claude-second  not signed in, as this shell sees it\n");
+    expect(text).toContain("\nUpdates\n  · by hand  this copy isn't a global npm install");
     expect(text).not.toContain("tok_secret");
+    // The one thing to do: the sink that stopped, with the command alone on its line.
+    expect(lines[0]).toBe("! 1 thing needs attention");
+    expect(lines.slice(-3)).toEqual([
+      "To fix",
+      "  1. kc stopped taking events (HTTP 401); they wait on this computer. See what it answers now:",
+      "       sessionpipe sink test kc",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
 
     const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    // What the page no longer spells out is still here for a program: where node and the
+    // files are, each key's store, and the hook's two timings.
+    expect(j.node_path).toEqual(expect.any(String));
+    expect(j).toMatchObject({
+      config,
+      state,
+      timing: { n: 1, p50: 4, p95: 4 },
+      hook_wall_ms: { n: 8, p50: 4, p95: 4 },
+    });
     expect(j).toMatchObject({
       version: VERSION,
       sinks: [
@@ -1361,9 +1521,21 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
       launcher: { node_ok: true, version: VERSION },
       warnings: [],
     });
+    // With --json too the exit code says there is something to fix.
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+
+    // The sink takes events again: nothing left to fix, and the exit code says so.
+    writeConfig({ ...cfg(), sinks: cfg().sinks.map(({ paused: _paused, ...sink }) => sink) } as never);
+    const well = await run("doctor");
+    expect(well.lines[0]).toBe("✓ All good");
+    expect(well.text).toContain("  ✓ kc   tier 1 · up to date\n");
+    expect(well.text).not.toContain("To fix");
+    expect(process.exitCode).toBeUndefined();
   });
 
   it("warns: a stopped daemon, a stalled poll, a failed update, a locked key, a signed-out account, a Linux logout", async () => {
+    steadyHook();
     put(path.join(home, ".claude", "settings.json"), {});
     put(path.join(home, ".claude-second", "settings.json"), {});
     put(path.join(home, ".claude-odd", "settings.json"), {});
@@ -1388,22 +1560,60 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     onPlatform("linux");
     vi.mocked(execFileSync).mockReturnValue("Linger=no\n");
     const down = await run("doctor");
-    expect(down.text).toContain("! the control daemon is not running or not responding; polling is stopped");
+    const user = os.userInfo().username;
+    // Each trouble is a row where it belongs, and a thing to do in the order to do it.
+    expect(down.lines[0]).toBe("! 4 things need attention");
+    expect(down.text).toContain("  ✗ background service  not running\n");
+    expect(down.text).toContain("  ! after you log out   the background service stops\n");
+    expect(down.text).toContain("  ✗ rx.invalid            not live: the background service isn't running\n");
+    expect(down.text).toContain("  ✗ plain.invalid         not live: the background service isn't running\n");
+    // A key in a store this shell can't open: the sink's own row says so, and it is no thing to fix.
+    expect(group(down, "Reports to")).toEqual(["  ✓ kc  tier 1 · its key can't be read from this shell · up to date"]);
+    expect(down.text).toContain("  ✓ Claude Code ~/.claude         signed in\n");
     expect(down.text).toContain(
-      "! the control daemon couldn't install sessionpipe 9.9.9: EACCES. It tries again tomorrow",
+      "  · Claude Code ~/.claude-odd     couldn't tell: `claude auth status` gave no answer\n",
     );
-    expect(down.text).toContain("! sink kc: its key is in the macOS Keychain, which this session can't read");
-    expect(down.text).toContain(
-      "! control rx.invalid: its key is in the macOS Keychain, which this session can't read",
+    expect(down.text).toContain("  ! Claude Code ~/.claude-second  not signed in, as this shell sees it\n");
+    expect(down.text).toMatch(/\n {2}! failed {3}installing 9\.9\.9 \d+ days ago: EACCES\n/);
+    expect(down.lines.slice(down.lines.indexOf("To fix"))).toEqual([
+      "To fix",
+      "  1. The background service isn't running, so no message reaches this computer. Start it:",
+      "       sessionpipe control run",
+      "  2. The background service couldn't install sessionpipe 9.9.9 by itself. Do it now:",
+      "       sessionpipe update",
+      "  3. The background service stops when you log out of this computer. Keep it running (with sudo if refused):",
+      `       loginctl enable-linger ${user}`,
+      "  4. Claude Code ~/.claude-second isn't signed in, so a message can't start a session with it. Sign in:",
+      "       CLAUDE_CONFIG_DIR=~/.claude-second claude auth login",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    // A program is told the same in the words it always was, and where each key is.
+    const jd = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(jd.warnings).toEqual(
+      expect.arrayContaining([
+        "the control daemon is not running or not responding; polling is stopped",
+        expect.stringContaining(
+          "the control daemon couldn't install sessionpipe 9.9.9: EACCES. It tries again tomorrow",
+        ),
+        expect.stringContaining("sink kc: its key is in the macOS Keychain, which this session can't read"),
+        expect.stringContaining("control rx.invalid: its key is in the macOS Keychain, which this session can't read"),
+        expect.stringMatching(/^Claude Code .*\.claude-second isn't signed in from here: `CLAUDE_CONFIG_DIR=/),
+        expect.stringContaining(`the control daemon stops when you log out: \`loginctl enable-linger ${user}\``),
+      ]),
     );
-    expect(down.text).toContain("key  sink kc                      the macOS Keychain (unreadable here)");
-    expect(down.text).toContain(`key  control plain.invalid        ${storeLabel("file")}\n`);
-    expect(down.text).toMatch(/! Claude Code .*\.claude-second isn't signed in from here: `CLAUDE_CONFIG_DIR=/);
-    expect(down.text).toMatch(/claude .*\.claude-odd +can't tell/);
-    expect(down.text).toContain(
-      `! the control daemon stops when you log out: \`loginctl enable-linger ${os.userInfo().username}\``,
-    );
-    expect(down.text).toMatch(/hooks run .*sessionpipe-hook → node \? \(gone: PATH's node\)/);
+    expect(jd.keys).toEqual([
+      { what: "sink kc", where: "keychain", readable: false },
+      { what: "control rx.invalid", where: "keychain", readable: false },
+      { what: "control plain.invalid", where: "file", readable: true },
+    ]);
+    expect(jd.claude_accounts).toEqual([
+      { dir: "~/.claude", signed_in: true },
+      { dir: "~/.claude-odd", signed_in: null },
+      { dir: "~/.claude-second", signed_in: false },
+    ]);
+    expect(jd.launcher).toMatchObject({ node: null, node_ok: false });
+    expect(jd.linger).toBe(false);
 
     vi.mocked(execFileSync).mockReturnValue("Linger=yes\n");
     const now = Date.now();
@@ -1449,18 +1659,51 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     ]);
     let tick = 0n;
     vi.spyOn(process.hrtime, "bigint").mockImplementation(() => (tick += 200_000_000n));
-    const { text } = await run("doctor");
-    expect(text).toContain("! claude-code: hooks are written but the harness will not run them — hooks are off");
-    expect(text).toContain("! claude-code: hooks are written but the harness will not run them — \n");
-    expect(text).toMatch(/! claude-code: the hook in .*settings\.json points at an old node or script path/);
-    expect(text).toMatch(/! codex: the notify line in .*config\.toml sits inside a \[table\]/);
-    expect(text).toContain("! the harness waits 200 ms per hook (p50, target < 150)");
-    expect(text).toContain("! the hook launcher is missing; run `sessionpipe install` again");
-    expect(text).toContain("hooks run ");
-    expect(text).toContain("→ node ? (gone: PATH's node)");
+    const { lines, text } = await run("doctor");
+    // For a person: a row for each file in the agent's own words, and what to do, once.
+    expect(lines[0]).toBe("! 5 things need attention");
+    expect(text).toContain("  ! hooks               have no launcher to run\n");
+    expect(text).toContain("  ! hook speed          200 ms each (95 in 100 under 200 ms)\n");
+    expect(text).toContain(
+      [
+        "Agents",
+        "  ! claude-code  hooks written, but the agent won't run them · ~/.claude/settings.json",
+        "  ! claude-code  hooks written, but the agent won't run them · ~/.claude-second/settings.json",
+        "  ! claude-code  hooks out of date · ~/.claude/settings.json",
+        "  ! codex        hooked in a place the agent never reads · ~/.codex/config.toml",
+        "",
+      ].join("\n"),
+    );
+    expect(lines.slice(lines.indexOf("To fix"))).toEqual([
+      "To fix",
+      "  1. The hooks have no launcher to run. Write them again from this copy:",
+      "       sessionpipe install",
+      // Hooks the agent won't run are its own setting's to mend: said with the reason, and no command.
+      "  2. claude-code has its hooks and won't run them, so its sessions aren't reported: hooks are off.",
+      "  3. claude-code has its hooks and won't run them, so its sessions aren't reported: its own settings turn hooks off.",
+      "  4. The hooks for claude-code, codex are missing or out of date, so not every session is reported. Write them again:",
+      "       sessionpipe install",
+      "  5. Each hook takes 200 ms, which is Node starting up on this computer; agents wait that long many times a turn. With no sink above tier 0, fewer events are hooked.",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    // For a program: each warning in the words it always had.
+    const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(j.warnings).toEqual(
+      expect.arrayContaining([
+        "claude-code: hooks are written but the harness will not run them — hooks are off",
+        "claude-code: hooks are written but the harness will not run them — ",
+        expect.stringMatching(/^claude-code: the hook in .*settings\.json points at an old node or script path/),
+        expect.stringMatching(/^codex: the notify line in .*config\.toml sits inside a \[table\]/),
+        expect.stringContaining("the harness waits 200 ms per hook (p50, target < 150)"),
+        "the hook launcher is missing; run `sessionpipe install` again",
+      ]),
+    );
+    expect(j.launcher).toMatchObject({ file: expect.stringContaining("sessionpipe-hook"), node: null, node_ok: false });
   });
 
   it("names the hook set when a sink crossing tier 0 is why the hooks are stale", async () => {
+    steadyHook();
     const file = path.join(home, ".claude", "settings.json");
     put(file, {});
     const bySet = (whenLean: "current" | "stale", otherFile = file) =>
@@ -1474,18 +1717,28 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
       sinks: [{ name: "r", url: "https://r.invalid", tier: 2 }],
       harnesses: { "claude-code": { enabled: true } },
     } as never);
+    // Which set, and why, is the warning a program reads; a person is told the hooks are
+    // out of date and to write them again.
+    const warned = async (): Promise<string> =>
+      (JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings as string[]).join("\n");
     bySet("current");
-    expect((await run("doctor")).text).toMatch(
-      /! claude-code: the hooks in .*settings\.json are the lean set, but a sink is above tier 0 now; run `sessionpipe install` again/,
+    expect(await warned()).toMatch(
+      /^claude-code: the hooks in .*settings\.json are the lean set, but a sink is above tier 0 now; run `sessionpipe install` again/m,
     );
+    const page = await run("doctor");
+    expect(page.text).toContain("\nAgents\n  ! claude-code  hooks out of date · ~/.claude/settings.json\n");
+    expect(page.lines.slice(-2)).toEqual([
+      "  2. The hooks for claude-code are missing or out of date, so not every session is reported. Write them again:",
+      "       sessionpipe install",
+    ]);
     writeConfig({ sinks: [], harnesses: { "claude-code": { enabled: true } } } as never);
     bySet("stale");
-    expect((await run("doctor")).text).toMatch(
+    expect(await warned()).toMatch(
       /are the full set, but no sink is above tier 0 now; run `sessionpipe install` again/,
     );
     // The other set read for a different file says nothing about this one: the path reading stands.
     bySet("stale", path.join(home, ".claude-second", "settings.json"));
-    expect((await run("doctor")).text).toMatch(/points at an old node or script path/);
+    expect(await warned()).toMatch(/points at an old node or script path/);
   });
 
   it("a hook that can't be spawned, or fails: no wall clock; the in-process timing survives a bad line", async () => {
@@ -1493,9 +1746,19 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     put(path.join(state, "timing.jsonl"), "garbage\n");
     onPlatform("win32");
     const failed = await run("doctor");
-    expect(failed.text).toContain("hook wall clock: could not spawn dist/hook.js");
-    expect(failed.text).toContain("hook in-process: no runs yet");
-    expect(failed.text).not.toContain("hooks run");
+    expect(failed.text).toContain("  ! hook speed          the hook could not be started\n");
+    expect(failed.lines.slice(-3)).toEqual([
+      "To fix",
+      "  1. The hook that agents run could not be started from this copy. Write the hooks again:",
+      "       sessionpipe install",
+    ]);
+    // No launcher on Windows, so no row for the hooks' own copy.
+    expect(failed.text).not.toMatch(/^ {2}. hooks /m);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const bad = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(bad).toMatchObject({ hook_wall_ms: null, timing: null });
+    expect(bad).not.toHaveProperty("launcher");
     vi.mocked(spawnSync).mockImplementation(() => {
       throw new Error("EACCES");
     });
@@ -2061,7 +2324,7 @@ describe.skipIf(process.platform === "win32")("a harness config the system won't
       expect(text).toMatch(/✓ codex: .*hooks\.json written|= codex: .*hooks\.json already current/);
       expect(text).toMatch(/[✓=] codex: .*config\.toml — notify (set at the top level|current)/);
       expect(text).toContain("note: Codex runs non-managed hooks only after you approve them");
-      expect(text).toContain("Nothing leaves this machine yet");
+      expect(text).toContain("Nothing leaves this computer yet");
       expect(err).not.toHaveBeenCalled();
       expect(exit).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
@@ -2069,9 +2332,8 @@ describe.skipIf(process.platform === "win32")("a harness config the system won't
     expect(readFileSync(settings(), "utf8")).toBe("{}\n");
     expect(cfg().harnesses.codex).toMatchObject({ enabled: true, created: [codexHooks()] });
     expect(cfg().harnesses["claude-code"]?.created).toBeUndefined();
-    const { text } = await run("status");
-    expect(text).toMatch(/claude-code {2}.*settings\.json +missing\n/);
-    expect(text).toMatch(/codex {8}.*hooks\.json +current\n/);
+    // What isn't hooked is said with its file; what is, by its name (once, for its two files).
+    expect(said(await run("status"), "Agents")).toBe("! claude-code: not hooked · ~/.claude/settings.json, codex");
   });
 
   it("codex: hooks.json written and remembered as created before config.toml is refused", async () => {
@@ -2135,6 +2397,868 @@ describe.skipIf(process.platform === "win32")("a harness config the system won't
   });
 });
 
+describe.skipIf(process.platform === "win32")("doctor and status: the background service and the disk", () => {
+  it("not loaded, or loaded and silent: which manager was asked, and the command that starts it there", async () => {
+    paired();
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.test");
+    const asked: string[] = [];
+    let has = false;
+    vi.mocked(execFileSync).mockImplementation(((cmd: string, args: string[]) => {
+      asked.push([cmd, ...args].join(" "));
+      if (!has) throw new Error("not there");
+      return "";
+    }) as never);
+    const start = "  1. The background service isn't running, so no message reaches this computer. Start it:";
+
+    // A Mac where launchd has no such service and no plist was written: pairing sets it up.
+    onPlatform("darwin");
+    const never = await run("doctor");
+    expect(never.text).toMatch(
+      row("✗", "background service", "not loaded: launchd doesn't have it, so nothing starts it"),
+    );
+    expect(fixes(never)).toEqual(["To fix", start, "       sessionpipe control pair https://rx.invalid"]);
+    expect(process.exitCode).toBe(1);
+    const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(j.warnings).toEqual([
+      "the control daemon is not running or not responding; polling is stopped",
+      "the background service isn't loaded: launchd doesn't have it",
+    ]);
+    // `status` says the same in its line, and leaves the command to doctor.
+    const brief = await run("status");
+    expect(said(brief, "This computer")).toMatch(
+      /^✗ \S+ \(sessionpipe 0\.0\.0\), background service: not loaded: launchd doesn't have it, so nothing starts it$/,
+    );
+    expect(brief.lines.at(-1)).toBe("  `sessionpipe doctor` says what to do about it.");
+
+    // The plist is there and launchd let go of it: it is started from its file.
+    const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.test.plist");
+    put(plist, "");
+    expect(fixes(await run("doctor"))).toEqual([
+      "To fix",
+      start,
+      `       launchctl bootstrap gui/$(id -u) ${JSON.stringify(plist)}`,
+    ]);
+
+    // launchd has it and nothing answers on the socket: its log is where to look.
+    has = true;
+    const silent = await run("doctor");
+    expect(silent.text).toMatch(row("✗", "background service", "started but not answering"));
+    expect(fixes(silent)).toEqual([
+      "To fix",
+      "  1. The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
+      `       tail -n 20 ${path.join(state, "control", "daemon.log")}`,
+    ]);
+    expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
+      "the control daemon is not running or not responding; polling is stopped",
+    ]);
+
+    // systemd, with nobody paired (only `ask on` wants the service) and no unit: run by hand.
+    has = false;
+    onPlatform("linux");
+    paired({ receivers: [], ask: true });
+    const byHand = await run("doctor");
+    expect(byHand.text).toMatch(
+      row("✗", "background service", "not loaded: systemd doesn't have it, so nothing starts it"),
+    );
+    expect(fixes(byHand)).toEqual(["To fix", start, "       sessionpipe control run"]);
+    // The unit is written and not active: enabled and started by its name.
+    put(path.join(home, ".config", "systemd", "user", "org.sessionpipe.test.service"), "");
+    expect(fixes(await run("doctor"))).toEqual([
+      "To fix",
+      start,
+      "       systemctl --user enable --now org.sessionpipe.test.service",
+    ]);
+
+    // Every command of all those runs was a look: nothing was started, stopped or written.
+    expect(asked.length).toBeGreaterThan(8);
+    for (const a of asked)
+      expect(a).toMatch(
+        /^(launchctl print (gui|user)\/\d*\/org\.sessionpipe\.test|systemctl --user is-active org\.sessionpipe\.test\.service|journalctl --user -u org\.sessionpipe\.test\.service )/,
+      );
+  });
+
+  it("running: what it has in hand; another version, or one too old to say its own, is a thing to fix", async () => {
+    paired();
+    const up = (status: Record<string, unknown>) =>
+      daemon({ status: { op: "status", status: { receivers: [], ...status } } });
+    let close = await up({ version: VERSION, busy: "a headless agent run" });
+    try {
+      // Fine is named and no more; what it is doing is doctor's to say.
+      const brief = await run("status");
+      expect(brief.lines[0]).toBe("✓ All good");
+      expect(said(brief, "This computer")).toMatch(/^✓ \S+ \(sessionpipe 0\.0\.0\), background service$/);
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      onPlatform("darwin");
+      const busy = await run("doctor");
+      expect(busy.lines[0]).toBe("✓ All good");
+      expect(busy.text).toMatch(row("✓", "background service", "running · busy with a headless agent run"));
+      // Paired, and the service has not said it asks that receiver yet.
+      expect(busy.text).toMatch(row("·", "rx.invalid", "the background service is taking it up · 0 keys trusted"));
+    } finally {
+      await close();
+    }
+    for (const [version, runs] of [
+      ["0.0.1", "0.0.1"],
+      [undefined, "an older release"],
+    ] as const) {
+      close = await up(version ? { version } : {});
+      try {
+        steadyHook();
+        vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+        onPlatform("darwin");
+        const other = await run("doctor");
+        expect(other.text).toMatch(
+          row("!", "background service", `running sessionpipe ${runs}, and this command is ${VERSION}`),
+        );
+        expect(fixes(other)).toEqual([
+          "To fix",
+          `  1. The background service runs sessionpipe ${runs} and this command is ${VERSION}. Bring both up to date:`,
+          "       sessionpipe update",
+        ]);
+        expect(said(await run("status"), "This computer")).toMatch(
+          new RegExp(
+            `^! \\S+ \\(sessionpipe 0\\.0\\.0\\), background service: running sessionpipe ${quoted(runs)}, and this command is 0\\.0\\.0$`,
+          ),
+        );
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it("a full disk comes first: by what the system says is free, or by what the service's log said this hour", async () => {
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    onPlatform("darwin");
+    const freeUp = [
+      "To fix",
+      "  1. This computer's disk is full, so events and messages can't be saved. Free some space, then look again:",
+      "       sessionpipe doctor",
+    ];
+    // Under 16 MB the state can't be relied on to be written.
+    disk.free = 5 * 1024 * 1024 + 4096;
+    const full = await run("status");
+    expect(full.lines[0]).toBe("! 1 thing needs attention");
+    expect(said(full, "This computer")).toMatch(/^✗ \S+ \(sessionpipe 0\.0\.0\), disk: full: 5 MB left$/);
+    const fullPage = await run("doctor");
+    expect(fullPage.text).toMatch(row("✗", "disk", "full: 5 MB left"));
+    expect(fixes(fullPage)).toEqual(freeUp);
+    expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
+      "this computer's disk is full: 5 MB left",
+    ]);
+    disk.free = 16 * 1024 * 1024;
+    expect((await run("status")).lines[0]).toBe("✓ All good");
+
+    // Room again; twelve minutes ago the service could not save, and only its log knows.
+    holdClock();
+    put(
+      path.join(state, "control", "daemon.log"),
+      [
+        `${minutesAgo(50)} control daemon ${VERSION} up · pid 1 · 1 receiver(s) · socket /x`,
+        `${minutesAgo(30)} request failed: ENOSPC: no space left on device, write`,
+        `${minutesAgo(12)} pool state not saved: No space left on device`,
+        "",
+      ].join("\n"),
+    );
+    const was = await run("doctor");
+    expect(was.text).toMatch(row("✗", "disk", "was full 12 min ago, by the background service's log"));
+    expect(fixes(was)).toEqual(freeUp);
+    expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
+      expect.stringMatching(/^this computer's disk .*was full 12 min ago, by the background service's log$/),
+    ]);
+    // `status` reads no log: it has only what the system says now.
+    const now = await run("status");
+    expect(now.lines[0]).toBe("✓ All good");
+    expect(now.text).not.toContain("disk");
+    // A system that won't say how much is free: the log's word stands on its own.
+    disk.free = null;
+    expect((await run("doctor")).text).toMatch(
+      row("✗", "disk", "was full 12 min ago, by the background service's log"),
+    );
+    // Neither says anything: no row.
+    rmSync(path.join(state, "control", "daemon.log"));
+    const quiet = await run("doctor");
+    expect(quiet.text).not.toMatch(/^ {2}. disk /m);
+    expect(quiet.lines[0]).toBe("✓ All good");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("doctor: accounts", () => {
+  const dirs = [".claude", ".claude-second", ".claude-odd"];
+  const accounts = () => {
+    for (const d of dirs) put(path.join(home, d, "settings.json"), {});
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+  };
+
+  it("a sign-in is the background service's own answer where it gives one, and this shell's where it doesn't", async () => {
+    accounts();
+    paired();
+    steadyHook();
+    // The service sees the opposite of what this shell does (a login keychain, over ssh),
+    // and can't tell for the third: only that one is asked of this shell's `claude`.
+    const close = await daemon({
+      status: {
+        op: "status",
+        status: {
+          version: VERSION,
+          receivers: [
+            { url: "https://rx.invalid", polling: true, last_poll: 1, last_error: null, last_poll_age_ms: 0 },
+          ],
+        },
+      },
+      health: {
+        op: "health",
+        health: {
+          accounts: [
+            { dir: path.join(home, ".claude"), signed_in: false },
+            { dir: path.join(home, ".claude-second"), signed_in: true },
+            { dir: path.join(home, ".claude-odd"), signed_in: null },
+          ],
+          keys: [{ url: "https://rx.invalid", readable: true }],
+        },
+      },
+    });
+    try {
+      onPlatform("darwin");
+      const mac = await run("doctor");
+      expect(group(mac, "Accounts")).toEqual([
+        "  ✗ Claude Code ~/.claude         not signed in, as the background service sees it",
+        "  · Claude Code ~/.claude-odd     couldn't tell: `claude auth status` gave no answer",
+        "  ✓ Claude Code ~/.claude-second  signed in",
+      ]);
+      expect(fixes(mac)).toEqual([
+        "To fix",
+        "  1. Claude Code ~/.claude isn't signed in where the background service runs, so a message can't start a session with it. A Mac keeps the sign-in in the login keychain: log in at this computer's screen, then:",
+        "       claude auth login",
+      ]);
+      // Elsewhere a login from any shell will do.
+      onPlatform("linux");
+      vi.mocked(execFileSync).mockReturnValue("Linger=yes\n");
+      expect(fixes(await run("doctor"))).toEqual([
+        "To fix",
+        "  1. Claude Code ~/.claude isn't signed in, so a message can't start a session with it. Sign in:",
+        "       claude auth login",
+      ]);
+      const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+      expect(j.claude_accounts).toEqual([
+        { dir: "~/.claude", signed_in: false },
+        { dir: "~/.claude-odd", signed_in: null },
+        { dir: "~/.claude-second", signed_in: true },
+      ]);
+      expect(j.warnings).toEqual(["Claude Code ~/.claude isn't signed in from here: `claude auth login`"]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("over ssh on a Mac this shell's 'not signed in' says nothing, so it is no thing to fix; elsewhere it is", async () => {
+    accounts();
+    paired();
+    steadyHook();
+    const up = await daemon({
+      status: {
+        op: "status",
+        status: {
+          version: VERSION,
+          receivers: [
+            { url: "https://rx.invalid", polling: true, last_poll: 1, last_error: null, last_poll_age_ms: 0 },
+          ],
+        },
+      },
+    });
+    try {
+      vi.stubEnv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 22");
+      onPlatform("darwin");
+      const mac = await run("doctor");
+      expect(group(mac, "Accounts")).toEqual([
+        "  ✓ Claude Code ~/.claude         signed in",
+        "  · Claude Code ~/.claude-odd     couldn't tell: `claude auth status` gave no answer",
+        "  · Claude Code ~/.claude-second  can't tell over ssh: a Mac keeps the sign-in in its login keychain",
+      ]);
+      expect(mac.lines[0]).toBe("✓ All good");
+      expect(process.exitCode).toBeUndefined();
+      onPlatform("linux");
+      vi.mocked(execFileSync).mockReturnValue("Linger=yes\n");
+      const linux = await run("doctor");
+      expect(linux.text).toMatch(row("!", "Claude Code ~/.claude-second", "not signed in, as this shell sees it"));
+      expect(fixes(linux)).toEqual([
+        "To fix",
+        "  1. Claude Code ~/.claude-second isn't signed in, so a message can't start a session with it. Sign in:",
+        "       CLAUDE_CONFIG_DIR=~/.claude-second claude auth login",
+      ]);
+    } finally {
+      await up();
+    }
+  });
+
+  it("the pool: on or off, how many accounts have room, and when it had none to give", async () => {
+    const account = (n: number) => ({
+      id: `0a1b2c3${n}`,
+      email: `a${n}@x.y`,
+      account_uuid: `0a1b2c3${n}-0000-4000-8000-000000000000`,
+      enabled: true,
+      added_at: "2026-10-29T10:00:00.000Z",
+    });
+    const pool = (on: boolean, n: number) =>
+      put(path.join(tmp, "config", "pool.json"), { on, port: 4141, accounts: [0, 1].slice(0, n).map(account) });
+    const up = (p: Record<string, unknown>) =>
+      daemon({
+        status: {
+          op: "status",
+          status: {
+            version: VERSION,
+            receivers: [],
+            pool: { on: true, port: 4141, listening: true, accounts: 2, with_room: 0, in_flight: 0, ...p },
+          },
+        },
+      });
+    const refused = [
+      "  1. Every pooled Claude account is at its limit or signed out, so Claude Code sessions here were refused. See which, and when each has room again:",
+      "       sessionpipe pool",
+    ];
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    onPlatform("darwin");
+
+    // On, two accounts, and the service says neither has room.
+    pool(true, 2);
+    let close = await up({});
+    try {
+      const none = await run("doctor");
+      expect(none.text).toMatch(row("!", "pool", "on · 2 accounts · 0 with room left"));
+      expect(fixes(none)).toEqual(["To fix", ...refused]);
+      expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
+        "the pool has no account with room left: Claude Code sessions here are being refused",
+      ]);
+      const brief = await run("status");
+      expect(brief.lines[0]).toBe("! 1 thing needs attention");
+      expect(said(brief, "Accounts")).toBe("! pool: on · 2 accounts · 0 with room left");
+    } finally {
+      await close();
+    }
+    // One has room: all good, and `status` only names it.
+    close = await up({ with_room: 1 });
+    try {
+      const room = await run("doctor");
+      expect(room.lines[0]).toBe("✓ All good");
+      expect(room.text).toMatch(row("✓", "pool", "on · 2 accounts · 1 with room left"));
+      expect(said(await run("status"), "Accounts")).toBe("✓ pool");
+    } finally {
+      await close();
+    }
+    // On with no account yet: nobody to be out of room.
+    pool(true, 0);
+    close = await up({ accounts: 0 });
+    try {
+      const empty = await run("doctor");
+      expect(empty.lines[0]).toBe("✓ All good");
+      expect(empty.text).toMatch(row("✓", "pool", "on · 0 accounts · 0 with room left"));
+    } finally {
+      await close();
+    }
+    // Off: the accounts are counted and nothing else is said, whatever the service holds.
+    pool(false, 1);
+    close = await up({ on: false, accounts: 1, with_room: 1 });
+    try {
+      expect((await run("doctor")).text).toMatch(row("·", "pool", "off · 1 account"));
+    } finally {
+      await close();
+    }
+
+    // With no service to ask, what its log wrote down this hour: sessions it had to refuse.
+    pool(true, 2);
+    holdClock();
+    const log = path.join(state, "control", "daemon.log");
+    put(log, `${minutesAgo(9)} no account could be tried (session 1234abcd)\n`);
+    const once = await run("doctor");
+    expect(once.text).toMatch(row("!", "pool", "on · 2 accounts · had none to try 1 time in the last hour"));
+    expect(fixes(once)).toEqual([
+      "To fix",
+      "  1. The background service isn't running, so no message reaches this computer. Start it:",
+      "       sessionpipe control run",
+      refused[0]?.replace("1.", "2."),
+      refused[1],
+    ]);
+    put(
+      log,
+      `${minutesAgo(9)} no account could be tried (session 1)\n${minutesAgo(3)} no account could be tried (session 2)\n`,
+    );
+    expect((await run("doctor")).text).toMatch(
+      row("!", "pool", "on · 2 accounts · had none to try 2 times in the last hour"),
+    );
+    // `status` reads no log: the pool is on, and that is all it knows.
+    expect(said(await run("status"), "Accounts")).toBe("✓ pool");
+  });
+});
+
+describe.skipIf(process.platform === "win32")(
+  "doctor and status: receivers, sinks, updates and the hooks' own copy",
+  () => {
+    it("each receiver: heard, taken up, forgotten by it (401), a key the service can't read, or no answer", async () => {
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      onPlatform("darwin");
+      const rx = (name: string, keys: number) => ({
+        url: `https://${name}.test`,
+        machine: "m",
+        token: "t",
+        keys: Array.from({ length: keys }, (_, i) => ({ id: `k${i}` })),
+      });
+      paired({
+        folders: ["/p", "/q"],
+        mode: "inherit",
+        receivers: [rx("live", 1), rx("gone", 0), rx("locked", 0), rx("slow", 0), rx("quiet", 0), rx("new", 2)],
+      });
+      const forgotten = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
+      const unread = "can't read this machine's token from keychain (locked?); retrying every 30 s";
+      // Every age is the service's own word, so nothing here reads the clock.
+      const close = await daemon({
+        status: {
+          op: "status",
+          status: {
+            version: VERSION,
+            receivers: [
+              { url: "https://live.test", polling: true, last_poll: 1, last_error: null, last_poll_age_ms: 10_000 },
+              {
+                url: "https://gone.test",
+                polling: false,
+                last_poll: 1,
+                last_error: forgotten,
+                last_poll_age_ms: 3480 * 60_000,
+              },
+              {
+                url: "https://locked.test",
+                polling: false,
+                last_poll: null,
+                last_error: unread,
+                last_poll_age_ms: 120_000,
+              },
+              {
+                url: "https://slow.test",
+                polling: true,
+                last_poll: 1,
+                last_error: "fetch failed",
+                last_poll_age_ms: 300_000,
+              },
+              { url: "https://quiet.test", polling: false, last_poll: null, last_error: null },
+              // Still asked by the service, and no longer in control.json.
+              { url: "https://old.test", polling: true, last_poll: null, last_error: null },
+            ],
+          },
+        },
+      });
+      try {
+        const rows = [
+          "  ✓ live.test             live · heard 10 s ago · 1 key trusted",
+          "  ✗ gone.test             not live: it no longer knows this computer",
+          "  ✗ locked.test           not live for 2 min: the background service can't read this computer's key",
+          "  ✗ slow.test             not live for 5 min: fetch failed",
+          "  ✗ quiet.test            not live: no answer",
+          "  · new.test              the background service is taking it up · 2 keys trusted",
+          "  ✓ old.test              live · just connected · 0 keys trusted",
+          "  · sessions you message  run in inherit mode, in 2 folders",
+        ];
+        // `status`: who is heard by name, who isn't with why; the one being taken up is doctor's.
+        const seen = await run("status");
+        expect(seen.lines[0]).toBe("! 4 things need attention");
+        expect(said(seen, "Messages from")).toBe(
+          "✗ live.test, gone.test: not live: it no longer knows this computer, locked.test: not live for 2 min: the background service can't read this computer's key, slow.test: not live for 5 min: fetch failed, quiet.test: not live: no answer, old.test",
+        );
+        const d = await run("doctor");
+        expect(group(d, "Messages from")).toEqual(rows);
+        // What to type comes before what only needs waiting for.
+        expect(fixes(d)).toEqual([
+          "To fix",
+          "  1. gone.test no longer knows this computer, so its messages can't arrive. Pair with it again:",
+          "       sessionpipe control pair https://gone.test",
+          "  2. The background service can't read this computer's key for locked.test: the keychain it is in is locked, or nobody is logged in at this computer's screen. Log in there once, or keep the keys in a file it can always read:",
+          "       sessionpipe secrets move file",
+          "  3. slow.test hasn't answered for 5 min. Messages wait there, and the background service keeps trying: nothing to type unless it stays this way.",
+          "  4. quiet.test hasn't answered. Messages wait there, and the background service keeps trying: nothing to type unless it stays this way.",
+        ]);
+        // A program gets each in the words it always had, and nothing for the ones that are fine.
+        expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
+          `https://gone.test: the daemon has not polled for 3480 minutes: ${forgotten}`,
+          `https://locked.test: the daemon has not polled for 2 minutes: ${unread}`,
+          "https://slow.test: the daemon has not polled for 5 minutes: fetch failed",
+          "https://quiet.test: the daemon has never polled: polling stopped",
+        ]);
+      } finally {
+        await close();
+      }
+    });
+
+    it("one session waiting and two hook events queued: counted in the singular and the plural", async () => {
+      writeConfig({ sinks: [{ name: "out", url: "stdout", tier: 0 }], harnesses: {} } as never);
+      new Outbox(state).append({ harness: "claude-code", session: "s1" }, [event("session.heartbeat", {})]);
+      put(path.join(state, "jobs", "a.json"), {});
+      put(path.join(state, "jobs", "b.json"), {});
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      expect(group(await run("doctor"), "Reports to")).toEqual([
+        "  ✓ out              tier 0 · 1 session waiting to be sent",
+        "  · still to handle  2 hook events waiting on this computer",
+      ]);
+      // Waiting is not wrong: `status` names the sink and no more.
+      const brief = await run("status");
+      expect(brief.lines[0]).toBe("✓ All good");
+      expect(said(brief, "Reports to")).toBe("✓ out");
+    });
+
+    it("updates: automatic with what the last check found, what waits for an idle moment, what failed, what was done", async () => {
+      paired();
+      // A global install this user can write: the background service updates it by itself.
+      const prefix = path.join(tmp, "prefix");
+      mkdirSync(path.join(prefix, "lib", "node_modules"), { recursive: true });
+      vi.mocked(globalPrefix).mockReturnValue(prefix);
+      holdClock();
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      onPlatform("darwin");
+      const updates = async (rec: Record<string, unknown>) => {
+        put(path.join(state, "control", "update.json"), rec);
+        return group(await run("doctor"), "Updates");
+      };
+      expect(await updates({})).toEqual(["  ✓ automatic  once a day; not checked yet"]);
+      expect(await updates({ checked_at: minutesAgo(180), latest: "9.9.9" })).toEqual([
+        "  ✓ automatic  checked 3 h ago: 9.9.9 is the newest",
+      ]);
+      expect(await updates({ checked_at: minutesAgo(180) })).toEqual([
+        "  ✓ automatic  checked 3 h ago: ? is the newest",
+      ]);
+      expect(await updates({ checked_at: minutesAgo(5), error: "ENOTFOUND registry.npmjs.org" })).toEqual([
+        "  ✓ automatic  the check 5 min ago failed: ENOTFOUND registry.npmjs.org",
+      ]);
+      expect(await updates({ checked_at: minutesAgo(180), latest: "9.9.9", pending: "9.9.9" })).toEqual([
+        "  ✓ automatic  checked 3 h ago: 9.9.9 is the newest",
+        "  · waiting    9.9.9 is installed once the background service is idle",
+      ]);
+      const updated = { from: "0.1.0", to: "0.2.0", at: minutesAgo(2 * 24 * 60), ms: 1 };
+      expect(await updates({ updated })).toEqual([
+        "  ✓ automatic    once a day; not checked yet",
+        "  · last update  0.1.0 → 0.2.0, 2 days ago",
+      ]);
+      // An install that failed is said instead of the last one that worked, and is a thing to fix.
+      const failed = { version: "9.9.9", at: minutesAgo(60), error: "npm install: EACCES" };
+      expect(await updates({ updated, failed })).toEqual([
+        "  ✓ automatic  once a day; not checked yet",
+        "  ! failed     installing 9.9.9 60 min ago: npm install: EACCES",
+      ]);
+      expect(fixes(await run("doctor"))).toEqual([
+        "To fix",
+        "  1. The background service isn't running, so no message reaches this computer. Start it:",
+        "       sessionpipe control run",
+        "  2. The background service couldn't install sessionpipe 9.9.9 by itself. Do it now:",
+        "       sessionpipe update",
+      ]);
+      // `status`: that it is automatic, and what failed; what waits or was done is doctor's.
+      expect(said(await run("status"), "Updates")).toBe(
+        "! automatic, failed: installing 9.9.9 60 min ago: npm install: EACCES",
+      );
+      put(path.join(state, "control", "update.json"), { updated, pending: "9.9.9" });
+      expect(said(await run("status"), "Updates")).toBe("✓ automatic");
+    });
+
+    it("the hooks' own copy: run by another version, naming a node that is gone, or missing a file", async () => {
+      put(path.join(home, ".claude", "settings.json"), {});
+      vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+      await run("install", "--claude-code", "--backfill", "0");
+      const launcher = path.join(tmp, "data", "sessionpipe-hook");
+      const written = readFileSync(launcher, "utf8");
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      const hooks = async () => /^ {2}(. hooks .*)$/m.exec((await run("doctor")).text)?.[1];
+      // `status` names them when they are fine, and says what is wrong when they aren't.
+      const brief = async () => said(await run("status"), "This computer")?.replace(/^(.) .*?\), /, "$1 ");
+      expect(await brief()).toBe("✓ hooks");
+      expect(await hooks()).toBe(`✓ hooks               run sessionpipe ${VERSION}`);
+      // A launcher from before it said its version is taken to be this one's.
+      writeFileSync(
+        launcher,
+        written.replace(`# sessionpipe ${VERSION} hook launcher`, "# sessionpipe's hook launcher"),
+      );
+      expect(await hooks()).toBe(`✓ hooks               run sessionpipe ${VERSION}`);
+      writeFileSync(launcher, written.replace(`# sessionpipe ${VERSION} hook`, "# sessionpipe 99.0.0 hook"));
+      expect(await hooks()).toBe(`! hooks               run sessionpipe 99.0.0, and this command is ${VERSION}`);
+      expect(await brief()).toBe(`! hooks: run sessionpipe 99.0.0, and this command is ${VERSION}`);
+      const gone = path.join(tmp, "gone", "node");
+      writeFileSync(launcher, written.replace(/^n='.*'$/m, `n='${gone}'`));
+      expect(await hooks()).toBe(`! hooks               name a node that is gone (${gone})`);
+      // A launcher that names no node at all.
+      writeFileSync(launcher, written.replace(/^n='.*'$/m, ""));
+      expect(await hooks()).toBe("! hooks               name a node that is gone (?)");
+      writeFileSync(launcher, written);
+      rmSync(path.join(tmp, "data", "worker.js"));
+      expect(await hooks()).toBe("! hooks               are missing a file");
+      // Whatever is wrong with it, the hooks are written again from this copy.
+      expect(fixes(await run("doctor"))).toEqual([
+        "To fix",
+        "  1. The hooks are missing a file. Write them again from this copy:",
+        "       sessionpipe install",
+      ]);
+    });
+  },
+);
+
+describe.skipIf(process.platform === "win32")("at a terminal", () => {
+  const at80 = { tty: true, columns: 80 };
+  const green = (s: string) => `${ESC}[32m${s}${ESC}[39m`;
+  const bold = (s: string) => `${ESC}[1m${s}${ESC}[22m`;
+  const cyan = (s: string) => `${ESC}[36m${s}${ESC}[39m`;
+
+  it("status and doctor take the terminal's colours and fold to its width; --no-color drops the colour and keeps the width", async () => {
+    const dim = (s: string) => `${ESC}[2m${s}${ESC}[22m`;
+    const brief = await runAt(at80, "status");
+    expect(brief.lines[0]).toBe(`${green("✓")} ${bold(green("All good"))}`);
+    expect(brief.lines[2]).toMatch(
+      new RegExp(`^ {2}${quoted(green("✓"))} This computer {2}\\S+ \\(sessionpipe 0\\.0\\.0\\)$`),
+    );
+    // A group's line longer than the terminal folds at a space, under its own words.
+    expect(brief.lines.slice(-4)).toEqual([
+      `  ${dim("·")} Updates        by hand: this copy isn't a global npm install (npx, a`,
+      `${" ".repeat(19)}checkout or a dev build)`,
+      "",
+      `  ${cyan("`sessionpipe doctor`")} looks closer.`,
+    ]);
+    for (const l of brief.lines) expect(plain(l).length).toBeLessThan(80);
+    // Into a pipe the same line is whole, and nothing is coloured.
+    const piped = await run("status");
+    expect(piped.text).not.toContain(ESC);
+    expect(said(piped, "Updates")).toBe(
+      "· by hand: this copy isn't a global npm install (npx, a checkout or a dev build)",
+    );
+    // --no-color, wherever it stands, is taken out of the command: the same lines, no colour.
+    for (const argv of [
+      ["status", "--no-color"],
+      ["--no-color", "status"],
+    ]) {
+      const mono = await runAt(at80, ...argv);
+      expect(mono.text).not.toContain(ESC);
+      expect(mono.lines).toEqual(brief.lines.map(plain));
+    }
+    // Doctor's page: each group under a heading in bold, a long row folded under its own text.
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    const page = await runAt(at80, "doctor");
+    expect(page.lines[0]).toBe(`${green("✓")} ${bold(green("All good"))}`);
+    expect(page.lines).toContain(bold("This computer"));
+    expect(page.lines).toContain(`  ${green("✓")} Claude Code ~/.claude  signed in`);
+    expect(group({ lines: page.lines.map(plain) }, "Updates")).toEqual([
+      "  · by hand  this copy isn't a global npm install (npx, a checkout or a dev",
+      "             build)",
+    ]);
+    for (const l of page.lines) expect(plain(l).length).toBeLessThan(80);
+    expect((await runAt(at80, "doctor", "--no-color")).lines).toEqual(page.lines.map(plain));
+    // NO_COLOR does the same from the environment.
+    vi.stubEnv("NO_COLOR", "1");
+    expect((await runAt(at80, "status")).lines).toEqual(brief.lines.map(plain));
+    expect((await runAt(at80, "doctor")).lines).toEqual(page.lines.map(plain));
+  });
+
+  it("the lines every command has always written are marked in colour and folded under their own text", async () => {
+    const add = await runAt(at80, "sink", "add", "stdout");
+    expect(add.lines[0]).toBe(`  ${green("✓")} sink stdout: stdout at tier 0`);
+    // One long line, folded under where its text begins, after the label.
+    const sends = (add.lines[1] as string).split("\n");
+    expect(sends.length).toBeGreaterThan(1);
+    expect(sends[0]).toMatch(/^ {4}tier 0 sends: session state and timing, machine, folder,/);
+    for (const l of sends.slice(1)) expect(l).toMatch(/^ {18}\S/);
+    for (const l of sends) expect(l.length).toBeLessThan(80);
+    // Into a pipe it is the one line it always was.
+    const piped = await run("sink", "add", "stdout");
+    expect(piped.lines[0]).toBe("  ✓ sink stdout: stdout at tier 0");
+    expect(piped.lines[1]).toBe(
+      sends
+        .map((l) => l.trim())
+        .join(" ")
+        .replace(/^/, "    "),
+    );
+
+    // `sink list`: columns as wide as they need, the last one folded under itself.
+    writeConfig({
+      sinks: [
+        {
+          name: "rx",
+          url: "https://receiver.example.com",
+          tier: 3,
+          max_tier: 1,
+          pii: true,
+          paused: "HTTP 401 from the receiver",
+        },
+        { name: "out", url: "stdout", tier: 0 },
+      ],
+      harnesses: {},
+    } as never);
+    expect((await runAt({ tty: true, columns: 60 }, "sink", "list")).lines).toEqual([
+      "  rx   https://receiver.example.com  tier 3 (capped 1) pii",
+      "                                     PAUSED HTTP 401 from",
+      "                                     the receiver · tools",
+      "                                     all",
+      "  out  stdout                        tier 0",
+    ]);
+    // Into a pipe: the line it always was, byte for byte, the name in 16 columns and the address in 44.
+    expect((await run("sink", "list")).lines).toEqual([
+      `  ${"rx".padEnd(16)} ${"https://receiver.example.com".padEnd(44)} tier 3 (capped 1) pii PAUSED HTTP 401 from the receiver · tools all`,
+      `  ${"out".padEnd(16)} ${"stdout".padEnd(44)} tier 0`,
+    ]);
+    expect((await run("sink", "list")).lines[1]).toBe(
+      "  out              stdout                                       tier 0",
+    );
+  });
+
+  it("what a program reads is never coloured or folded: --json, the version, an agent's answer, the daemon's log", async () => {
+    const j = await runAt(at80, "status", "--json");
+    expect(j.text).not.toContain(ESC);
+    expect(JSON.parse(j.text)).toMatchObject({ version: VERSION, sinks: [] });
+    expect((await runAt(at80, "version")).lines).toEqual([VERSION]);
+    // The note a harness would get from `hook` is longer than the line would be, and whole.
+    expect((await runAt({ tty: true, columns: 40 }, "hook")).lines).toEqual([
+      "sessionpipe hook is dist/hook.js; harnesses run it directly",
+    ]);
+    // `ask <agent> "<task>"` prints the agent's answer as it came; the family's own
+    // commands (`ask status`) are for a person.
+    vi.mocked(askMain).mockImplementation(async (_argv, io) => {
+      io.out("  ✓ done: `rm -rf` was not run");
+      return 0;
+    });
+    expect((await runAt(at80, "ask", "codex", "tidy up")).lines).toEqual(["  ✓ done: `rm -rf` was not run"]);
+    expect((await runAt(at80, "ask", "status")).lines).toEqual([
+      `  ${green("✓")} done: ${cyan("`rm -rf`")} was not run`,
+    ]);
+    expect((await runAt(at80, "ask")).lines).toEqual([`  ${green("✓")} done: ${cyan("`rm -rf`")} was not run`]);
+    // `control status` is a page at a terminal and JSON for a pipe or --json; `control run`
+    // writes the daemon's log; every other `control` line is for a person.
+    const view = () => (vi.mocked(controlMain).mock.lastCall as unknown[])[3] as { ui: typeof PLAIN };
+    await runAt(at80, "control", "status");
+    expect(view().ui).toEqual({ color: true, unicode: true, width: 79, tty: true });
+    await runAt(at80, "control", "status", "--json");
+    expect(view().ui).toBe(PLAIN);
+    await runAt(at80, "control", "run");
+    expect(view().ui).toBe(PLAIN);
+    await runAt(at80, "control", "mode");
+    expect(view().ui).toMatchObject({ color: true, tty: true });
+    await run("control", "mode");
+    expect(view().ui).toEqual(PLAIN);
+    // A waiter's message goes out by the very function it was given.
+    const lines: string[] = [];
+    const out = (s = "") => void lines.push(s);
+    await cli.main(["wait", "--session", "codex:t"], { out, err: vi.fn(), exit: vi.fn(), ...at80 });
+    expect(waitMain).toHaveBeenLastCalledWith(["wait", "--session", "codex:t"], out);
+  });
+
+  it("--help at a terminal: a command's usage folded between its options, and the page of every command", async () => {
+    const usage = await runAt(at80, "install", "--help");
+    expect(usage.lines).toHaveLength(1);
+    const lines = (usage.lines[0] as string).split("\n");
+    expect(lines[0]).toMatch(new RegExp(`^${quoted(bold("Usage:"))} sessionpipe install \\[--claude-code `));
+    // Each further line starts under the first option, and none splits `[--sink URL --tier N]`.
+    const folded = lines.slice(1, lines.indexOf(""));
+    expect(folded.length).toBeGreaterThan(1);
+    for (const l of folded) expect(l).toMatch(/^ {27}[[-]/);
+    expect(folded).toContain(`${" ".repeat(27)}[--backfill DAYS] [--sink URL --tier N]`);
+    for (const l of lines) expect(plain(l).length).toBeLessThan(80);
+    expect(lines.at(-1)).toBe("  -h, --help  Show help without running the command.");
+    // Help wins for a command a program reads, too.
+    expect((await runAt(at80, "tail", "-h")).lines[0]).toMatch(
+      new RegExp(`^${quoted(bold("Usage:"))} sessionpipe tail \\[--session ID\\]`),
+    );
+    const page = ((await runAt(at80, "--help")).lines[0] as string).split("\n");
+    expect(page[0]).toBe(
+      `${bold(`sessionpipe ${VERSION}`)} · what your coding agents are doing, sent where you choose`,
+    );
+    expect(page).toContain(bold("Set up"));
+    expect(page).toContain(`  ${cyan("doctor".padEnd(26))}  Is this computer fine, and what to fix`);
+    for (const l of page) expect(plain(l).length).toBeLessThan(80);
+  });
+
+  it("an error is two lines where errors go: what is wrong, and the command to try, in that terminal's colours", async () => {
+    const said = "--machine NAME is required when naming or renaming a machine";
+    const red = (s: string) => `${ESC}[31m${s}${ESC}[39m`;
+    const dim = (s: string) => `${ESC}[2m${s}${ESC}[22m`;
+    // stdout into a pipe, stderr at the terminal: the error is coloured, by its own stream.
+    const r = await runAt({ errTty: true, columns: 80 }, "install", "--machine");
+    expect(r.err).toHaveBeenCalledWith(
+      `${red(bold("error"))}  ${said}\n${dim("try")}    ${cyan("sessionpipe install --help")}\n`,
+    );
+    expect(r.exit).toHaveBeenCalledWith(1);
+    // --no-color holds for errors too; a narrow terminal folds what is wrong under itself.
+    const mono = await runAt({ errTty: true, columns: 40 }, "install", "--machine", "--no-color");
+    expect(mono.err).toHaveBeenCalledWith(
+      "error  --machine NAME is required when\n       naming or renaming a machine\ntry    sessionpipe install --help\n",
+    );
+    // A terminal for stdout alone leaves the error as a pipe gets it.
+    const piped = await runAt(at80, "install", "--machine");
+    expect(piped.err).toHaveBeenCalledWith(`error  ${said}\ntry    sessionpipe install --help\n`);
+  });
+
+  it("an error with no command of its own to point at points at the page of every command", async () => {
+    // The page itself could not be written (stdout is gone): there is no usage line to name.
+    for (const argv of [[], ["help"], ["bogus"]]) {
+      const err = vi.fn();
+      const exit = vi.fn();
+      await cli.main(argv, {
+        out: () => {
+          throw new Error("write EPIPE");
+        },
+        err,
+        exit,
+      });
+      expect(err).toHaveBeenCalledWith("error  write EPIPE\ntry    sessionpipe --help\n");
+      expect(exit).toHaveBeenCalledWith(1);
+    }
+  });
+
+  it("by default the terminal is this process's own: stdout's for the page, stderr's for an error", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const was = {
+      out: Object.getOwnPropertyDescriptor(process.stdout, "isTTY"),
+      columns: Object.getOwnPropertyDescriptor(process.stdout, "columns"),
+      err: Object.getOwnPropertyDescriptor(process.stderr, "isTTY"),
+    };
+    const put1 = (o: object, k: string, d: PropertyDescriptor | undefined, value?: unknown) =>
+      d && value === undefined
+        ? Object.defineProperty(o, k, d)
+        : value === undefined
+          ? delete (o as Record<string, unknown>)[k]
+          : Object.defineProperty(o, k, { value, configurable: true, writable: true });
+    try {
+      put1(process.stdout, "isTTY", undefined, true);
+      put1(process.stdout, "columns", undefined, 60);
+      put1(process.stderr, "isTTY", undefined, true);
+      await cli.main(["status"]);
+      const written = stdout.mock.calls.map(([s]) => plain(String(s)));
+      expect(String(stdout.mock.calls[0]?.[0])).toBe(`${green("✓")} ${bold(green("All good"))}\n`);
+      // Sixty columns wide, as stdout says: a long row folds there, and nothing runs past it.
+      expect(written).toContain("  · Updates        by hand: this copy isn't a global npm\n");
+      expect(written).toContain(`${" ".repeat(19)}install (npx, a checkout or a dev build)\n`);
+      for (const l of written.join("").split("\n")) expect(l.length).toBeLessThan(60);
+      await cli.main(["install", "--machine"]);
+      expect(String(stderr.mock.lastCall?.[0])).toBe(
+        `${ESC}[31m${bold("error")}${ESC}[39m  --machine NAME is required when naming or renaming a\n       machine\n${ESC}[2mtry${ESC}[22m    ${cyan("sessionpipe install --help")}\n`,
+      );
+      // Not a terminal: plain, whole lines, as a script has always read them.
+      put1(process.stdout, "isTTY", undefined, false);
+      put1(process.stderr, "isTTY", undefined, false);
+      stdout.mockClear();
+      await cli.main(["status"]);
+      expect(stdout.mock.calls.map(([s]) => String(s)).join("")).not.toContain(ESC);
+      await cli.main(["install", "--machine"]);
+      expect(stderr).toHaveBeenLastCalledWith(
+        "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
+      );
+    } finally {
+      put1(process.stdout, "isTTY", was.out);
+      put1(process.stdout, "columns", was.columns);
+      put1(process.stderr, "isTTY", was.err);
+    }
+  });
+});
+
 // Last: this reloads the module graph, so the mocks and spies above are not its.
 describe.skipIf(process.platform === "win32")("a copy under Homebrew's versioned node", () => {
   it("is warned about by doctor, with a hook path it can't resolve", async () => {
@@ -2151,6 +3275,20 @@ describe.skipIf(process.platform === "win32")("a copy under Homebrew's versioned
         "sessionpipe is installed inside Homebrew's versioned node folder; `brew upgrade node` will delete it. Install with `npm install -g --prefix ~/.local sessionpipe`.",
       );
       expect(j.harnesses["claude-code"][0].state).toBe("missing");
+      // For a person: a row for where it is installed, and the one command that moves it.
+      const page: string[] = [];
+      await brewed.main(["doctor"], { out: (s = "") => void page.push(s), err: vi.fn(), exit: vi.fn() });
+      expect(page.join("\n")).toMatch(
+        row("!", "installed in", "Homebrew's node folder, which `brew upgrade node` deletes"),
+      );
+      const at = page.findIndex((l) =>
+        l.endsWith(
+          ". sessionpipe is installed inside Homebrew's node folder, and `brew upgrade node` will delete it. Install it where it stays:",
+        ),
+      );
+      expect(at).toBeGreaterThan(page.indexOf("To fix"));
+      expect(page[at + 1]).toBe("       npm install -g --prefix ~/.local sessionpipe");
+      expect(process.exitCode).toBe(1);
     } finally {
       dist.dir = realDist;
     }

@@ -26,10 +26,11 @@ import { openPool, readPool } from "../pool/index.js";
 import { appendObserved, drain, VERSION } from "../run.js";
 import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
+import { PLAIN, table, tint, type Ui } from "../style.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
 import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
-import { ControlDaemon, DaemonRunning } from "./daemon.js";
+import { ControlDaemon, DaemonRunning, type Status } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { CLAUDE_NOT_FOUND } from "./route.js";
@@ -44,6 +45,7 @@ import {
   readControl,
   writeControl,
 } from "./store.js";
+import { statusView } from "./view.js";
 import { waitForMessage, waitSession } from "./wait.js";
 
 export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR]… [--mode safe|auto|inherit] [--tier 0-3] [--token T] [--name N] [--no-service]
@@ -53,21 +55,27 @@ export const CONTROL_HELP = `  sessionpipe control pair <receiver> [--folder DIR
   sessionpipe wait [--session <harness>:<id>]      (a session runs this in the background)
   sessionpipe channel [--session claude-code:<id>] [--name N]  (Claude Code runs this as a channel)`;
 
-const MODE_TEXT = `  auto    Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's
-          own safety check stops what looks dangerous. Pick this to get work done from your phone.
-          (Codex runs with --approve-for-me, Antigravity with --mode accept-edits.) Where Claude
-          Code's settings turn auto mode off (permissions.disableAutoMode), Claude Code runs these
-          sessions in its default mode instead, which refuses whatever needs approval; inherit
-          runs them as your own sessions run.
-  safe    Only what each folder's Claude Code settings already allow: with no allow rules, a
-          session can't even read a file. Pick this if this machine holds things no agent
-          should touch unattended. (Codex runs in its workspace-write sandbox and never
-          escalates; Antigravity is denied every tool call that would need approval.)
-  inherit As your own sessions here run: no permission flag, so each harness starts in its own
-          default on this machine. Claude Code takes permissions.defaultMode from its settings,
-          whatever you set there, bypassPermissions included. Pick this if sessions you message
-          should run the way you run them. (Codex follows the approval_policy and sandbox_mode in
-          its config.toml; Antigravity gets no flag, as in safe.)`;
+/** What each mode lets a messaged session do. A terminal gets each one folded under
+ *  itself; a pipe gets each on one line. */
+const MODES: readonly (readonly [ControlMode, string])[] = [
+  [
+    "auto",
+    "Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's own safety check stops what looks dangerous. Pick this to get work done from your phone. (Codex runs with --approve-for-me, Antigravity with --mode accept-edits.) Where Claude Code's settings turn auto mode off (permissions.disableAutoMode), Claude Code runs these sessions in its default mode instead, which refuses whatever needs approval; inherit runs them as your own sessions run.",
+  ],
+  [
+    "safe",
+    "Only what each folder's Claude Code settings already allow: with no allow rules, a session can't even read a file. Pick this if this machine holds things no agent should touch unattended. (Codex runs in its workspace-write sandbox and never escalates; Antigravity is denied every tool call that would need approval.)",
+  ],
+  [
+    "inherit",
+    "As your own sessions here run: no permission flag, so each harness starts in its own default on this machine. Claude Code takes permissions.defaultMode from its settings, whatever you set there, bypassPermissions included. Pick this if sessions you message should run the way you run them. (Codex follows the approval_policy and sandbox_mode in its config.toml; Antigravity gets no flag, as in safe.)",
+  ],
+];
+const modeText = (ui: Ui): string =>
+  table(
+    ui,
+    MODES.map(([m, about]) => [tint(ui, "bold", m), about]),
+  ).join("\n");
 
 /** What each mode means, in a few words: after pairing, and after `control mode` changes it. */
 const MODE_IS: Record<ControlMode, string> = {
@@ -84,14 +92,14 @@ const MODE_NOW: Record<ControlMode, string> = {
 /** Ask the person at this machine, once: auto, safe or inherit. Inherit only by its whole
  *  name, never by a stray letter: it runs whatever the settings say, bypass included. Not
  *  a terminal (an agent ran the pair command): safe, and say how to change it. */
-async function askMode(out: (s?: string) => void): Promise<ControlMode> {
+async function askMode(out: (s?: string) => void, view: View): Promise<ControlMode> {
   if (!process.stdin.isTTY) {
     out("  Mode: safe for now. Run `sessionpipe control mode auto` to let sessions you message work unattended.");
     return "safe";
   }
   out("");
   out("  When you message a session on this machine from your phone, how may it run?");
-  out(MODE_TEXT);
+  view.say(modeText(view.ui));
   const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -150,7 +158,20 @@ export function changeFolders(
   return { folders: next, said };
 }
 
-export async function controlMain(argv: string[], out: (s?: string) => void, distDir: string): Promise<void> {
+/** How a command's own pages reach a terminal: `ui` is its colour and width, `say`
+ *  writes a line already set for it (`out` is for the lines every command has always
+ *  written, which the caller sets). Left out: a pipe. */
+export interface View {
+  ui: Ui;
+  say: (s?: string) => void;
+}
+
+export async function controlMain(
+  argv: string[],
+  out: (s?: string) => void,
+  distDir: string,
+  view: View = { ui: PLAIN, say: out },
+): Promise<void> {
   const flag = (n: string) => {
     const i = argv.indexOf(n);
     return i >= 0 ? argv[i + 1] : undefined;
@@ -189,7 +210,8 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
       // How sessions run when a message arrives is the person's call, asked once here at
       // the machine — never a default they find out about when a session can't read a file.
       const mode =
-        parseMode(flag("--mode")) ?? (existing?.mode && existing.receivers.length ? existing.mode : await askMode(out));
+        parseMode(flag("--mode")) ??
+        (existing?.mode && existing.receivers.length ? existing.mode : await askMode(out, view));
       const tier: Tier = tierArg(argv, 0);
       await pair({
         url,
@@ -211,6 +233,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
         mode,
         name: flag("--name") ?? existing?.name ?? machineName(cfg, os.hostname()),
         out,
+        ui: view.ui,
       });
       const c = readControl()!;
       out(`  Folders sessions may run in: ${c.folders.join(", ")}`);
@@ -220,17 +243,16 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
         cli = realpathSync(cli);
       } catch {}
       if (argv.includes("--no-service"))
-        out("  Daemon: not installed as a service (--no-service); run `sessionpipe control run` yourself");
-      else out(`  Daemon: ${installService({ node: stableNode(process.execPath), cli })}`);
+        out("  Background service: not installed as a service (--no-service); run `sessionpipe control run` yourself");
+      else out(`  Background service: ${installService({ node: stableNode(process.execPath), cli })}`);
       return;
     }
     case "mode": {
       const want = parseMode(argv[2]);
       if (!want) {
         const c = readControl();
-        return out(
-          `  mode: ${c?.mode ?? "not set up"}\n  usage: sessionpipe control mode auto|safe|inherit\n${MODE_TEXT}`,
-        );
+        out(`  mode: ${c?.mode ?? "not set up"}\n  usage: sessionpipe control mode auto|safe|inherit`);
+        return view.say(modeText(view.ui));
       }
       const c = readControl();
       if (!c) return out("  control isn't set up on this machine: run `sessionpipe control pair <receiver>` first");
@@ -268,7 +290,7 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
           writeControl(c);
           // The running daemon reads control.json again within seconds and tells the
           // receiver the new list in a hello then.
-          out("  The control daemon uses the new list within seconds.");
+          out("  The background service uses the new list within seconds.");
         }
       }
       return out(
@@ -309,8 +331,15 @@ export async function controlMain(argv: string[], out: (s?: string) => void, dis
     }
     case "status": {
       const r = await ask(socketPath(stateDir()), { op: "status" }, 2000);
-      if (r?.op !== "status") return out("  the control daemon isn't running");
-      return out(JSON.stringify(r.status, null, 2));
+      // A script reads this: a pipe, and --json anywhere, get the JSON it always printed.
+      const json = !view.ui.tty || argv.includes("--json");
+      if (r?.op !== "status")
+        return json
+          ? out("  the control daemon isn't running")
+          : out("  ✗ The background service isn't running. `sessionpipe doctor` says why, and what to do.");
+      if (json) return out(JSON.stringify(r.status, null, 2));
+      for (const l of statusView(view.ui, r.status as Status, Date.now())) view.say(l);
+      return;
     }
     case "run":
       return runDaemon(out, distDir);

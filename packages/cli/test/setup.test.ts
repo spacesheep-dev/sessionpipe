@@ -184,7 +184,7 @@ fs.writeFileSync(path.join(target, 'bin/sessionpipe'), script, { mode: 0o755 });
       const r = run([...args, "--machine", "Intel-mbp", "--rename-machine", "--allow-downgrade"]);
       // connect goes on to reach receiver.invalid and fails there; the rename came first.
       if (args[0] === "install") expect(r.code, r.out).toBe(0);
-      expect(r.out).toContain("Renamed the control daemon Intel → Intel-mbp");
+      expect(r.out).toContain("Renamed the background service Intel → Intel-mbp");
       expect(config().machine).toBe("Intel-mbp");
       // The name moves; the pairing (its id and keys) does not.
       expect(JSON.parse(readFileSync(control, "utf8"))).toMatchObject({

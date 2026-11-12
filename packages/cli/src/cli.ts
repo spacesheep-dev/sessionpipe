@@ -43,18 +43,29 @@ import {
   waitNamedLock,
   writeConfig,
 } from "@sessionpipe/core";
-import { ASK_HELP, askMain } from "./ask.js";
+import { askMain } from "./ask.js";
 import { connectFolders, connectTier, tierArg } from "./connect.js";
-import { autoUpdateOff, readUpdate, updateFile, updateLine, updateSummary } from "./control/autoupdate.js";
-import { CONTROL_HELP, channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
+import { ago, autoUpdateOff, readUpdate, updateFile, updateSummary } from "./control/autoupdate.js";
+import { channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
-import { ask, socketPath } from "./control/local.js";
+import {
+  askHealth,
+  DISK_FULL_BYTES,
+  freeBytes,
+  logTroubles,
+  serviceLog,
+  serviceLook,
+  type Trouble,
+} from "./control/health.js";
+import { ask, type Health, socketPath } from "./control/local.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
+import { heardAgo, hostOf, isLive } from "./control/view.js";
 import { isToolsMode, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
-import { commandHelp } from "./help.js";
+import { helpFor } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
-import { POOL_HELP, poolMain, poolOffForUninstall } from "./pool/cli.js";
+import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
+import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
 import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import {
@@ -67,7 +78,9 @@ import {
   sinkWithSecrets,
   storeLabel,
 } from "./secrets.js";
+import { commands, failure, fold, makeUi, PLAIN, paint, span, table, type Ui } from "./style.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
+import { overview, usage } from "./usage.js";
 import { applyWellKnown, readWellKnown } from "./wellknown.js";
 
 const print = (s = ""): void => {
@@ -76,7 +89,11 @@ const print = (s = ""): void => {
 // One command per process: `main` sets these for the run, every command reads them.
 let args: string[] = [];
 let out: (s?: string) => void = print;
+/** Lines already set for this run's terminal (report.ts, usage.ts): written as they are. */
+let say: (s?: string) => void = print;
 let state = "";
+/** How this run's output looks: a terminal's colour and width, or a pipe's whole lines. */
+let ui: Ui = PLAIN;
 const flag = (name: string): string | undefined => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
@@ -90,20 +107,58 @@ export interface Io {
   /** What a failed command says, then `exit(1)`. */
   err: (s: string) => void;
   exit: (code: number) => void;
+  /** The output is a terminal, and its width. Left out: a pipe. */
+  tty?: boolean;
+  columns?: number | undefined;
+  /** Where errors go is a terminal. */
+  errTty?: boolean;
+}
+
+const processIo = (): Io => ({
+  out: print,
+  err: (s) => void process.stderr.write(s),
+  exit: (c) => process.exit(c),
+  tty: !!process.stdout.isTTY,
+  columns: process.stdout.columns,
+  errTty: !!process.stderr.isTTY,
+});
+
+/** What these commands write is read by a program, so it is never coloured or folded:
+ *  the daemon's log, a session's events, a waiter's message, an agent's answer. */
+const FOR_PROGRAMS = ["tail", "wait", "channel", "worker", "hook", "version", "--version", "-v"];
+
+/** Whether this run's lines are for a person to read (style.ts `paint`). */
+function forPeople(a: readonly string[], tty: boolean): boolean {
+  if (a.includes("--help") || a.includes("-h")) return true;
+  if (a.includes("--json") || FOR_PROGRAMS.includes(a[0] as string)) return false;
+  // The daemon's log, and its status where a script reads it (a pipe gets JSON).
+  if (a[0] === "control") return a[1] !== "run" && (a[1] !== "status" || tty);
+  // `ask <agent> "<task>"` prints the agent's answer.
+  if (a[0] === "ask") return ["on", "off", "status", "setup", undefined].includes(a[1]);
+  return true;
 }
 
 /** Run one command: `argv` is what follows `sessionpipe`; `io` is this process by default. */
-export async function main(
-  argv: string[],
-  io: Io = { out: print, err: (s) => void process.stderr.write(s), exit: (c) => process.exit(c) },
-): Promise<void> {
-  args = argv;
-  out = io.out;
+export async function main(argv: string[], io: Io = processIo()): Promise<void> {
+  const noColor = argv.includes("--no-color");
+  args = argv.filter((a) => a !== "--no-color");
+  ui = makeUi({ isTTY: io.tty, columns: io.columns, noColor });
+  const people = forPeople(args, ui.tty);
+  if (!people) ui = PLAIN;
+  out = people ? (s = "") => io.out(paint(ui, s)) : io.out;
+  say = io.out;
   state = stateDir();
   try {
     await command(args[0] ?? "help");
   } catch (e) {
-    io.err(`sessionpipe: ${(e as Error).message}\n`);
+    const about = helpFor(args);
+    io.err(
+      failure(
+        makeUi({ isTTY: io.errTty, columns: io.columns, noColor }),
+        (e as Error).message,
+        `sessionpipe ${about ? `${about} ` : ""}--help`,
+      ),
+    );
     io.exit(1);
   }
 }
@@ -158,13 +213,14 @@ function selectedAdapters(): typeof ADAPTERS {
 
 async function command(cmd: string): Promise<void> {
   // Help wins over every command and argument, before any command can do work.
-  if (has("--help") || has("-h")) {
-    const usage = commandHelp(
-      args,
-      ADAPTERS.map((a) => a.name),
+  if (has("--help") || has("-h"))
+    return say(
+      usage(
+        ui,
+        args,
+        ADAPTERS.map((a) => a.name),
+      ) ?? overview(ui, VERSION),
     );
-    return usage ? out(usage) : help();
-  }
   // A --tier that is not a whole number stops these commands here, before any work: an npx
   // re-run, a hook written, a sink stored. `sink add`, `install --sink`, `connect`,
   // `control pair` and `tail` read it; their sibling subcommands refuse it too, rather than
@@ -200,9 +256,9 @@ async function command(cmd: string): Promise<void> {
     case "worker":
       return workerFromArgv();
     case "control":
-      return controlMain(args, out, distDir);
+      return controlMain(args, out, distDir, { ui, say });
     case "pool":
-      return poolMain(args, out, distDir);
+      return poolMain(args, out, distDir, {}, ui);
     case "wait":
       return waitMain(args, out);
     case "ask": {
@@ -226,26 +282,7 @@ async function command(cmd: string): Promise<void> {
 }
 
 function help(): void {
-  out(`sessionpipe ${VERSION} — an open protocol for what your coding agents are doing
-
-Usage:
-  sessionpipe connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line]
-                                  (everything, in one go: hooks, a sink, signed messages, keys)
-  sessionpipe install [--claude-code --codex --gemini-cli --antigravity --devin --grok-build] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]
-  sessionpipe uninstall [--claude-code --codex --gemini-cli --antigravity --devin --grok-build | --all] [--keep-state]
-  sessionpipe sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--pii] [--tools all|main|beat] [--name N]
-  sessionpipe sink list | remove <name> | test <name>
-  sessionpipe secrets [move keychain|secret-service|file]   (where the machine's keys live)
-  sessionpipe status [--json] | doctor [--json]
-  sessionpipe tail [--session ID] [--tier N] [--harness NAME]
-  sessionpipe backfill [--days 30] | forget <harness> <session> | replay --sink NAME [--from-start] [--tools all|main|beat]
-  sessionpipe update [off|on]       (install the latest now; off/on: the daemon's daily update)
-  sessionpipe titles [on|off|refresh] (on: name Claude Code sessions as claude.ai does; off by default)
-${CONTROL_HELP}
-${POOL_HELP}
-${ASK_HELP}
-
-Docs: https://sessionpipe.org · nothing leaves this machine until you add a sink.`);
+  say(overview(ui, VERSION));
 }
 
 /** --machine names a first install. A repeat setup must not split sessions from control. */
@@ -278,7 +315,7 @@ function setupConfig(): Config {
     // by id, so the pairing holds). receivers[].machine is that id, not the name.
     if (control && control.name !== name && (machine || name === pairedName)) {
       writeControl({ ...control, name });
-      out(`  Renamed the control daemon ${control.name} → ${name}; its next hello tells each receiver.`);
+      out(`  Renamed the background service ${control.name} → ${name}; its next hello tells each receiver.`);
     }
     cfg.machine = name;
   }
@@ -297,11 +334,11 @@ async function install(): Promise<void> {
   const adapters = selectedAdapters();
   if (!adapters.length) {
     out(
-      "  No supported harness found on this machine (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Grok Build). Pass --<harness> to force one.",
+      "  No coding agent found on this computer (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Grok Build). Pass --<harness> to force one.",
     );
     return;
   }
-  out(`  Machine: ${machineName(cfg, os.hostname())}`);
+  out(`  This computer: ${machineName(cfg, os.hostname())}`);
   const lean = isLean(cfg);
   if (lean)
     out(
@@ -323,7 +360,7 @@ async function install(): Promise<void> {
   if (live.length) out(`  Reporting to ${live.map((s) => `${s.name} (tier ${s.tier})`).join(", ")}.`);
   else
     out(
-      "  Nothing leaves this machine yet: events go to the local outbox. `sessionpipe tail` shows them; `sessionpipe sink add <url> --tier N` sends them.",
+      "  Nothing leaves this computer yet: events go to the local outbox. `sessionpipe tail` shows them; `sessionpipe sink add <url> --tier N` sends them.",
     );
   out("  Sessions already running pick up hooks on their next start (Claude Code ≥ 2.1.280 picks them up live).");
 }
@@ -674,10 +711,18 @@ async function sink(): Promise<void> {
   }
   if (sub === "list") {
     if (!cfg.sinks.length) out("  no sinks");
-    for (const s of cfg.sinks)
-      out(
-        `  ${s.name.padEnd(16)} ${s.url.padEnd(44)} tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`,
-      );
+    const rest = (s: SinkConfig): string =>
+      `tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`;
+    // A pipe keeps the line it always had. A terminal gets columns as wide as they need,
+    // the last one folded under itself: the old line is over 80 columns before it says much.
+    if (ui.width === Number.POSITIVE_INFINITY)
+      for (const s of cfg.sinks) out(`  ${s.name.padEnd(16)} ${s.url.padEnd(44)} ${rest(s)}`);
+    else
+      for (const l of table(
+        ui,
+        cfg.sinks.map((s) => [s.name, s.url, rest(s)]),
+      ))
+        say(l);
     return;
   }
   if (sub === "remove" && args[2]) {
@@ -984,11 +1029,15 @@ type ControlHealth = {
   })[];
 };
 
-async function controlHealth(): Promise<ControlHealth | null> {
-  if (!pairedCount()) return null;
+/** The running background service's own account of itself; null when none answers. */
+async function serviceStatus(): Promise<Status | null> {
   const reply = await ask(socketPath(state), { op: "status" }, 1500);
-  if (reply?.op !== "status") return { running: false, receivers: [] };
-  const status = reply.status as Status;
+  return reply?.op === "status" ? (reply.status as Status) : null;
+}
+
+function controlHealth(status: Status | null): ControlHealth | null {
+  if (!pairedCount()) return null;
+  if (!status) return { running: false, receivers: [] };
   return {
     running: true,
     receivers: status.receivers.map((r) => ({
@@ -1003,30 +1052,593 @@ async function controlHealth(): Promise<ControlHealth | null> {
   };
 }
 
-function controlLines(control: ControlHealth | null): void {
-  if (!control) {
-    out("  control:  not paired");
-    return;
+/** How many of the outbox's session files hold events this sink has not been sent. */
+function pendingFor(s: SinkConfig): number {
+  const c = new Cursors(state, s.name).read();
+  const outbox = new Outbox(state);
+  let pending = 0;
+  for (const ref of outbox.sessions()) {
+    const f = outbox.file(ref);
+    try {
+      pending += Math.max(0, statSync(f).size - (c[`${ref.harness}/${ref.session}`] ?? 0)) > 0 ? 1 : 0;
+    } catch {}
   }
-  if (!control.running) {
-    out("  control:  daemon not running or not responding; polling: no");
-    return;
-  }
-  for (const r of control.receivers) {
-    const age = r.last_poll_age_ms === null ? "unknown" : `${Math.floor(r.last_poll_age_ms / 60_000)} minutes`;
-    out(
-      `  control:  ${r.url} · polling: ${r.polling ? "yes" : "no"} · last successful poll: ${r.last_poll === null ? `never (${age} since start)` : `${age} ago`} · last error: ${r.last_error ?? "none"}`,
+  return pending;
+}
+
+/** The command that starts a service that isn't loaded, as this platform spells it.
+ *  `sessionpipe control run` where no manager has it: it runs until the terminal closes. */
+function startService(look: ReturnType<typeof serviceLook>, receiver: string | undefined): string {
+  if (look?.installed && look.manager === "launchd")
+    return `launchctl bootstrap gui/$(id -u) ${JSON.stringify(look.file)}`;
+  if (look?.installed) return `systemctl --user enable --now ${path.basename(look.file as string)}`;
+  return look && receiver ? `sessionpipe control pair ${receiver}` : "sessionpipe control run";
+}
+
+const HOOK_WORD = {
+  current: "hooked",
+  stale: "hooks out of date",
+  missing: "not hooked",
+  misplaced: "hooked in a place the agent never reads",
+  inactive: "hooks written, but the agent won't run them",
+} as const;
+
+/** Everything `doctor` looks at (and, without `deep`, what `status` does: no hook is
+ *  timed, no sign-in asked for, no log read). `report` is doctor's --json, unchanged in
+ *  shape; `groups` and `todo` are the same findings for a person. */
+async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>; groups: Group[]; todo: Todo[] }> {
+  const cfg = readConfig();
+  const hc = hookCommand();
+  const now = Date.now();
+  const report: Record<string, unknown> = {
+    version: VERSION,
+    node: process.version,
+    node_path: stableNode(process.execPath),
+    machine: machineName(cfg, os.hostname()),
+    state: state,
+    config: configFile(),
+    harnesses: {},
+    sinks: [],
+    timing: timing(),
+    hook_wall_ms: deep ? hookWall() : null,
+    update: updateState(cfg),
+    warnings: [] as string[],
+  };
+  const warnings = report.warnings as string[];
+  const todo: Todo[] = [];
+  const computer: Group = { title: "This computer", rows: [] };
+  const agents: Group = { title: "Agents", rows: [] };
+  const reports: Group = { title: "Reports to", rows: [] };
+  const messages: Group = { title: "Messages from", rows: [] };
+  const accounts: Group = { title: "Accounts", rows: [] };
+  const updates: Group = { title: "Updates", rows: [] };
+  computer.rows.push({
+    mark: "ok",
+    label: report.machine as string,
+    value: `sessionpipe ${VERSION} · node ${process.version}`,
+    brief: `${report.machine} (sessionpipe ${VERSION})`,
+  });
+
+  // --- the background service ------------------------------------------------------
+  const control = readControl();
+  const poolCfg = readPool();
+  const live = await serviceStatus();
+  const health = controlHealth(live);
+  report.control = health;
+  const wanted = !!control?.receivers.length || poolCfg.on || control?.ask === true;
+  if (health && !health.running)
+    warnings.push("the control daemon is not running or not responding; polling is stopped");
+  if (live) {
+    // A service from before it said its version is an old one.
+    const runs = live.version ?? "an older release";
+    const other = runs !== VERSION;
+    computer.rows.push({
+      mark: other ? "warn" : "ok",
+      label: "background service",
+      value: other
+        ? `running sessionpipe ${runs}, and this command is ${VERSION}`
+        : `running${live.busy ? ` · busy with ${live.busy}` : ""}`,
+    });
+    if (other)
+      todo.push({
+        order: 1,
+        say: `The background service runs sessionpipe ${runs} and this command is ${VERSION}. Bring both up to date:`,
+        run: "sessionpipe update",
+      });
+  } else if (wanted) {
+    const look = serviceLook();
+    const loaded = look?.loaded === true;
+    const log = tilde(path.join(state, "control", "daemon.log"));
+    computer.rows.push({
+      mark: "bad",
+      label: "background service",
+      value: loaded
+        ? "started but not answering"
+        : look
+          ? `not loaded: ${look.manager} doesn't have it, so nothing starts it`
+          : "not running",
+    });
+    if (look && !loaded) warnings.push(`the background service isn't loaded: ${look.manager} doesn't have it`);
+    todo.push(
+      loaded
+        ? {
+            order: 1,
+            say: "The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
+            run: `tail -n 20 ${log}`,
+          }
+        : {
+            order: 1,
+            say: "The background service isn't running, so no message reaches this computer. Start it:",
+            run: startService(look, control?.receivers[0]?.url),
+          },
     );
+  } else
+    computer.rows.push({
+      mark: "info",
+      label: "background service",
+      value: "not set up: nothing here needs it yet",
+    });
+
+  // --- the disk, and what only the service's log knew -------------------------------
+  const troubles: Trouble[] = deep ? logTroubles(serviceLog(), now) : [];
+  const free = freeBytes(state);
+  const full = troubles.find((t) => t.kind === "disk");
+  if ((free !== null && free < DISK_FULL_BYTES) || full) {
+    const said =
+      free !== null && free < DISK_FULL_BYTES
+        ? `full: ${Math.floor(free / (1024 * 1024))} MB left`
+        : `was full ${span(now - (full as Trouble).last)} ago, by the background service's log`;
+    computer.rows.push({ mark: "bad", label: "disk", value: said });
+    warnings.push(`this computer's disk ${said.startsWith("full") ? "is " : ""}${said}`);
+    todo.push({
+      order: 0,
+      say: "This computer's disk is full, so events and messages can't be saved. Free some space, then look again:",
+      run: "sessionpipe doctor",
+    });
+  }
+
+  // --- the hooks' own home -----------------------------------------------------------
+  const upd = report.update as ReturnType<typeof updateState>;
+  if (upd.failed)
+    warnings.push(
+      `the control daemon couldn't install sessionpipe ${upd.failed.version}: ${upd.failed.error}. It tries again tomorrow; \`sessionpipe update\` tries now.`,
+    );
+  if (usesLauncher()) {
+    const l = launcherState(VERSION);
+    report.launcher = { file: tilde(l.file), node: l.node, node_ok: l.nodeOk, version: l.version };
+    if (Object.keys(cfg.harnesses).length) {
+      warnings.push(...l.problems);
+      computer.rows.push(
+        l.problems.length
+          ? { mark: "warn", label: "hooks", value: hookTrouble(l) }
+          : { mark: "ok", label: "hooks", value: `run sessionpipe ${l.version ?? VERSION}` },
+      );
+      if (l.problems.length)
+        todo.push({
+          order: 2,
+          say: `The hooks ${hookTrouble(l)}. Write them again from this copy:`,
+          run: "sessionpipe install",
+        });
+    }
+  }
+  const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
+  if (w)
+    computer.rows.push({
+      mark: w.p50 > 150 ? "warn" : "ok",
+      label: "hook speed",
+      value: `${w.p50} ms each (95 in 100 under ${w.p95} ms)`,
+    });
+  else if (deep) {
+    computer.rows.push({ mark: "warn", label: "hook speed", value: "the hook could not be started" });
+    todo.push({
+      order: 2,
+      say: "The hook that agents run could not be started from this copy. Write the hooks again:",
+      run: "sessionpipe install",
+    });
+  }
+
+  // Where each key lives, and whether this session can read it.
+  const keys: { what: string; where: string; readable: boolean }[] = [];
+  for (const s of cfg.sinks)
+    if (s.token_in || s.token || s.secret)
+      keys.push({ what: `sink ${s.name}`, where: s.token_in ?? "file", readable: !!sinkWithSecrets(s) });
+  for (const r of control?.receivers ?? [])
+    keys.push({ what: `control ${new URL(r.url).host}`, where: r.token_in ?? "file", readable: !!r.token });
+  report.keys = keys;
+  for (const k of keys)
+    if (!k.readable)
+      warnings.push(
+        `${k.what}: its key is in ${storeLabel(k.where as StoreName)}, which this session can't read (locked, or an ssh shell). Events wait; the control daemon sends them from your own session.`,
+      );
+
+  // --- accounts: each Claude Code sign-in, as the service sees it where it can be asked
+  const claudeBin = deep ? claudeControl.findClaude() : null;
+  const seen: Health | null = deep && live ? await askHealth(socketPath(state)) : null;
+  if (claudeBin) {
+    const dirs = claudeDirs();
+    const logins = await Promise.all(
+      dirs.map(async (d) => {
+        const its = seen?.accounts.find((a) => a.dir === d)?.signed_in;
+        return typeof its === "boolean"
+          ? { service: true, signedIn: its as boolean | null }
+          : { service: false, signedIn: (await claudeControl.claudeLogin(claudeBin, d)).loggedIn };
+      }),
+    );
+    report.claude_accounts = dirs.map((d, i) => ({ dir: tilde(d), signed_in: logins[i]?.signedIn ?? null }));
+    dirs.forEach((d, i) => {
+      const l = logins[i] as (typeof logins)[number];
+      const label = `Claude Code ${tilde(d)}`;
+      const login = claudeControl.loginCommand(d).replace(/`/g, "");
+      if (l.signedIn === false && control?.receivers.length)
+        warnings.push(`Claude Code ${tilde(d)} isn't signed in from here: ${claudeControl.loginCommand(d)}`);
+      if (l.signedIn === true) accounts.rows.push({ mark: "ok", label, value: "signed in" });
+      else if (l.signedIn === null)
+        accounts.rows.push({ mark: "info", label, value: "couldn't tell: `claude auth status` gave no answer" });
+      else if (l.service) {
+        accounts.rows.push({ mark: "bad", label, value: "not signed in, as the background service sees it" });
+        todo.push({
+          order: 4,
+          say:
+            process.platform === "darwin"
+              ? `${label} isn't signed in where the background service runs, so a message can't start a session with it. A Mac keeps the sign-in in the login keychain: log in at this computer's screen, then:`
+              : `${label} isn't signed in, so a message can't start a session with it. Sign in:`,
+          run: login,
+        });
+      } else if (process.platform === "darwin" && process.env.SSH_CONNECTION)
+        // A Mac's login keychain can't be read over ssh: this shell's "no" says nothing.
+        accounts.rows.push({
+          mark: "info",
+          label,
+          value: "can't tell over ssh: a Mac keeps the sign-in in its login keychain",
+        });
+      else if (!control?.receivers.length)
+        // Only a session started by a message needs it; this computer takes none.
+        accounts.rows.push({ mark: "info", label, value: "not signed in, as this shell sees it" });
+      else {
+        accounts.rows.push({ mark: "warn", label, value: "not signed in, as this shell sees it" });
+        todo.push({
+          order: 4,
+          say: `${label} isn't signed in, so a message can't start a session with it. Sign in:`,
+          run: login,
+        });
+      }
+    });
+  }
+  if (poolCfg.on || poolCfg.accounts.length) {
+    const p = live?.pool;
+    const none = poolCfg.on && !!p && p.accounts > 0 && p.with_room === 0;
+    const refused = troubles.find((t) => t.kind === "pool");
+    accounts.rows.push({
+      mark: none || refused ? "warn" : poolCfg.on ? "ok" : "info",
+      label: "pool",
+      value: `${poolCfg.on ? "on" : "off"} · ${poolCfg.accounts.length} account${poolCfg.accounts.length === 1 ? "" : "s"}${
+        p && poolCfg.on ? ` · ${p.with_room} with room left` : ""
+      }${refused ? ` · had none to try ${refused.times} time${refused.times === 1 ? "" : "s"} in the last hour` : ""}`,
+    });
+    if (none || refused) {
+      warnings.push("the pool has no account with room left: Claude Code sessions here are being refused");
+      todo.push({
+        order: 5,
+        say: "Every pooled Claude account is at its limit or signed out, so Claude Code sessions here were refused. See which, and when each has room again:",
+        run: "sessionpipe pool",
+      });
+    }
+  }
+
+  // A systemd user service stops at logout unless the user lingers.
+  if (deep && process.platform === "linux" && control?.receivers.length) {
+    let linger: boolean | null = null;
+    try {
+      linger = /^Linger=yes/m.test(
+        execFileSync("loginctl", ["show-user", os.userInfo().username, "--property=Linger"], {
+          encoding: "utf8",
+          timeout: 5000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }),
+      );
+    } catch {}
+    report.linger = linger;
+    if (linger === false) {
+      warnings.push(
+        `the control daemon stops when you log out: \`loginctl enable-linger ${os.userInfo().username}\` (with sudo if refused) keeps it running`,
+      );
+      computer.rows.push({ mark: "warn", label: "after you log out", value: "the background service stops" });
+      todo.push({
+        order: 3,
+        say: "The background service stops when you log out of this computer. Keep it running (with sudo if refused):",
+        run: `loginctl enable-linger ${os.userInfo().username}`,
+      });
+    }
+  }
+  if (/\/Cellar\/node(?:@\d+)?\/[^/]+\//.test(distDir)) {
+    warnings.push(
+      "sessionpipe is installed inside Homebrew's versioned node folder; `brew upgrade node` will delete it. Install with `npm install -g --prefix ~/.local sessionpipe`.",
+    );
+    computer.rows.push({
+      mark: "warn",
+      label: "installed in",
+      value: "Homebrew's node folder, which `brew upgrade node` deletes",
+    });
+    todo.push({
+      order: 1,
+      say: "sessionpipe is installed inside Homebrew's node folder, and `brew upgrade node` will delete it. Install it where it stays:",
+      run: "npm install -g --prefix ~/.local sessionpipe",
+    });
+  }
+
+  // --- agents ------------------------------------------------------------------------
+  const rehook: string[] = [];
+  for (const a of ADAPTERS) {
+    if (!a.detect()) continue;
+    const lean = isLean(cfg);
+    const st = a.installed(hc, process.env, { lean });
+    (report.harnesses as Record<string, unknown>)[a.name] = st.map((r) => ({
+      file: tilde(r.file),
+      state: r.state,
+      ...(r.note ? { note: r.note } : {}),
+    }));
+    for (const r of st) {
+      agents.rows.push({
+        mark: r.state === "current" ? "ok" : r.state === "missing" && !cfg.harnesses[a.name] ? "info" : "warn",
+        label: a.name,
+        value: `${HOOK_WORD[r.state]} · ${tilde(r.file)}`,
+      });
+      // Hooks the agent itself won't run are not mended by writing them again: its own
+      // setting has to change, and the note says which.
+      if (r.state === "inactive")
+        todo.push({
+          order: 2,
+          say: `${a.name} has its hooks and won't run them, so its sessions aren't reported: ${r.note ?? "its own settings turn hooks off"}.`,
+        });
+      else if (r.state === "missing" ? cfg.harnesses[a.name] : r.state !== "current") rehook.push(a.name);
+    }
+    for (const r of st)
+      if (r.state === "inactive")
+        warnings.push(`${a.name}: hooks are written but the harness will not run them — ${r.note ?? ""}`);
+    for (const r of st)
+      if (r.state === "stale") {
+        // The same file read against the other hook set: stale only because a sink crossed
+        // tier 0 since the hooks were written, not because a path moved.
+        const otherSet =
+          a.installed(hc, process.env, { lean: !lean }).find((x) => x.file === r.file)?.state === "current";
+        warnings.push(
+          otherSet
+            ? `${a.name}: the hooks in ${tilde(r.file)} are the ${lean ? "full" : "lean"} set, but ${lean ? "no sink is above tier 0 now" : "a sink is above tier 0 now"}; run \`sessionpipe install\` again.`
+            : `${a.name}: the hook in ${tilde(r.file)} points at an old node or script path; run \`sessionpipe install\` again.`,
+        );
+      }
+    for (const r of st)
+      if (r.state === "misplaced")
+        warnings.push(
+          `${a.name}: the notify line in ${tilde(r.file)} sits inside a [table], where Codex never reads it; run \`sessionpipe install\` again.`,
+        );
+  }
+  // An agent that was hooked here and is no longer found (uninstalled, or its folder moved).
+  for (const name of Object.keys(cfg.harnesses))
+    if (!ADAPTERS.some((a) => a.name === name && a.detect()))
+      agents.rows.push({
+        mark: "info",
+        label: name,
+        value: "was hooked here, and is no longer found on this computer",
+      });
+  if (!agents.rows.length)
+    agents.rows.push({ mark: "info", label: "none", value: "no coding agent was found on this computer" });
+  if (rehook.length) {
+    const names = [...new Set(rehook)];
+    todo.push({
+      order: 2,
+      say: `The hooks for ${names.join(", ")} are missing or out of date, so not every session is reported. Write them again:`,
+      run: "sessionpipe install",
+    });
+  }
+
+  // --- where it reports ----------------------------------------------------------------
+  for (const s of cfg.sinks) {
+    (report.sinks as unknown[]).push({
+      name: s.name,
+      url: s.url,
+      tier: s.tier,
+      max_tier: s.max_tier ?? null,
+      pii: !!s.pii,
+      tools: toolsMode(s),
+      control: !!s.control,
+      paused: s.paused ?? null,
+      token: s.token_in ? `in ${s.token_in}` : s.token ? `${s.token.slice(0, 4)}…` : null,
+    });
+    const pending = pendingFor(s);
+    // A key this shell can't read (a keychain, over ssh) is the service's to send with.
+    const locked =
+      (s.token_in || s.token || s.secret) && !sinkWithSecrets(s) ? " · its key can't be read from this shell" : "";
+    const tier = `tier ${Math.min(s.tier, s.max_tier ?? 3)}${locked}`;
+    reports.rows.push(
+      s.paused
+        ? { mark: "bad", label: s.name, value: `${tier} · stopped: ${s.paused}` }
+        : {
+            mark: "ok",
+            label: s.name,
+            value: `${tier} · ${pending ? `${pending} session${pending === 1 ? "" : "s"} waiting to be sent` : "up to date"}`,
+          },
+    );
+    if (s.paused)
+      todo.push({
+        order: 3,
+        say: `${s.name} stopped taking events (${s.paused}); they wait on this computer. See what it answers now:`,
+        run: `sessionpipe sink test ${s.name}`,
+      });
+  }
+  if (!cfg.sinks.length)
+    reports.rows.push({ mark: "info", label: "nowhere", value: "events stay on this computer until you add a sink" });
+  const jobs = waitingJobs();
+  if (jobs)
+    reports.rows.push({
+      mark: "info",
+      label: "still to handle",
+      value: `${jobs} hook event${jobs === 1 ? "" : "s"} waiting on this computer`,
+    });
+
+  // --- who can message it, and whether that is live --------------------------------------
+  // Every receiver this computer is paired with, and any the service still asks that
+  // control.json no longer lists (it reads the file again within seconds).
+  const paired = control?.receivers ?? [];
+  const asked = health?.receivers ?? [];
+  for (const url of new Set([...paired.map((r) => r.url), ...asked.map((r) => r.url)])) {
+    const r = { url, keys: paired.find((x) => x.url === url)?.keys ?? [] };
+    const p = asked.find((x) => x.url === url);
+    const label = hostOf(r.url);
+    const trusted = `${r.keys.length} key${r.keys.length === 1 ? "" : "s"} trusted`;
+    if (!p) {
+      messages.rows.push({
+        mark: live ? "info" : "bad",
+        label,
+        value: live
+          ? `the background service is taking it up · ${trusted}`
+          : "not live: the background service isn't running",
+      });
+      continue;
+    }
+    // A normal long-poll takes 25 s (35 s deadline). Allow one minute at startup
+    // and between responses, but report a stopped/backing-off loop immediately.
+    if (isLive(p)) {
+      messages.rows.push({
+        mark: "ok",
+        label,
+        value: `live · ${p.last_poll === null ? "just connected" : `heard ${heardAgo(p.last_poll_age_ms as number)}`} · ${trusted}`,
+      });
+      continue;
+    }
+    const age =
+      p.last_poll_age_ms === null
+        ? "never polled"
+        : `not polled for ${Math.floor(p.last_poll_age_ms / 60_000)} minutes`;
+    warnings.push(
+      `${r.url}: the daemon has ${age}: ${p.last_error ?? (p.polling ? "no successful poll response" : "polling stopped")}`,
+    );
+    const forSpan = p.last_poll_age_ms === null ? "" : ` for ${span(p.last_poll_age_ms)}`;
+    const err = p.last_error ?? "";
+    if (/\(401\)/.test(err)) {
+      messages.rows.push({ mark: "bad", label, value: "not live: it no longer knows this computer" });
+      todo.push({
+        order: 3,
+        say: `${label} no longer knows this computer, so its messages can't arrive. Pair with it again:`,
+        run: `sessionpipe control pair ${r.url}`,
+      });
+    } else if (err.startsWith("can't read this machine's token")) {
+      messages.rows.push({
+        mark: "bad",
+        label,
+        value: `not live${forSpan}: the background service can't read this computer's key`,
+      });
+      todo.push({
+        order: 3,
+        say: `The background service can't read this computer's key for ${label}: the keychain it is in is locked, or nobody is logged in at this computer's screen. Log in there once, or keep the keys in a file it can always read:`,
+        run: "sessionpipe secrets move file",
+      });
+    } else {
+      messages.rows.push({
+        mark: "bad",
+        label,
+        value: `not live${forSpan}: ${err || "no answer"}`,
+      });
+      todo.push({
+        order: 6,
+        say: `${label} hasn't answered${forSpan}. Messages wait there, and the background service keeps trying: nothing to type unless it stays this way.`,
+      });
+    }
+  }
+  if (control?.receivers.length)
+    messages.rows.push({
+      mark: "info",
+      label: "sessions you message",
+      value: `run in ${control.mode} mode, in ${control.folders.length} folder${control.folders.length === 1 ? "" : "s"}`,
+    });
+  else messages.rows.push({ mark: "info", label: "nobody", value: "this computer takes no messages" });
+
+  // --- updates ---------------------------------------------------------------------------
+  updates.rows.push(
+    upd.auto
+      ? {
+          mark: "ok",
+          label: "automatic",
+          value: upd.last_check
+            ? upd.last_error
+              ? `the check ${ago(upd.last_check, now)} failed: ${upd.last_error}`
+              : `checked ${ago(upd.last_check, now)}: ${upd.latest ?? "?"} is the newest`
+            : "once a day; not checked yet",
+        }
+      : { mark: "info", label: "by hand", value: `${upd.off}` },
+  );
+  if (upd.pending)
+    updates.rows.push({
+      mark: "info",
+      label: "waiting",
+      value: `${upd.pending} is installed once the background service is idle`,
+    });
+  if (upd.failed) {
+    updates.rows.push({
+      mark: "warn",
+      label: "failed",
+      value: `installing ${upd.failed.version} ${ago(upd.failed.at, now)}: ${upd.failed.error}`,
+    });
+    todo.push({
+      order: 1,
+      say: `The background service couldn't install sessionpipe ${upd.failed.version} by itself. Do it now:`,
+      run: "sessionpipe update",
+    });
+  } else if (upd.updated)
+    updates.rows.push({
+      mark: "info",
+      label: "last update",
+      value: `${upd.updated.from} → ${upd.updated.to}, ${ago(upd.updated.at, now)}`,
+    });
+
+  if (w && w.p50 > 150) {
+    warnings.push(
+      `the harness waits ${w.p50} ms per hook (p50, target < 150): that is Node's own startup on this machine. A lean install (no sink above tier 0) hooks fewer events.`,
+    );
+    todo.push({
+      order: 6,
+      say: `Each hook takes ${w.p50} ms, which is Node starting up on this computer; agents wait that long many times a turn. With no sink above tier 0, fewer events are hooked.`,
+    });
+  }
+  return { report, groups: [computer, agents, reports, messages, accounts, updates], todo };
+}
+
+/** Hook events written down and not yet handled by a worker. */
+function waitingJobs(): number {
+  try {
+    return readdirSync(jobsDir(state)).filter((n) => n.endsWith(".json")).length;
+  } catch {
+    return 0;
   }
 }
 
+/** What is wrong with the hooks' own copy, in a few words. */
+function hookTrouble(l: ReturnType<typeof launcherState>): string {
+  if (!l.present) return "have no launcher to run";
+  if (l.version && l.version !== VERSION) return `run sessionpipe ${l.version}, and this command is ${VERSION}`;
+  if (!l.nodeOk) return `name a node that is gone (${l.node ?? "?"})`;
+  return "are missing a file";
+}
+
 async function status(): Promise<void> {
+  if (!has("--json")) {
+    const c = await checkup(false);
+    say(verdict(ui, inOrder(c.todo).length));
+    say("");
+    for (const l of brief(ui, c.groups)) say(l);
+    say("");
+    for (const l of fold(
+      ui,
+      "  ",
+      c.todo.length ? "`sessionpipe doctor` says what to do about it." : "`sessionpipe doctor` looks closer.",
+    ))
+      say(commands(ui, l));
+    return;
+  }
   const cfg = readConfig();
   const hc = hookCommand();
-  const json = has("--json");
   const harnesses: Record<string, { file: string; state: string; note?: string }[]> = {};
   const sinks = [];
-  if (!json) out(`  machine:  ${machineName(cfg, os.hostname())}   sessionpipe ${VERSION}   state ${tilde(state)}`);
   for (const a of ADAPTERS) {
     if (!a.detect() && !cfg.harnesses[a.name]) continue;
     const installed = a.installed(hc, process.env, { lean: isLean(cfg) });
@@ -1035,23 +1647,8 @@ async function status(): Promise<void> {
       state: r.state,
       ...(r.note ? { note: r.note } : {}),
     }));
-    if (!json)
-      for (const r of installed)
-        out(
-          `  ${a.name.padEnd(12)} ${tilde(r.file).padEnd(44)} ${r.state}${r.state !== "current" && r.note ? ` — ${r.note}` : ""}`,
-        );
   }
-  if (!json && !cfg.sinks.length) out("  sinks:    none (events stay in the local outbox)");
-  for (const s of cfg.sinks) {
-    const c = new Cursors(state, s.name).read();
-    const outbox = new Outbox(state);
-    let pending = 0;
-    for (const ref of outbox.sessions()) {
-      const f = outbox.file(ref);
-      try {
-        pending += Math.max(0, statSync(f).size - (c[`${ref.harness}/${ref.session}`] ?? 0)) > 0 ? 1 : 0;
-      } catch {}
-    }
+  for (const s of cfg.sinks)
     sinks.push({
       name: s.name,
       url: s.url,
@@ -1061,57 +1658,34 @@ async function status(): Promise<void> {
       tools: toolsMode(s),
       control: !!s.control,
       paused: s.paused ?? null,
-      pending_sessions: pending,
+      pending_sessions: pendingFor(s),
     });
-    if (!json)
-      out(
-        `  sink      ${s.name.padEnd(16)} tier ${Math.min(s.tier, s.max_tier ?? 3)}  ${s.paused ? `PAUSED ${s.paused}` : pending ? `${pending} session file(s) with undelivered events` : "up to date"}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`,
-      );
-  }
-  const control = await controlHealth();
-  if (!json) controlLines(control);
+  const control = controlHealth(await serviceStatus());
   // The account pool, from its file alone (`sessionpipe pool` asks the daemon for the rest).
   const poolCfg = readPool();
   const pool =
     poolCfg.on || poolCfg.accounts.length
       ? { on: poolCfg.on, port: poolCfg.port, accounts: poolCfg.accounts.length }
       : null;
-  if (!json && pool)
-    out(
-      `  pool:     ${pool.on ? "on" : "off"} · ${pool.accounts} account${pool.accounts === 1 ? "" : "s"}${pool.on ? ` · 127.0.0.1:${pool.port}` : ""} (\`sessionpipe pool\` has the room each has left)`,
-    );
-  const update = updateState(cfg);
-  if (!json) out(`  update:   ${updateLine(update, Date.now())}`);
-  const t = timing();
-  if (!json && t)
-    out(
-      `  hook:     in-process p50 ${t.p50} ms over ${t.n} runs (\`sessionpipe doctor\` measures the wall clock the harness waits)`,
-    );
-  let jobs = 0;
-  try {
-    jobs = readdirSync(jobsDir(state)).filter((n) => n.endsWith(".json")).length;
-  } catch {}
-  if (json)
-    out(
-      JSON.stringify(
-        {
-          version: VERSION,
-          machine: machineName(cfg, os.hostname()),
-          state,
-          config: configFile(),
-          harnesses,
-          sinks,
-          timing: t,
-          control,
-          pool,
-          update,
-          jobs,
-        },
-        null,
-        2,
-      ),
-    );
-  else if (jobs) out(`  jobs:     ${jobs} waiting`);
+  out(
+    JSON.stringify(
+      {
+        version: VERSION,
+        machine: machineName(cfg, os.hostname()),
+        state,
+        config: configFile(),
+        harnesses,
+        sinks,
+        timing: timing(),
+        control,
+        pool,
+        update: updateState(cfg),
+        jobs: waitingJobs(),
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 /** Spawn the hook the way a harness does and time the whole process (issue #12:
@@ -1169,186 +1743,11 @@ function timing(): { n: number; p50: number; p95: number } | null {
 }
 
 async function doctor(): Promise<void> {
-  const cfg = readConfig();
-  const hc = hookCommand();
-  const report: Record<string, unknown> = {
-    version: VERSION,
-    node: process.version,
-    node_path: stableNode(process.execPath),
-    machine: machineName(cfg, os.hostname()),
-    state: state,
-    config: configFile(),
-    harnesses: {},
-    sinks: [],
-    timing: timing(),
-    hook_wall_ms: hookWall(),
-    update: updateState(cfg),
-    warnings: [] as string[],
-  };
-  const warnings = report.warnings as string[];
-  const health = await controlHealth();
-  report.control = health;
-  if (health && !health.running)
-    warnings.push("the control daemon is not running or not responding; polling is stopped");
-  for (const r of health?.receivers ?? []) {
-    // A normal long-poll takes 25 s (35 s deadline). Allow one minute at startup
-    // and between responses, but report a stopped/backing-off loop immediately.
-    if (!r.polling || (r.last_poll_age_ms !== null && r.last_poll_age_ms >= 60_000)) {
-      const age =
-        r.last_poll_age_ms === null
-          ? "never polled"
-          : `not polled for ${Math.floor(r.last_poll_age_ms / 60_000)} minutes`;
-      warnings.push(
-        `${r.url}: the daemon has ${age}: ${r.last_error ?? (r.polling ? "no successful poll response" : "polling stopped")}`,
-      );
-    }
-  }
-  const upd = report.update as ReturnType<typeof updateState>;
-  if (upd.failed)
-    warnings.push(
-      `the control daemon couldn't install sessionpipe ${upd.failed.version}: ${upd.failed.error}. It tries again tomorrow; \`sessionpipe update\` tries now.`,
-    );
-  if (usesLauncher()) {
-    const l = launcherState(VERSION);
-    report.launcher = { file: tilde(l.file), node: l.node, node_ok: l.nodeOk, version: l.version };
-    if (Object.keys(cfg.harnesses).length) warnings.push(...l.problems);
-  }
-  // Where each key lives, and whether this session can read it.
-  const keys: { what: string; where: string; readable: boolean }[] = [];
-  for (const s of cfg.sinks)
-    if (s.token_in || s.token || s.secret)
-      keys.push({ what: `sink ${s.name}`, where: s.token_in ?? "file", readable: !!sinkWithSecrets(s) });
-  const control = readControl();
-  for (const r of control?.receivers ?? [])
-    keys.push({ what: `control ${new URL(r.url).host}`, where: r.token_in ?? "file", readable: !!r.token });
-  report.keys = keys;
-  for (const k of keys)
-    if (!k.readable)
-      warnings.push(
-        `${k.what}: its key is in ${storeLabel(k.where as StoreName)}, which this session can't read (locked, or an ssh shell). Events wait; the control daemon sends them from your own session.`,
-      );
-  // Each Claude Code account: a message's headless run needs its login.
-  const claudeBin = claudeControl.findClaude();
-  if (claudeBin) {
-    const dirs = claudeDirs();
-    const logins = await Promise.all(dirs.map((d) => claudeControl.claudeLogin(claudeBin, d)));
-    report.claude_accounts = dirs.map((d, i) => ({ dir: tilde(d), signed_in: logins[i]?.loggedIn ?? null }));
-    dirs.forEach((d, i) => {
-      if (logins[i]?.loggedIn === false && control?.receivers.length)
-        warnings.push(`Claude Code ${tilde(d)} isn't signed in from here: ${claudeControl.loginCommand(d)}`);
-    });
-  }
-  // A systemd user service stops at logout unless the user lingers.
-  if (process.platform === "linux" && control?.receivers.length) {
-    let linger: boolean | null = null;
-    try {
-      linger = /^Linger=yes/m.test(
-        execFileSync("loginctl", ["show-user", os.userInfo().username, "--property=Linger"], {
-          encoding: "utf8",
-          timeout: 5000,
-          stdio: ["ignore", "pipe", "ignore"],
-        }),
-      );
-    } catch {}
-    report.linger = linger;
-    if (linger === false)
-      warnings.push(
-        `the control daemon stops when you log out: \`loginctl enable-linger ${os.userInfo().username}\` (with sudo if refused) keeps it running`,
-      );
-  }
-  if (/\/Cellar\/node(?:@\d+)?\/[^/]+\//.test(distDir))
-    warnings.push(
-      "sessionpipe is installed inside Homebrew's versioned node folder; `brew upgrade node` will delete it. Install with `npm install -g --prefix ~/.local sessionpipe`.",
-    );
-  for (const a of ADAPTERS) {
-    if (!a.detect()) continue;
-    const lean = isLean(cfg);
-    const st = a.installed(hc, process.env, { lean });
-    (report.harnesses as Record<string, unknown>)[a.name] = st.map((r) => ({
-      file: tilde(r.file),
-      state: r.state,
-      ...(r.note ? { note: r.note } : {}),
-    }));
-    for (const r of st)
-      if (r.state === "inactive")
-        warnings.push(`${a.name}: hooks are written but the harness will not run them — ${r.note ?? ""}`);
-    for (const r of st)
-      if (r.state === "stale") {
-        // The same file read against the other hook set: stale only because a sink crossed
-        // tier 0 since the hooks were written, not because a path moved.
-        const otherSet =
-          a.installed(hc, process.env, { lean: !lean }).find((x) => x.file === r.file)?.state === "current";
-        warnings.push(
-          otherSet
-            ? `${a.name}: the hooks in ${tilde(r.file)} are the ${lean ? "full" : "lean"} set, but ${lean ? "no sink is above tier 0 now" : "a sink is above tier 0 now"}; run \`sessionpipe install\` again.`
-            : `${a.name}: the hook in ${tilde(r.file)} points at an old node or script path; run \`sessionpipe install\` again.`,
-        );
-      }
-    for (const r of st)
-      if (r.state === "misplaced")
-        warnings.push(
-          `${a.name}: the notify line in ${tilde(r.file)} sits inside a [table], where Codex never reads it; run \`sessionpipe install\` again.`,
-        );
-  }
-  for (const s of cfg.sinks)
-    (report.sinks as unknown[]).push({
-      name: s.name,
-      url: s.url,
-      tier: s.tier,
-      max_tier: s.max_tier ?? null,
-      pii: !!s.pii,
-      tools: toolsMode(s),
-      control: !!s.control,
-      paused: s.paused ?? null,
-      token: s.token_in ? `in ${s.token_in}` : s.token ? `${s.token.slice(0, 4)}…` : null,
-    });
-  const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
-  if (w && w.p50 > 150)
-    warnings.push(
-      `the harness waits ${w.p50} ms per hook (p50, target < 150): that is Node's own startup on this machine. A lean install (no sink above tier 0) hooks fewer events.`,
-    );
-  if (has("--json")) {
-    out(JSON.stringify(report, null, 2));
-    return;
-  }
-  out(`  sessionpipe ${VERSION} · node ${process.version} at ${report.node_path}`);
-  out(`  config ${tilde(configFile())} · state ${tilde(state)}`);
-  for (const [h, st] of Object.entries(report.harnesses as Record<string, { file: string; state: string }[]>))
-    for (const r of st) out(`  ${h.padEnd(12)} ${r.file.padEnd(44)} ${r.state}`);
-  for (const s of report.sinks as {
-    name: string;
-    tier: number;
-    max_tier: number | null;
-    tools: ToolsMode;
-    paused: string | null;
-  }[])
-    out(
-      `  sink ${s.name.padEnd(16)} tier ${s.tier}${s.max_tier !== null ? ` (receiver max ${s.max_tier})` : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, s.tools)}`,
-    );
-  controlLines(health);
-  const lr = report.launcher as { file: string; node: string | null; node_ok: boolean } | undefined;
-  if (lr)
-    out(`  hooks run ${lr.file} → node ${lr.node ? tilde(lr.node) : "?"}${lr.node_ok ? "" : " (gone: PATH's node)"}`);
-  for (const k of keys)
-    out(`  key  ${k.what.padEnd(28)} ${storeLabel(k.where as StoreName)}${k.readable ? "" : " (unreadable here)"}`);
-  for (const a of (report.claude_accounts as { dir: string; signed_in: boolean | null }[] | undefined) ?? [])
-    out(
-      `  claude ${a.dir.padEnd(26)} ${a.signed_in === true ? "signed in" : a.signed_in === false ? "NOT signed in from here" : "can't tell"}`,
-    );
-  out(`  update ${updateLine(upd, Date.now())}`);
-  const t = report.timing as { p50: number; p95: number; n: number } | null;
-  out(
-    w
-      ? `  hook wall clock (what the harness waits): p50 ${w.p50} ms · p95 ${w.p95} ms over ${w.n} spawns`
-      : "  hook wall clock: could not spawn dist/hook.js",
-  );
-  out(
-    t
-      ? `  hook in-process: p50 ${t.p50} ms · p95 ${t.p95} ms over the last ${t.n} runs`
-      : "  hook in-process: no runs yet",
-  );
-  for (const w of warnings) out(`  ! ${w}`);
-  if (!warnings.length) out("  no warnings");
+  const c = await checkup(true);
+  if (has("--json")) out(JSON.stringify(c.report, null, 2));
+  else for (const l of page(ui, c)) say(l);
+  // The exit code says whether anything needs attention, for a script as for a person.
+  if (c.todo.length) process.exitCode = 1;
 }
 
 /** Follow the local outbox: one event per line, filtered to a tier. The zero-server demo. */

@@ -13,6 +13,7 @@ import { ask, type LocalReply, type LocalRequest, socketPath } from "../control/
 import { installService } from "../control/pair.js";
 import { type Imported, type PoolOutcome, runPoolRequest } from "../control/pool.js";
 import { stableNode } from "../runtime.js";
+import { PLAIN, type Ui } from "../style.js";
 import { openPool, type Pool, type PoolStatus, summaryLine } from "./index.js";
 
 export const POOL_HELP = `  sessionpipe pool [--json]                        (the accounts in order, the room each has left)
@@ -64,6 +65,7 @@ export async function poolMain(
   out: (s?: string) => void,
   distDir: string,
   over: Partial<PoolCliDeps> = {},
+  ui: Ui = PLAIN,
 ): Promise<void> {
   const deps: PoolCliDeps = {
     ask: (req, ms) => ask(socketPath(stateDir()), req, ms),
@@ -99,7 +101,7 @@ export async function poolMain(
     case "status": {
       const r = await request({ action: "status" });
       if (has("--json")) return out(JSON.stringify({ ...r.status, daemon: r.daemon }, null, 2));
-      return printStatus(r, out, deps.now());
+      return printStatus(r, out, deps.now(), ui);
     }
     case "on": {
       const r = await request({ action: "on" });
@@ -108,8 +110,10 @@ export async function poolMain(
       if (!r.status.accounts.length)
         out("  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.");
       if (r.daemon)
-        out(`  Daemon: running${r.status.listening || r.status.another_daemon ? listenerWord(r.status) : ""}`);
-      else out(`  Daemon: ${deps.installService()}`);
+        out(
+          `  Background service: running${r.status.listening || r.status.another_daemon ? listenerWord(r.status) : ""}`,
+        );
+      else out(`  Background service: ${deps.installService()}`);
       return out(`  pool:     ${summaryLine(r.status)}`);
     }
     case "off": {
@@ -170,7 +174,7 @@ export async function poolMain(
     }
     case "refresh": {
       const r = await request({ action: "refresh", ...(rest[0] ? { account: rest[0] } : {}) }, VENDOR_MS);
-      return printStatus(r, out, deps.now());
+      return printStatus(r, out, deps.now(), ui);
     }
     default:
       return out(POOL_HELP);
@@ -235,7 +239,7 @@ const listenerWord = (s: PoolStatus): string =>
       ? ` · listening on 127.0.0.1:${s.port}`
       : " · the pool's listener isn't up";
 
-function printStatus(r: Done, out: (s?: string) => void, now: number): void {
+function printStatus(r: Done, out: (s?: string) => void, now: number, ui: Ui): void {
   const s = r.status;
   out(`  pool:     ${summaryLine(s)}`);
   if (r.daemon) out(`  daemon:   running${listenerWord(s)}`);
@@ -249,9 +253,17 @@ function printStatus(r: Done, out: (s?: string) => void, now: number): void {
       const reset = when(x.resets_at, now);
       return `${label} ${String(x.used_percent).padStart(3)}%${reset ? ` (resets ${reset})` : ""}`.padEnd(width);
     };
-    out(
-      `  ${a.id.padEnd(9)} ${(a.label ? `${a.label} <${a.email}>` : a.email).padEnd(36)} ${(a.enabled ? "enabled" : "disabled").padEnd(9)} ${win("five_hour", "5h", 24)} ${win("seven_day", "7d", 30)} ${word(a, now)}`,
-    );
+    // One line per account is over a hundred columns: a terminal gets two, the windows
+    // under the name. A pipe keeps the one line it always had.
+    const name = a.label ? `${a.label} <${a.email}>` : a.email;
+    if (ui.width === Number.POSITIVE_INFINITY)
+      out(
+        `  ${a.id.padEnd(9)} ${name.padEnd(36)} ${(a.enabled ? "enabled" : "disabled").padEnd(9)} ${win("five_hour", "5h", 24)} ${win("seven_day", "7d", 30)} ${word(a, now)}`,
+      );
+    else {
+      out(`  ${a.id.padEnd(9)} ${name} · ${a.enabled ? "enabled" : "disabled"} · ${word(a, now)}`);
+      out(`  ${" ".repeat(9)} ${win("five_hour", "5h", 0)} · ${win("seven_day", "7d", 0)}`);
+    }
   }
   if (!s.accounts.length) out("  no accounts: `sessionpipe pool add --import` or `sessionpipe pool add --login`");
   for (const f of s.settings) out(`  settings  ${tilde(f.file).padEnd(44)} ${f.state}${f.note ? ` — ${f.note}` : ""}`);

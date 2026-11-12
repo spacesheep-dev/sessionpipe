@@ -270,8 +270,11 @@ describe("status", () => {
     expect(snapshot(tmp)).toEqual(before);
     // Doctor intentionally benchmarks hooks. Run only here without the guard,
     // with isolated HOME/state and no harness executable on PATH.
+    // Its exit code says something here needs attention (a sink that stopped, a daemon
+    // that isn't running), with --json too; the report is whole on stdout all the same.
     const diagnostic = run(["doctor", "--json"], false);
-    expect(diagnostic.status, diagnostic.stderr).toBe(0);
+    expect(diagnostic.status, diagnostic.stderr).toBe(1);
+    expect(diagnostic.stderr).toBe("");
     const doctor = JSON.parse(diagnostic.stdout);
     for (const key of ["version", "machine", "state", "config", "harnesses", "timing", "update", "control"])
       expect(report[key], key).toEqual(doctor[key]);
@@ -283,25 +286,25 @@ describe("status", () => {
     });
   }, 30000);
 
-  it("adds control health to the human table", () => {
+  it("is a few lines for a person: the verdict, then a line a group, with what is wrong said and what is fine named", () => {
     const r = run(["status"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toBe("");
-    // Captured from main for this fixture; platform path separators are the only
-    // variable, alongside the version baked into the build.
+    // Captured from this fixture, into a pipe: no colour, no folding. Platform path
+    // separators, the hook launcher (none on Windows) and the version are the variables.
     const version = JSON.parse(readFileSync(path.resolve(here, "../package.json"), "utf8")).version;
+    const launcher = process.platform !== "win32";
     const rows = [
-      `  machine:  lab-box   sessionpipe ${version}   state ~${path.sep}state`,
-      `  ${"claude-code".padEnd(12)} ${`~${path.sep}.claude${path.sep}settings.json`.padEnd(44)} missing`,
-      `  ${"codex".padEnd(12)} ${`~${path.sep}.codex${path.sep}hooks.json`.padEnd(44)} missing — Codex runs non-managed hooks only after the review in \`codex\` (/hooks); until then nothing is reported unless the notify fallback is ours`,
-      `  ${"codex".padEnd(12)} ${`~${path.sep}.codex${path.sep}config.toml`.padEnd(44)} missing`,
-      `  ${"gemini-cli".padEnd(12)} ${`~${path.sep}.gemini${path.sep}settings.json`.padEnd(44)} missing`,
-      `  sink      ${"receiver".padEnd(16)} tier 1  PAUSED HTTP 401 · tools all`,
-      `  sink      ${"local".padEnd(16)} tier 0  up to date`,
-      "  control:  daemon not running or not responding; polling: no",
-      "  update:   not automatic: update_check is false in config.json (`sessionpipe update on`)",
-      "  hook:     in-process p50 3 ms over 1 runs (`sessionpipe doctor` measures the wall clock the harness waits)",
-      "  jobs:     1 waiting",
+      `! ${launcher ? 4 : 3} things need attention`,
+      "",
+      `  ✗ This computer  lab-box (sessionpipe ${version}), background service: not running${launcher ? ", hooks: have no launcher to run" : ""}`,
+      // Codex is here and was never hooked: that only informs, so it is left to doctor.
+      `  ! Agents         claude-code: not hooked · ~${path.sep}.claude${path.sep}settings.json, gemini-cli: not hooked · ~${path.sep}.gemini${path.sep}settings.json`,
+      "  ✗ Reports to     receiver: tier 1 · stopped: HTTP 401, local",
+      "  ✗ Messages from  receiver.invalid: not live: the background service isn't running",
+      "  · Updates        by hand: update_check is false in config.json (`sessionpipe update on`)",
+      "",
+      "  `sessionpipe doctor` says what to do about it.",
     ];
     expect(r.stdout).toBe(`${rows.join("\n")}\n`);
   });
@@ -333,7 +336,9 @@ describe("status", () => {
   });
 });
 
-// Async children let the fake local daemon answer while the built commands run.
+// Async children let the fake local daemon answer while the built commands run. `status`
+// only reports, so it ends 0; `doctor` ends 1 here, with or without --json: this
+// fixture always has something to fix (a sink that stopped, hooks that aren't written).
 function diagnostic(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...(args[0] === "status" ? ["--require", guard] : []), cli, ...args], {
@@ -350,20 +355,66 @@ function diagnostic(args: string[]): Promise<string> {
       stderr += b;
     });
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 && !stderr ? resolve(stdout) : reject(new Error(`${code}: ${stderr}`))));
+    const expected = args[0] === "doctor" ? 1 : 0;
+    child.on("close", (code) =>
+      code === expected && !stderr ? resolve(stdout) : reject(new Error(`${code}: ${stderr}`)),
+    );
   });
 }
 
 describe("control health in status and doctor", () => {
   const error = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
   it.each([
-    { name: "an old daemon that permanently stopped", polling: false, minutes: 3480, error, legacy: true },
-    { name: "a daemon backing off before its first success", polling: false, minutes: 5, error, never: true },
-    { name: "a stalled loop still claiming to poll", polling: true, minutes: 5, error: null },
-    { name: "a healthy long-poll", polling: true, minutes: 0, error: null },
+    {
+      name: "an old daemon that permanently stopped",
+      polling: false,
+      minutes: 3480,
+      error,
+      legacy: true,
+      brief: "✗ Messages from  receiver.invalid: not live: it no longer knows this computer",
+      row: "✗ receiver.invalid      not live: it no longer knows this computer",
+      fix: [
+        "receiver.invalid no longer knows this computer, so its messages can't arrive. Pair with it again:",
+        "sessionpipe control pair https://receiver.invalid",
+      ],
+    },
+    {
+      name: "a daemon backing off before its first success",
+      polling: false,
+      minutes: 5,
+      error,
+      never: true,
+      brief: "✗ Messages from  receiver.invalid: not live: it no longer knows this computer",
+      row: "✗ receiver.invalid      not live: it no longer knows this computer",
+      fix: [
+        "receiver.invalid no longer knows this computer, so its messages can't arrive. Pair with it again:",
+        "sessionpipe control pair https://receiver.invalid",
+      ],
+    },
+    {
+      name: "a stalled loop still claiming to poll",
+      polling: true,
+      minutes: 5,
+      error: null,
+      brief: "✗ Messages from  receiver.invalid: not live for 5 min: no answer",
+      row: "✗ receiver.invalid      not live for 5 min: no answer",
+      fix: [
+        "receiver.invalid hasn't answered for 5 min. Messages wait there, and the background service keeps trying: nothing to type unless it stays this way.",
+      ],
+    },
+    {
+      name: "a healthy long-poll",
+      polling: true,
+      minutes: 0,
+      error: null,
+      brief: "✓ Messages from  receiver.invalid",
+      row: "✓ receiver.invalid      live · heard just now · 1 key trusted",
+      fix: [],
+    },
   ])(
     "reports $name in both text and JSON",
     async (test) => {
+      const version = JSON.parse(readFileSync(path.resolve(here, "../package.json"), "utf8")).version;
       const receiver = {
         url: "https://receiver.invalid",
         polling: test.polling,
@@ -371,16 +422,23 @@ describe("control health in status and doctor", () => {
         last_error: test.error,
         ...(test.legacy ? {} : { last_poll_age_ms: test.minutes * 60_000 }),
       };
+      // What each command asks the daemon: its status; doctor then asks what it sees from
+      // where it runs (`health`), which a daemon older than that question hangs up on.
+      const asked: unknown[] = [];
       const server = net.createServer((socket) => {
         socket.once("data", (data) => {
-          expect(JSON.parse(data.toString())).toEqual({ op: "status" });
-          socket.end(`${JSON.stringify({ op: "status", status: { receivers: [receiver] } })}\n`);
+          const request = JSON.parse(data.toString());
+          asked.push(request);
+          if (request.op !== "status") return socket.end();
+          socket.end(`${JSON.stringify({ op: "status", status: { version, receivers: [receiver] } })}\n`);
         });
       });
       await new Promise<void>((resolve) => server.listen(env.SESSIONPIPE_SOCKET, resolve));
       try {
         for (const command of ["status", "doctor"]) {
+          asked.length = 0;
           const report = JSON.parse(await diagnostic([command, "--json"]));
+          expect(asked).toEqual(command === "doctor" ? [{ op: "status" }, { op: "health" }] : [{ op: "status" }]);
           expect(report.control).toMatchObject({ running: true, receivers: [receiver] });
           expect(report.control.receivers[0].last_poll_age_ms).toBeGreaterThanOrEqual(test.minutes * 60_000);
           if (command === "doctor") {
@@ -388,12 +446,25 @@ describe("control health in status and doctor", () => {
             if (test.minutes) expect(report.warnings).toContain(warning);
             else expect(report.warnings.some((w: string) => w.includes("daemon has"))).toBe(false);
           }
+          // For a person: `status` names the receiver in its group's line, with what is
+          // wrong when it isn't heard; doctor has a row that says since when, and what to
+          // do about it, with the command on its own line.
           const text = await diagnostic([command]);
-          expect(text).toContain(`polling: ${test.polling ? "yes" : "no"}`);
-          expect(text).toContain(`last error: ${test.error ?? "none"}`);
-          expect(text).toContain(test.never ? "never (5 minutes since start)" : `${test.minutes} minutes ago`);
-          if (command === "doctor" && test.minutes)
-            expect(text).toContain(`! ${receiver.url}: the daemon has not polled for ${test.minutes} minutes:`);
+          if (command === "status") {
+            expect(text).toMatch(
+              new RegExp(
+                `^ {2}. This computer {2}lab-box \\(sessionpipe ${version}\\), background service(?:, hooks: .*)?$`,
+                "m",
+              ),
+            );
+            expect(text).toContain(`  ${test.brief}\n`);
+            expect(text).not.toContain("To fix");
+          } else {
+            expect(text).toContain("  ✓ background service  running\n");
+            expect(text).toContain(`  ${test.row}\n`);
+            for (const line of test.fix) expect(text).toContain(line);
+            if (!test.fix.length) expect(text).not.toMatch(/receiver\.invalid (?:hasn't answered|no longer knows)/);
+          }
         }
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));

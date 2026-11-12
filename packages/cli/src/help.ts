@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Usage is data: asking for it must never enter a command's implementation. The site's
-// docs page reads the same table, so a command's usage is written in one place.
+// docs page reads the same table, so a command's usage is written in one place. That
+// page compiles this one file on its own, so it imports nothing.
 export function usageTable(harnesses: readonly string[]): Record<string, string> {
   return {
     connect:
       "connect <receiver> [--machine NAME] [--rename-machine] [--allow-downgrade] [--tier 0-3] [--mode safe|auto|inherit] [--folder DIR]… [--status-line|--no-status-line] [--no-service]",
     install: `install [${harnesses.map((h) => `--${h}`).join(" ")}] [--machine NAME] [--rename-machine] [--allow-downgrade] [--backfill DAYS] [--sink URL --tier N] [--status-line|--no-status-line]`,
+    uninstall: `uninstall [${harnesses.map((h) => `--${h}`).join(" ")} | --all] [--keep-state]`,
     sink: "sink add|list|remove|test (use --help after a subcommand for its options)",
     "sink add":
       "sink add <url|file:PATH|stdout> [--tier 0-3] [--token T] [--secret S] [--pii] [--tools all|main|beat] [--name N]",
@@ -64,11 +66,13 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
   };
 }
 
-export function commandHelp(args: string[], harnesses: readonly string[]): string | undefined {
-  const usage = usageTable(harnesses);
+/** The longest command these arguments name that has a usage line, as the words to type
+ *  for its help; "" when they name none. */
+export function helpFor(args: readonly string[]): string {
+  const usage = usageTable([]);
   for (let n = Math.min(args.length, 3); n > 0; n--) {
-    const line = usage[args.slice(0, n).join(" ")];
-    if (line) return `Usage: sessionpipe ${line}\n\n  -h, --help  Show help without running the command.`;
+    const name = args.slice(0, n).join(" ");
+    if (usage[name]) return name;
   }
-  return undefined;
+  return "";
 }

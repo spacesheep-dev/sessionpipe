@@ -23,6 +23,7 @@ import {
   withoutInherit,
 } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
+import { makeUi } from "../src/style.js";
 
 // The build bakes the version in; here it is what the receiver must be told.
 vi.hoisted(() => {
@@ -190,8 +191,20 @@ describe("pairing (CONTROL.md §2)", () => {
     });
     expect(rx.seen[1]?.body).not.toHaveProperty("poll_key");
     expect(rx.seen[2]).toMatchObject({ url: `${CONTROL}/pair?code=CODE-1`, auth: "Bearer sink-token" });
-    // Digits that aren't six digits are shown as they came; no expiry given means ten minutes.
-    expect(said()).toContain("The page shows these digits too: ABC-DEF");
+    // The link and the digits each on a line of their own. Digits that aren't six digits
+    // are shown as they came; no expiry given means ten minutes.
+    expect(out.slice(0, 8)).toEqual([
+      "",
+      "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
+      "",
+      "      open:   https://rx.test/pair/CODE-1",
+      "      check:  ABC-DEF   (the page shows these digits too)",
+      "",
+      "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
+      "  This code is good for 10 minutes; if it runs out, a fresh one appears here.",
+    ]);
+    // One computer, one key: nothing about pairing several.
+    expect(said()).not.toContain("Pairing several");
     expect(said()).toContain("good for 10 minutes");
     expect(said()).toContain("names your Claude Code account: a@x.io");
     expect(said()).not.toContain("Approved by");
@@ -350,9 +363,43 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(pollKey).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect(posts[1]?.body).not.toHaveProperty("machine");
     expect(rx.seen.find((s) => s.url.includes("?code="))?.auth).toBe(`Bearer ${pollKey}`);
-    expect(said()).toContain("open https://rx.test/pair/CODE-1 and enter:  123 456");
+    // One address for everyone: the digits are what the person types there, in two threes.
+    expect(out.slice(0, 9)).toEqual([
+      "",
+      "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
+      "",
+      "      open:   https://rx.test/pair/CODE-1",
+      "      enter:  123 456",
+      "",
+      "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
+      "  Pairing several computers? Run this on each one: every one shows its own digits.",
+      "  This code is good for 1 minute; if it runs out, a fresh one appears here.",
+    ]);
     expect(said()).toContain("Approved by @me. If that isn't you, run `sessionpipe control off` now.");
     expect(sinks).toEqual(["events-key"]);
+  });
+
+  it("at a terminal the link is picked out in colour and the digits in bold, keyed or open", async () => {
+    const ui = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+    const ESC = String.fromCharCode(27);
+    const link = `      open:   ${ESC}[36mhttps://rx.test/pair/CODE-1${ESC}[39m`;
+    rx.posts = [started()];
+    rx.gets = [await paired()];
+    await pair(opts({ ui }));
+    // Keyed: the six digits the page shows too, in two threes like the page.
+    expect(out.slice(3, 5)).toEqual([
+      link,
+      `      check:  ${ESC}[1m123 456${ESC}[22m   (the page shows these digits too)`,
+    ]);
+    // Nothing else is coloured: the sentences read as they do in a pipe.
+    expect(out.filter((l) => l.includes(ESC))).toHaveLength(2);
+    (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
+    rx.posts = [started()];
+    rx.gets = [await paired({ account: "@me" })];
+    out = [];
+    await pair(opts({ ui, token: null }));
+    expect(out.slice(3, 5)).toEqual([link, `      enter:  ${ESC}[1m123 456${ESC}[22m`]);
+    expect(out.filter((l) => l.includes(ESC))).toHaveLength(2);
   });
 
   it("no token in the paired answer and none from before: nothing is trusted", async () => {
