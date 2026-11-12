@@ -232,6 +232,43 @@ describe.runIf(unix)("frames on the socket", () => {
     expect(await ask(sock, { op: "restart" }, 500)).toEqual({ op: "none" });
   });
 
+  it("health: each Claude Code account's sign-in as the daemon sees it, remembered as before a run", async () => {
+    const dirs = ["claude-config", "claude-second", "claude-odd"].map((n) => path.join(tmp, n));
+    const login = vi.fn(async (dir?: string) => {
+      if (dir === dirs[2]) throw new Error("claude auth status gave no answer");
+      return { loggedIn: dir === dirs[0] };
+    });
+    let clock = Date.parse("2026-11-12T10:00:00Z");
+    await make({ extra: { now: () => clock, claudeDirs: () => dirs, login } }).start();
+    const health = {
+      accounts: [
+        { dir: dirs[0], signed_in: true },
+        { dir: dirs[1], signed_in: false },
+        { dir: dirs[2], signed_in: null },
+      ],
+    };
+    expect(await ask(sock, { op: "health" }, 2000)).toEqual({ op: "health", health });
+    const asked = (dir: string | undefined) => login.mock.calls.filter(([d]) => d === dir).length;
+    expect(dirs.map(asked)).toEqual([1, 1, 1]);
+    // Asked again at once: every answer is remembered.
+    expect(await ask(sock, { op: "health" }, 2000)).toEqual({ op: "health", health });
+    expect(dirs.map(asked)).toEqual([1, 1, 1]);
+    // A "no" is remembered half a minute, since a login is the next thing to happen; the rest ten.
+    clock += 31_000;
+    expect(await ask(sock, { op: "health" }, 2000)).toEqual({ op: "health", health });
+    expect(dirs.map(asked)).toEqual([1, 2, 1]);
+  });
+
+  it("health with no way to ask Claude Code: each account is there, its sign-in unknown", async () => {
+    await make().start();
+    expect(await ask(sock, { op: "health" }, 2000)).toEqual({
+      op: "health",
+      health: {
+        accounts: [{ dir: path.join(tmp, "claude-config"), signed_in: null }],
+      },
+    });
+  });
+
   it("a session's own permission mode is recorded from its hooks: latest word wins, an unchanged one writes nothing", async () => {
     const state = path.join(tmp, "state", "control", "state.json");
     const modes = () => (JSON.parse(readFileSync(state, "utf8")) as { modes: Record<string, string> }).modes;

@@ -71,7 +71,7 @@ import { closerOf, questionOver } from "./attention.js";
 import { fetchFiles, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
-import { type AskRequest, ask, type LocalReply, type LocalRequest } from "./local.js";
+import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./reply.js";
 import {
@@ -968,6 +968,21 @@ export class ControlDaemon {
     };
   }
 
+  /** What this process sees that the shell asking may not: each Claude Code account's
+   *  sign-in (on a Mac it lives in the login keychain, which an ssh shell can't read),
+   *  asked as before a run and remembered as long. (A key it can't read is in its status
+   *  already, as the receiver's last error.) */
+  private async health(): Promise<Health> {
+    const login = this.deps.login;
+    const dirs = this.deps.claudeDirs();
+    const signedIn = await Promise.all(
+      dirs.map((d) => (login ? this.loginState(d, () => login(d)) : Promise.resolve(null))),
+    );
+    return {
+      accounts: dirs.map((dir, i) => ({ dir, signed_in: signedIn[i] as boolean | null })),
+    };
+  }
+
   private poolSummary(): NonNullable<Status["pool"]> {
     const s = (this.deps.pool as Pool).status();
     return {
@@ -1129,6 +1144,9 @@ export class ControlDaemon {
         return;
       case "restart":
         this.reply(s, this.deps.onRestart?.() ? { op: "ok" } : { op: "none" });
+        return;
+      case "health":
+        void this.health().then((health) => this.reply(s, { op: "health", health }));
         return;
       case "pool":
         void runPoolRequest(this.deps.pool, req, { terminal: true }).then(async (r) => {

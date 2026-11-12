@@ -254,6 +254,51 @@ export function installService(o: InstallOptions): ServicePlan {
   return { files: [], commands, manager: null };
 }
 
+/** What a look at the service finds. */
+export interface ServiceState {
+  /** Which manager this platform has; null where there is none. */
+  manager: "launchd" | "systemd" | null;
+  /** Where its file is, or would be. */
+  file: string | null;
+  /** The file is there. */
+  installed: boolean;
+  /** The manager has the service now (launchd: in either domain; systemd: active). */
+  loaded: boolean;
+}
+
+/** Whether this platform's manager has the service now. A look only: nothing is
+ *  written, started or stopped (`launchctl print`, `systemctl --user is-active`). */
+export function serviceState(o: UninstallOptions): ServiceState {
+  const f = serviceFiles({ ...o, description: "", argv: [], logPath: "" });
+  const platform = o.platform ?? process.platform;
+  const uid = o.uid ?? String(process.getuid?.() ?? "");
+  const exec = o.exec ?? execQuiet;
+  const ok = (cmd: string, args: string[]): boolean => {
+    try {
+      exec(cmd, args);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (platform === "darwin")
+    return {
+      manager: "launchd",
+      file: f.plist.path,
+      installed: existsSync(f.plist.path),
+      loaded:
+        ok("launchctl", ["print", `gui/${uid}/${o.label}`]) || ok("launchctl", ["print", `user/${uid}/${o.label}`]),
+    };
+  if (platform === "linux")
+    return {
+      manager: "systemd",
+      file: f.unit.path,
+      installed: existsSync(f.unit.path),
+      loaded: ok("systemctl", ["--user", "is-active", o.unit]),
+    };
+  return { manager: null, file: null, installed: false, loaded: false };
+}
+
 export interface UninstallOptions {
   label: string;
   unit: string;
