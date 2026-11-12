@@ -418,9 +418,11 @@ interface Placing {
 /** Write and start the service for this platform: what it came to, or why nothing was
  *  touched. A sessionpipe that keeps its files somewhere other than this computer's
  *  usual place never replaces the usual service (health.ts `serviceNames`); a run with
- *  `exec` stood in runs nothing real, and may. */
+ *  `exec` stood in runs nothing real, and may. With `keep`, a service file that is
+ *  there keeps the environment it gave the service, and only the program changes. */
 function put(
   o: Placing,
+  keep: boolean,
 ): { plan: core.ServicePlan; label: string; unit: string; file: string; log: string } | { left: string } {
   const names = serviceNames(o.env) ?? (o.exec ? { label: LABEL, unit: UNIT } : null);
   if (!names) return { left: noService(o.env) as string };
@@ -448,9 +450,15 @@ function put(
     closeSync(openSync(log, "a", 0o600));
     chmodSync(log, 0o600);
   } catch {}
+  // What the old file gave the service is what a person, or the shell that paired, chose
+  // for it. The shell `update` runs in is somebody else's choice (under npx, npx's own
+  // `.bin` folders lead its PATH), and has no SESSIONPIPE_CLAUDE that was set by hand.
+  const given = keep && old !== null ? core.serviceEnvironment(old) : null;
+  // SESSIONPIPE_SERVICE is the manager's own to say, and is written again with the file.
+  const { SESSIONPIPE_SERVICE: _manager, ...kept } = given ?? {};
   const plan = core.installService({
     ...here,
-    env: serviceEnv(o.env),
+    env: given ? kept : serviceEnv(o.env),
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });
@@ -460,11 +468,12 @@ function put(
 const NO_MANAGER = "no service manager for this platform yet; run `sessionpipe control run` yourself";
 const managed = (platform: NodeJS.Platform = process.platform) => platform === "darwin" || platform === "linux";
 
-/** Write and start the service for this platform (`control pair`, `pool on`, `ask on`).
- *  Returns what it did, in words. */
+/** Write and start the service for this platform (`control pair`, `pool on`, `ask on`):
+ *  it is given the PATH of the shell that ran this (`serviceEnv`). Returns what it did,
+ *  in words. */
 export function installService(o: Placing): string {
   if (!managed(o.platform)) return NO_MANAGER;
-  const r = put(o);
+  const r = put(o, false);
   if ("left" in r) return `left alone: ${r.left}; ${BY_HAND}`;
   const { plan, label, unit, file, log } = r;
   if (plan.manager === "launchd")
@@ -476,7 +485,8 @@ export function installService(o: Placing): string {
   return `${plan.restored ? `left ${file} as it was` : `wrote ${file}`}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
 }
 
-/** The same for `sessionpipe update`, which replaces a service that is there. It answers
+/** The same for `sessionpipe update`, which replaces a service that is there: the
+ *  service keeps the environment its file gave it, and runs this copy. It answers
  *  nothing; where the service could not be put in place it throws, with why in words
  *  for a person (what to run next is the caller's to say, which knows whether anything
  *  answers now). */
@@ -485,7 +495,7 @@ export function placeService(o: Placing): void {
   const back = "; the service file that was there before was put back";
   let r: ReturnType<typeof put>;
   try {
-    r = put(o);
+    r = put(o, true);
   } catch (e) {
     if (!(e instanceof core.ServiceRefused)) throw e;
     throw new Error(`${e.why}${e.back ? back : ""}`);
