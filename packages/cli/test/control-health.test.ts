@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // control/health.ts and control/view.ts: what doctor finds out about the background
 // service, and `control status` as a terminal shows it.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Status } from "../src/control/daemon.js";
 import {
   askHealth,
@@ -21,9 +22,17 @@ import {
 import { heardAgo, hostOf, isLive, statusView } from "../src/control/view.js";
 import { makeUi, PLAIN, plain } from "../src/style.js";
 
+// Nothing here starts a real launchctl, systemctl or journalctl: where the code would
+// run one with nothing stood in, this is what it gets.
+vi.mock("node:child_process", async (original) => ({
+  ...(await original<typeof import("node:child_process")>()),
+  execFileSync: vi.fn(),
+}));
+
 let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(path.join(os.tmpdir(), "sp-health-"));
+  vi.mocked(execFileSync).mockReset();
 });
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
@@ -114,7 +123,9 @@ describe("a look at the service", () => {
   });
 });
 
-describe("what the service sees", () => {
+// The daemon's socket is a Unix socket here; on Windows it is a named pipe, which a path
+// in the temp folder is not (the other socket tests are left out there the same way).
+describe.runIf(process.platform !== "win32")("what the service sees", () => {
   const serve = (answer: (req: { op: string }) => string | null): Promise<{ sock: string; close: () => void }> =>
     new Promise((resolve) => {
       const sock = path.join(tmp, "s.sock");
@@ -214,10 +225,27 @@ describe("reading the log", () => {
     expect(asked).toHaveLength(1);
     expect(serviceLog({ env: { SESSIONPIPE_STATE: path.join(tmp, "empty") } })).toBe("");
     expect(serviceLog()).toBe("");
-    // With nothing stood in: the real journalctl, or none; never a throw.
-    expect(typeof serviceLog({ env: { ...env, SESSIONPIPE_STATE: path.join(tmp, "empty") }, platform: "linux" })).toBe(
-      "string",
-    );
+    // None of that started a program of its own.
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("with nothing stood in it asks journalctl itself: the last hour, quietly, for five seconds at most", () => {
+    const empty = { SESSIONPIPE_STATE: path.join(tmp, "empty"), SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest" };
+    vi.mocked(execFileSync).mockReturnValueOnce("what journald kept\n");
+    expect(serviceLog({ env: empty, platform: "linux" })).toBe("what journald kept\n");
+    expect(vi.mocked(execFileSync).mock.calls).toEqual([
+      [
+        "journalctl",
+        ["--user", "-u", "org.sessionpipe.racetest.service", "--since", "-1h", "-o", "cat", "--no-pager"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 },
+      ],
+    ]);
+    // No journalctl on this computer, or one that fails: nothing to read, and no throw.
+    vi.mocked(execFileSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("spawnSync journalctl ENOENT"), { code: "ENOENT" });
+    });
+    expect(serviceLog({ env: empty, platform: "linux" })).toBe("");
+    expect(execFileSync).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -372,11 +400,13 @@ describe("control status, as a terminal shows it", () => {
       "  · pool Claude accounts   on · 0 accounts, 0 with room left · 127.0.0.1:4141",
     );
     expect(pool({ on: false, accounts: 0 })).toBeUndefined();
-    expect(pool({}, { on: true, harnesses: [] })).toBeDefined();
+    // Asking is on and no agent that can be asked is installed: said as that.
+    expect(
+      statusView(PLAIN, { ...base, ask: { on: true, harnesses: [] } }, now).find((l) =>
+        l.includes("let agents ask agents"),
+      ),
+    ).toBe("  · let agents ask agents  yes: none installed");
     const upd = (update: unknown) => statusView(PLAIN, { ...base, update }, now).join("\n");
-    expect(statusView(PLAIN, { ...base, ask: { on: true, harnesses: [] } }, now).join("\n")).toContain(
-      "yes: none installed",
-    );
     expect(upd({ off: "SESSIONPIPE_NO_UPDATE_CHECK is set" })).toContain(
       "  · by hand  SESSIONPIPE_NO_UPDATE_CHECK is set",
     );
