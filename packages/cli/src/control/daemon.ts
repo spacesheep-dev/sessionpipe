@@ -102,6 +102,7 @@ import {
   onItsWord,
   routeCancel,
   routePrompt,
+  stillRecent,
 } from "./route.js";
 import {
   type Ack,
@@ -673,6 +674,10 @@ export class ControlDaemon {
   private readonly queued = new Map<string, number>();
   /** Each session's messages, one at a time and in the order they were sent (line.ts). */
   private readonly lines = new Lines();
+  /** Sessions (by ref) a run of the daemon's own has finished in, and when its process
+   *  closed: what the transcript gained up to then has no writer behind it (`endedAt`).
+   *  After a restart, also what the last daemon knew of that, from either source: its own
+   *  runs, and the ends sessions' hooks reported to it (`takeUp`). */
   private readonly lastEnd = new Map<string, number>();
   /** Sessions (by ref) a run of the daemon's own was asked to COPY and is not known to
    *  have run anywhere else, and when that run ended: a Claude Code that took no notice
@@ -702,8 +707,6 @@ export class ControlDaemon {
    *  off): the person reads the ack, the machine's log doesn't need it every time. */
   private readonly warned = new Set<string>();
   private state: DaemonState;
-  /** state.json named sessions mid-turn when this daemon read it. */
-  private readonly turnsOnFile: boolean;
   private running = false;
   private readonly polling = new Map<string, PollState>();
   private readonly delivered: Record<string, number> = {};
@@ -768,21 +771,10 @@ export class ControlDaemon {
   ) {
     this.nonces = new NonceStore(path.join(dir, "nonces.jsonl"), deps.now);
     this.acks = new AckOutbox(path.join(dir, "acks.jsonl"));
+    // What the last daemon left for this one (`mid_turn`, `ended`, `strays`) is only
+    // read here. It is taken up once the socket is this daemon's (`takeUp`).
     this.state = readState(path.join(dir, "state.json"), deps.now());
     this.aliases = readAliases(aliasFile(dir));
-    // The sessions that were mid-turn when the last daemon stopped still are, until
-    // their hooks say otherwise or have been silent too long.
-    for (const [ref, m] of Object.entries(this.state.mid_turn)) {
-      const l = this.liveOf(ref);
-      l.midTurn = true;
-      l.heard = true;
-      l.lastEvent = Date.parse(m.at);
-      if (m.cwd) l.cwd = m.cwd;
-      if (m.transcript) l.transcript = m.transcript;
-    }
-    // Taken up: from here the file says what the next stop writes, not this.
-    this.turnsOnFile = Object.keys(this.state.mid_turn).length > 0;
-    this.state.mid_turn = {};
   }
 
   // --- lifecycle ------------------------------------------------------------------
@@ -791,6 +783,8 @@ export class ControlDaemon {
     this.running = true;
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     await this.listen();
+    // Before anything can arrive: no hook has connected yet and no poll has been sent.
+    this.takeUp();
     // The pool's listener comes up before anything that could take time: while the
     // pool is on, every Claude Code request on this machine goes through it.
     await this.syncPool();
@@ -815,6 +809,7 @@ export class ControlDaemon {
    *  open for the process's exit to drop. */
   async stop(o: { leaveSocket?: boolean } = {}): Promise<void> {
     // Not for a daemon that only steps aside: the one that took over has heard for itself.
+    // (One that never had the socket took nothing up and heard nothing: it has nothing to say.)
     if (this.running && !o.leaveSocket) this.rememberTurns();
     this.running = false;
     this.paused?.go();
@@ -846,22 +841,75 @@ export class ControlDaemon {
     await this.deps.pool?.stop();
   }
 
-  /** Which sessions are mid-turn is known only from having been told. Written where the
-   *  next daemon reads it (state.json `mid_turn`), so a restart doesn't cost that: a
-   *  message to a session someone is working in still waits for its Stop. */
+  /** What the daemon knows only from having been told, written where the next one reads
+   *  it (state.json), so a restart doesn't cost it:
+   *
+   *  - which sessions are mid-turn (`mid_turn`): a message to a session someone is
+   *    working in still waits for its Stop;
+   *  - which runs have just ended (`ended`: the daemon's own, whose process it saw
+   *    close, and a session's own end as its hooks reported it), and which copies' runs
+   *    may have strayed into the session they copied (`strays`): what decides whether a
+   *    transcript written a moment ago still has a writer behind it. An update restarts
+   *    the daemon the moment its own turn in a session is over, and a daemon that forgot
+   *    that turn had ended answered the person's next message in a copy, where every
+   *    later message then went.
+   *
+   *  Each only for as long as it decides anything: a turn heard from in the last ten
+   *  minutes (`HOOKS_WORD_MS`), an end or a stray of the last 90 seconds
+   *  (`stillRecent`). */
   private rememberTurns(): void {
+    const now = this.deps.now();
+    const iso = (at: number): string => new Date(at).toISOString();
     const mid: DaemonState["mid_turn"] = {};
     for (const [ref, l] of this.live)
       if (this.midTurnNow(l))
         mid[ref] = {
-          at: new Date(l.lastEvent).toISOString(),
+          at: iso(l.lastEvent),
           ...(l.cwd ? { cwd: l.cwd } : {}),
           ...(l.transcript ? { transcript: l.transcript } : {}),
         };
-    // Nothing to say and nothing on file to take back: leave the file alone.
-    if (!Object.keys(mid).length && !this.turnsOnFile) return;
-    this.state.mid_turn = mid;
-    this.saveState("the sessions that are mid-turn");
+    const ended: Record<string, string> = {};
+    for (const ref of new Set([...this.lastEnd.keys(), ...this.live.keys()])) {
+      const at = this.endedAt(ref);
+      if (at && stillRecent(at, now)) ended[ref] = iso(at);
+    }
+    const strays: Record<string, string> = {};
+    for (const [ref, at] of this.strays) if (stillRecent(at, now)) strays[ref] = iso(at);
+    // Nothing to say: the file is left alone (what it said was taken back at the start).
+    if (![mid, ended, strays].some((m) => Object.keys(m).length)) return;
+    this.state = { ...this.state, mid_turn: mid, ended, strays };
+    this.saveState("what the next daemon is to know of the sessions here");
+  }
+
+  /** The other half, at a start: what the last daemon wrote as it stopped becomes this
+   *  daemon's own knowledge. Only once the socket is this daemon's: one that finds
+   *  another already answering exits having read nothing away from it.
+   *
+   *  A session that was mid-turn still is, until its hooks say otherwise or have been
+   *  silent too long. An end and a stray account for what they did, for their 90 seconds.
+   *
+   *  Then state.json says none of it any more: it was true of the last daemon's stop, and
+   *  a daemon that dies without one of its own (a crash, a kill) must not hand the same
+   *  words to the next start as if they were news. */
+  private takeUp(): void {
+    const { mid_turn: turns, ended = {}, strays = {}, ...rest } = this.state;
+    for (const [ref, m] of Object.entries(turns)) {
+      const l = this.liveOf(ref);
+      l.midTurn = true;
+      l.heard = true;
+      l.lastEvent = Date.parse(m.at);
+      if (m.cwd) l.cwd = m.cwd;
+      if (m.transcript) l.transcript = m.transcript;
+    }
+    for (const [ref, at] of Object.entries(ended)) this.lastEnd.set(ref, Date.parse(at));
+    for (const [ref, at] of Object.entries(strays)) this.strays.set(ref, Date.parse(at));
+    const count = (m: object): number => Object.keys(m).length;
+    if (![turns, ended, strays].some(count)) return;
+    this.deps.log(
+      `taken up from the daemon before this one: ${count(turns)} session(s) mid-turn, ${count(ended)} run(s) just ended, ${count(strays)} copy run(s) that may have strayed`,
+    );
+    this.state = { ...rest, mid_turn: {} };
+    this.saveState("that what the last daemon left was taken up");
   }
 
   /** The pool's listener and its idle usage poll run exactly while the pool is on
@@ -899,9 +947,9 @@ export class ControlDaemon {
    *  session someone is working in, mid-turn in its own window: that turn is not the
    *  daemon's to wait for, and what the daemon knows of it (that it is mid-turn, so a
    *  message waits for its Stop rather than copying it) is written down at a stop and
-   *  read back at the next start (`rememberTurns`). Before 0.15 such a session held a
-   *  restart back, and on a computer where some session is always working an update's
-   *  restart never came. */
+   *  read back at the next start (`rememberTurns`, `takeUp`). Before 0.15 such a session
+   *  held a restart back, and on a computer where some session is always working an
+   *  update's restart never came. */
   busy(): string | null {
     const pooled = this.deps.pool?.status().in_flight ?? 0;
     if (pooled) return `${pooled} pooled request(s) being answered`;

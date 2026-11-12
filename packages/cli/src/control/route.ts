@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The routing rule (spec/CONTROL.md §6): the first delivery mode that fits, top to
 // bottom. Pure, so every branch is a unit test.
-import { acpControl, isUlid, shortId } from "@sessionpipe/core";
+import { acpControl, claudeControl, isUlid, shortId } from "@sessionpipe/core";
 import { type ControlKind, type CopyWhy, frameHandoff as handoffFrame } from "@sessionpipe/core/control";
 
 // The words around a delivered message have one definition, in core, where the
@@ -73,6 +73,14 @@ export const HELD: Record<Holder, (what: string) => string> = {
 /** How long a session's own hooks are taken at their word that a turn is running in it,
  *  counted from the last thing they said: a session killed mid-turn never sends its Stop. */
 export const HOOKS_WORD_MS = 10 * 60_000;
+
+/** Is a run's end, or a copy's stray run (daemon.ts `strays`), still recent enough to
+ *  decide where a message goes? Each is weighed against a transcript's last write, and
+ *  a write counts for 90 seconds (core's `recentWrite`, asked here as it is there): past
+ *  that a stray holds nothing, and an end accounts for no write that still counts (but
+ *  one made in the two seconds of slack after it, for those two seconds). It is what the
+ *  daemon carries of them across its own restart. */
+export const stillRecent = (at: number, now: number): boolean => claudeControl.recentWrite(at, undefined, now);
 
 /** What holds a Claude Code session, from what the machine can see of it (§6, What counts
  *  as held; conformance/control-held.json): the live rows of the harness's own session
