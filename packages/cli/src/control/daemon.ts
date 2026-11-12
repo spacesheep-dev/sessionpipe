@@ -565,6 +565,12 @@ interface TurnPending {
 
 interface Live {
   midTurn: boolean;
+  /** Mid-turn on the last daemon's word (state.json `mid_turn`): no turn
+   *  of its own has begun or ended under this daemon. Its Stop may have come while no
+   *  daemon listened, so it counts for a message only while the session has been heard
+   *  from in the last ten minutes (`inTurn`), and is let go of when that runs out
+   *  (`lapses`). */
+  fromFile?: boolean;
   /** The Stop hook just delivered a block: the next Stop event continues the turn. */
   continued: boolean;
   waiter: net.Socket | null;
@@ -855,8 +861,8 @@ export class ControlDaemon {
    *    later message then went.
    *
    *  Each only for as long as it decides anything: a turn heard from in the last ten
-   *  minutes (`HOOKS_WORD_MS`), an end or a stray of the last 90 seconds
-   *  (`stillRecent`). */
+   *  minutes (`HOOKS_WORD_MS`, the one horizon of a turn remembered), an end or a stray
+   *  of the last 90 seconds (`stillRecent`). */
   private rememberTurns(): void {
     const now = this.deps.now();
     const iso = (at: number): string => new Date(at).toISOString();
@@ -885,8 +891,9 @@ export class ControlDaemon {
    *  daemon's own knowledge. Only once the socket is this daemon's: one that finds
    *  another already answering exits having read nothing away from it.
    *
-   *  A session that was mid-turn still is, until its hooks say otherwise or have been
-   *  silent too long. An end and a stray account for what they did, for their 90 seconds.
+   *  A session that was mid-turn still is, on that word (`fromFile`): a message for it
+   *  waits for its Stop, for as long as the session has been heard from in the last ten
+   *  minutes. An end and a stray account for what they did, for their 90 seconds.
    *
    *  Then state.json says none of it any more: it was true of the last daemon's stop, and
    *  a daemon that dies without one of its own (a crash, a kill) must not hand the same
@@ -896,10 +903,12 @@ export class ControlDaemon {
     for (const [ref, m] of Object.entries(turns)) {
       const l = this.liveOf(ref);
       l.midTurn = true;
+      l.fromFile = true;
       l.heard = true;
       l.lastEvent = Date.parse(m.at);
       if (m.cwd) l.cwd = m.cwd;
       if (m.transcript) l.transcript = m.transcript;
+      this.lapses(ref, l);
     }
     for (const [ref, at] of Object.entries(ended)) this.lastEnd.set(ref, Date.parse(at));
     for (const [ref, at] of Object.entries(strays)) this.strays.set(ref, Date.parse(at));
@@ -910,6 +919,28 @@ export class ControlDaemon {
     );
     this.state = { ...rest, mid_turn: {} };
     this.saveState("that what the last daemon left was taken up");
+  }
+
+  /** A session mid-turn on the last daemon's word is let go of when that word runs out:
+   *  ten minutes after it was last heard from, with no turn of its own begun or ended
+   *  under this daemon. The Stop a message waits for there may have come while no daemon
+   *  listened, and nothing else would end the wait for half an hour (`TURN_FALLBACK_MS`).
+   *  Heard from meanwhile, it is looked at again ten minutes after that. Let go of, it is
+   *  not mid-turn, and what waited for its Stop goes the way it would for a session that
+   *  never was (`notMidTurn`). */
+  private lapses(ref: string, l: Live): void {
+    const t = setTimeout(
+      () => {
+        if (!this.running || !l.fromFile) return;
+        if (this.midTurnNow(l)) return this.lapses(ref, l);
+        this.deps.log(
+          `${ref.slice(0, 24)} was mid-turn before this daemon started and has said nothing for ten minutes: it is not taken to be mid-turn any more`,
+        );
+        this.notMidTurn(l);
+      },
+      Math.max(0, l.lastEvent + HOOKS_WORD_MS - this.deps.now()),
+    );
+    t.unref();
   }
 
   /** The pool's listener and its idle usage poll run exactly while the pool is on
@@ -1193,6 +1224,8 @@ export class ControlDaemon {
           return;
         }
         l.continued = true;
+        // The turn goes on with this message, under this daemon's eyes.
+        l.fromFile = false;
         // The transcript of the session whose Stop this is. Its last words may not be in
         // it yet, so this is only where the search for the answer starts (reply.ts).
         const from = this.answerFrom(req.session);
@@ -1291,6 +1324,7 @@ export class ControlDaemon {
     if (e.event === "UserPromptSubmit" || e.event === "SessionStart") {
       if (e.event === "UserPromptSubmit") {
         l.midTurn = true;
+        l.fromFile = false;
         // A turn began. Whether it is the turn a written message caused is the next
         // question (`tookIt`); this is only the signal that there is one to look at.
         const waiting = this.prompted.get(named);
@@ -1325,6 +1359,7 @@ export class ControlDaemon {
    *  will never come (the turn's process was killed), goes another way. */
   private notMidTurn(l: Live): void {
     l.midTurn = false;
+    l.fromFile = false;
     l.continued = false;
     const left = l.turnQueue.splice(0);
     for (const p of left) if (this.inflight.has(p.msgId)) void this.reroute(p);
@@ -2433,6 +2468,15 @@ export class ControlDaemon {
     return !!l?.midTurn && this.deps.now() - l.lastEvent < HOOKS_WORD_MS;
   }
 
+  /** Is a turn running in it that a message can wait for the Stop of (the `turn` rung)?
+   *  By its own hooks' word to this daemon, for as long as the turn takes: its Stop will
+   *  be heard here, and a tool call can be silent for longer than ten minutes. By the
+   *  last daemon's word (`fromFile`), only while the session has been heard from in the
+   *  last ten minutes: the Stop may have come while no daemon listened. */
+  private inTurn(l: Live | undefined): boolean {
+    return !!l?.midTurn && (!l.fromFile || this.midTurnNow(l));
+  }
+
   /** One headless turn as a child process of the daemon's own: in a slot, and stoppable
    *  while it waits for one (CONTROL.md §6 `cancel`), so a Stop that arrives before its
    *  slot does means it never starts. */
@@ -2685,7 +2729,7 @@ export class ControlDaemon {
     // the tag is what the turn it causes is recognised by (`channelMark`). One whose id
     // makes no mark was handed over, acked `held` whatever the session did, and the
     // channel shut.
-    return l.channel === null || (marked && !l.midTurn && !this.mutedChannels.has(l.channel));
+    return l.channel === null || (marked && !this.inTurn(l) && !this.mutedChannels.has(l.channel));
   }
 
   private view(
@@ -2714,7 +2758,7 @@ export class ControlDaemon {
         harness: ref.harness,
         sdk: this.sdkSessions.has(session),
         waiter: this.waiterFits(l, marked),
-        midTurn: !!l?.midTurn,
+        midTurn: this.inTurn(l),
         // The inbox is Claude Code's own local socket; no other harness has one.
         inbox: false,
         held,
@@ -2740,7 +2784,7 @@ export class ControlDaemon {
       harness: ref.harness,
       sdk: this.sdkSessions.has(session),
       waiter: this.waiterFits(l, marked),
-      midTurn: !!l?.midTurn,
+      midTurn: this.inTurn(l),
       inbox: !!look && "rec" in look,
       held,
       known: !!t,
@@ -3040,6 +3084,7 @@ export class ControlDaemon {
     await this.inLine(p.session, p.iat, async () => {
       const l = this.liveOf(p.session);
       l.midTurn = false;
+      l.fromFile = false;
       const place = this.place(p.session);
       if ("refused" in place) return this.finish(p.receiver, p.msgId, refusal(place));
       const cmd = { kind: "prompt", session: p.session, text: p.text, iat: p.iat } as ControlCommand;
