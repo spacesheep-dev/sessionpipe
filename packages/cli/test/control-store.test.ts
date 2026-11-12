@@ -19,8 +19,11 @@ import {
   parseMode,
   readControl,
   readState,
+  takeTurnsSeed,
+  turnsSeedFile,
   writeControl,
   writeState,
+  writeTurnsSeed,
 } from "../src/control/store.js";
 import type { Runner } from "../src/secrets.js";
 
@@ -364,5 +367,67 @@ describe("forks and aliases on disk", () => {
     });
     expect(receiverIdOf(readAliases(f), "codex", "t6")).toBe("f");
     expect(receiverIdOf(readAliases(f), "antigravity", "t6")).toBeNull();
+  });
+});
+
+describe("the turns seed (turns-seed.json)", () => {
+  // `sessionpipe update` leaves it for the daemon that replaces one too old to write
+  // down which sessions are mid-turn; that daemon takes it as it starts.
+  const dir = () => path.join(tmp, "state", "control");
+  const now = Date.parse("2026-11-12T10:00:00.000Z");
+  const at = new Date(now).toISOString();
+  const TEN_MINUTES = 600_000;
+
+  it("written, then taken once: each session mid-turn as of when it was written, and the file is gone", () => {
+    writeTurnsSeed(dir(), ["claude-code:a", "codex:b"], now);
+    expect(JSON.parse(readFileSync(turnsSeedFile(dir()), "utf8"))).toEqual({
+      at,
+      sessions: ["claude-code:a", "codex:b"],
+    });
+    expect(takeTurnsSeed(dir(), now + 3000)).toEqual({ "claude-code:a": { at }, "codex:b": { at } });
+    expect(existsSync(turnsSeedFile(dir()))).toBe(false);
+    expect(takeTurnsSeed(dir(), now + 3000)).toEqual({});
+  });
+
+  it("by the clock of the day when no time is given", () => {
+    writeTurnsSeed(dir(), ["claude-code:a"]);
+    const written = (JSON.parse(readFileSync(turnsSeedFile(dir()), "utf8")) as { at: string }).at;
+    expect(Math.abs(Date.now() - Date.parse(written))).toBeLessThan(TEN_MINUTES);
+    expect(takeTurnsSeed(dir())).toEqual({ "claude-code:a": { at: written } });
+  });
+
+  it("good for the ten minutes a session's hooks are taken at their word, counted from when it was written", () => {
+    writeTurnsSeed(dir(), ["claude-code:a"], now);
+    expect(takeTurnsSeed(dir(), now + TEN_MINUTES - 1)).toEqual({ "claude-code:a": { at } });
+    writeTurnsSeed(dir(), ["claude-code:a"], now);
+    expect(takeTurnsSeed(dir(), now + TEN_MINUTES)).toEqual({});
+    expect(existsSync(turnsSeedFile(dir()))).toBe(false);
+  });
+
+  it("anything that is not a seed is read as nothing, and is gone all the same", () => {
+    mkdirSync(dir(), { recursive: true });
+    for (const bad of [
+      "not json",
+      "null",
+      "[]",
+      JSON.stringify({ sessions: ["claude-code:a"] }),
+      JSON.stringify({ at: 5, sessions: ["claude-code:a"] }),
+      JSON.stringify({ at: "whenever", sessions: ["claude-code:a"] }),
+      JSON.stringify({ at }),
+      JSON.stringify({ at, sessions: "claude-code:a" }),
+    ]) {
+      writeFileSync(turnsSeedFile(dir()), bad);
+      expect(takeTurnsSeed(dir(), now)).toEqual({});
+      expect(existsSync(turnsSeedFile(dir()))).toBe(false);
+    }
+    // Only the names that are names.
+    writeFileSync(turnsSeedFile(dir()), JSON.stringify({ at, sessions: ["claude-code:a", "", 7, null, ["x"]] }));
+    expect(takeTurnsSeed(dir(), now)).toEqual({ "claude-code:a": { at } });
+  });
+
+  it("a folder in its place: nothing, it stays, and nothing is thrown at a daemon that is starting", () => {
+    mkdirSync(turnsSeedFile(dir()), { recursive: true });
+    expect(takeTurnsSeed(dir(), now)).toEqual({});
+    expect(statSync(turnsSeedFile(dir())).isDirectory()).toBe(true);
   });
 });

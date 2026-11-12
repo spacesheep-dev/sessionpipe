@@ -24,7 +24,7 @@ import { DayKey, Passkey } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { HOOKS_WORD_MS } from "../src/control/route.js";
-import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
+import { type ControlConfig, type PairedReceiver, turnsSeedFile, writeTurnsSeed } from "../src/control/store.js";
 import { FakeReceiver, type Queued } from "./helpers/receiver.js";
 
 // Nothing here waits on real time, but each case signs with real keys and talks over a
@@ -472,6 +472,9 @@ describe.runIf(unix)("what the last daemon left is taken up by the daemon that h
     const at = iso(Date.now());
     const left = JSON.stringify({ mid_turn: { [cc(SID)]: { at } }, ended: { [cc(COPY)]: at } });
     writeFileSync(stateFile(), left);
+    // And the seed an update leaves just before it replaces a daemon: for the one that
+    // replaces it, not for one that only came by.
+    writeTurnsSeed(dir, [cc(SID)]);
     // A second `control run`: it is constructed, finds the socket answered, and exits.
     const late = new ControlDaemon(config, dir, sock, {
       now: Date.now,
@@ -485,6 +488,82 @@ describe.runIf(unix)("what the last daemon left is taken up by the daemon that h
     expect(late.status().mid_turn).toEqual([]);
     await late.stop();
     expect(readFileSync(stateFile(), "utf8")).toBe(left);
+    expect(existsSync(turnsSeedFile(dir))).toBe(true);
     expect(serving.status().mid_turn).toEqual([]);
+  });
+});
+
+describe.runIf(unix)("the turns seed: what a daemon too old to write it down knew", () => {
+  // A daemon from before `mid_turn` writes nothing as it stops. `sessionpipe update` asks
+  // it which sessions are mid-turn and leaves them in a file for the daemon it puts in
+  // its place.
+  const A = cc(SID);
+  const B = "codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
+  const C = cc(COPY);
+
+  it("is taken by the daemon that replaces it: those sessions are mid-turn, and the seed is gone", async () => {
+    written(SID, 10 * MINUTE);
+    writeTurnsSeed(dir, [A, B]);
+    // The replacing takes a moment.
+    await vi.advanceTimersByTimeAsync(3000);
+    const d = await daemon();
+    expect(d.status().mid_turn).toEqual([A, B]);
+    expect(log).toContain(
+      "taken up from the daemon before this one: 2 session(s) mid-turn, 0 run(s) just ended, 0 copy run(s) that may have strayed",
+    );
+    expect(existsSync(turnsSeedFile(dir))).toBe(false);
+    // Only the seed said anything: state.json has nothing to take back, and is not written.
+    expect(existsSync(stateFile())).toBe(false);
+    // A message for one waits for its Stop, as it did under the daemon that was replaced.
+    const q = await hand(d, "while you are at it");
+    await taken(q.id);
+    expect(await stopHook(A)).toMatchObject({ op: "block", id: q.id });
+    expect(runs).toEqual([]);
+  });
+
+  it("is merged with what state.json says: a session both name was last heard from at the later of the two, and where it runs is kept", async () => {
+    const t = Date.now();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      stateFile(),
+      JSON.stringify({
+        mid_turn: {
+          [A]: { at: iso(t - 60_000), cwd: "/work/a", transcript: "/t/a.jsonl" },
+          [B]: { at: iso(t - 10_000) },
+        },
+      }),
+    );
+    writeTurnsSeed(dir, [A, B, C], t - 30_000);
+    const d = await daemon();
+    expect(d.status().mid_turn).toEqual([A, B, C]);
+    expect(existsSync(turnsSeedFile(dir))).toBe(false);
+    expect(onFile().mid_turn).toEqual({});
+    // As the next stop writes them: when each was last heard from, and where it runs.
+    await stop(d);
+    expect(onFile().mid_turn).toEqual({
+      [A]: { at: iso(t - 30_000), cwd: "/work/a", transcript: "/t/a.jsonl" },
+      [B]: { at: iso(t - 10_000) },
+      [C]: { at: iso(t - 30_000) },
+    });
+  });
+
+  it("a stale seed, one that is not a seed, and a folder in its place: nothing is mid-turn, and the daemon starts", async () => {
+    writeTurnsSeed(dir, [A], Date.now() - HOOKS_WORD_MS);
+    const stale = await daemon();
+    expect(stale.status().mid_turn).toEqual([]);
+    expect(existsSync(turnsSeedFile(dir))).toBe(false);
+    await stop(stale);
+
+    writeFileSync(turnsSeedFile(dir), "not a seed");
+    const malformed = await daemon();
+    expect(malformed.status().mid_turn).toEqual([]);
+    expect(existsSync(turnsSeedFile(dir))).toBe(false);
+    await stop(malformed);
+
+    mkdirSync(turnsSeedFile(dir));
+    const folder = await daemon();
+    expect(folder.status().mid_turn).toEqual([]);
+    expect(log.filter((l) => l.startsWith("taken up"))).toEqual([]);
+    expect(existsSync(stateFile())).toBe(false);
   });
 });

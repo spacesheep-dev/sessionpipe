@@ -118,6 +118,7 @@ import {
   readState,
   type StartOptions,
   startOptionsOf,
+  takeTurnsSeed,
   writeControl,
   writeState,
 } from "./store.js";
@@ -565,7 +566,7 @@ interface TurnPending {
 
 interface Live {
   midTurn: boolean;
-  /** Mid-turn on the last daemon's word (state.json `mid_turn`): no turn
+  /** Mid-turn on the last daemon's word (state.json `mid_turn`, the turns seed): no turn
    *  of its own has begun or ended under this daemon. Its Stop may have come while no
    *  daemon listened, so it counts for a message only while the session has been heard
    *  from in the last ten minutes (`inTurn`), and is let go of when that runs out
@@ -887,19 +888,25 @@ export class ControlDaemon {
     this.saveState("what the next daemon is to know of the sessions here");
   }
 
-  /** The other half, at a start: what the last daemon wrote as it stopped becomes this
-   *  daemon's own knowledge. Only once the socket is this daemon's: one that finds
+  /** The other half, at a start: what the last daemon wrote as it stopped, and what
+   *  `sessionpipe update` left of a daemon too old to write it (the turns seed), become
+   *  this daemon's own knowledge. Only once the socket is this daemon's: one that finds
    *  another already answering exits having read nothing away from it.
    *
    *  A session that was mid-turn still is, on that word (`fromFile`): a message for it
    *  waits for its Stop, for as long as the session has been heard from in the last ten
-   *  minutes. An end and a stray account for what they did, for their 90 seconds.
+   *  minutes. Named by both the file and the seed, it was last heard from at the later
+   *  of the two. An end and a stray account for what they did, for their 90 seconds.
    *
    *  Then state.json says none of it any more: it was true of the last daemon's stop, and
    *  a daemon that dies without one of its own (a crash, a kill) must not hand the same
    *  words to the next start as if they were news. */
   private takeUp(): void {
-    const { mid_turn: turns, ended = {}, strays = {}, ...rest } = this.state;
+    const turns = { ...this.state.mid_turn };
+    for (const [ref, m] of Object.entries(takeTurnsSeed(this.dir, this.deps.now()))) {
+      const had = turns[ref];
+      if (!had || Date.parse(had.at) < Date.parse(m.at)) turns[ref] = { ...had, at: m.at };
+    }
     for (const [ref, m] of Object.entries(turns)) {
       const l = this.liveOf(ref);
       l.midTurn = true;
@@ -910,6 +917,7 @@ export class ControlDaemon {
       if (m.transcript) l.transcript = m.transcript;
       this.lapses(ref, l);
     }
+    const { ended = {}, strays = {}, ...rest } = this.state;
     for (const [ref, at] of Object.entries(ended)) this.lastEnd.set(ref, Date.parse(at));
     for (const [ref, at] of Object.entries(strays)) this.strays.set(ref, Date.parse(at));
     const count = (m: object): number => Object.keys(m).length;
@@ -917,6 +925,8 @@ export class ControlDaemon {
     this.deps.log(
       `taken up from the daemon before this one: ${count(turns)} session(s) mid-turn, ${count(ended)} run(s) just ended, ${count(strays)} copy run(s) that may have strayed`,
     );
+    // Where only the seed said anything, state.json has nothing to take back.
+    if (![this.state.mid_turn, ended, strays].some(count)) return;
     this.state = { ...rest, mid_turn: {} };
     this.saveState("that what the last daemon left was taken up");
   }

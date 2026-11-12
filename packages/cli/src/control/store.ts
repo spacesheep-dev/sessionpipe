@@ -10,6 +10,8 @@
 //                               and, from a stop to the next start, what the daemon knew
 //                               only from having been told (sessions mid-turn, runs that
 //                               just ended)
+//   state/control/turns-seed.json  the same for a daemon too old to write it, left by
+//                                  `sessionpipe update` for the one that replaces it
 import {
   appendFileSync,
   chmodSync,
@@ -475,7 +477,9 @@ export function writeTurnsSeed(dir: string, sessions: readonly string[], now: nu
 }
 
 /** Take the seed: the sessions it names, each mid-turn as of when it was written, where
- *  that is still within the hooks' word; the file is gone afterwards either way. */
+ *  that is still within the hooks' word; the file is gone afterwards either way. It never
+ *  throws: a daemon takes this as it starts, and a seed it can't read or can't remove (a
+ *  folder in its place) is no reason not to start. */
 export function takeTurnsSeed(dir: string, now: number = Date.now()): Record<string, MidTurn> {
   const file = turnsSeedFile(dir);
   const out: Record<string, MidTurn> = {};
@@ -485,7 +489,9 @@ export function takeTurnsSeed(dir: string, now: number = Date.now()): Record<str
     if (Number.isFinite(at) && now - at < HOOKS_WORD_MS && Array.isArray(j.sessions))
       for (const s of j.sessions) if (typeof s === "string" && s) out[s] = { at: j.at as string };
   } catch {}
-  rmSync(file, { force: true });
+  try {
+    rmSync(file, { force: true });
+  } catch {}
   return out;
 }
 
