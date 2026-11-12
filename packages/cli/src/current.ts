@@ -70,9 +70,6 @@ export interface CurrentDeps {
    *  there is a `sudo` to name. */
   platform: NodeJS.Platform;
   latest: () => Promise<string>;
-  /** Why npm is not to be asked at all (SESSIONPIPE_NO_UPDATE_CHECK), or null. What is
-   *  here is then made one version, and nothing newer is looked for. */
-  unasked: string | null;
   /** Install into this copy's prefix and each of `others`, then write the hooks again. */
   install: (version: string, others: string[]) => Promise<InstallResult>;
   /** Write the hooks again from this copy. */
@@ -152,16 +149,14 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
   // --- 1. the newest release, and this copy on it ---------------------------------------
   let target = d.version;
   let unasked: string | null = null;
-  if (d.unasked) d.say({ mark: "info", text: `npm isn't asked for a newer release: ${d.unasked}` });
-  else
-    try {
-      const latest = await d.latest();
-      if (isNewer(latest, d.version)) target = latest;
-      else d.say({ mark: "ok", text: `sessionpipe ${d.version} is the newest release` });
-    } catch (e) {
-      unasked = (e as Error).message;
-      d.say({ mark: "warn", text: `couldn't ask npm for the newest release: ${unasked}` });
-    }
+  try {
+    const latest = await d.latest();
+    if (isNewer(latest, d.version)) target = latest;
+    else d.say({ mark: "ok", text: `sessionpipe ${d.version} is the newest release` });
+  } catch (e) {
+    unasked = (e as Error).message;
+    d.say({ mark: "warn", text: `couldn't ask npm for the newest release: ${unasked}` });
+  }
   if (target !== d.version) {
     if (!d.prefix)
       return {
@@ -427,9 +422,7 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
   return {
     state: "current",
     version: target,
-    said: d.unasked
-      ? `Everything on this computer runs sessionpipe ${target}: ${what}. npm was not asked for a newer release.`
-      : `This computer is up to date: sessionpipe ${target} runs ${what}.`,
+    said: `This computer is up to date: sessionpipe ${target} runs ${what}.`,
     ...(warn ? { warn: `${warn} \`sessionpipe doctor\` looks again.` } : {}),
   };
 }

@@ -1930,10 +1930,11 @@ const SIGN = { ok: "✓", warn: "!", bad: "✗", info: "·", same: "=" } as cons
  *  copy typed, the copy the background service runs and the hooks all on the newest
  *  release, the service running it and hearing from its receivers. `update off|on`
  *  switches the service's own daily update (config.json `update_check`; it reads that
- *  every ten minutes). Exit 0: everything is current (a receiver that hasn't answered the
- *  service is said in the last line, in yellow, and is still 0). 3: the service finishes
- *  by itself when what it holds is done. 1: what is wrong is said, with the one command
- *  to run next. */
+ *  every ten minutes). With SESSIONPIPE_NO_UPDATE_CHECK set it changes nothing and says
+ *  so. Exit 0: everything is current (a receiver that hasn't answered the service is
+ *  said in the last line, in yellow, and is still 0). 3: the service finishes by itself
+ *  when what it holds is done. 1: what is wrong is said, with the one command to run
+ *  next. */
 async function update(): Promise<void> {
   const sub = args[1];
   if (sub === "off" || sub === "on") {
@@ -1951,6 +1952,16 @@ async function update(): Promise<void> {
     process.exitCode = 2;
     return out("usage: sessionpipe update [off|on]");
   }
+  // Updating is switched off for whoever set this: nothing is asked, installed, written
+  // or restarted, as before 0.15. One line says so, and how to update once all the same.
+  if (process.env.SESSIONPIPE_NO_UPDATE_CHECK)
+    return out(
+      `  Updating is off, because SESSIONPIPE_NO_UPDATE_CHECK is set: nothing was changed. To update once without it: \`${
+        process.platform === "win32"
+          ? 'cmd /c "set SESSIONPIPE_NO_UPDATE_CHECK=&& sessionpipe update"'
+          : "env -u SESSIONPIPE_NO_UPDATE_CHECK sessionpipe update"
+      }\``,
+    );
   // From the npx cache there is nothing to update in place: the persistent copy is
   // installed (or found) and takes over, as for `install` and `connect`.
   if (viaNpx(distDir)) return rerunGlobally(args, out);
@@ -1968,7 +1979,6 @@ async function update(): Promise<void> {
     prefix,
     unwritable: prefix ? unwritable(prefix) : null,
     platform: process.platform,
-    unasked: process.env.SESSIONPIPE_NO_UPDATE_CHECK ? "SESSIONPIPE_NO_UPDATE_CHECK is set" : null,
     latest: async () => {
       try {
         return await latestVersion();

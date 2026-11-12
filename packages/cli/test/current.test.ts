@@ -84,7 +84,6 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     prefix: "/p/typed",
     unwritable: null,
     platform: "darwin",
-    unasked: null,
     latest: async () => {
       if (s.latest instanceof Error) throw s.latest;
       return s.latest;
@@ -288,30 +287,6 @@ describe("with npm out of reach", () => {
     expect(((await c.out) as { next: string }).next).toBe(
       'npm install -g --prefix "C:\\Program Files\\nodejs" sessionpipe@1.3.0',
     );
-  });
-});
-
-describe("with the check turned off", () => {
-  it("npm isn't asked: what is here is made one version, and it says that is all it did", async () => {
-    let asked = 0;
-    const { sim, out } = run(
-      { hooks: "0.9.0" },
-      {
-        unasked: "SESSIONPIPE_NO_UPDATE_CHECK is set",
-        latest: async () => {
-          asked++;
-          return "9.9.9";
-        },
-      },
-    );
-    expect(await out).toEqual({
-      state: "current",
-      version: "1.0.0",
-      said: "Everything on this computer runs sessionpipe 1.0.0: the command, the hooks and the background service, which hears r.example. npm was not asked for a newer release.",
-    });
-    expect(asked).toBe(0);
-    expect(sim.rearms).toBe(1);
-    expect(texts(sim)[0]).toBe("info: npm isn't asked for a newer release: SESSIONPIPE_NO_UPDATE_CHECK is set");
   });
 });
 
