@@ -101,7 +101,8 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     harnesses: ["claude-code"],
     wanted: true,
     status: async () => (s.status.length > 1 ? (s.status.shift() as Status | null) : (s.status[0] ?? null)),
-    health: async () => null,
+    // A service of this release: it says which copy it is, so it remembers across a stop.
+    health: async () => ({ accounts: [], copy: { cli: `${MINE}/cli.js`, via: "launchd" as const } }),
     restart: async () => {
       s.restarts++;
       s.did.push("restart");
@@ -436,7 +437,7 @@ describe("the service, made to run this copy", () => {
     const turns = ["claude-code:aaaa", "codex:bbbb"];
     // It says a session is mid-turn, which was never its own to wait for, and answers no `health`.
     const old = st("0.14.2", { busy: "a session on this machine mid-turn", mid_turn: turns });
-    const a = run({ look: other, status: [old, old, null, st("1.1.0")] });
+    const a = run({ look: other, status: [old, old, null, st("1.1.0")] }, { health: async () => null });
     expect((await a.out).state).toBe("current");
     expect(a.sim.seeded).toEqual([turns]);
     expect(a.sim.did).toEqual(["quiesce", "seed", "place"]);
@@ -446,7 +447,7 @@ describe("the service, made to run this copy", () => {
     expect(b.sim.seeded).toEqual([turns]);
     // With no session mid-turn, or a status that names none, there is nothing to write.
     for (const idle of [st("0.14.2", { mid_turn: [] }), st("0.14.2")]) {
-      const c = run({ look: other, status: [idle, idle, null, st("1.1.0")] });
+      const c = run({ look: other, status: [idle, idle, null, st("1.1.0")] }, { health: async () => null });
       expect((await c.out).state).toBe("current");
       expect(c.sim.did).toEqual(["quiesce", "place"]);
     }
@@ -661,9 +662,33 @@ describe("the service that runs this copy already", () => {
     });
   });
 
-  it("one from before 0.15 waits for a session someone works in, by its own older rule: waiting, not failed", async () => {
+  it("one from before 0.15 that a manager has is replaced at once, with who is mid-turn written down: its own rule would wait for ever on a busy computer", async () => {
     const old = st("0.14.2", { busy: "a session on this machine mid-turn", mid_turn: ["claude-code:aaaa"] });
-    const { sim, out } = run({ version: "0.15.0", latest: "0.15.0", hooks: "0.15.0", status: [old] });
+    const { sim, out } = run(
+      { version: "0.15.0", latest: "0.15.0", hooks: "0.15.0", status: [old, old, null, st("0.15.0")] },
+      { health: async () => null },
+    );
+    expect((await out).state).toBe("current");
+    expect(sim.seeded).toEqual([["claude-code:aaaa"]]);
+    // Asked to stop taking messages first (an older one doesn't answer that), then written down, then replaced.
+    expect(sim.did).toEqual(["quiesce", "seed", "place"]);
+    expect(texts(sim)).toContain("ok: the background service was started again on this copy");
+    // One that holds something of its own is still given its moment, and never cut short.
+    const working = st("0.14.2", { busy: "a headless agent run" });
+    const b = run(
+      { version: "0.15.0", latest: "0.15.0", hooks: "0.15.0", status: [working] },
+      { health: async () => null },
+    );
+    expect(await b.out).toMatchObject({ state: "waiting" });
+    expect(b.sim.did).not.toContain("place");
+  });
+
+  it("one from before 0.15 that someone runs by hand waits by its own older rule: waiting, not failed", async () => {
+    const old = st("0.14.2", { busy: "a session on this machine mid-turn", mid_turn: ["claude-code:aaaa"] });
+    const { sim, out } = run(
+      { version: "0.15.0", latest: "0.15.0", hooks: "0.15.0", status: [old], look: null },
+      { health: async () => null },
+    );
     expect(await out).toEqual({
       state: "waiting",
       version: "0.15.0",

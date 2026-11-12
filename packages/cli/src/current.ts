@@ -248,7 +248,13 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     // copy, doesn't answer or has lost its file, and where it should have it and nothing
     // runs. A daemon that answers and that no manager has is someone's own to run: it is
     // asked to restart itself, and no service is installed that nobody asked for.
-    if (has ? theirs || !before || !asked : asked && !before) {
+    // A service from before 0.15 says which copy it is to nobody, and that is how it is
+    // told apart. It restarts itself only once no session on the computer is mid-turn,
+    // which on a busy computer never comes: where a manager has it, it is replaced like
+    // one on another copy, with what it knows of who is mid-turn written down first.
+    const remembers = before ? !!(await d.health())?.copy : true;
+    const older = !!before && before.version !== target && !remembers;
+    if (has ? theirs || !before || !asked || older : asked && !before) {
       // Give it a moment to finish what it holds; a turn of its own can take an hour.
       if (held) {
         d.say({ mark: "info", text: `the background service is busy (${held}): giving it a moment…` });
@@ -277,7 +283,7 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       // A service from before 0.15 writes nothing down when it is stopped, and the one
       // that replaces it would copy a session it didn't know was mid-turn. It is told
       // apart by what it answers: only one that remembers says which copy it is.
-      if (running && !(await d.health())?.copy) {
+      if (running && !remembers) {
         const turns = running.mid_turn ?? [];
         if (turns.length) d.seed(turns);
       }

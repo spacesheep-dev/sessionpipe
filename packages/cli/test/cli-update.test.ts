@@ -253,16 +253,26 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
   });
 
   it("it couldn't: one line that says what is wrong, one with the command to run next; exit 1", async () => {
-    const r = await update({
-      state: "failed",
+    const failed = {
+      state: "failed" as const,
       error: "npm can't write /usr/local/lib/node_modules",
       next: "sudo npm install -g --prefix /usr/local sessionpipe@9.9.9 && sessionpipe update",
-    });
+    };
+    const r = await update(failed, { errTty: true, columns: 200 });
     expect(r.err).toHaveBeenCalledWith(
-      "error  npm can't write /usr/local/lib/node_modules\ntry    sudo npm install -g --prefix /usr/local sessionpipe@9.9.9 && sessionpipe update\n",
+      expect.stringMatching(
+        /error.* {2}npm can't write \/usr\/local\/lib\/node_modules\n.*try.* {4}.*sudo npm install -g --prefix \/usr\/local sessionpipe@9\.9\.9 && sessionpipe update.*\n$/,
+      ),
     );
     expect(r.exit).toHaveBeenCalledWith(1);
     expect(r.lines).toEqual([]);
+    // Into a pipe a failure is one line; the command to run next is said at its end, so
+    // a script, an ssh session or an agent is told it too.
+    const piped = await update(failed);
+    expect(piped.err).toHaveBeenCalledWith(
+      "sessionpipe: npm can't write /usr/local/lib/node_modules. Next: sudo npm install -g --prefix /usr/local sessionpipe@9.9.9 && sessionpipe update\n",
+    );
+    expect(piped.exit).toHaveBeenCalledWith(1);
   });
 
   it("hands the flow this copy, the harnesses set up here, and whether anything needs the service", async () => {

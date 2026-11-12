@@ -63,7 +63,7 @@ export function assertSetupVersion(allowDowngrade: boolean, target?: string): vo
   const check = (installed: string | null, where: string): void => {
     if (installed && isNewer(installed, VERSION, true))
       throw new Refusal(
-        `refusing to downgrade sessionpipe: ${installed} is installed at ${where}; this command would install ${VERSION}. Use the installed newer CLI, or pass --allow-downgrade to force ${VERSION}.`,
+        `refusing to downgrade sessionpipe: ${installed} is installed at ${where}; this command would install ${VERSION}. \`sessionpipe update\` brings this copy up to date; --allow-downgrade forces ${VERSION}.`,
         "sessionpipe update",
       );
   };
