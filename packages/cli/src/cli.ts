@@ -1188,18 +1188,26 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   const troubles: Trouble[] = deep ? logTroubles(serviceLog(), now) : [];
   const free = freeBytes(state);
   const full = troubles.find((t) => t.kind === "disk");
-  if ((free !== null && free < DISK_FULL_BYTES) || full) {
-    const said =
-      free !== null && free < DISK_FULL_BYTES
-        ? `full: ${Math.floor(free / (1024 * 1024))} MB left`
-        : `was full ${span(now - (full as Trouble).last)} ago, by the background service's log`;
+  const fullNow = free !== null && free < DISK_FULL_BYTES;
+  if (fullNow || full) {
+    const said = fullNow
+      ? `full: ${Math.floor(free / (1024 * 1024))} MB left`
+      : `was full ${span(now - (full as Trouble).last)} ago, by the background service's log`;
     computer.rows.push({ mark: "bad", label: "disk", value: said });
-    warnings.push(`this computer's disk ${said.startsWith("full") ? "is " : ""}${said}`);
-    todo.push({
-      order: 0,
-      say: "This computer's disk is full, so events and messages can't be saved. Free some space, then look again:",
-      run: "sessionpipe doctor",
-    });
+    warnings.push(`this computer's disk ${fullNow ? "is " : ""}${said}`);
+    todo.push(
+      fullNow
+        ? {
+            order: 0,
+            say: "This computer's disk is full, so events and messages can't be saved. Free some space, then look again:",
+            run: "sessionpipe doctor",
+          }
+        : // It has room again: nothing is left to do, and nothing to type.
+          {
+            order: 0,
+            say: `This computer's disk was full ${span(now - (full as Trouble).last)} ago, and events or messages from then may not have been saved. It has room now: nothing to type.`,
+          },
+    );
   }
 
   // --- the hooks' own home -----------------------------------------------------------
@@ -1750,10 +1758,16 @@ function timing(): { n: number; p50: number; p95: number } | null {
 
 async function doctor(): Promise<void> {
   const c = await checkup(true);
-  if (has("--json")) out(JSON.stringify(c.report, null, 2));
-  else for (const l of page(ui, c)) say(l);
-  // The exit code says whether anything needs attention, for a script as for a person.
-  if (c.todo.length) process.exitCode = 1;
+  // For a program: it exits 0 whatever was found, as it always has. What was found is
+  // in `warnings`.
+  if (has("--json")) return out(JSON.stringify(c.report, null, 2));
+  for (const l of page(ui, c)) say(l);
+  // The exit code says whether there is a command for the person to run. A finding with
+  // nothing to type (a slow hook, a receiver that hasn't answered yet, a disk that was
+  // full) is on the page and counted in the verdict, and leaves the code alone: it
+  // comes and goes with this computer's load and the network, and a script that reads
+  // the code must not fail on that.
+  if (c.todo.some((t) => t.run)) process.exitCode = 1;
 }
 
 /** Follow the local outbox: one event per line, filtered to a tier. The zero-server demo. */

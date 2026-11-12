@@ -270,10 +270,10 @@ describe("status", () => {
     expect(snapshot(tmp)).toEqual(before);
     // Doctor intentionally benchmarks hooks. Run only here without the guard,
     // with isolated HOME/state and no harness executable on PATH.
-    // Its exit code says something here needs attention (a sink that stopped, a daemon
-    // that isn't running), with --json too; the report is whole on stdout all the same.
+    // With --json it exits 0 whatever it found, as it always has: what needs attention
+    // (a daemon that isn't running) is in `warnings`, and the report is whole on stdout.
     const diagnostic = run(["doctor", "--json"], false);
-    expect(diagnostic.status, diagnostic.stderr).toBe(1);
+    expect(diagnostic.status, diagnostic.stderr).toBe(0);
     expect(diagnostic.stderr).toBe("");
     const doctor = JSON.parse(diagnostic.stdout);
     for (const key of ["version", "machine", "state", "config", "harnesses", "timing", "update", "control"])
@@ -337,8 +337,8 @@ describe("status", () => {
 });
 
 // Async children let the fake local daemon answer while the built commands run. `status`
-// only reports, so it ends 0; `doctor` ends 1 here, with or without --json: this
-// fixture always has something to fix (a sink that stopped, hooks that aren't written).
+// only reports, and `doctor --json` is for a program: both end 0. `doctor` for a person
+// ends 1 here: this fixture always has a command to run (hooks that aren't written).
 function diagnostic(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...(args[0] === "status" ? ["--require", guard] : []), cli, ...args], {
@@ -355,7 +355,7 @@ function diagnostic(args: string[]): Promise<string> {
       stderr += b;
     });
     child.on("error", reject);
-    const expected = args[0] === "doctor" ? 1 : 0;
+    const expected = args[0] === "doctor" && !args.includes("--json") ? 1 : 0;
     child.on("close", (code) =>
       code === expected && !stderr ? resolve(stdout) : reject(new Error(`${code}: ${stderr}`)),
     );

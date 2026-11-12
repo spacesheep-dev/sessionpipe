@@ -1527,9 +1527,8 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
       launcher: { node_ok: true, version: VERSION },
       warnings: [],
     });
-    // With --json too the exit code says there is something to fix.
-    expect(process.exitCode).toBe(1);
-    process.exitCode = undefined;
+    // --json exits 0 whatever it found, as it always has: a program reads `warnings`.
+    expect(process.exitCode).toBeUndefined();
 
     // The sink takes events again: nothing left to fix, and the exit code says so.
     writeConfig({ ...cfg(), sinks: cfg().sinks.map(({ paused: _paused, ...sink }) => sink) } as never);
@@ -2552,6 +2551,9 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     const fullPage = await run("doctor");
     expect(fullPage.text).toMatch(row("✗", "disk", "full: 5 MB left"));
     expect(fixes(fullPage)).toEqual(freeUp);
+    // Full now: there is something for the person to do, and the exit code says so.
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
     expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
       "this computer's disk is full: 5 MB left",
     ]);
@@ -2571,7 +2573,14 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     );
     const was = await run("doctor");
     expect(was.text).toMatch(row("✗", "disk", "was full 12 min ago, by the background service's log"));
-    expect(fixes(was)).toEqual(freeUp);
+    // It is said and counted, with nothing to type: the disk has room, and an hour of
+    // the log saying so must not fail a script that reads the exit code.
+    expect(was.lines[0]).toBe("! 1 thing needs attention");
+    expect(fixes(was)).toEqual([
+      "To fix",
+      "  1. This computer's disk was full 12 min ago, and events or messages from then may not have been saved. It has room now: nothing to type.",
+    ]);
+    expect(process.exitCode).toBeUndefined();
     expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([
       expect.stringMatching(/^this computer's disk .*was full 12 min ago, by the background service's log$/),
     ]);
@@ -3018,6 +3027,101 @@ describe.skipIf(process.platform === "win32")(
     });
   },
 );
+
+describe.skipIf(process.platform === "win32")("doctor's exit code", () => {
+  /** This computer with its hooks written and nothing else to say. */
+  async function hooked(): Promise<void> {
+    put(path.join(home, ".claude", "settings.json"), {});
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([]);
+    await run("install", "--claude-code", "--backfill", "0");
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    onPlatform("darwin");
+  }
+  /** The hook's eight timed runs take `ms` each by this clock: no real hook is timed. */
+  function hookTakes(ms: number): void {
+    let tick = 0n;
+    vi.spyOn(process.hrtime, "bigint").mockImplementation(() => (tick += BigInt(ms) * 1_000_000n));
+  }
+
+  it("a slow hook is said and counted, and is nothing to run: the code stays 0 however loaded the machine", async () => {
+    await hooked();
+    hookTakes(400);
+    const slow = await run("doctor");
+    expect(slow.lines[0]).toBe("! 1 thing needs attention");
+    expect(slow.text).toContain("  ! hook speed          400 ms each (95 in 100 under 400 ms)\n");
+    expect(fixes(slow)).toEqual([
+      "To fix",
+      "  1. Each hook takes 400 ms, which is Node starting up on this computer; agents wait that long many times a turn. With no sink above tier 0, fewer events are hooked.",
+    ]);
+    expect(process.exitCode).toBeUndefined();
+    // The same computer a moment later, with the hook quick again: the same code.
+    hookTakes(3);
+    const quick = await run("doctor");
+    expect(quick.lines[0]).toBe("✓ All good");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("a receiver that hasn't answered yet, and hooks an agent's own setting turns off: counted, nothing to run, 0", async () => {
+    await hooked();
+    hookTakes(3);
+    paired({ receivers: [{ url: "https://slow.test", machine: "m", token: "t", keys: [] }] });
+    const close = await daemon({
+      status: {
+        op: "status",
+        status: {
+          version: VERSION,
+          receivers: [
+            {
+              url: "https://slow.test",
+              polling: true,
+              last_poll: 1,
+              last_error: "fetch failed",
+              last_poll_age_ms: 300_000,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const waiting = await run("doctor");
+      expect(waiting.lines[0]).toBe("! 1 thing needs attention");
+      expect(fixes(waiting)).toEqual([
+        "To fix",
+        "  1. slow.test hasn't answered for 5 min. Messages wait there, and the background service keeps trying: nothing to type unless it stays this way.",
+      ]);
+      expect(process.exitCode).toBeUndefined();
+      vi.spyOn(claudeCode, "installed").mockReturnValue([
+        { file: path.join(home, ".claude", "settings.json"), state: "inactive", note: "hooks are off" },
+      ]);
+      const off = await run("doctor");
+      expect(off.lines[0]).toBe("! 2 things need attention");
+      expect(fixes(off).filter((l) => l.startsWith("       "))).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it("one thing with a command to run makes it 1, beside any number with none; --json is 0 all the same", async () => {
+    await hooked();
+    hookTakes(400);
+    writeConfig({
+      ...cfg(),
+      sinks: [{ name: "kc", url: "https://kc.invalid", tier: 0, paused: "HTTP 401" }],
+    } as never);
+    const d = await run("doctor");
+    expect(d.lines[0]).toBe("! 2 things need attention");
+    expect(fixes(d).filter((l) => l.startsWith("       "))).toEqual(["       sessionpipe sink test kc"]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(j.warnings).toEqual([expect.stringContaining("the harness waits 400 ms per hook")]);
+    expect(process.exitCode).toBeUndefined();
+    // `status` never sets it either: it says what it sees and leaves the rest to doctor.
+    expect((await run("status")).lines[0]).toBe("! 1 thing needs attention");
+    expect(process.exitCode).toBeUndefined();
+  });
+});
 
 describe.skipIf(process.platform === "win32")("words from outside, on the pages", () => {
   const BEL = String.fromCharCode(7);
