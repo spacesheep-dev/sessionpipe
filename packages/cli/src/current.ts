@@ -18,7 +18,10 @@
 // A restart never cuts short what the service itself holds (a turn it runs, a message in
 // hand, a prompt held for an answer): it is given a moment, and past that the service
 // restarts by itself when it is done. A session someone is working in is not held back
-// for: the service remembers it is mid-turn across the restart (daemon.ts).
+// for: the service remembers it is mid-turn across the restart (daemon.ts). A service
+// from before 0.15 doesn't remember, so what it knows of who is mid-turn is written down
+// for it before it is replaced (`seed`); and where such a one restarts itself it waits
+// for those sessions by its own older rule, which is said as it is: waiting, not failed.
 //
 // Everything that touches the computer comes in as a dependency, so each path is a test.
 import type { ServiceState } from "@sessionpipe/core/service";
@@ -77,6 +80,9 @@ export interface CurrentDeps {
   look: () => ServiceState | null;
   /** Replace the service with one that runs this copy; throws with why it couldn't. */
   place: () => void;
+  /** Leave the sessions that are mid-turn for the service that starts next (store.ts
+   *  `writeTurnsSeed`): a service too old to write that down itself is about to be stopped. */
+  seed: (sessions: string[]) => void;
   /** The version of the copy in a dist folder, and that folder's npm prefix if it has one. */
   versionAt: (distDir: string) => string | null;
   globalPrefix: (distDir: string) => string | null;
@@ -214,6 +220,13 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
             : `The background service is busy: ${still}. Moving it onto this copy now would cut that short; when it is done, run \`sessionpipe update\` once more.`,
         };
       }
+      // A service from before 0.15 writes nothing down when it is stopped, and the one
+      // that replaces it would copy a session it didn't know was mid-turn. It is told
+      // apart by what it answers: only one that remembers says which copy it is.
+      if (running && !(await d.health())?.copy) {
+        const turns = running.mid_turn ?? [];
+        if (turns.length) d.seed(turns);
+      }
       try {
         d.place();
       } catch (e) {
@@ -260,12 +273,22 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       const will = await d.restart();
       if (will) running = await until(d, d.settleMs ?? 25_000, d.status, (s) => s?.version === target);
       if (running?.version !== target) {
-        const still = running ? holding(running) : null;
-        if (will && still)
+        // It took the restart and waits for something: that ends by itself. What it
+        // waits for is said as it is. One from before 0.15 waits for every session on
+        // this computer to end its turn, which is not a failure of this command's.
+        if (will && running?.busy)
           return {
             state: "waiting",
             version: target,
-            said: `The background service is busy: ${still}. It restarts by itself onto sessionpipe ${target} when that is done: nothing more to type.`,
+            said: holding(running)
+              ? `The background service is busy: ${running.busy}. It restarts by itself onto sessionpipe ${target} when that is done: nothing more to type.`
+              : `The background service still runs sessionpipe ${running.version}, which waits for the sessions on this computer to end their turn before it restarts. It restarts by itself onto sessionpipe ${target} when the one it waits for ends its turn: nothing more to type.`,
+          };
+        if (will && !running)
+          return {
+            state: "failed",
+            error: `the background service stopped to restart onto sessionpipe ${target} and doesn't answer`,
+            next: "sessionpipe doctor",
           };
         return {
           state: "failed",

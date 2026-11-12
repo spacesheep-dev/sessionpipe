@@ -59,7 +59,15 @@ import {
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
 import { installService } from "./control/pair.js";
-import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
+import {
+  controlState,
+  moveControlSecrets,
+  pairedCount,
+  parseMode,
+  readControl,
+  writeControl,
+  writeTurnsSeed,
+} from "./control/store.js";
 import { heardAgo, hostOf, isLive } from "./control/view.js";
 import { bringCurrent } from "./current.js";
 import { isToolsMode, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
@@ -1975,6 +1983,7 @@ async function update(): Promise<void> {
     restart: async () => (await ask(sock, { op: "restart" }, 2000))?.op === "ok",
     look: () => serviceLook(),
     place: () => void installService({ node, cli }),
+    seed: (sessions) => writeTurnsSeed(controlState(), sessions),
     versionAt,
     globalPrefix,
     same: samePath,
