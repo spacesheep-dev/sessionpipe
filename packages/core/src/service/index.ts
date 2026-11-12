@@ -364,6 +364,34 @@ export function serviceArgv(text: string): string[] | null {
   return [...unit.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => unsd(m[1] as string));
 }
 
+/** The environment a service file gives its process, as `serviceFiles` wrote it and as
+ *  a person may have added to it by hand: a plist's EnvironmentVariables, a unit's
+ *  `Environment=` lines (each assignment quoted or bare). SESSIONPIPE_SERVICE is among
+ *  them. Null when the text is neither file. */
+export function serviceEnvironment(text: string): Record<string, string> | null {
+  const plist = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(text)?.[1];
+  if (plist !== undefined)
+    return Object.fromEntries(
+      [...plist.matchAll(/<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g)].map((m) => [
+        unxml(m[1] as string),
+        unxml(m[2] as string),
+      ]),
+    );
+  if (!/^ExecStart=/m.test(text)) return null;
+  const env: Record<string, string> = {};
+  // One line may hold several assignments, and systemd lets the quotes go round all of
+  // one or only its value: `"A=x y"`, `A="x y"`, `A=x`.
+  for (const l of text.matchAll(/^Environment=(.*)$/gm))
+    for (const word of (l[1] as string).matchAll(/(?:"(?:[^"\\]|\\.)*"|[^\s"])+/g)) {
+      const pair = word[0]
+        .replace(/"((?:[^"\\]|\\.)*)"/g, (_quoted, inner: string) => inner.replace(/\\(.)/g, "$1"))
+        .replace(/%%/g, "%");
+      const eq = pair.indexOf("=");
+      if (eq > 0) env[pair.slice(0, eq)] = pair.slice(eq + 1);
+    }
+  return env;
+}
+
 /** A service file's ProgramArguments or ExecStart, read from disk; null when it can't be. */
 function argvOf(file: string): string[] | null {
   const text = textOf(file);
