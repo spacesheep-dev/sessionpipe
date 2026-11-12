@@ -79,6 +79,7 @@ import {
   sinkWithSecrets,
   storeLabel,
 } from "./secrets.js";
+import { shq, shqPath } from "./shell.js";
 import { clean, commands, failure, fold, makeUi, PLAIN, paint, span, table, type Ui } from "./style.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 import { overview, usage } from "./usage.js";
@@ -557,7 +558,7 @@ async function connect(): Promise<void> {
     writeConfig(after);
     const eff = Math.min(sink.tier, sink.max_tier ?? 3) as Tier;
     out(`  ✓ Sink ${sink.name}: tier ${eff}${old !== tier ? ` (was ${old})` : ""} — sends ${TIER_TEXT[eff]}`);
-  } else out(`  ! No sink for ${host}: \`sessionpipe sink add ${url} --token <key> --tier ${tier}\``);
+  } else out(`  ! No sink for ${host}: \`sessionpipe sink add ${shq(url)} --token <key> --tier ${tier}\``);
 
   // 4. Keys into the keychain, when this session has one unlocked.
   const store = bestStore();
@@ -594,9 +595,16 @@ async function reportClaudeAccounts(): Promise<void> {
       );
     else if (l.loggedIn === false)
       out(
-        `  ! Claude Code ${tilde(d)}: not signed in as this shell sees it — ${claudeControl.loginCommand(d)}${process.platform === "darwin" && process.env.SSH_CONNECTION ? " (over ssh a Mac's keychain login can't be read; log in at the screen)" : ""}`,
+        `  ! Claude Code ${tilde(d)}: not signed in as this shell sees it — \`${loginRun(d)}\`${process.platform === "darwin" && process.env.SSH_CONNECTION ? " (over ssh a Mac's keychain login can't be read; log in at the screen)" : ""}`,
       );
   });
+}
+
+/** The command that signs one Claude Code account in, to paste: the account's folder is
+ *  a word of it, quoted when a shell would read it as anything else. */
+function loginRun(dir: string): string {
+  const usual = path.resolve(dir) === path.resolve(os.homedir(), ".claude");
+  return usual ? "claude auth login" : `CLAUDE_CONFIG_DIR=${shqPath(dir)} claude auth login`;
 }
 
 /** `sessionpipe secrets [move <store>]`: where this machine's keys live. */
@@ -1075,9 +1083,9 @@ function pendingFor(s: SinkConfig): number {
  *  `sessionpipe control run` where no manager has it: it runs until the terminal closes. */
 function startService(look: ReturnType<typeof serviceLook>, receiver: string | undefined): string {
   if (look?.installed && look.manager === "launchd")
-    return `launchctl bootstrap gui/$(id -u) ${JSON.stringify(look.file)}`;
-  if (look?.installed) return `systemctl --user enable --now ${path.basename(look.file as string)}`;
-  return look && receiver ? `sessionpipe control pair ${receiver}` : "sessionpipe control run";
+    return `launchctl bootstrap gui/$(id -u) ${shq(look.file as string)}`;
+  if (look?.installed) return `systemctl --user enable --now ${shq(path.basename(look.file as string))}`;
+  return look && receiver ? `sessionpipe control pair ${shq(receiver)}` : "sessionpipe control run";
 }
 
 const HOOK_WORD = {
@@ -1153,7 +1161,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   } else if (wanted) {
     const look = serviceLook();
     const loaded = look?.loaded === true;
-    const log = tilde(path.join(state, "control", "daemon.log"));
+    const log = shqPath(path.join(state, "control", "daemon.log"));
     computer.rows.push({
       mark: "bad",
       label: "background service",
@@ -1281,7 +1289,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
     dirs.forEach((d, i) => {
       const l = logins[i] as (typeof logins)[number];
       const label = `Claude Code ${tilde(d)}`;
-      const login = claudeControl.loginCommand(d).replace(/`/g, "");
+      const login = loginRun(d);
       if (l.signedIn === false && control?.receivers.length)
         warnings.push(`Claude Code ${tilde(d)} isn't signed in from here: ${claudeControl.loginCommand(d)}`);
       if (l.signedIn === true) accounts.rows.push({ mark: "ok", label, value: "signed in" });
@@ -1359,7 +1367,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       todo.push({
         order: 3,
         say: "The background service stops when you log out of this computer. Keep it running (with sudo if refused):",
-        run: `loginctl enable-linger ${os.userInfo().username}`,
+        run: `loginctl enable-linger ${shq(os.userInfo().username)}`,
       });
     }
   }
@@ -1476,7 +1484,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       todo.push({
         order: 3,
         say: `${s.name} stopped taking events (${s.paused}); they wait on this computer. See what it answers now:`,
-        run: `sessionpipe sink test ${s.name}`,
+        run: `sessionpipe sink test ${shq(s.name)}`,
       });
   }
   if (!cfg.sinks.length)
@@ -1533,7 +1541,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       todo.push({
         order: 3,
         say: `${label} no longer knows this computer, so its messages can't arrive. Pair with it again:`,
-        run: `sessionpipe control pair ${r.url}`,
+        run: `sessionpipe control pair ${shq(r.url)}`,
       });
     } else if (err.startsWith("can't read this machine's token")) {
       messages.rows.push({

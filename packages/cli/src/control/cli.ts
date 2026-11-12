@@ -227,7 +227,7 @@ export async function controlMain(
               ? `  ✓ Sink ${new URL(url).host} now carries the key the receiver handed over.`
               : tier >= 2
                 ? `  ✓ Sink ${new URL(url).host} added at tier ${tier}.`
-                : `  ✓ Sink ${new URL(url).host} added (tier ${tier}: ${tier ? "tool activity" : "session state"}, no conversation text). \`sessionpipe sink add ${url} --tier 2\` sends transcripts too.`,
+                : `  ✓ Sink ${new URL(url).host} added (tier ${tier}: ${tier ? "tool activity" : "session state"}, no conversation text). \`sessionpipe sink add ${shq(url)} --tier 2\` sends transcripts too.`,
           );
         },
         folders,

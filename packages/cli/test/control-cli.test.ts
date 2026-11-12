@@ -276,6 +276,12 @@ describe("control pair", () => {
     out = [];
     await run("pair", RX, "--no-service", "--tier", "1");
     expect(said()).toContain("added (tier 1: tool activity, no conversation text)");
+    // A receiver's address a shell would act on is one quoted word of the command it is shown in.
+    writeConfig({ sinks: [], harnesses: {} });
+    out = [];
+    await run("pair", `${RX}/$(id)`, "--no-service");
+    const q = process.platform === "win32" ? '"' : "'";
+    expect(said()).toContain(`\`sessionpipe sink add ${q}${RX}/$(id)${q} --tier 2\` sends transcripts too.`);
     writeConfig({ sinks: [], harnesses: {} });
     await expect(run("pair", RX, "--no-service", "--tier", "nan")).rejects.toThrow(
       '--tier takes 0, 1, 2 or 3, not "nan"',

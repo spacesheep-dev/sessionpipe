@@ -2440,11 +2440,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     // The plist is there and launchd let go of it: it is started from its file.
     const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.test.plist");
     put(plist, "");
-    expect(fixes(await run("doctor"))).toEqual([
-      "To fix",
-      start,
-      `       launchctl bootstrap gui/$(id -u) ${JSON.stringify(plist)}`,
-    ]);
+    expect(fixes(await run("doctor"))).toEqual(["To fix", start, `       launchctl bootstrap gui/$(id -u) ${plist}`]);
 
     // launchd has it and nothing answers on the socket: its log is where to look.
     has = true;
@@ -3120,6 +3116,150 @@ describe.skipIf(process.platform === "win32")("doctor's exit code", () => {
     // `status` never sets it either: it says what it sees and leaves the rest to doctor.
     expect((await run("status")).lines[0]).toBe("! 1 thing needs attention");
     expect(process.exitCode).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("commands doctor prints for pasting", () => {
+  /** The commands under "To fix", as they would be pasted. */
+  const pasted = (r: { lines: string[] }) =>
+    fixes(r)
+      .filter((l) => l.startsWith("       "))
+      .map((l) => l.trim());
+  /** What a POSIX shell makes of a printed command: its words, with '…' and \\' read as
+   *  sh reads them and nothing expanded (shell.test.ts asks a real sh the same). */
+  function words(cmd: string): string[] {
+    const out: string[] = [];
+    let cur: string | null = null;
+    for (let i = 0; i < cmd.length; i++) {
+      const c = cmd[i] as string;
+      if (c === " ") {
+        if (cur !== null) out.push(cur);
+        cur = null;
+      } else if (c === "'") {
+        const end = cmd.indexOf("'", i + 1);
+        cur = (cur ?? "") + cmd.slice(i + 1, end);
+        i = end;
+      } else cur = (cur ?? "") + (c === "\\" ? cmd[++i] : c);
+    }
+    return cur === null ? out : [...out, cur];
+  }
+  const odd = "my box's $(touch pwned) dir";
+
+  it("a sink's name and a receiver's address are each one word, whatever is in them", async () => {
+    steadyHook();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    onPlatform("darwin");
+    writeConfig({
+      sinks: [{ name: odd, url: "https://kc.invalid", tier: 0, paused: "HTTP 401" }],
+      harnesses: {},
+    } as never);
+    const gone = "https://gone.test/$(id)?a=1&b=`x`";
+    paired({ receivers: [{ url: gone, machine: "m", token: "t", keys: [] }] });
+    const close = await daemon({
+      status: {
+        op: "status",
+        status: {
+          version: VERSION,
+          receivers: [
+            {
+              url: gone,
+              polling: false,
+              last_poll: 1,
+              last_error: "the receiver no longer knows this machine (401)",
+              last_poll_age_ms: 60_000,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const cmds = pasted(await run("doctor"));
+      expect(cmds).toEqual([
+        `sessionpipe sink test 'my box'\\''s $(touch pwned) dir'`,
+        `sessionpipe control pair '${gone}'`,
+      ]);
+      expect(words(cmds[0] as string)).toEqual(["sessionpipe", "sink", "test", odd]);
+      expect(words(cmds[1] as string)).toEqual(["sessionpipe", "control", "pair", gone]);
+    } finally {
+      await close();
+    }
+    // With no service to ask and none written, pairing again is what starts it: the same word.
+    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.test");
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error("not there");
+    });
+    expect(pasted(await run("doctor"))).toContain(`sessionpipe control pair '${gone}'`);
+  });
+
+  it("a folder with a space, a quote or a $ in it: the service's file, its log, an account's folder", async () => {
+    // A home nobody would choose, and one many have: "/Users/Mary Ann".
+    const oddHome = path.join(tmp, odd);
+    // Its state is kept somewhere else again, where no `~` shortens the path.
+    const oddState = path.join(tmp, "state of $(touch pwned)'s");
+    mkdirSync(oddHome);
+    vi.stubEnv("HOME", oddHome);
+    vi.stubEnv("USERPROFILE", oddHome);
+    vi.stubEnv("SESSIONPIPE_STATE", oddState);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(oddHome, ".claude"));
+    vi.spyOn(os, "homedir").mockReturnValue(oddHome);
+    // Two accounts not signed in: one in a folder a shell reads as it stands, one not.
+    const oddAccount = path.join(oddHome, ".claude-it's $(touch pwned).claude-second");
+    put(path.join(oddHome, ".claude", "settings.json"), {});
+    put(path.join(oddHome, ".claude-second", "settings.json"), {});
+    put(path.join(oddAccount, "settings.json"), {});
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.test");
+    steadyHook();
+    paired();
+    let loaded = false;
+    vi.mocked(execFileSync).mockImplementation((() => {
+      if (!loaded) throw new Error("not there");
+      return "";
+    }) as never);
+    onPlatform("darwin");
+    const plist = path.join(oddHome, "Library", "LaunchAgents", "org.sessionpipe.test.plist");
+    put(plist, "");
+    const start = pasted(await run("doctor"));
+    // The whole path, quoted: a `~` inside quotes would be a folder of that name.
+    const q = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
+    expect(start[0]).toBe(`launchctl bootstrap gui/$(id -u) ${q(plist)}`);
+    expect(words(start[0] as string)).toEqual(["launchctl", "bootstrap", "gui/$(id", "-u)", plist]);
+    // Under the home folder a `~` is enough, and the shell fills it in. The other folder
+    // is one word only inside quotes, where a `~` would not be filled in: the whole path.
+    const odder = `CLAUDE_CONFIG_DIR=${q(oddAccount)} claude auth login`;
+    expect(start.slice(1).sort()).toEqual([odder, "CLAUDE_CONFIG_DIR=~/.claude-second claude auth login"].sort());
+    expect(words(odder)).toEqual([`CLAUDE_CONFIG_DIR=${oddAccount}`, "claude", "auth", "login"]);
+    loaded = true;
+    const silent = pasted(await run("doctor"));
+    expect(silent[0]).toBe(`tail -n 20 ${q(path.join(oddState, "control", "daemon.log"))}`);
+    expect(words(silent[0] as string)).toEqual(["tail", "-n", "20", path.join(oddState, "control", "daemon.log")]);
+    // `connect` says the same sign-in command on its own line, quoted the same.
+    loaded = false;
+    const connected = await run("connect", "rx.invalid", "--no-service");
+    expect(connected.text).toContain(`not signed in as this shell sees it — \`${odder}\``);
+    expect(connected.text).toContain("— `CLAUDE_CONFIG_DIR=~/.claude-second claude auth login`");
+  });
+
+  it("an ordinary folder keeps its short form, and a user or a unit with a space in its name is one word", async () => {
+    put(path.join(home, ".claude", "settings.json"), {});
+    put(path.join(home, ".claude-second", "settings.json"), {});
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.test");
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    vi.spyOn(os, "userInfo").mockReturnValue({ username: "mary ann" } as ReturnType<typeof os.userInfo>);
+    steadyHook();
+    paired();
+    onPlatform("linux");
+    vi.mocked(execFileSync).mockImplementation(((cmd: string) => {
+      if (cmd === "loginctl") return "Linger=no\n";
+      throw new Error("inactive");
+    }) as never);
+    put(path.join(home, ".config", "systemd", "user", "org.sessionpipe.test.service"), "");
+    expect(pasted(await run("doctor"))).toEqual([
+      "systemctl --user enable --now org.sessionpipe.test.service",
+      "loginctl enable-linger 'mary ann'",
+      "CLAUDE_CONFIG_DIR=~/.claude-second claude auth login",
+    ]);
   });
 });
 
