@@ -296,6 +296,47 @@ describe("forks and aliases on disk", () => {
     );
     expect(readState(f).started).toEqual({ a: { permission: "read", model: "sonnet" }, b: { permission: "edits" } });
   });
+  it("state.json: runs that just ended and copies' stray runs, for the 90 seconds they decide anything", () => {
+    const f = path.join(tmp, "state", "control", "state.json");
+    const now = Date.parse("2026-11-12T10:00:00.000Z");
+    const ago = (ms: number) => new Date(now - ms).toISOString();
+    mkdirSync(path.dirname(f), { recursive: true });
+    for (const key of ["ended", "strays"] as const) {
+      writeFileSync(
+        f,
+        JSON.stringify({
+          [key]: {
+            "claude-code:now": ago(0),
+            "claude-code:edge": ago(90_000),
+            "claude-code:old": ago(90_001),
+            "claude-code:unparseable": "whenever",
+            "claude-code:not-a-time": 5,
+            "claude-code:nothing": null,
+          },
+        }),
+      );
+      // Only the times, and only those a transcript's write could still be weighed against.
+      expect(readState(f, now)).toEqual({
+        started: {},
+        modes: {},
+        parked: {},
+        mid_turn: {},
+        copies: {},
+        [key]: { "claude-code:now": ago(0), "claude-code:edge": ago(90_000) },
+      });
+      // None left, or not a map: the key is absent, as on a file that never had it.
+      expect(readState(f, now + 90_001)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: {} });
+      for (const bad of ["none", 7, null, {}]) {
+        writeFileSync(f, JSON.stringify({ [key]: bad }));
+        expect(readState(f, now)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: {} });
+      }
+    }
+    // Written as the daemon holds them, beside the rest.
+    const ended = { "claude-code:a": ago(1000) };
+    const strays = { "claude-code:b": ago(2000) };
+    writeState(f, { copies: {}, started: {}, modes: {}, parked: {}, mid_turn: {}, ended, strays });
+    expect(readState(f, now)).toMatchObject({ ended, strays });
+  });
   it("aliases.json: only entries with an id and a folder; `at` is optional; anything else is no map", () => {
     const f = path.join(tmp, "state", "control", "aliases.json");
     expect(readAliases(f)).toEqual({});

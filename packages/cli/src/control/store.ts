@@ -6,7 +6,10 @@
 //                               command runs (a failed write refuses it)
 //   state/control/acks.jsonl    acks not yet accepted by their receiver
 //   state/control/state.json    forks: which copy a message to a session goes to, and
-//                               the options each session the daemon started runs with
+//                               the options each session the daemon started runs with;
+//                               and, from a stop to the next start, what the daemon knew
+//                               only from having been told (sessions mid-turn, runs that
+//                               just ended)
 import {
   appendFileSync,
   chmodSync,
@@ -41,7 +44,7 @@ import {
   secretGet,
   secretSet,
 } from "../secrets.js";
-import { HOOKS_WORD_MS } from "./route.js";
+import { HOOKS_WORD_MS, stillRecent } from "./route.js";
 
 export interface PairedReceiver {
   /** The receiver's origin, as the person typed it. */
@@ -365,8 +368,22 @@ export interface DaemonState {
   /** Session ref → a turn was running in it, by its own hooks' word, when the daemon
    *  last stopped. Written at a stop and read at the next start, so a restart (an
    *  update's) doesn't forget it and copy a session a message should have waited for.
-   *  Read back pruned: only those heard from within HOOKS_WORD_MS. */
+   *  Read back pruned: only those heard from within HOOKS_WORD_MS. Empty again once the
+   *  daemon that read it has taken it up: what it says is true of a stop, not of a crash. */
   mid_turn: Record<string, MidTurn>;
+  /** Session ref → when a run of it was last known to have finished (ISO-8601), as the
+   *  daemon knew at its last stop: a run of its own whose process it saw close, or the
+   *  session's own end as its hooks reported it. What the transcript gained up to then
+   *  has no writer behind it (CONTROL.md §6, What counts as held), and a daemon that
+   *  forgot that across a restart answered the next message in a copy. Written and read
+   *  like `mid_turn`; read back pruned to the ends that still count (`stillRecent`).
+   *  Absent: none. */
+  ended?: Record<string, string>;
+  /** Session ref → when a run asked to copy it, and not known to have run anywhere else,
+   *  ended (ISO-8601): the session is held for 90 seconds after that, whatever end its
+   *  hooks reported meanwhile (§6). Carried with `ended`, which without it would account
+   *  for that run's writes and let the session be resumed. Absent: none. */
+  strays?: Record<string, string>;
 }
 
 /** A session mid-turn when the daemon stopped. */
@@ -383,6 +400,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
   const modes: Record<string, string> = {};
   const parked: Record<string, Parked> = {};
   const mid_turn: Record<string, MidTurn> = {};
+  let ended: Record<string, string> | undefined;
+  let strays: Record<string, string> | undefined;
   try {
     const j = JSON.parse(readFileSync(file, "utf8")) as {
       copies?: unknown;
@@ -391,6 +410,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
       modes?: unknown;
       parked?: unknown;
       mid_turn?: unknown;
+      ended?: unknown;
+      strays?: unknown;
     };
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
@@ -420,6 +441,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
             ...(typeof m.transcript === "string" ? { transcript: m.transcript } : {}),
           };
       }
+    ended = recentTimes(j.ended, now);
+    strays = recentTimes(j.strays, now);
     // The richer shape when it is there, the plain id map when it isn't.
     const from = j.copies_v2 && typeof j.copies_v2 === "object" ? j.copies_v2 : j.copies;
     if (from && typeof from === "object")
@@ -428,7 +451,17 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
         if (c) copies[k] = c;
       }
   } catch {}
-  return { copies, started, modes, parked, mid_turn };
+  return { copies, started, modes, parked, mid_turn, ...(ended ? { ended } : {}), ...(strays ? { strays } : {}) };
+}
+
+/** A map of session ref → ISO time as state.json keeps one (`ended`, `strays`): the
+ *  entries that are times and still recent, or nothing when there are none. */
+function recentTimes(v: unknown, now: number): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  if (v && typeof v === "object")
+    for (const [k, at] of Object.entries(v as Record<string, unknown>))
+      if (typeof at === "string" && stillRecent(Date.parse(at), now)) out[k] = at;
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Sessions that were mid-turn under a daemon too old to write that down itself (before
