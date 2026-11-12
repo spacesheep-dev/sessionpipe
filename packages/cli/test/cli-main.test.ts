@@ -3096,12 +3096,6 @@ describe.skipIf(process.platform === "win32")("commands doctor prints for pastin
     } finally {
       await close();
     }
-    // With no service to ask and none written, pairing again is what starts it: the same word.
-    vi.stubEnv("SESSIONPIPE_SERVICE_LABEL", "org.sessionpipe.test");
-    vi.mocked(execFileSync).mockImplementation(() => {
-      throw new Error("not there");
-    });
-    expect(pasted(await run("doctor"))).toContain(`sessionpipe control pair '${gone}'`);
   });
 
   it("a folder with a space, a quote or a $ in it: the service's file, its log, an account's folder", async () => {
@@ -3135,8 +3129,8 @@ describe.skipIf(process.platform === "win32")("commands doctor prints for pastin
     const start = pasted(await run("doctor"));
     // The whole path, quoted: a `~` inside quotes would be a folder of that name.
     const q = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
-    expect(start[0]).toBe(`launchctl bootstrap gui/$(id -u) ${q(plist)}`);
-    expect(words(start[0] as string)).toEqual(["launchctl", "bootstrap", "gui/$(id", "-u)", plist]);
+    // A service launchd should be running and isn't is `update`'s to put back: no path to paste.
+    expect(start[0]).toBe("sessionpipe update");
     // Under the home folder a `~` is enough, and the shell fills it in. The other folder
     // is one word only inside quotes, where a `~` would not be filled in: the whole path.
     const odder = `CLAUDE_CONFIG_DIR=${q(oddAccount)} claude auth login`;
@@ -3163,13 +3157,15 @@ describe.skipIf(process.platform === "win32")("commands doctor prints for pastin
     steadyHook();
     paired();
     onPlatform("linux");
-    vi.mocked(execFileSync).mockImplementation(((cmd: string) => {
+    vi.mocked(execFileSync).mockImplementation(((cmd: string, args: string[]) => {
       if (cmd === "loginctl") return "Linger=no\n";
+      // systemd answers for this user, and the unit is not active.
+      if (args.includes("show")) return "Version=255\n";
       throw new Error("inactive");
     }) as never);
     put(path.join(home, ".config", "systemd", "user", "org.sessionpipe.test.service"), "");
     expect(pasted(await run("doctor"))).toEqual([
-      "systemctl --user enable --now org.sessionpipe.test.service",
+      "sessionpipe update",
       "loginctl enable-linger 'mary ann'",
       "CLAUDE_CONFIG_DIR=~/.claude-second claude auth login",
     ]);

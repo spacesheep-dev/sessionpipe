@@ -3,9 +3,13 @@
  *  line a failure prints comes from here, from the code that raised it, and never from
  *  the words of a message: those may be a receiver's, a file's or npm's. */
 export class Refusal extends Error {
+  /** `inLine`: the message doesn't name the command itself. Where a failure is the one
+   *  line a pipe gets, the command is then said at the end of it, so a script, an ssh
+   *  session or an agent reads what to run next as a person at a terminal does. */
   constructor(
     message: string,
     readonly next: string,
+    readonly inLine = false,
   ) {
     super(message);
   }

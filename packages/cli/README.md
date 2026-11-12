@@ -262,7 +262,7 @@ receivers; and the last line says so. It does four things, in order:
    up to 40 seconds and says which receiver it waits for.
 
 When it can't get there it stops with one line that says what is wrong and one that
-says what to type next:
+says what to type next (into a pipe: one line, with `Next: <command>` at its end):
 
 | What stood in the way | What it says to run |
 |---|---|
@@ -289,16 +289,19 @@ working in yourself is not waited for: the service remembers across the restart 
 it is mid-turn, so a message to it still waits for its Stop.
 
 A service from before 0.15 has neither habit. It forgets who is mid-turn when it stops,
-so `update` writes that down for the new one before it replaces it. And where it
-restarts itself, it first waits for every session on the computer to end its turn:
-`update` says so, and that nothing more is to be typed.
+and it restarts itself only once no session on the computer is mid-turn, which on a busy
+computer never comes. So where launchd or systemd has it, `update` replaces it at once,
+after writing down for the new one who is mid-turn. One that someone runs by hand can
+only restart itself, by its older rule: `update` says so, and that nothing more is to
+be typed.
 
 Exit codes:
 
 - `0`: everything is current. Also when a receiver hasn't answered (the yellow last
   line), and when `SESSIONPIPE_NO_UPDATE_CHECK` is set (nothing was changed).
 - `3`: the service restarts by itself later, because it is busy with something of its
-  own, or is an older release waiting for a session to end its turn. Nothing to type.
+  own, or is an older release run by hand that waits for a session to end its turn.
+  Nothing to type.
 - `1`: it stopped, with what is wrong and the one command to run next.
 - `2`: a wrong argument.
 

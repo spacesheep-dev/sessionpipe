@@ -192,10 +192,11 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
     await command(args[0] ?? "help");
   } catch (e) {
     const about = helpFor(args);
+    const piped = !io.errTty;
     io.err(
       failure(
         makeUi({ isTTY: io.errTty, columns: io.columns, noColor }),
-        (e as Error).message,
+        e instanceof Refusal && e.inLine && piped ? `${e.message}. Next: ${e.next}` : (e as Error).message,
         e instanceof Refusal ? e.next : `sessionpipe ${about ? `${about} ` : ""}--help`,
       ),
     );
@@ -1210,7 +1211,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       todo.push({
         order: 1,
         say: "The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
-        run: `tail -n 20 ${tilde(path.join(state, "control", "daemon.log"))}`,
+        run: `tail -n 20 ${shqPath(path.join(state, "control", "daemon.log"))}`,
       });
     // Where launchd or systemd should have it (its file is there), `update` puts it back.
     // With no file nobody asked for a service here, and with no manager that can be asked
@@ -2012,7 +2013,7 @@ async function update(): Promise<void> {
     now: () => Date.now(),
     say: (step) => out(`  ${SIGN[step.mark]} ${step.text}`),
   });
-  if (r.state === "failed") throw new Refusal(r.error, r.next);
+  if (r.state === "failed") throw new Refusal(r.error, r.next, true);
   say("");
   // Green only when nothing is left to say: the service finishing by itself, and a
   // receiver that hasn't answered it, are yellow. The second is still exit 0: this
