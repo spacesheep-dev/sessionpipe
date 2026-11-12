@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // shell.ts and refusal.ts: a word of a command printed for a person to paste, and the
 // error that carries its own next command.
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { Refusal } from "../src/refusal.js";
-import { shq } from "../src/shell.js";
+import { shq, shqPath } from "../src/shell.js";
 
 describe("a word of a printed command", () => {
   it("is left alone when a shell would read it as it stands", () => {
@@ -25,6 +29,72 @@ describe("a word of a printed command", () => {
     expect(shq("C:\\Program Files\\x", "win32")).toBe('"C:\\Program Files\\x"');
     expect(shq('say "hi"', "win32")).toBe('"say ""hi"""');
     expect(shq("a b")).toBe(process.platform === "win32" ? '"a b"' : "'a b'");
+  });
+});
+
+describe("what a shell makes of it", () => {
+  // The words nobody chooses for a folder, and some people do.
+  const hostile = [
+    "/Users/Mary Ann/My Projects",
+    "it's",
+    "'; touch pwned; '",
+    "$(touch pwned)",
+    "`touch pwned`",
+    "a;touch pwned&&b|c>pwned",
+    ["$HOME $", "{PATH} !! \\ * ? ~"].join(""),
+    'say "hi"',
+    "-rf",
+    "",
+    "line\nbreak",
+  ];
+
+  it.runIf(process.platform !== "win32")("sh hands the program each word as it was, and runs nothing in it", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-shq-"));
+    try {
+      for (const word of hostile) {
+        // What a person pastes: the command with the word in it, read by a real sh.
+        const seen = execFileSync("/bin/sh", ["-c", `printf '%s|' first ${shq(word, "linux")} last`], {
+          cwd: dir,
+          encoding: "utf8",
+        });
+        expect(seen).toBe(`first|${word}|last|`);
+      }
+      expect(existsSync(path.join(dir, "pwned"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a file or folder in a printed command", () => {
+  it("keeps its short form under the home folder, where a shell reads that as it stands", () => {
+    const home = path.join(path.sep, "home", "me");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home);
+    try {
+      expect(shqPath(path.posix.join("/home/me", ".claude-second"), "linux")).toBe(
+        process.platform === "win32" ? "/home/me/.claude-second" : "~/.claude-second",
+      );
+      expect(shqPath("/var/log/x.log", "linux")).toBe("/var/log/x.log");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("is the whole path in quotes when a shell would act on it: a quoted ~ is not the home folder", () => {
+    const home = path.join(path.sep, "home", "me");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home);
+    try {
+      const odd = path.join(home, "My Claude's $(x)");
+      expect(shqPath(odd, "linux")).toBe(`'${odd.replace(/'/g, `'\\''`)}'`);
+      expect(shqPath(odd, "linux")).not.toContain("~");
+      expect(shqPath("C:\\Users\\Mary Ann\\.claude-second", "win32")).toBe('"C:\\Users\\Mary Ann\\.claude-second"');
+      // This platform's quotes by default.
+      expect(shqPath("/tmp/a b")).toBe(process.platform === "win32" ? '"/tmp/a b"' : "'/tmp/a b'");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
