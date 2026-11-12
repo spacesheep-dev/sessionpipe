@@ -8,62 +8,210 @@ name: Release
 # four packages go to npm, the version is tagged with a GitHub release, and a PR brings
 # the version bump back to main and merges itself once CI passes. Merges to main publish
 # nothing; production only ever moves forward along main.
+#
+# Who may do what, job by job. The repository's own build and tests run in jobs that can
+# only read (check, build). What goes to npm is the tarballs the build job packed from the
+# tree it tested, handed over as an artifact: the publish job checks out nothing, builds
+# nothing and runs no repository script, and it alone can ask for the token npm trusts.
+# The jobs that write to the repository (version, finish) run neither the build nor the tests.
+# Actions are pinned to a commit, with the release it is in the comment (Dependabot moves both).
 
 on:
   push:
     branches: [production]
 
-permissions:
-  contents: write
-  pull-requests: write
-  actions: write
-  id-token: write
-  packages: write
+permissions: {}
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Publish to npm
+  check:
+    name: Build and test what was pushed
     # On once the repo variable RELEASES_ENABLED=true is set and npm can take the
     # publish: each package lists this workflow as its trusted publisher (npmjs.com →
     # package → Settings → Trusted publisher, file release.yml), or the NPM_TOKEN secret
     # holds an npm automation token.
     if: vars.RELEASES_ENABLED == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
-      # Trusted publishing (OIDC) needs npm >= 11.5; Node 22 ships npm 10.
-      - run: npm install -g npm@11
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
+
+  version:
+    name: Version
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes release/v<version>
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+      finish: ${{ steps.plan.outputs.finish }}
+      bumped: ${{ steps.plan.outputs.bumped }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
       - name: Version
         id: plan
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           node scripts/release-version.mjs
-      - name: Publish to npm
-        if: steps.plan.outputs.publish == 'true'
-        run: npm run release
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
-      - name: Tags and GitHub release
-        if: steps.plan.outputs.finish == 'true'
+
+  build:
+    name: Build, test and pack the version
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm test
+      # The tarballs npm will get, packed from the tree the tests above just passed on.
+      - name: Pack
         run: |
           set -e
-          v="${{ steps.plan.outputs.version }}"
+          mkdir -p "$RUNNER_TEMP/pack"
+          for d in cli core receiver conformance; do
+            npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack" -w "packages/$d"
+          done
+          ls -l "$RUNNER_TEMP/pack"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: ${{ runner.temp }}/pack/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to npm
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # npm trusted publishing and provenance
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC) needs npm >= 11.5; Node 22 ships npm 10.
+      - run: npm install -g npm@11
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: pack
+      # Each tarball as it was packed, and only the ones npm does not have yet (a re-run
+      # after a publish that stopped half way sends the rest).
+      - name: Publish to npm
+        run: |
+          set -e
+          for d in cli core receiver conformance; do
+            case "$d" in cli) name=sessionpipe ;; *) name="sessionpipe-$d" ;; esac
+            file="pack/$name-$VERSION.tgz"
+            test -f "$file" || { echo "::error::$file was not packed"; exit 1; }
+            if [ "$(npm view "$name@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "$name@$VERSION is on npm already"
+            else
+              npm publish "$file" --access public
+            fi
+          done
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+  image:
+    name: Receiver image → GHCR
+    needs: [version, publish]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - name: Is there an image to build
+        id: has
+        run: |
+          if [ -f packages/receiver/Dockerfile ]; then echo "dockerfile=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has.outputs.dockerfile == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build the packages the image is made from
+        if: steps.has.outputs.dockerfile == 'true'
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: Receiver image → GHCR
+        if: steps.has.outputs.dockerfile == 'true'
+        run: |
+          set -e
+          docker build -t "ghcr.io/spacesheep-dev/sessionpipe-receiver:$VERSION" -t ghcr.io/spacesheep-dev/sessionpipe-receiver:latest -f packages/receiver/Dockerfile .
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push "ghcr.io/spacesheep-dev/sessionpipe-receiver:$VERSION"
+          docker push ghcr.io/spacesheep-dev/sessionpipe-receiver:latest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  finish:
+    name: Tags, GitHub release, and the bump back to main
+    needs: [version, build, publish]
+    # Also when there was nothing left to publish (build and publish skipped): a re-run
+    # finishes a release that reached npm and stopped before its tags or its PR.
+    if: ${{ !cancelled() && !failure() && needs.version.outputs.finish == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tags, the GitHub release, merging the PR
+      pull-requests: write
+      actions: write # starts CI on the release branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0
+      - name: Tags and GitHub release
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          v="$VERSION"
           tags=""
           for d in cli core receiver conformance; do
             t="$(node -p "require('./packages/$d/package.json').name")@$v"
@@ -74,26 +222,19 @@ jobs:
           if ! gh release view "v$v" >/dev/null 2>&1; then
             tar -czf "sessionpipe-schemas-v$v.tgz" -C schemas v1
             node -e "const c=require('fs').readFileSync('packages/core/CHANGELOG.md','utf8');process.stdout.write('## '+(c.split(/^## /m)[1]||''))" > notes.md
-            gh release create "v$v" "sessionpipe-schemas-v$v.tgz" --target "${{ steps.plan.outputs.sha }}" --title "v$v" --notes-file notes.md
+            gh release create "v$v" "sessionpipe-schemas-v$v.tgz" --target "$SHA" --title "v$v" --notes-file notes.md
           fi
         env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Receiver image → GHCR
-        if: steps.plan.outputs.publish == 'true' && hashFiles('packages/receiver/Dockerfile') != ''
-        run: |
-          set -e
-          v="${{ steps.plan.outputs.version }}"
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker build -t ghcr.io/spacesheep-dev/sessionpipe-receiver:$v -t ghcr.io/spacesheep-dev/sessionpipe-receiver:latest -f packages/receiver/Dockerfile .
-          docker push ghcr.io/spacesheep-dev/sessionpipe-receiver:$v
-          docker push ghcr.io/spacesheep-dev/sessionpipe-receiver:latest
       # A PR opened with this workflow's token starts no workflows of its own, so CI is
       # started on the branch by hand; its checks are what let the PR merge itself.
       - name: Version bump back to main
-        if: steps.plan.outputs.bumped == 'true'
+        if: needs.version.outputs.bumped == 'true'
         run: |
           set -e
-          v="${{ steps.plan.outputs.version }}"
+          v="$VERSION"
           b="release/v$v"
           pr="$(gh pr list --head "$b" --state open --json url --jq '.[0].url // ""')"
           if [ -z "$pr" ]; then
@@ -108,4 +249,5 @@ jobs:
           gh pr merge "$pr" --auto --rebase
           echo "::notice::v$v published; $pr brings the bump back to main"
         env:
+          VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

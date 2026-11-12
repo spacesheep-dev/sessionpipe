@@ -7,7 +7,8 @@
 //
 // Refuses when production is not on main, and when an earlier release's version bump has
 // not come back to main: releasing again from here would publish one version twice or
-// skip one. A re-run of the same push picks up the version commit it already pushed.
+// skip one. A re-run of the same push picks up the version commit it already pushed, and
+// only that: a release/v<version> branch holding anything else is refused.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -50,6 +51,10 @@ try {
   );
 }
 
+// The version commit is these paths and nothing else.
+const stageVersion = () =>
+  sh("git", ["add", "-A", ".changeset", "package-lock.json", ...DIRS.map((dir) => `packages/${dir}`)]);
+
 const pending = readdirSync(path.join(root, ".changeset")).filter((n) => n.endsWith(".md") && n !== "README.md");
 if (pending.length) {
   sh("npx", ["changeset", "version"]);
@@ -75,13 +80,21 @@ if (open.includes(branch)) {
   sh("git", ["fetch", "-q", "origin", branch]);
   const made = sh("git", ["rev-parse", "FETCH_HEAD"]);
   if (sh("git", ["rev-parse", `${made}^`]) !== base) fail(notBack(branch));
+  // Anyone who can push a branch can push one with this name. It is taken up only when it is,
+  // file for file, the version commit this run would make from the same push; anything else
+  // on it would be built, published and tagged as the release.
+  stageVersion();
+  if (sh("git", ["write-tree"]) !== sh("git", ["rev-parse", `${made}^{tree}`]))
+    fail(
+      `${branch} is not the version commit this push makes (its files differ). Delete the branch, then push main to production again.`,
+    );
   sh("git", ["reset", "-q", "--hard", made]);
 } else if (pending.length) {
   if (DIRS.every((dir) => onNpm(readJson(`packages/${dir}/package.json`).name, version)))
     fail(
       `v${version} is already on npm but main still carries the changesets that made it. Bring that version bump to main, then push main to production again.`,
     );
-  sh("git", ["add", "-A", ".changeset", "package-lock.json", ...DIRS.map((dir) => `packages/${dir}`)]);
+  stageVersion();
   sh("git", ["commit", "-q", "-s", "-m", `Release: version packages (${version})`]);
   sh("git", ["push", "-q", "origin", `HEAD:refs/heads/${branch}`]);
 }

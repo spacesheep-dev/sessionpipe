@@ -8,6 +8,8 @@ on:
   # starts no workflows of its own, and these checks are what let that PR merge.
   workflow_dispatch:
 
+# Actions are pinned to a commit, with the release it is in the comment (Dependabot moves both).
+# No job here writes to the repository, so none keeps the checkout's token.
 permissions:
   contents: read
 
@@ -25,8 +27,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -60,16 +64,28 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Every commit carries Signed-off-by
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        # Every commit, whoever its author says it is: Dependabot and the release workflow sign
+        # theirs off too. The one commit that needs no line is a merge that is nothing but its
+        # two parents put together (GitHub's "Update branch"): it carries nobody's work. A merge
+        # with a conflict resolved or a change added by hand is somebody's, and is signed off.
         run: |
           set -e
-          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
           missing=0
-          for sha in $(git rev-list --no-merges "$range"); do
-            case "$(git log -1 --format=%ae "$sha")" in *dependabot*|*github-actions*) continue;; esac
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            parents="$(git log -1 --format=%P "$sha")"
+            if [ "$(echo "$parents" | wc -w)" -eq 2 ] \
+              && merged="$(git merge-tree --write-tree $parents 2>/dev/null)" \
+              && [ "$merged" = "$(git rev-parse "$sha^{tree}")" ]; then
+              continue
+            fi
             if ! git log -1 --format=%B "$sha" | grep -qi '^Signed-off-by: .\+<.\+@.\+>'; then
               echo "::error::commit $sha has no Signed-off-by line (git commit -s)"
               missing=1
@@ -82,18 +98,21 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
       - name: buf breaking against the base, so a change on the wire is additive (spec/VERSIONING.md)
         working-directory: proto
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          base="${{ github.event.pull_request.base.sha }}"
+          base="$BASE"
           if git cat-file -e "$base:proto/buf.yaml" 2>/dev/null; then
             ../node_modules/.bin/buf breaking --against "../.git#ref=$base,subdir=proto"
           else
@@ -105,9 +124,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: spec/*.md changed → conformance/ or schemas/ changed too
         run: |
           base="${{ github.event.pull_request.base.sha }}"
@@ -125,9 +145,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: packages/core/src/adapters/ changed → conformance/harness/ or packages/core/test/ changed too
         run: |
           base="${{ github.event.pull_request.base.sha }}"
