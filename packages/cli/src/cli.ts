@@ -166,16 +166,6 @@ function forPeople(a: readonly string[], tty: boolean): boolean {
   return true;
 }
 
-/** A command that stops with what is wrong and the one command to run next. */
-export class Refusal extends Error {
-  constructor(
-    message: string,
-    readonly next: string,
-  ) {
-    super(message);
-  }
-}
-
 /** Run one command: `argv` is what follows `sessionpipe`; `io` is this process by default. */
 export async function main(argv: string[], io: Io = processIo()): Promise<void> {
   const noColor = argv.includes("--no-color");
