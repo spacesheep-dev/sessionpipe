@@ -190,7 +190,12 @@ export interface UpdaterDeps {
   latest: () => Promise<string>;
   /** The version of the copy on disk. */
   installed: () => Promise<string | null>;
-  install: (version: string) => Promise<{ ok: true; ms: number; hooks?: string } | { ok: false; error: string }>;
+  install: (
+    version: string,
+  ) => Promise<
+    | { ok: true; ms: number; hooks?: string; along?: string[]; others?: { dir: string; error: string }[] }
+    | { ok: false; error: string }
+  >;
   daemon: Quiescent;
   /** Stop the daemon and come back on the code on disk. Doesn't return in production. */
   restart: (from: string, to: string) => Promise<void>;
@@ -384,6 +389,10 @@ export class AutoUpdater {
         return;
       }
       if (r.hooks) note = `; ${r.hooks}`;
+      // Another copy on this computer (the one a person types) that couldn't be brought
+      // along: `sessionpipe doctor` there says so, and `sessionpipe update` there fixes it.
+      for (const dir of r.along ?? []) this.d.log(`update: the copy in ${dir} was brought to ${target} too`);
+      for (const o of r.others ?? []) this.d.log(`update: the copy in ${o.dir} was left as it is: ${o.error}`);
     }
     const ms = this.d.now() - t0;
     // Anything that came in over the socket while npm ran (a permission prompt) ends

@@ -200,7 +200,7 @@ describe("the page of every command", () => {
 describe("one command's usage", () => {
   it("a pipe gets the line whole, as before", () => {
     expect(usage(PLAIN, ["update"], [])).toBe(
-      "Usage: sessionpipe update [off|on] (install the latest now; off/on: the daemon's daily update)\n\n  -h, --help  Show help without running the command.",
+      "Usage: sessionpipe update [off|on] (bring this whole computer up to date now; off/on: the background service's daily update)\n\n  -h, --help  Show help without running the command.",
     );
     expect(usage(PLAIN, ["nope"], [])).toBeUndefined();
   });

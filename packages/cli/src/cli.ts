@@ -58,8 +58,10 @@ import {
   type Trouble,
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
+import { installService } from "./control/pair.js";
 import { moveControlSecrets, pairedCount, parseMode, readControl, writeControl } from "./control/store.js";
 import { heardAgo, hostOf, isLive } from "./control/view.js";
+import { bringCurrent } from "./current.js";
 import { isToolsMode, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
 import { helpFor } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
@@ -68,7 +70,7 @@ import { readPool } from "./pool/index.js";
 import { Refusal } from "./refusal.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
-import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
+import { assertSetupVersion, cliPath, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import {
   bestStore,
   dropSinkSecrets,
@@ -80,8 +82,32 @@ import {
   storeLabel,
 } from "./secrets.js";
 import { shq, shqPath } from "./shell.js";
-import { clean, commands, failure, fold, makeUi, PLAIN, paint, span, table, type Ui } from "./style.js";
-import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
+import {
+  clean,
+  commands,
+  failure,
+  fold,
+  makeUi,
+  mark,
+  PLAIN,
+  paint,
+  plain,
+  span,
+  table,
+  tint,
+  type Ui,
+} from "./style.js";
+import {
+  globalPrefix,
+  installEverywhere,
+  latestVersion,
+  prefixOf,
+  rearmHooks,
+  registryLatest,
+  samePath,
+  unwritable,
+  versionAt,
+} from "./update.js";
 import { overview, usage } from "./usage.js";
 import { applyWellKnown, readWellKnown } from "./wellknown.js";
 
@@ -138,6 +164,16 @@ function forPeople(a: readonly string[], tty: boolean): boolean {
   // `ask <agent> "<task>"` prints the agent's answer.
   if (a[0] === "ask") return ["on", "off", "status", "setup", undefined].includes(a[1]);
   return true;
+}
+
+/** A command that stops with what is wrong and the one command to run next. */
+export class Refusal extends Error {
+  constructor(
+    message: string,
+    readonly next: string,
+  ) {
+    super(message);
+  }
 }
 
 /** Run one command: `argv` is what follows `sessionpipe`; `io` is this process by default. */
@@ -400,7 +436,7 @@ function rehook(cfg: Config, wasLean: boolean): void {
     // second run would find nothing to rewrite.
     const why = (e as Error).message.replace(/; this command would install .*$/s, "");
     out(
-      `  The hooks need rewriting now and were left alone: ${why}. Rewrite them with the newer sessionpipe's \`install\`, or with this one's \`sessionpipe install --allow-downgrade\`.`,
+      `  The hooks need rewriting now and were left alone: ${why}. \`sessionpipe update\` brings this copy up to date and rewrites them.`,
     );
     return;
   }
@@ -1083,15 +1119,6 @@ function pendingFor(s: SinkConfig): number {
   return pending;
 }
 
-/** The command that starts a service that isn't loaded, as this platform spells it.
- *  `sessionpipe control run` where no manager has it: it runs until the terminal closes. */
-function startService(look: ReturnType<typeof serviceLook>, receiver: string | undefined): string {
-  if (look?.installed && look.manager === "launchd")
-    return `launchctl bootstrap gui/$(id -u) ${shq(look.file as string)}`;
-  if (look?.installed) return `systemctl --user enable --now ${shq(path.basename(look.file as string))}`;
-  return look && receiver ? `sessionpipe control pair ${shq(receiver)}` : "sessionpipe control run";
-}
-
 const HOOK_WORD = {
   current: "hooked",
   stale: "hooks out of date",
@@ -1145,50 +1172,55 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   const wanted = !!control?.receivers.length || poolCfg.on || control?.ask === true;
   if (health && !health.running)
     warnings.push("the control daemon is not running or not responding; polling is stopped");
+  // The copy the service's file names: the same one a person types, or another install.
+  const look = wanted || live ? serviceLook() : null;
+  const mine = cliPath(distDir);
+  const theirs = look?.argv?.[1] && !samePath(look.argv[1], mine) ? path.dirname(look.argv[1]) : null;
+  // What one `sessionpipe update` puts right: a copy or hooks on another version than
+  // this command, a service launchd or systemd should be running and isn't.
+  const apart: string[] = [];
+  let down = false;
   if (live) {
     // A service from before it said its version is an old one.
     const runs = live.version ?? "an older release";
     const other = runs !== VERSION;
+    const where = theirs ? tilde(prefixOf(theirs) ?? theirs) : "";
     computer.rows.push({
-      mark: other ? "warn" : "ok",
+      mark: other ? "warn" : theirs ? "info" : "ok",
       label: "background service",
       value: other
-        ? `running sessionpipe ${runs}, and this command is ${VERSION}`
-        : `running${live.busy ? ` · busy with ${live.busy}` : ""}`,
+        ? `running sessionpipe ${runs}${theirs ? ` from another copy, in ${where}` : `, and this command is ${VERSION}`}`
+        : theirs
+          ? `running, from another copy kept at this version, in ${where}`
+          : `running${live.busy ? ` · busy with ${live.busy}` : ""}`,
     });
-    if (other)
-      todo.push({
-        order: 1,
-        say: `The background service runs sessionpipe ${runs} and this command is ${VERSION}. Bring both up to date:`,
-        run: "sessionpipe update",
-      });
+    if (other) apart.push(`the background service runs ${runs}${theirs ? ` from another copy (in ${where})` : ""}`);
   } else if (wanted) {
-    const look = serviceLook();
     const loaded = look?.loaded === true;
-    const log = shqPath(path.join(state, "control", "daemon.log"));
     computer.rows.push({
       mark: "bad",
       label: "background service",
       value: loaded
         ? "started but not answering"
         : look
-          ? `not loaded: ${look.manager} doesn't have it, so nothing starts it`
+          ? `not loaded: ${look.manager} doesn't have it`
           : "not running",
     });
     if (look && !loaded) warnings.push(`the background service isn't loaded: ${look.manager} doesn't have it`);
-    todo.push(
-      loaded
-        ? {
-            order: 1,
-            say: "The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
-            run: `tail -n 20 ${log}`,
-          }
-        : {
-            order: 1,
-            say: "The background service isn't running, so no message reaches this computer. Start it:",
-            run: startService(look, control?.receivers[0]?.url),
-          },
-    );
+    if (loaded)
+      todo.push({
+        order: 1,
+        say: "The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
+        run: `tail -n 20 ${tilde(path.join(state, "control", "daemon.log"))}`,
+      });
+    // Where launchd or systemd keeps it, `update` puts it back; elsewhere a person runs it.
+    else if (look) down = true;
+    else
+      todo.push({
+        order: 1,
+        say: "The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
+        run: "sessionpipe control run",
+      });
   } else
     computer.rows.push({
       mark: "info",
@@ -1238,7 +1270,10 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
           ? { mark: "warn", label: "hooks", value: hookTrouble(l) }
           : { mark: "ok", label: "hooks", value: `run sessionpipe ${l.version ?? VERSION}` },
       );
-      if (l.problems.length)
+      // `install` from an older copy would put newer hooks back; `update` brings this copy
+      // up first, then writes them.
+      if (l.version && l.version !== VERSION) apart.push(`the hooks run ${l.version}`);
+      else if (l.problems.length)
         todo.push({
           order: 2,
           say: `The hooks ${hookTrouble(l)}. Write them again from this copy:`,
@@ -1246,6 +1281,14 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
         });
     }
   }
+  if (down || apart.length)
+    todo.push({
+      order: 1,
+      say: `${down ? "The background service isn't running, so no message reaches this computer. " : ""}${
+        apart.length ? `This command is sessionpipe ${VERSION}, and ${apart.join(", and ")}. ` : ""
+      }One command puts it right:`,
+      run: "sessionpipe update",
+    });
   const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
   if (w)
     computer.rows.push({
@@ -1880,9 +1923,14 @@ function updateState(cfg: Config) {
   });
 }
 
-/** `sessionpipe update [off|on]`: install the latest release into this copy's prefix
- *  now, then have the daemon restart onto it once idle; or switch the daemon's daily
- *  update off or on (config.json `update_check`; the daemon reads it every ten minutes). */
+const SIGN = { ok: "✓", warn: "!", bad: "✗", info: "·", same: "=" } as const;
+
+/** `sessionpipe update`: leave this whole computer current, in one step (current.ts): the
+ *  copy typed, the copy the background service runs and the hooks all on the newest
+ *  release, the service running it and hearing from its receivers. `update off|on`
+ *  switches the service's own daily update (config.json `update_check`; it reads that
+ *  every ten minutes). Exit 0: everything is current. 3: the service finishes by itself
+ *  when what it holds is done. 1: what is wrong is said, with the one command to run next. */
 async function update(): Promise<void> {
   const sub = args[1];
   if (sub === "off" || sub === "on") {
@@ -1891,8 +1939,8 @@ async function update(): Promise<void> {
     writeConfig(cfg);
     return out(
       sub === "off"
-        ? "  ✓ The control daemon no longer checks npm or updates itself. `sessionpipe update` still updates by hand; `sessionpipe update on` undoes this."
-        : "  ✓ The control daemon checks npm once a day and installs a new release when it's idle.",
+        ? "  ✓ The background service no longer checks npm or updates by itself. `sessionpipe update` still updates this computer; `sessionpipe update on` undoes this."
+        : "  ✓ The background service checks npm once a day and updates this computer by itself.",
     );
   }
   // `update OFF` or `update of` is someone switching updates off: never install for them.
@@ -1900,48 +1948,56 @@ async function update(): Promise<void> {
     process.exitCode = 2;
     return out("usage: sessionpipe update [off|on]");
   }
-  if (process.env.SESSIONPIPE_NO_UPDATE_CHECK) return out("  update check is off (SESSIONPIPE_NO_UPDATE_CHECK)");
-  let latest: string;
-  try {
-    latest = await latestVersion();
-  } catch (e) {
-    return out(`  couldn't check npm: ${(e as Error).message}`);
-  }
-  if (!isNewer(latest, VERSION)) return out(`  sessionpipe ${VERSION} is current (npm latest: ${latest})`);
+  // From the npx cache there is nothing to update in place: the persistent copy is
+  // installed (or found) and takes over, as for `install` and `connect`.
+  if (viaNpx(distDir)) return rerunGlobally(args, out);
+  const control = readControl();
+  const harnesses = enabledHarnesses(readConfig().harnesses);
   const prefix = globalPrefix(distDir);
-  if (!prefix)
-    return out(
-      `  ${latest} is available (you run ${VERSION}), but this copy isn't a global npm install (npx, a checkout or a dev build): \`npm install -g sessionpipe@${latest}\` installs one.`,
-    );
-  out(`  ${latest} is available (you run ${VERSION}); installing into ${tilde(prefix)}…`);
-  const r = await installVersion(latest, {
-    node: process.execPath,
-    distDir,
-    harnesses: enabledHarnesses(readConfig().harnesses),
-  });
-  if (!r.ok) {
-    process.exitCode = 1;
-    return out(`  ✗ ${r.error}`);
-  }
-  out(`  ✓ sessionpipe ${latest} installed in ${(r.ms / 1000).toFixed(1)} s; ${r.hooks}`);
-  // The daemon still runs the old code: it restarts onto this copy when nothing is in hand.
+  const node = stableNode(process.execPath);
+  const cli = cliPath(distDir);
   const sock = socketPath(state);
-  const st = await ask(sock, { op: "status" }, 2000);
-  if (st?.op !== "status") return;
-  const running = (st.status as { version?: string }).version ?? "?";
-  if (running === latest) return;
-  const r2 = await ask(sock, { op: "restart" }, 2000);
-  if (r2?.op === "ok") out(`  The control daemon (${running}) restarts onto ${latest} as soon as nothing is in hand.`);
-  else
-    out(
-      `  The control daemon still runs ${running} and can't restart itself: ${
-        process.platform === "darwin"
-          ? `\`launchctl kickstart -k gui/${process.getuid?.() ?? "$(id -u)"}/org.sessionpipe.control\``
-          : process.platform === "linux"
-            ? "`systemctl --user restart sessionpipe-control.service`"
-            : "stop `sessionpipe control run` and start it again"
-      } moves it (a run in progress stops).`,
-    );
+  const r = await bringCurrent({
+    version: VERSION,
+    distDir,
+    node,
+    cli,
+    prefix,
+    unwritable: prefix ? unwritable(prefix) : null,
+    unasked: process.env.SESSIONPIPE_NO_UPDATE_CHECK ? "SESSIONPIPE_NO_UPDATE_CHECK is set" : null,
+    latest: async () => {
+      try {
+        return await latestVersion();
+      } catch (e) {
+        // fetch says only "fetch failed"; why is in its cause (ENOTFOUND, ECONNREFUSED).
+        const cause = (e as { cause?: { code?: string; message?: string; errors?: { code?: string }[] } }).cause;
+        const why = cause?.code ?? cause?.errors?.[0]?.code ?? cause?.message ?? (e as Error).message;
+        throw new Error(`${hostOf(registryLatest())} can't be reached (${why})`);
+      }
+    },
+    install: (v, others) => installEverywhere(v, { node: process.execPath, distDir, others, harnesses }),
+    rearm: () => rearmHooks({ node: process.execPath, distDir, harnesses }),
+    hooks: () => (usesLauncher() ? launcherState(VERSION).version : null),
+    harnesses,
+    wanted: !!control?.receivers.length || readPool().on || control?.ask === true,
+    status: serviceStatus,
+    health: () => askHealth(sock, 5000),
+    restart: async () => (await ask(sock, { op: "restart" }, 2000))?.op === "ok",
+    look: () => serviceLook(),
+    place: () => void installService({ node, cli }),
+    versionAt,
+    globalPrefix,
+    same: samePath,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    now: Date.now,
+    say: (step) => out(`  ${SIGN[step.mark]} ${step.text}`),
+  });
+  if (r.state === "failed") throw new Refusal(r.error, r.next);
+  say("");
+  const waiting = r.state === "waiting";
+  for (const l of fold(ui, `${plain(mark(ui, waiting ? "warn" : "ok"))} `, r.said))
+    say(tint(ui, waiting ? "yellow" : "green", tint(ui, "bold", l)));
+  if (waiting) process.exitCode = 3;
 }
 
 /** `sessionpipe titles [on|off]`: whether the worker asks a harness's own service for a

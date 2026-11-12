@@ -6,14 +6,12 @@
 // now sees it. With no daemon running, the same request runs against the façade in
 // this process (pool/index.ts), which writes pool.json and the secrets store; the
 // daemon reads those when it starts. One owner of the state at a time, never two.
-import { realpathSync } from "node:fs";
-import path from "node:path";
 import { stateDir, tilde } from "@sessionpipe/core";
 import { ask, type LocalReply, type LocalRequest, socketPath } from "../control/local.js";
 import { installService } from "../control/pair.js";
 import { type Imported, type PoolOutcome, runPoolRequest } from "../control/pool.js";
 import { Refusal } from "../refusal.js";
-import { stableNode } from "../runtime.js";
+import { cliPath, stableNode } from "../runtime.js";
 import { PLAIN, type Ui } from "../style.js";
 import { openPool, type Pool, type PoolStatus, summaryLine } from "./index.js";
 
@@ -43,15 +41,7 @@ const LOCAL_MS = 5_000;
 const DAEMON_DOWN =
   "  ! the daemon isn't running, so Claude Code can't reach Claude while the pool is on: `sessionpipe control run` (or `sessionpipe pool on` again to install the service)";
 
-/** The installed CLI by its real path, so the service outlives a reinstall's symlink. */
-export function cliPath(distDir: string): string {
-  const cli = path.join(distDir, "cli.js");
-  try {
-    return realpathSync(cli);
-  } catch {
-    return cli;
-  }
-}
+export { cliPath } from "../runtime.js";
 
 /** A delivered answer, from either side. */
 interface Done {

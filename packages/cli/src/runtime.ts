@@ -27,6 +27,16 @@ export function stableNode(exe: string): string {
   return exe;
 }
 
+/** The installed CLI by its real path, so a service outlives a reinstall's symlink. */
+export function cliPath(distDir: string): string {
+  const cli = path.join(distDir, "cli.js");
+  try {
+    return realpathSync(cli);
+  } catch {
+    return cli;
+  }
+}
+
 export function viaNpx(distDir: string): boolean {
   return /[\\/]_npx[\\/]/.test(distDir) || /[\\/]\.npm[\\/]/.test(distDir);
 }

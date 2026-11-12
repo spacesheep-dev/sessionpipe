@@ -434,6 +434,29 @@ describe("the daemon's auto-update", () => {
     expect(h.record()).toMatchObject({ pending: null, failed: null, updated: { from: "0.5.0", to: "0.6.0" } });
   });
 
+  it("says which other copy on this computer was brought along, and which was left as it is", async () => {
+    const h = harness(
+      {},
+      {
+        install: async () => ({
+          ok: true,
+          ms: 5,
+          hooks: "hooks re-armed for claude-code",
+          along: ["/home/me/.local/lib/node_modules/sessionpipe/dist"],
+          others: [{ dir: "/opt/shared/lib/node_modules/sessionpipe/dist", error: "npm install: EACCES" }],
+        }),
+      },
+    );
+    await h.u.tick();
+    expect(h.lines).toContain(
+      "update: the copy in /home/me/.local/lib/node_modules/sessionpipe/dist was brought to 0.6.0 too",
+    );
+    expect(h.lines).toContain(
+      "update: the copy in /opt/shared/lib/node_modules/sessionpipe/dist was left as it is: npm install: EACCES",
+    );
+    expect(h.lines.at(-1)).toMatch(/; restarting$/);
+  });
+
   it("never installs while busy: nothing happens until the daemon is idle", async () => {
     let busy: string | null = "1 message(s) in hand";
     const h = harness({}, { daemon: { busy: () => busy, pauseIntake: () => {}, resumeIntake: () => {} } });

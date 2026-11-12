@@ -127,7 +127,8 @@ vi.mock("../src/run.js", async (original) => ({
 const updates = vi.hoisted(() => ({
   latestVersion: vi.fn(async () => "9.9.9"),
   installedVersion: vi.fn(async () => "1.0.0"),
-  installVersion: vi.fn(async () => ({ ok: true as const, ms: 1 })),
+  installEverywhere: vi.fn(async () => ({ ok: true as const, ms: 1, hooks: "", rearmed: true })),
+  copyOnPath: vi.fn((): string | null => null),
 }));
 vi.mock("../src/update.js", async (original) => ({
   ...(await original<typeof import("../src/update.js")>()),
@@ -397,10 +398,19 @@ describe("control run", () => {
     expect(deps.off()).toBe("SESSIONPIPE_NO_UPDATE_CHECK is set");
     expect(await deps.latest()).toBe("9.9.9");
     expect(await deps.installed()).toBe("1.0.0");
-    expect(await deps.install("9.9.9")).toEqual({ ok: true, ms: 1 });
-    expect(updates.installVersion).toHaveBeenCalledWith(
+    expect(await deps.install("9.9.9")).toMatchObject({ ok: true, ms: 1 });
+    expect(updates.installEverywhere).toHaveBeenCalledWith(
       "9.9.9",
-      expect.objectContaining({ distDir: dist, harnesses: [] }),
+      expect.objectContaining({ distDir: dist, harnesses: [], others: [] }),
+    );
+    // Which copy this daemon is, and who starts it again (nobody, under a test): for `health`.
+    expect(daemon().deps.copy?.()).toEqual({ cli: path.join(dist, "cli.js"), via: null });
+    // The copy a person types, where the service's PATH finds another install: brought along.
+    updates.copyOnPath.mockReturnValueOnce("/home/me/.local/lib/node_modules/sessionpipe/dist");
+    await deps.install("9.9.9");
+    expect(updates.installEverywhere).toHaveBeenLastCalledWith(
+      "9.9.9",
+      expect.objectContaining({ others: ["/home/me/.local/lib/node_modules/sessionpipe/dist"] }),
     );
   });
 

@@ -850,7 +850,7 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
       expect(text).toContain(
         "The hooks need rewriting now and were left alone: refusing to downgrade sessionpipe: 99.0.0 is installed at",
       );
-      expect(text).toContain("or with this one's `sessionpipe install --allow-downgrade`");
+      expect(text).toContain("`sessionpipe update` brings this copy up to date and rewrites them.");
       expect(text).not.toContain("pass --allow-downgrade");
       expect(Object.keys(JSON.parse(readFileSync(settings, "utf8")).hooks)).not.toContain("PreToolUse");
       rmSync(dist, { recursive: true, force: true });
@@ -1585,7 +1585,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     expect(down.text).toMatch(/\n {2}! failed {3}installing 9\.9\.9 \d+ days ago: EACCES\n/);
     expect(down.lines.slice(down.lines.indexOf("To fix"))).toEqual([
       "To fix",
-      "  1. The background service isn't running, so no message reaches this computer. Start it:",
+      "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
       "       sessionpipe control run",
       "  2. The background service couldn't install sessionpipe 9.9.9 by itself. Do it now:",
       "       sessionpipe update",
@@ -2188,97 +2188,6 @@ describe("titles", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("update", () => {
-  it("off and on set the daemon's daily check", async () => {
-    expect((await run("update", "off")).text).toContain("✓ The control daemon no longer checks npm");
-    expect(cfg().update_check).toBe(false);
-    expect((await run("update", "on")).text).toContain("✓ The control daemon checks npm once a day");
-    expect(cfg().update_check).toBe(true);
-    vi.stubEnv("SESSIONPIPE_NO_UPDATE_CHECK", "1");
-    expect((await run("update")).lines).toEqual(["  update check is off (SESSIONPIPE_NO_UPDATE_CHECK)"]);
-    expect(latestVersion).not.toHaveBeenCalled();
-  });
-
-  it("any other word is a usage error: npm is never asked and nothing is installed", async () => {
-    vi.mocked(latestVersion).mockResolvedValue("99.0.0");
-    vi.mocked(globalPrefix).mockReturnValue(path.join(home, ".local"));
-    writeConfig({ sinks: [], harnesses: {}, update_check: true } as never);
-    for (const word of ["OFF", "of", "--off", "disable"]) {
-      expect((await run("update", word)).lines).toEqual(["usage: sessionpipe update [off|on]"]);
-      expect(process.exitCode).toBe(2);
-      process.exitCode = undefined;
-    }
-    expect(latestVersion).not.toHaveBeenCalled();
-    expect(installVersion).not.toHaveBeenCalled();
-    expect(cfg().update_check).toBe(true);
-  });
-
-  it("asks npm: unreachable, current, or newer but not a global install", async () => {
-    vi.mocked(latestVersion).mockRejectedValueOnce(new Error("ENOTFOUND"));
-    expect((await run("update")).lines).toEqual(["  couldn't check npm: ENOTFOUND"]);
-    vi.mocked(latestVersion).mockResolvedValue(VERSION);
-    expect((await run("update")).lines).toEqual([`  sessionpipe ${VERSION} is current (npm latest: ${VERSION})`]);
-    vi.mocked(latestVersion).mockResolvedValue("99.0.0");
-    expect((await run("update")).text).toContain(
-      `99.0.0 is available (you run ${VERSION}), but this copy isn't a global npm install (npx, a checkout or a dev build): \`npm install -g sessionpipe@99.0.0\` installs one.`,
-    );
-  });
-
-  it("installs the release, then has the daemon restart onto it — or says how to, per platform", async () => {
-    vi.mocked(latestVersion).mockResolvedValue("99.0.0");
-    vi.mocked(globalPrefix).mockReturnValue(path.join(home, ".local"));
-    writeConfig({ sinks: [], harnesses: { "claude-code": { enabled: true }, codex: { enabled: false } } } as never);
-    vi.mocked(installVersion).mockResolvedValue({ ok: false, ms: 10, stage: "npm", error: "npm install: EACCES" });
-    const failed = await run("update");
-    expect(failed.text).toContain(`99.0.0 is available (you run ${VERSION}); installing into `);
-    expect(failed.lines[1]).toBe("  ✗ npm install: EACCES");
-    expect(process.exitCode).toBe(1);
-    process.exitCode = undefined;
-    expect(installVersion).toHaveBeenCalledWith("99.0.0", {
-      node: process.execPath,
-      distDir: realDist,
-      harnesses: ["claude-code"],
-    });
-
-    vi.mocked(installVersion).mockResolvedValue({ ok: true, ms: 1234, hooks: "hooks re-armed for claude-code" });
-    const noDaemon = await run("update");
-    expect(noDaemon.lines[1]).toBe("  ✓ sessionpipe 99.0.0 installed in 1.2 s; hooks re-armed for claude-code");
-    expect(noDaemon.lines).toHaveLength(2);
-
-    let close = await daemon({ status: { op: "status", status: { version: "99.0.0" } } });
-    expect((await run("update")).lines).toHaveLength(2);
-    await close();
-    close = await daemon({ status: { op: "status", status: { version: "0.1.0" } }, restart: { op: "ok" } });
-    expect((await run("update")).lines[2]).toBe(
-      "  The control daemon (0.1.0) restarts onto 99.0.0 as soon as nothing is in hand.",
-    );
-    await close();
-
-    close = await daemon({ status: { op: "status", status: {} }, restart: { op: "none" } });
-    try {
-      onPlatform("darwin");
-      expect((await run("update")).lines[2]).toBe(
-        `  The control daemon still runs ? and can't restart itself: \`launchctl kickstart -k gui/${process.getuid?.()}/org.sessionpipe.control\` moves it (a run in progress stops).`,
-      );
-      const getuid = Object.getOwnPropertyDescriptor(process, "getuid") as PropertyDescriptor;
-      Object.defineProperty(process, "getuid", { value: undefined, configurable: true });
-      try {
-        expect((await run("update")).lines[2]).toContain("gui/$(id -u)/org.sessionpipe.control");
-      } finally {
-        Object.defineProperty(process, "getuid", getuid);
-      }
-      onPlatform("linux");
-      expect((await run("update")).lines[2]).toContain(
-        "`systemctl --user restart sessionpipe-control.service` moves it",
-      );
-      onPlatform("win32");
-      expect((await run("update")).lines[2]).toContain("stop `sessionpipe control run` and start it again moves it");
-    } finally {
-      await close();
-    }
-  });
-});
-
 // A Claude Code session id is a UUID; the adapter drops a payload with any other shape
 // and no transcript_path as another harness's (claude-code.ts notClaudeCode).
 const JOB_SESSION = "7c1e2d3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f";
@@ -2418,15 +2327,15 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
       if (!has) throw new Error("not there");
       return "";
     }) as never);
-    const start = "  1. The background service isn't running, so no message reaches this computer. Start it:";
+    // Where launchd or systemd keeps the service, `update` is what puts it back.
+    const start =
+      "  1. The background service isn't running, so no message reaches this computer. One command puts it right:";
 
-    // A Mac where launchd has no such service and no plist was written: pairing sets it up.
+    // A Mac where launchd has no such service and no plist was written.
     onPlatform("darwin");
     const never = await run("doctor");
-    expect(never.text).toMatch(
-      row("✗", "background service", "not loaded: launchd doesn't have it, so nothing starts it"),
-    );
-    expect(fixes(never)).toEqual(["To fix", start, "       sessionpipe control pair https://rx.invalid"]);
+    expect(never.text).toMatch(row("✗", "background service", "not loaded: launchd doesn't have it"));
+    expect(fixes(never)).toEqual(["To fix", start, "       sessionpipe update"]);
     expect(process.exitCode).toBe(1);
     const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
     expect(j.warnings).toEqual([
@@ -2436,14 +2345,14 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     // `status` says the same in its line, and leaves the command to doctor.
     const brief = await run("status");
     expect(said(brief, "This computer")).toMatch(
-      /^✗ \S+ \(sessionpipe 0\.0\.0\), background service: not loaded: launchd doesn't have it, so nothing starts it$/,
+      /^✗ \S+ \(sessionpipe 0\.0\.0\), background service: not loaded: launchd doesn't have it$/,
     );
     expect(brief.lines.at(-1)).toBe("  `sessionpipe doctor` says what to do about it.");
 
-    // The plist is there and launchd let go of it: it is started from its file.
+    // The plist is there and launchd let go of it: the same one command.
     const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.test.plist");
     put(plist, "");
-    expect(fixes(await run("doctor"))).toEqual(["To fix", start, `       launchctl bootstrap gui/$(id -u) ${plist}`]);
+    expect(fixes(await run("doctor"))).toEqual(["To fix", start, "       sessionpipe update"]);
 
     // launchd has it and nothing answers on the socket: its log is where to look.
     has = true;
@@ -2458,22 +2367,16 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
       "the control daemon is not running or not responding; polling is stopped",
     ]);
 
-    // systemd, with nobody paired (only `ask on` wants the service) and no unit: run by hand.
+    // systemd, with nobody paired (only `ask on` wants the service) and no unit.
     has = false;
     onPlatform("linux");
     paired({ receivers: [], ask: true });
     const byHand = await run("doctor");
-    expect(byHand.text).toMatch(
-      row("✗", "background service", "not loaded: systemd doesn't have it, so nothing starts it"),
-    );
-    expect(fixes(byHand)).toEqual(["To fix", start, "       sessionpipe control run"]);
-    // The unit is written and not active: enabled and started by its name.
+    expect(byHand.text).toMatch(row("✗", "background service", "not loaded: systemd doesn't have it"));
+    expect(fixes(byHand)).toEqual(["To fix", start, "       sessionpipe update"]);
+    // The unit is written and not active: the same.
     put(path.join(home, ".config", "systemd", "user", "org.sessionpipe.test.service"), "");
-    expect(fixes(await run("doctor"))).toEqual([
-      "To fix",
-      start,
-      "       systemctl --user enable --now org.sessionpipe.test.service",
-    ]);
+    expect(fixes(await run("doctor"))).toEqual(["To fix", start, "       sessionpipe update"]);
 
     // Every command of all those runs was a look: nothing was started, stopped or written.
     expect(asked.length).toBeGreaterThan(8);
@@ -2519,7 +2422,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
         );
         expect(fixes(other)).toEqual([
           "To fix",
-          `  1. The background service runs sessionpipe ${runs} and this command is ${VERSION}. Bring both up to date:`,
+          `  1. This command is sessionpipe ${VERSION}, and the background service runs ${runs}. One command puts it right:`,
           "       sessionpipe update",
         ]);
         expect(said(await run("status"), "This computer")).toMatch(
@@ -2791,7 +2694,7 @@ describe.skipIf(process.platform === "win32")("doctor: accounts", () => {
     expect(once.text).toMatch(row("!", "pool", "on · 2 accounts · had none to try 1 time in the last hour"));
     expect(fixes(once)).toEqual([
       "To fix",
-      "  1. The background service isn't running, so no message reaches this computer. Start it:",
+      "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
       "       sessionpipe control run",
       refused[0]?.replace("1.", "2."),
       refused[1],
@@ -2963,7 +2866,7 @@ describe.skipIf(process.platform === "win32")(
       ]);
       expect(fixes(await run("doctor"))).toEqual([
         "To fix",
-        "  1. The background service isn't running, so no message reaches this computer. Start it:",
+        "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
         "       sessionpipe control run",
         "  2. The background service couldn't install sessionpipe 9.9.9 by itself. Do it now:",
         "       sessionpipe update",
