@@ -727,6 +727,56 @@ describe("the service that keeps the daemon running", () => {
       expect(plist).toContain(`<key>SESSIONPIPE_CLAUDE</key><string>${path.join(bin, "claude")}</string>`);
   });
 
+  it("update keeps what the service file gave the service: only the program changes", () => {
+    const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.control.plist");
+    const unit = path.join(home, ".config", "systemd", "user", "sessionpipe-control.service");
+    const paired = "/Users/me/.nvm/versions/node/v22/bin:/usr/bin:/bin";
+    // As `control pair` left it, from the shell that paired; then a person added a line by hand.
+    installService({ node: "/n", cli: "/old/cli.js", env: { ...env, PATH: paired }, exec, platform: "darwin" });
+    writeFileSync(
+      plist,
+      readFileSync(plist, "utf8").replace(
+        "</dict>",
+        "<key>SESSIONPIPE_CLAUDE</key><string>/opt/claude &amp; co/claude</string></dict>",
+      ),
+    );
+    // `update` run through npx: its shell's PATH starts with npx's own folders.
+    const npx = { ...env, PATH: "/Users/me/.npm/_npx/abc/node_modules/.bin:/usr/bin:/bin" };
+    placeService({ node: "/n2", cli: "/new/cli.js", env: npx, exec, platform: "darwin" });
+    const after = readFileSync(plist, "utf8");
+    expect(after).toContain("<array><string>/n2</string><string>/new/cli.js</string>");
+    expect(after).toContain(
+      `<key>EnvironmentVariables</key><dict><key>SESSIONPIPE_SERVICE</key><string>launchd</string><key>PATH</key><string>${paired}</string><key>SESSIONPIPE_CLAUDE</key><string>/opt/claude &amp; co/claude</string></dict>`,
+    );
+    expect(after).not.toContain("_npx");
+    // The same for a unit, where the line was added the way systemd's own files have it.
+    installService({ node: "/n", cli: "/old/cli.js", env: { ...env, PATH: paired }, exec, platform: "linux" });
+    writeFileSync(
+      unit,
+      readFileSync(unit, "utf8").replace(
+        "Restart=on-failure",
+        "Environment=SESSIONPIPE_CLAUDE=/opt/claude/bin/claude\nRestart=on-failure",
+      ),
+    );
+    placeService({ node: "/n2", cli: "/new/cli.js", env: npx, exec, platform: "linux" });
+    const now = readFileSync(unit, "utf8");
+    expect(now).toContain('ExecStart="/n2" "/new/cli.js" "control" "run"');
+    expect(now).toContain(
+      `Environment=SESSIONPIPE_SERVICE=systemd\nEnvironment="PATH=${paired}"\nEnvironment="SESSIONPIPE_CLAUDE=/opt/claude/bin/claude"\n`,
+    );
+    expect(now).not.toContain("_npx");
+    // `control pair` again is a person choosing anew: the file takes that shell's PATH.
+    installService({ node: "/n2", cli: "/new/cli.js", env: { ...env, PATH: "/usr/bin" }, exec, platform: "linux" });
+    expect(readFileSync(unit, "utf8")).toContain('Environment="PATH=/usr/bin"');
+    // With no file to keep from (launchd had it, and the file was gone), or one that is no service file: this shell's.
+    rmSync(plist);
+    placeService({ node: "/n2", cli: "/new/cli.js", env: npx, exec, platform: "darwin" });
+    expect(readFileSync(plist, "utf8")).toContain(`<key>PATH</key><string>${npx.PATH}</string>`);
+    writeFileSync(plist, "not a plist");
+    placeService({ node: "/n2", cli: "/new/cli.js", env: npx, exec, platform: "darwin" });
+    expect(readFileSync(plist, "utf8")).toContain(`<key>PATH</key><string>${npx.PATH}</string>`);
+  });
+
   it("darwin: bootstraps into the gui domain, or the user domain when nobody is at the screen", () => {
     const r = installService({ node: "/n", cli: "/c.js", env, exec, platform: "darwin" });
     const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.control.plist");
