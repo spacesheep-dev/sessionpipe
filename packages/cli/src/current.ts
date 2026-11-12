@@ -9,10 +9,13 @@
 //      the same steps the service's own daily update takes).
 //   2. The hooks written again from this copy.
 //   3. The service made to run this copy: the same one a person types, so the two can't
-//      drift apart again. Where launchd or systemd has it under another copy, or
-//      doesn't have it at all, it is replaced (core's `installService`: the old one
-//      booted out, the new one started once it is gone). Where it runs this copy
-//      already, it is asked to restart itself.
+//      drift apart again. Where launchd or systemd has it under another copy, or should
+//      have it (its file is there) and nothing runs, it is replaced (core's
+//      `installService`: the old one booted out, the new one started once it is gone).
+//      Where it runs this copy already, and where someone runs it by hand (no manager
+//      has it: `pair --no-service`, tmux, a container), it is asked to restart itself
+//      over its socket. A service nobody asked for is never installed: with no service
+//      file and nothing running, the next step is `sessionpipe control run`.
 //   4. A look: it answers with the new version and is asking its receivers.
 //
 // A restart never cuts short what the service itself holds (a turn it runs, a message in
@@ -76,9 +79,11 @@ export interface CurrentDeps {
   health: () => Promise<Health | null>;
   /** Ask the running service to restart itself onto the copy on disk; true when it will. */
   restart: () => Promise<boolean>;
-  /** What launchd or systemd has; null where this sessionpipe has no service to manage. */
+  /** What launchd or systemd has; null where this sessionpipe has no service to manage,
+   *  or no manager that can be asked from here. */
   look: () => ServiceState | null;
-  /** Replace the service with one that runs this copy; throws with why it couldn't. */
+  /** Replace the service with one that runs this copy; throws with why it couldn't, also
+   *  where nothing here could start one. */
   place: () => void;
   /** Leave the sessions that are mid-turn for the service that starts next (store.ts
    *  `writeTurnsSeed`): a service too old to write that down itself is about to be stopped. */
@@ -201,7 +206,15 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     d.say({ mark: "info", text: "the background service isn't set up on this computer: nothing to restart" });
   else {
     let running = before;
-    if (look && (!look.installed || !look.loaded || theirs || !before)) {
+    // A manager has it now; and someone asked for a service: its file is there (also
+    // after a start that failed, which leaves the file and nothing loaded).
+    const has = look?.loaded === true;
+    const asked = look?.installed === true;
+    // The manager is what puts it on this copy where it has it now and it runs another
+    // copy, doesn't answer or has lost its file, and where it should have it and nothing
+    // runs. A daemon that answers and that no manager has is someone's own to run: it is
+    // asked to restart itself, and no service is installed that nobody asked for.
+    if (has ? theirs || !before || !asked : asked && !before) {
       // Give it a moment to finish what it holds; a turn of its own can take an hour.
       if (held) {
         d.say({ mark: "info", text: `the background service is busy (${held}): giving it a moment…` });
@@ -254,22 +267,28 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
             : "the background service is started",
       });
     } else if (!before) {
-      // No manager has it and nothing answers: only a person can start it.
+      // Nothing answers, and there is no service here to put back: no file for one, or
+      // no manager that can be asked. Only a person can start it.
       return {
         state: "failed",
-        error:
-          "the background service isn't running, and nothing on this computer starts it by itself (no launchd or systemd service for it here)",
+        error: "the background service isn't running, and nothing on this computer starts it by itself",
         next: "sessionpipe control run",
       };
     } else if (before.version !== target) {
-      // It runs this copy already (or was started by hand): it restarts itself.
+      // It runs this copy already, or someone runs it by hand: it restarts itself.
       const copy = (await d.health())?.copy;
       if (copy && !d.same(copy.cli, d.cli))
-        return {
-          state: "failed",
-          error: `the background service was started by hand from another copy (${copy.cli}) and runs sessionpipe ${before.version}: stop it where it runs, then start this one`,
-          next: "sessionpipe control run",
-        };
+        return copy.via === "launchd" || copy.via === "systemd"
+          ? {
+              state: "failed",
+              error: `the background service runs another copy (${copy.cli}) on sessionpipe ${before.version}, and ${copy.via} can't be asked from this shell to move it onto this one. Run this from a terminal you opened on this computer yourself`,
+              next: "sessionpipe update",
+            }
+          : {
+              state: "failed",
+              error: `the background service was started by hand from another copy (${copy.cli}) and runs sessionpipe ${before.version}: stop it where it runs, then start this one`,
+              next: "sessionpipe control run",
+            };
       const will = await d.restart();
       if (will) running = await until(d, d.settleMs ?? 25_000, d.status, (s) => s?.version === target);
       if (running?.version !== target) {
@@ -290,11 +309,19 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
             error: `the background service stopped to restart onto sessionpipe ${target} and doesn't answer`,
             next: "sessionpipe doctor",
           };
-        return {
-          state: "failed",
-          error: `the background service still runs sessionpipe ${before.version} and didn't restart onto ${target}`,
-          next: "sessionpipe update",
-        };
+        // One a manager has can be asked again. One that someone started is theirs to
+        // stop and start: that always puts it on the copy they type.
+        return has
+          ? {
+              state: "failed",
+              error: `the background service still runs sessionpipe ${before.version} and didn't restart onto ${target}`,
+              next: "sessionpipe update",
+            }
+          : {
+              state: "failed",
+              error: `the background service still runs sessionpipe ${before.version} and didn't restart onto ${target}. It was started by hand: stop it where it runs, then start it again`,
+              next: "sessionpipe control run",
+            };
       }
       d.say({ mark: "ok", text: `the background service restarted onto sessionpipe ${target}` });
     } else d.say({ mark: "ok", text: `the background service runs sessionpipe ${target}` });
