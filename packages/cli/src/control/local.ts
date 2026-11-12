@@ -45,6 +45,11 @@ export type LocalRequest =
   | { op: "status" }
   /** `sessionpipe update` installed a new copy: restart onto it once nothing is in hand. */
   | { op: "restart" }
+  /** `sessionpipe update`, just before it replaces the service: stop taking messages if,
+   *  and only if, nothing is held right now. `ok`: intake is paused and nothing is held
+   *  (the daemon lets go by itself after a minute if it is not stopped); `none`: something
+   *  is held, and nothing was paused. A daemon from before this closes the connection. */
+  | { op: "quiesce" }
   /** `sessionpipe doctor`: what the daemon can see that the shell asking may not (a
    *  sign-in kept in a Mac's login keychain, which an ssh shell can't read). */
   | { op: "health" }
