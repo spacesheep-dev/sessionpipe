@@ -23,13 +23,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DayKey, Passkey } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
+import { HOOKS_WORD_MS } from "../src/control/route.js";
 import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
 import { FakeReceiver, type Queued } from "./helpers/receiver.js";
+
+// Nothing here waits on real time, but each case signs with real keys and talks over a
+// real socket: on a busy machine that is not to be what fails it.
+vi.setConfig({ testTimeout: 30_000 });
 
 const SID = "3b6d4b30-20f0-4628-acdd-e3b0b37dccca";
 /** The id the stand-in gives a copy it makes. */
 const COPY = "c0000001-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
 const cc = (id: string) => `claude-code:${id}`;
+const MINUTE = 60_000;
 const unix = process.platform !== "win32"; // the daemon's socket is a Unix socket here
 
 let tmp: string;
@@ -147,6 +153,11 @@ async function hand(d: ControlDaemon, text: string, session = cc(SID)): Promise<
   return q;
 }
 const acksOf = (id: string) => rx.acks.filter((a) => a.id === id).map((a) => a.outcome);
+/** The message is acked `taken` and nothing more: it waits. */
+const taken = (id: string) =>
+  vi.waitFor(() => expect(acksOf(id)).toEqual(["taken"]), { timeout: 10_000, interval: 10 });
+/** The Stop hook of a session asks the daemon for a message, as its turn ends. */
+const stopHook = (session: string) => ask(sock, { op: "stop", session, active: false }, 2000);
 const finalAck = (id: string): Promise<Record<string, unknown>> =>
   vi.waitFor(
     () => {
@@ -332,6 +343,125 @@ describe.runIf(unix)("a run that has just ended, and a message after the restart
     const heard = iso(Date.now());
     await stop(second);
     expect(onFile()).toMatchObject({ mid_turn: {}, ended: { [cc(SID)]: heard }, strays: {} });
+  });
+});
+
+describe.runIf(unix)("a session mid-turn in its own window, and a message after the restart", () => {
+  const LAPSED = `${cc(SID).slice(0, 24)} was mid-turn before this daemon started and has said nothing for ten minutes: it is not taken to be mid-turn any more`;
+  /** The session begins a turn, the daemon is restarted a minute into it, and a message
+   *  for the session arrives: it waits for the turn's Stop. `heard`: when the session's
+   *  hooks last said anything to the daemon that stopped. */
+  async function restartedMidTurn(): Promise<{ d: ControlDaemon; q: Queued; heard: number }> {
+    written(SID, 10 * MINUTE);
+    const first = await daemon();
+    await event(cc(SID), "UserPromptSubmit");
+    const heard = Date.now();
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    await stop(first);
+    expect(onFile().mid_turn).toEqual({ [cc(SID)]: { at: iso(heard) } });
+    const d = await daemon();
+    expect(d.status().mid_turn).toEqual([cc(SID)]);
+    const q = await hand(d, "while you are at it");
+    await taken(q.id);
+    return { d, q, heard };
+  }
+
+  it("its Stop comes after the restart: the message is handed over there, and nothing is run", async () => {
+    const { d, q } = await restartedMidTurn();
+    const r = await stopHook(cc(SID));
+    expect(r).toMatchObject({ op: "block", id: q.id });
+    expect(String((r as { reason: string }).reason)).toContain("while you are at it");
+    expect(runs).toEqual([]);
+    // The turn goes on with the message under this daemon's eyes: it is mid-turn by
+    // what this daemon saw, however long it says nothing.
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    expect(d.status().mid_turn).toEqual([cc(SID)]);
+    expect(log).not.toContain(LAPSED);
+  });
+
+  it("its Stop came while no daemon listened: the message waits out the ten minutes since the session was last heard from, then goes as for a session that is not mid-turn", async () => {
+    // (The turn ended between the two daemons: its Stop hook found no socket.)
+    const { d, q, heard } = await restartedMidTurn();
+    await vi.advanceTimersByTimeAsync(heard + HOOKS_WORD_MS - Date.now() - 1000);
+    expect(acksOf(q.id)).toEqual(["taken"]);
+    expect(runs).toEqual([]);
+    expect(d.status().mid_turn).toEqual([cc(SID)]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(log).toContain(LAPSED);
+    expect(d.status().mid_turn).toEqual([]);
+    expect(await finalAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", reply: "did it" });
+    expect(ran()).toEqual([`resume ${SID}`]);
+  });
+
+  it("heard from meanwhile: the ten minutes count from then", async () => {
+    const { q, heard } = await restartedMidTurn();
+    await vi.advanceTimersByTimeAsync(4 * MINUTE);
+    await event(cc(SID), "PostToolUse");
+    const again = Date.now();
+    // Ten minutes after the last word the stopped daemon heard: the message waits on.
+    await vi.advanceTimersByTimeAsync(heard + HOOKS_WORD_MS - Date.now() + 1000);
+    expect(acksOf(q.id)).toEqual(["taken"]);
+    expect(log).not.toContain(LAPSED);
+    await vi.advanceTimersByTimeAsync(again + HOOKS_WORD_MS - Date.now() - 1000);
+    expect(acksOf(q.id)).toEqual(["taken"]);
+    expect(runs).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(log).toContain(LAPSED);
+    expect(await finalAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+  });
+
+  it("a turn of its own begun under this daemon: it is that turn's Stop the message waits for, as any message does", async () => {
+    const { d, q } = await restartedMidTurn();
+    // The Stop was missed and the person typed again.
+    await event(cc(SID), "UserPromptSubmit");
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    expect(log).not.toContain(LAPSED);
+    expect(acksOf(q.id)).toEqual(["taken"]);
+    expect(d.status().mid_turn).toEqual([cc(SID)]);
+    expect(await stopHook(cc(SID))).toMatchObject({ op: "block", id: q.id });
+    expect(runs).toEqual([]);
+  });
+
+  it("the clock is past the ten minutes before any timer is (a computer that slept): a message is not made to wait", async () => {
+    written(SID, 10 * MINUTE);
+    const first = await daemon();
+    await event(cc(SID), "UserPromptSubmit");
+    await stop(first);
+    const second = await daemon();
+    vi.setSystemTime(Date.now() + 11 * MINUTE);
+    expect(log).not.toContain(LAPSED);
+    const q = await hand(second, "after the sleep");
+    expect(await finalAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(ran()).toEqual([`resume ${SID}`]);
+  });
+
+  it("a daemon that stopped before the ten minutes were out lets go of nothing afterwards", async () => {
+    const first = await daemon();
+    await event(cc(SID), "UserPromptSubmit");
+    await stop(first);
+    const second = await daemon();
+    await stop(second);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    expect(second.status().mid_turn).toEqual([cc(SID)]);
+    expect(log).not.toContain(LAPSED);
+  });
+
+  it("a daemon that dies without a stop does not hand the last stop's words to the next start", async () => {
+    written(SID, 10 * MINUTE);
+    const first = await daemon();
+    await event(cc(SID), "UserPromptSubmit");
+    await stop(first);
+    expect(Object.keys(onFile().mid_turn ?? {})).toEqual([cc(SID)]);
+    // The next daemon takes it up, hears the turn end, and is killed: no stop of its own.
+    const killed = await daemon();
+    expect(onFile().mid_turn).toEqual({});
+    await event(cc(SID), "Stop");
+    // (Its socket stays behind in this process, so the one after it listens elsewhere.)
+    const third = await daemon(path.join(tmp, "next.sock"));
+    expect(killed.status().mid_turn).toEqual([]);
+    expect(third.status().mid_turn).toEqual([]);
+    const q = await hand(third, "after the crash");
+    expect(await finalAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
   });
 });
 

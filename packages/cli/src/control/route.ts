@@ -71,7 +71,18 @@ export const HELD: Record<Holder, (what: string) => string> = {
 };
 
 /** How long a session's own hooks are taken at their word that a turn is running in it,
- *  counted from the last thing they said: a session killed mid-turn never sends its Stop. */
+ *  counted from the last thing they said: a session killed mid-turn never sends its Stop.
+ *
+ *  It is also the one horizon of a turn remembered across the daemon's own restart
+ *  (daemon.ts `rememberTurns`, `takeUp`): what is written at a stop, what is read back at
+ *  the next start, and how long a message waits on a session that is mid-turn on the last
+ *  daemon's word alone, are all "heard from in the last ten minutes". Not the thirty
+ *  minutes a message waits for the Stop of a turn this daemon itself saw begin: across a
+ *  restart a Stop can come while no daemon listens, and then nothing ends the wait but
+ *  the horizon. Ten minutes of a message waiting for nothing is what a missed Stop costs
+ *  at most; thirty was the other choice, and its price was that. What ten costs instead:
+ *  a session more than ten minutes into one silent tool call is not remembered, and a
+ *  message for it after a restart goes the way it does for any session a process holds. */
 export const HOOKS_WORD_MS = 10 * 60_000;
 
 /** Is a run's end, or a copy's stray run (daemon.ts `strays`), still recent enough to
