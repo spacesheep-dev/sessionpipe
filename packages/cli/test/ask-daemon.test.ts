@@ -198,7 +198,7 @@ describe.runIf(unix)("sessionpipe ask against the daemon", () => {
     const r = await pending;
     expect(r.code).toBe(1);
     expect(r.out).toBe("");
-    expect(r.err).toMatch(/\nsessionpipe ask: the background service went away before codex answered\n$/);
+    expect(r.err).toMatch(/\nsessionpipe ask: the control daemon went away before codex answered\n$/);
   });
 
   it("no daemon on the socket: exit 1 and what to run", async () => {

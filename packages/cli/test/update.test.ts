@@ -544,7 +544,7 @@ describe("the daemon's auto-update", () => {
     expect(on).toMatchObject({ off: null, last_check: rec.checked_at, latest: "0.6.0", last_error: null });
     const noDaemon = updateSummary({ off: null, paired: false, rec: {} });
     expect(noDaemon.auto).toBe(false);
-    expect(noDaemon.off).toMatch(/^it runs in the background service, which isn't set up here/);
+    expect(noDaemon.off).toMatch(/^it runs in the control daemon, which isn't set up here/);
     const envOff = updateSummary({ off: null, paired: true, rec: { off: "SESSIONPIPE_NO_UPDATE_CHECK is set" } });
     expect(envOff.off).toMatch(/daemon's environment/);
   });

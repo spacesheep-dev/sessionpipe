@@ -200,7 +200,7 @@ async function askOnce(
     );
   else if (state === "asked") {
     endLine();
-    io.err(`sessionpipe ask: the background service went away before ${label} answered\n`);
+    io.err(`sessionpipe ask: the control daemon went away before ${label} answered\n`);
   }
   return code;
 }

@@ -151,10 +151,17 @@ describe("control pair", () => {
     expect(said()).toContain("Mode: safe for now. Run `sessionpipe control mode auto`");
     expect(said()).toContain(`Folders sessions may run in: ${project}`);
     expect(said()).toContain("Mode: safe (nothing that needs approval runs unattended)");
+    // Not at a terminal: the line a program that ran the pairing has always been given.
+    expect(out).toContain(
+      "  Daemon: not installed as a service (--no-service); run `sessionpipe control run` yourself",
+    );
+    expect(installService).not.toHaveBeenCalled();
+    // At a terminal it is said in the words of the rest of the page.
+    out = [];
+    await atTerminal("pair", "rx.test/", "--no-service", "--mode", "safe");
     expect(out).toContain(
       "  Background service: not installed as a service (--no-service); run `sessionpipe control run` yourself",
     );
-    expect(installService).not.toHaveBeenCalled();
   });
 
   it("run from the home folder with no folder named: a warning, and no folder at all", async () => {
@@ -169,6 +176,9 @@ describe("control pair", () => {
     expect(said()).toContain("Mode: auto (Claude Code's auto mode)");
     // The service is written through the stable node and the real cli.js path.
     expect(installService).toHaveBeenCalledWith({ node: expect.any(String), cli: path.join(dist, "cli.js") });
+    expect(out).toContain("  Daemon: launchd agent (stand-in)");
+    out = [];
+    await atTerminal("pair", RX, "--mode", "auto");
     expect(out).toContain("  Background service: launchd agent (stand-in)");
   });
 
@@ -215,9 +225,16 @@ describe("control pair", () => {
 
   it("hands the pairing the terminal it is at, so the link and the digits can be picked out there", async () => {
     writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [receiver] });
+    vi.mocked(pair).mockImplementationOnce(async (o) => {
+      o.say?.("      open:   the link, set for the terminal");
+      return readControl()!;
+    });
     await atTerminal("pair", RX, "--no-service");
     expect(pair).toHaveBeenLastCalledWith(expect.objectContaining({ url: RX, ui: terminal }));
-    // A caller that names no terminal is a pipe.
+    // A line the pairing has set for that terminal goes out as it is, not as a line to paint.
+    expect(shown).toEqual(["      open:   the link, set for the terminal"]);
+    expect(said()).not.toContain("open:");
+    // A caller that names no terminal is a pipe: the pairing writes the lines programs read.
     await run("pair", RX, "--no-service");
     expect(pair).toHaveBeenLastCalledWith(expect.objectContaining({ url: RX, ui: PLAIN }));
   });
@@ -314,6 +331,17 @@ describe("control mode, keys, off, status, help", () => {
     expect(said()).toContain("Mode stays auto.");
     expect(readControl()?.mode).toBe("auto");
     expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+    out = [];
+    // Why may end in what the receiver sent for a well-known file: it stays on its line.
+    vi.mocked(withoutInherit).mockResolvedValueOnce([
+      `couldn't check that https://rx.test knows inherit mode (Unexpected token '<', "<html>\n  ✓ Sessions you message now run in inherit mode" is not valid JSON)`,
+    ]);
+    await run("mode", "inherit");
+    expect(out[0]).toBe(
+      `  ✗ couldn't check that https://rx.test knows inherit mode (Unexpected token '<', "<html>   ✓ Sessions you message now run in inherit mode" is not valid JSON).`,
+    );
+    expect(out.filter((l) => l.startsWith("  ✓"))).toEqual([]);
     process.exitCode = 0;
     out = [];
     await run("mode", "inherit");

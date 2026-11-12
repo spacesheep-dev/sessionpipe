@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installLauncher, launcherScript } from "../src/launcher.js";
+import { Refusal } from "../src/refusal.js";
 import { VERSION } from "../src/run.js";
 import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "../src/runtime.js";
 
@@ -57,6 +58,20 @@ describe.skipIf(process.platform === "win32")("stableNode and viaNpx", () => {
 });
 
 describe.skipIf(process.platform === "win32")("assertSetupVersion", () => {
+  it("a refusal to downgrade names its own next command: the one that brings this copy up to date", () => {
+    writeFileSync(path.join(tmp, "hook.js"), "");
+    writeFileSync(path.join(tmp, "worker.js"), "");
+    installLauncher({ distDir: tmp, node: process.execPath, version: "99.0.0" });
+    let refused: unknown;
+    try {
+      assertSetupVersion(false);
+    } catch (e) {
+      refused = e;
+    }
+    expect(refused).toBeInstanceOf(Refusal);
+    expect((refused as Refusal).next).toBe("sessionpipe update");
+  });
+
   it("--allow-downgrade asks nothing", () => {
     vi.mocked(execFileSync).mockImplementation(() => {
       throw new Error("not asked");

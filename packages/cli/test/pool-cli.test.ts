@@ -20,6 +20,7 @@ import {
 import { openPool, type Pool, type PoolStatus, summaryLine } from "../src/pool/index.js";
 import { readPool } from "../src/pool/store.js";
 import type { PoolLimits } from "../src/pool/types.js";
+import { Refusal } from "../src/refusal.js";
 import { makeUi } from "../src/style.js";
 import { credential, type FakeAdapter, fakeAdapter, uuidOf } from "./helpers/pool-fake.js";
 
@@ -463,6 +464,10 @@ describe("sessionpipe pool, with no daemon running", () => {
     await expect(run(["add", "--login", "--code", "-"], { open: () => pool })).rejects.toThrow(
       "no sign-in is pending; run `sessionpipe pool add --login` first",
     );
+    // What to run next is the refusal's own, said by the code that refused.
+    await expect(run(["add", "--login", "--code", "-"], { open: () => pool })).rejects.toMatchObject({
+      next: "sessionpipe pool add --login",
+    });
     pool.beginLogin();
     secret = " \n";
     await expect(run(["add", "--login", "--code", "-"], { open: () => pool })).rejects.toThrow("no code was pasted");
@@ -500,6 +505,13 @@ describe("sessionpipe pool, with no daemon running", () => {
     expect(lines).toEqual([`  ✓ removed ${ids[1]}`, "  pool:     off · 2 accounts · 2 with room · serving Sheep"]);
     await expect(run(["remove", "nobody"], { open: () => pool })).rejects.toThrow("no pooled account is nobody");
     await expect(run(["remove"], { open: () => pool })).rejects.toThrow("pool remove takes an account id or email");
+    for (const sub of ["remove", "enable", "disable"]) {
+      const refused = await run([sub], { open: () => pool }).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(Refusal);
+      expect(refused).toMatchObject({ next: "sessionpipe pool" });
+    }
+    // A refusal in the pool's own words (which may be the vendor's) names no command.
+    expect(await run(["remove", "nobody"], { open: () => pool }).catch((e: unknown) => e)).not.toBeInstanceOf(Refusal);
     await expect(run(["order"], { open: () => pool })).rejects.toThrow("pool order takes every account");
     await expect(run(["order", ids[2]!], { open: () => pool })).rejects.toThrow(
       "the order must name every pooled account once",

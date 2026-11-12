@@ -19,7 +19,9 @@ import {
 import { KEY_TYPES, type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
 import type { Exec } from "@sessionpipe/core/service";
 import * as core from "@sessionpipe/core/service";
-import { PLAIN, tint, type Ui } from "../style.js";
+import { Refusal } from "../refusal.js";
+import { shq } from "../shell.js";
+import { clean, PLAIN, tint, type Ui } from "../style.js";
 import {
   askOn,
   type ControlConfig,
@@ -55,8 +57,12 @@ export interface PairOptions {
   accounts?: HarnessAccount[];
   /** How long expired codes are renewed for (default RENEW_FOR_MS). */
   renewFor?: number;
-  /** The terminal the lines are for: the link and the digits are picked out on one. */
+  /** Where the lines go. At a terminal the link and the digits stand each on a line of
+   *  their own; left out, or a pipe, the lines are the ones programs have always read. */
   ui?: Ui;
+  /** Writes a line already set for that terminal, colour and all (the link, the
+   *  digits). Left out: `out`. */
+  say?: (s: string) => void;
 }
 
 /** How long `control pair` keeps asking for fresh codes when nobody approves one. */
@@ -119,8 +125,9 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
   const sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const { control, rpId, open, inherit } = await discover(o.url, f);
   if (o.mode === "inherit" && !inherit)
-    throw new Error(
+    throw new Refusal(
       `${inheritRefused(o.url)}. Pair with --mode safe or --mode auto (\`sessionpipe control mode safe\` first, if this machine is in inherit already).`,
+      `sessionpipe control pair ${shq(o.url)} --mode safe`,
     );
   if (!o.token && !open)
     throw new Error(
@@ -187,29 +194,53 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
   };
   const host = new URL(o.url).host;
   const ui = o.ui ?? PLAIN;
+  const say = o.say ?? o.out;
+  /** The same command again, for this receiver: what to run when a pairing came to nothing. */
+  const again = `sessionpipe control pair ${shq(o.url)}`;
   const announce = (p: { url: string; check: string; until: number }) => {
     const spaced = /^\d{6}$/.test(p.check) ? `${p.check.slice(0, 3)} ${p.check.slice(3)}` : p.check;
+    const mins = Math.max(1, Math.round((p.until - Date.now()) / 60_000));
+    const good = `  This code is good for ${mins} minute${mins === 1 ? "" : "s"}; if it runs out, a fresh one appears here.`;
     o.out("");
     // The approval happens on whatever device holds the person's passkey, which is
     // rarely the machine being paired (a server may have no screen at all): say so, or
     // the "Touch ID" line reads as "do it here" (2026-10-02, four machines, one headless).
+    if (!ui.tty) {
+      // Not a terminal: a program started this and reads these lines, so they stay as
+      // they have always been, to the byte. sessionpipe-gui's setup page takes the link
+      // from the line that holds it and the digits from "digits too: 123456" or
+      // "enter:  123 456" (its server/setup/pairer.ts). control-pair.test.ts pins them.
+      o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one),`);
+      if (pollKey) {
+        o.out(`  open ${p.url} and enter:  ${spaced}`);
+        o.out("  then approve with that device's passkey (Touch ID, Face ID, a security key).");
+        o.out("  Pairing several machines? Run this on each one: every machine shows its own digits.");
+      } else {
+        o.out("  open this link and approve with that device's passkey (Touch ID, Face ID, a security key):");
+        o.out(`    ${p.url}`);
+        o.out(`  The page shows these digits too: ${p.check}`);
+      }
+      o.out(good);
+      o.out("");
+      return;
+    }
     o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one):`);
     o.out("");
     // The two things a person needs, each alone on its line: the link, and the digits.
-    o.out(`      open:   ${tint(ui, "cyan", p.url)}`);
+    // Both are the receiver's words, so they are cleaned before they are coloured.
+    say(`      open:   ${tint(ui, "cyan", clean(p.url))}`);
     if (pollKey) {
       // Open pairing: one address for everyone, and the digits are what the person types.
-      o.out(`      enter:  ${tint(ui, "bold", spaced)}`);
+      say(`      enter:  ${tint(ui, "bold", clean(spaced))}`);
       o.out("");
       o.out("  Then approve with that device's passkey (Touch ID, Face ID, a security key).");
       o.out("  Pairing several computers? Run this on each one: every one shows its own digits.");
     } else {
-      o.out(`      check:  ${tint(ui, "bold", spaced)}   (the page shows these digits too)`);
+      say(`      check:  ${tint(ui, "bold", clean(spaced))}   (the page shows these digits too)`);
       o.out("");
       o.out("  Then approve with that device's passkey (Touch ID, Face ID, a security key).");
     }
-    const mins = Math.max(1, Math.round((p.until - Date.now()) / 60_000));
-    o.out(`  This code is good for ${mins} minute${mins === 1 ? "" : "s"}; if it runs out, a fresh one appears here.`);
+    o.out(good);
     o.out("");
   };
   // A code lives ten minutes on the receiver. A person approving three headless
@@ -226,13 +257,15 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     if (!expired) {
       const r = await f(`${control}/pair?code=${encodeURIComponent(cur.code)}`, { headers: auth }).catch(() => null);
       if (!r) continue;
-      if (r.status === 404) throw new Error("the receiver lost the pairing; run `sessionpipe control pair` again");
+      if (r.status === 404)
+        throw new Refusal("the receiver lost the pairing; run `sessionpipe control pair` again", again);
       p = await json(r);
       if (p.status === "expired") expired = true;
       else if (p.status !== "paired") continue;
     }
     if (expired) {
-      if (Date.now() >= renewUntil) throw new Error("the pairing link expired; run `sessionpipe control pair` again");
+      if (Date.now() >= renewUntil)
+        throw new Refusal("the pairing link expired; run `sessionpipe control pair` again", again);
       // A keyed pairing keeps the machine row its first code made; an open one starts
       // clean under the same poll key (the receiver names the machine at approval).
       cur = await start(o.token ? cur.machine : existing?.machine);
@@ -259,7 +292,8 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     if (!rec.keys.some((k) => k.id === key.id)) rec.keys.push({ ...key, added_at: new Date().toISOString() });
     if (!existing) cfg.receivers.push(rec);
     writeControl(cfg, o.env);
-    o.out(`  ✓ Paired with ${rec.url} as ${machine} · ${rec.keys.length} key(s) trusted on this machine`);
+    // The receiver named the machine, and names who approved: its words, on one line each.
+    o.out(`  ✓ Paired with ${rec.url} as ${clean(machine)} · ${rec.keys.length} key(s) trusted on this machine`);
     // Say so when the approving key is an app's device key rather than a passkey.
     if (key.type === "device") o.out("  It approved with an app's device key: held in hardware, verified each use.");
     const named = accounts.flatMap((a) => (a.email ? [a.email] : a.name ? [a.name] : []));
@@ -267,7 +301,7 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
       o.out(`  Its session board names your Claude Code account${named.length > 1 ? "s" : ""}: ${named.join(", ")}`);
     // Whose passkey this machine now trusts: with open pairing, whoever approved the link.
     if (typeof p.account === "string")
-      o.out(`  Approved by ${p.account}. If that isn't you, run \`sessionpipe control off\` now.`);
+      o.out(`  Approved by ${clean(p.account)}. If that isn't you, run \`sessionpipe control off\` now.`);
     // The receiver may hand over a sessions-only key for the events lane, so its session
     // board shows this machine without a second step.
     if (typeof p.sink_token === "string" && o.addSink) o.addSink(p.sink_token);

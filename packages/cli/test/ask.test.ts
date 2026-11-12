@@ -244,7 +244,7 @@ describe.runIf(unix)("ask <agent> <task>", () => {
     const r = await run(["codex", "x"]);
     expect(r.code).toBe(1);
     expect(r.err).toBe(
-      `sessionpipe ask: codex is on it (ask ${ASK_ID})\npartial\nsessionpipe ask: the background service went away before codex answered\n`,
+      `sessionpipe ask: codex is on it (ask ${ASK_ID})\npartial\nsessionpipe ask: the control daemon went away before codex answered\n`,
     );
   });
 

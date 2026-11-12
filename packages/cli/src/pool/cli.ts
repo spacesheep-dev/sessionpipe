@@ -12,6 +12,7 @@ import { stateDir, tilde } from "@sessionpipe/core";
 import { ask, type LocalReply, type LocalRequest, socketPath } from "../control/local.js";
 import { installService } from "../control/pair.js";
 import { type Imported, type PoolOutcome, runPoolRequest } from "../control/pool.js";
+import { Refusal } from "../refusal.js";
 import { stableNode } from "../runtime.js";
 import { PLAIN, type Ui } from "../style.js";
 import { openPool, type Pool, type PoolStatus, summaryLine } from "./index.js";
@@ -136,7 +137,11 @@ export async function poolMain(
       if (has("--login")) {
         if (has("--code")) {
           const pending = (await request({ action: "status" })).status.pending;
-          if (!pending) throw new Error("no sign-in is pending; run `sessionpipe pool add --login` first");
+          if (!pending)
+            throw new Refusal(
+              "no sign-in is pending; run `sessionpipe pool add --login` first",
+              "sessionpipe pool add --login",
+            );
           const code = (await deps.readSecret()).trim();
           if (!code) throw new Error("no code was pasted");
           const r = await request({ action: "login.complete", account: pending.id, code }, VENDOR_MS);
@@ -159,7 +164,11 @@ export async function poolMain(
     case "remove":
     case "enable":
     case "disable": {
-      if (!rest[0]) throw new Error(`pool ${sub} takes an account id or email (\`sessionpipe pool\` lists them)`);
+      if (!rest[0])
+        throw new Refusal(
+          `pool ${sub} takes an account id or email (\`sessionpipe pool\` lists them)`,
+          "sessionpipe pool",
+        );
       const r = await request({ action: sub, account: rest[0] });
       out(`  ✓ ${sub === "remove" ? "removed" : sub === "enable" ? "enabled" : "disabled"} ${rest[0]}`);
       return out(`  pool:     ${summaryLine(r.status)}`);
