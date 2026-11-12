@@ -63,7 +63,11 @@ export function globalPrefix(distDir: string, platform: NodeJS.Platform = proces
 
 /** The dist folder of the `sessionpipe` a shell with this PATH would run, when that is a
  *  global npm install: what a person types, as far as a process that isn't their shell
- *  can tell. Null when PATH has none, or it is no global install. */
+ *  can tell. Null when PATH has none, or the first one is no global install of
+ *  sessionpipe: npm writes into whatever prefix it is given, so a script that only has
+ *  the name (a wrapper called `sessionpipe.cmd`, a link in a project's `.bin`) must never
+ *  make its folder one. An install has its `dist/cli.js` and a package.json that says
+ *  it is sessionpipe. */
 export function copyOnPath(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -83,17 +87,20 @@ export function copyOnPath(
         // Not in this folder, or a link to nowhere: a shell would look further too.
         continue;
       }
-    return globalPrefix(dist, platform) ? dist : null;
+    return globalPrefix(dist, platform) && existsSync(path.join(dist, "cli.js")) && versionAt(dist) ? dist : null;
   }
   return null;
 }
 
-/** The version of the copy in a dist folder, from its package.json; null when unreadable. */
+/** The version of the copy in a dist folder, from its package.json; null when that can't
+ *  be read as sessionpipe's own (none there, another package's, no version in it). */
 export function versionAt(distDir: string): string | null {
   try {
-    const v = (JSON.parse(readFileSync(path.join(distDir, "..", "package.json"), "utf8")) as { version?: unknown })
-      .version;
-    return typeof v === "string" && parseVersion(v) ? v : null;
+    const j = JSON.parse(readFileSync(path.join(distDir, "..", "package.json"), "utf8")) as {
+      name?: unknown;
+      version?: unknown;
+    };
+    return j.name === "sessionpipe" && typeof j.version === "string" && parseVersion(j.version) ? j.version : null;
   } catch {
     return null;
   }
@@ -276,8 +283,14 @@ export async function installEverywhere(
   const along: string[] = [];
   for (const dir of new Set(o.others)) {
     if (samePath(dir, o.distDir)) continue;
+    // npm installs into whatever prefix it is given: only a folder that says it holds
+    // sessionpipe is one, and only an older copy is written to.
     const has = versionAt(dir);
-    if (has && !isNewer(version, has, true)) continue;
+    if (!has) {
+      failed.push({ dir, error: "no package.json there says it is sessionpipe, so npm was not run on it" });
+      continue;
+    }
+    if (!isNewer(version, has, true)) continue;
     const r = await npmInstall(version, { ...o, distDir: dir });
     if (r.ok) along.push(dir);
     else failed.push({ dir, error: r.error });
