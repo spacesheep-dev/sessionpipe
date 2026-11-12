@@ -567,3 +567,88 @@ describe.runIf(unix)("the turns seed: what a daemon too old to write it down kne
     expect(existsSync(stateFile())).toBe(false);
   });
 });
+
+describe.runIf(unix)("quiesce: `sessionpipe update` is about to replace the daemon", () => {
+  const quiesce = () => ask(sock, { op: "quiesce" }, 2000);
+  const LET_GO = "the update that paused this daemon to replace it did not do so within a minute: its pause is over";
+  const polling = (d: ControlDaemon) => d.status().receivers[0]?.polling;
+
+  it("nothing held: ok, and no message is taken from then on; not replaced within a minute, it takes them again", async () => {
+    const d = await daemon();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(polling(d)).toBe(true);
+    expect(await quiesce()).toEqual({ op: "ok" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(d.intakePaused()).toBe(true);
+    expect(polling(d)).toBe(false);
+    expect(d.busy()).toBeNull();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(d.intakePaused()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(log).toContain(LET_GO);
+    expect(d.intakePaused()).toBe(false);
+    expect(polling(d)).toBe(true);
+  });
+
+  it("replaced within the minute, as an update does: the pause ends with the daemon, and nothing is left to let go", async () => {
+    const d = await daemon();
+    expect(await quiesce()).toEqual({ op: "ok" });
+    await d.stop();
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(log).not.toContain(LET_GO);
+  });
+
+  it("something held: none, and nothing is paused", async () => {
+    written(SID, 10 * MINUTE);
+    const d = await daemon();
+    await event(cc(SID), "UserPromptSubmit");
+    const q = await hand(d, "at your Stop");
+    await taken(q.id);
+    expect(d.busy()).toBe("1 message(s) in hand");
+    expect(await quiesce()).toEqual({ op: "none" });
+    expect(d.intakePaused()).toBe(false);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(log).not.toContain(LET_GO);
+  });
+
+  it("an update this daemon is installing itself: none, and that pause is not ended by any minute", async () => {
+    const d = await daemon();
+    // autoupdate.ts, before it runs npm: nothing is in hand, and it is no moment to be replaced.
+    d.pauseIntake();
+    expect(d.busy()).toBeNull();
+    expect(await quiesce()).toEqual({ op: "none" });
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(d.intakePaused()).toBe(true);
+    expect(log).not.toContain(LET_GO);
+    d.resumeIntake();
+    expect(d.intakePaused()).toBe(false);
+  });
+
+  it("the updater pausing and letting go while a quiesce holds: each pause is its holder's", async () => {
+    const d = await daemon();
+    expect(await quiesce()).toEqual({ op: "ok" });
+    // The daemon's own updater comes by, and thinks better of it: the quiesce still holds.
+    d.pauseIntake();
+    d.resumeIntake();
+    expect(d.intakePaused()).toBe(true);
+    // And the other way: an install the updater began outlives the quiesce's minute.
+    d.pauseIntake();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(log).toContain(LET_GO);
+    expect(d.intakePaused()).toBe(true);
+    d.resumeIntake();
+    expect(d.intakePaused()).toBe(false);
+  });
+
+  it("asked again while it is paused: ok again, and the minute starts again", async () => {
+    const d = await daemon();
+    expect(await quiesce()).toEqual({ op: "ok" });
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(await quiesce()).toEqual({ op: "ok" });
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(d.intakePaused()).toBe(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(d.intakePaused()).toBe(false);
+    expect(log.filter((l) => l === LET_GO)).toHaveLength(1);
+  });
+});

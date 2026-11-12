@@ -254,6 +254,9 @@ const HELLO_EVERY_MS = 10 * 60_000;
 const BUSY_SETTLE_MS = 2000;
 /** A message waiting for a Stop that never comes goes another way after this. */
 const TURN_FALLBACK_MS = 30 * 60_000;
+/** How long intake stays paused for a `sessionpipe update` that said it is about to
+ *  replace this daemon (`quiesce`) and then did not: the daemon lets go by itself. */
+const QUIESCE_MS = 60_000;
 /** How long the daemon follows a session's turn for the answer to an in-place
  *  message before acking it delivered without one. */
 const ANSWER_WAIT_MS = 30 * 60_000;
@@ -742,6 +745,13 @@ export class ControlDaemon {
   private readonly signedInSaid = new Map<string, boolean>();
   /** Intake paused for an update: the long-polls end and wait for this. */
   private paused: { until: Promise<void>; go: () => void } | null = null;
+  /** Who paused it, each for itself: the updater in this process, for as long as its
+   *  install takes (`pauseIntake`), and a `sessionpipe update` about to replace this
+   *  daemon, for a minute at most (`quiesce` on the socket). Intake stays paused while
+   *  either holds it, so neither lets go of the other's pause. */
+  private readonly pauses = new Set<"updater" | "quiesce">();
+  /** Lets go of a `quiesce` that was not followed by a stop. */
+  private quiesced: NodeJS.Timeout | null = null;
   /** Poll answers whose messages are being read and handed out. */
   private receiving = 0;
   /** The socket file this daemon created (dev:ino): stop() removes only that one, and a
@@ -819,6 +829,7 @@ export class ControlDaemon {
     // (One that never had the socket took nothing up and heard nothing: it has nothing to say.)
     if (this.running && !o.leaveSocket) this.rememberTurns();
     this.running = false;
+    if (this.quiesced) clearTimeout(this.quiesced);
     this.paused?.go();
     for (const a of this.aborts) a.abort();
     for (const st of this.polling.values()) st.wake?.();
@@ -1005,8 +1016,18 @@ export class ControlDaemon {
   }
 
   /** Stop taking messages: every long-poll ends now and waits for resumeIntake(). The
-   *  receiver keeps what arrives meanwhile; the local socket keeps answering. */
+   *  receiver keeps what arrives meanwhile; the local socket keeps answering. The
+   *  updater's own pause (autoupdate.ts): a `quiesce` neither makes it nor ends it. */
   pauseIntake(): void {
+    this.pause("updater");
+  }
+
+  resumeIntake(): void {
+    this.resume("updater");
+  }
+
+  private pause(who: "updater" | "quiesce"): void {
+    this.pauses.add(who);
     if (this.paused) return;
     let go!: () => void;
     const until = new Promise<void>((r) => {
@@ -1016,16 +1037,45 @@ export class ControlDaemon {
     for (const a of this.aborts) a.abort();
   }
 
-  resumeIntake(): void {
+  /** `who` lets go. Intake resumes when nobody holds it any more. */
+  private resume(who: "updater" | "quiesce"): void {
+    this.pauses.delete(who);
+    if (this.pauses.size) return;
     const p = this.paused;
     this.paused = null;
     p?.go();
   }
 
-  /** Intake is paused: an update is being installed. Nothing is in hand then (busy()
-   *  is null), and it is no moment to restart. */
+  /** Intake is paused: an update is being installed, or one is about to replace this
+   *  daemon (`quiesce`). Nothing is in hand then (busy() is null), and it is no moment
+   *  to restart. */
   intakePaused(): boolean {
     return this.paused !== null;
+  }
+
+  /** `sessionpipe update` is about to replace this daemon (local.ts `quiesce`): stop
+   *  taking messages, if and only if nothing is held right now. True: intake is paused,
+   *  so the daemon it stops a moment from now has nothing in hand, and if no stop comes
+   *  the pause ends by itself after a minute. False: something is held, and nothing was
+   *  paused. An update this daemon's own updater is installing counts as held, as it
+   *  does for a restart (`intakePaused`): replacing the daemon then would end npm with
+   *  it. Asked again while the pause is on, the minute starts again. */
+  private quiesce(): boolean {
+    if (this.busy() || this.pauses.has("updater")) return false;
+    this.pause("quiesce");
+    if (this.quiesced) clearTimeout(this.quiesced);
+    this.quiesced = setTimeout(() => {
+      this.quiesced = null;
+      this.deps.log(
+        "the update that paused this daemon to replace it did not do so within a minute: its pause is over",
+      );
+      this.resume("quiesce");
+    }, QUIESCE_MS);
+    this.quiesced.unref();
+    this.deps.log(
+      "an update is about to replace this daemon: nothing is in hand, and no message is taken until it has",
+    );
+    return true;
   }
 
   /** The socket path still holds this daemon's file. Gone: listen again. Replaced:
@@ -1275,6 +1325,9 @@ export class ControlDaemon {
         return;
       case "restart":
         this.reply(s, this.deps.onRestart?.() ? { op: "ok" } : { op: "none" });
+        return;
+      case "quiesce":
+        this.reply(s, this.quiesce() ? { op: "ok" } : { op: "none" });
         return;
       case "health":
         void this.health().then((health) => this.reply(s, { op: "health", health }));
