@@ -309,6 +309,9 @@ beforeEach(() => {
   }))
     vi.stubEnv(k, v as string);
   vi.resetAllMocks();
+  // This computer's name heads doctor's first column, and a config without one takes the
+  // hostname: a CI runner's is sixty characters, which would widen every row a test reads.
+  vi.spyOn(os, "hostname").mockReturnValue("test-box.local");
 });
 afterEach(async () => {
   Object.defineProperty(process, "platform", platform);
