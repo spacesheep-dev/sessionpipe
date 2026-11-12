@@ -242,12 +242,39 @@ function rewriteLinks(md, map, dirPrefix) {
 
 marked.use({ gfm: true, headerIds: true, mangle: false });
 
+/** The longest a table row's first cell may be and still be a name kept on one line. */
+const NAME_MAX = 28;
+/** How many characters of a cell's HTML a reader sees: a tag is none, an entity is one.
+ *  A count only: nothing is made from the cell but this number. */
+function shown(html) {
+  let n = 0;
+  let inTag = false;
+  let inEntity = false;
+  for (const ch of html.trim()) {
+    if (inTag) inTag = ch !== ">";
+    else if (inEntity) inEntity = ch !== ";";
+    else if (ch === "<") inTag = true;
+    else {
+      inEntity = ch === "&";
+      n++;
+    }
+  }
+  return n;
+}
+
 function page({ title, description, body: html, pathname, edit, license, jsonld }) {
   // A block that scrolls sideways takes focus, so a keyboard can scroll it; a header cell
   // with nothing in it (a Markdown table with a blank heading) is an ordinary cell.
   const body = html
     .replace(/<pre(?![^>]*aria-hidden)(?=[\s>])/g, '<pre tabindex="0"')
     .replace(/<table>/g, '<table tabindex="0">')
+    // A row's first cell that is a sentence, not a name, may wrap (site.css keeps a name on
+    // one line): held to one line, a long one pushes the columns after it out of sight.
+    .replace(/<tr>(\s*)<td>([\s\S]*?)<\/td>/g, (row, gap, cell) =>
+      shown(cell) > NAME_MAX ? `<tr>${gap}<td class="says">${cell}</td>` : row,
+    )
+    // A centred cell that is one word (a tick, "always", "opt-in") is never broken in two.
+    .replace(/<td align="center">([^<\s]+)<\/td>/g, '<td align="center" class="one">$1</td>')
     .replace(/<th([^>]*)>\s*<\/th>/g, "<td$1></td>");
   const canonical = SITE + pathname;
   const twin = twins.has(pathname) ? `${pathname}index.md` : null;

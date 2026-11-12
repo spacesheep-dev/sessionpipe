@@ -963,6 +963,16 @@ button.copy:active {
   line-height: 1.55;
   margin: 0 0 1.4em;
   font-variant-numeric: tabular-nums;
+  /* A table wider than the column scrolls sideways, and says so: a shade at the edge it
+     runs past, gone at the edge it has reached. The first two layers move with the cells
+     and cover the shades, which stay put. */
+  background:
+    linear-gradient(to right, var(--bg) 40%, transparent) left / 44px 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 40%, transparent) right / 44px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--fg) 16%, transparent), transparent) left / 16px 100% no-repeat
+    scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--fg) 16%, transparent), transparent) right / 16px 100% no-repeat
+    scroll;
 }
 .prose th,
 .prose td {
@@ -977,8 +987,33 @@ button.copy:active {
   border-bottom-color: var(--line-strong);
   white-space: nowrap;
 }
+/* A row's name stays on one line. A first cell that is a sentence wraps (build.mjs marks
+   it): on one line it pushed the columns after it past the text column, where a table of
+   ticks read as if its last columns were never ticked. On a narrow screen every first cell
+   wraps. */
 .prose td:first-child {
   white-space: nowrap;
+}
+.prose td.says {
+  white-space: normal;
+  min-width: 14em;
+}
+/* build.mjs: a centred cell that is one word. */
+.prose td.one {
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .prose td:first-child {
+    white-space: normal;
+  }
+  .prose td.says {
+    min-width: 7em;
+  }
+  /* The room a column of ticks gives back goes to the words beside it. */
+  .prose td[align="center"],
+  .prose th[align="center"] {
+    padding-right: 10px;
+  }
 }
 /* in a table the column already says "literal": mono, no chip */
 .prose td code {
