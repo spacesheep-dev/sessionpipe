@@ -2,11 +2,16 @@
 // The control daemon keeps its own copy current. About a minute after it starts, and
 // then once a day by the wall clock (state/control/update.json remembers the last
 // check, so a restart or a machine that slept doesn't ask twice in a day), it reads
-// npm's `latest`. When that is newer it waits until the daemon has nothing in hand —
-// no message being delivered, no headless run or start, no held SDK session mid-turn,
-// no permission prompt open, no session on the machine mid-turn, no acks being sent —
-// stops taking new messages, installs the release into the prefix it runs from
-// (update.ts), and restarts onto it:
+// npm's `latest`. When that is newer it waits until the daemon itself holds nothing
+// (daemon.ts `busy`) — no pooled request being answered, no message in hand (one
+// queued for a session's Stop included), no headless run or start, no held SDK session
+// mid-turn, no permission prompt held for an answer, no acks being sent — stops taking
+// new messages, installs the release (update.ts `installEverywhere`: the copy it runs
+// from, the copy a person types where that is another install, the hooks), and restarts
+// onto it. A session someone is working in, mid-turn in its own window, is not waited
+// for: that turn is not the daemon's, and what the daemon knows of it is written down
+// at the stop and read back by the next one (daemon.ts `rememberTurns`, `takeUp`). The
+// restart:
 //
 //   launchd / systemd   exit UPDATE_EXIT; the service restarts it on the new code
 //                       (every plist and unit sessionpipe ever wrote restarts on a
