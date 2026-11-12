@@ -114,6 +114,10 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
       s.placed++;
       s.did.push("place");
     },
+    quiesce: async () => {
+      s.did.push("quiesce");
+      return true;
+    },
     seed: (sessions) => {
       s.seeded.push(sessions);
       s.did.push("seed");
@@ -460,7 +464,7 @@ describe("the service, made to run this copy", () => {
     const a = run({ look: other, status: [old, old, null, st("1.1.0")] });
     expect((await a.out).state).toBe("current");
     expect(a.sim.seeded).toEqual([turns]);
-    expect(a.sim.did).toEqual(["seed", "place"]);
+    expect(a.sim.did).toEqual(["quiesce", "seed", "place"]);
     // One that answers `health` without saying which copy it is, is as old.
     const b = run({ look: other, status: [old, old, null, st("1.1.0")] }, { health: async () => ({ accounts: [] }) });
     expect((await b.out).state).toBe("current");
@@ -469,7 +473,7 @@ describe("the service, made to run this copy", () => {
     for (const idle of [st("0.14.2", { mid_turn: [] }), st("0.14.2")]) {
       const c = run({ look: other, status: [idle, idle, null, st("1.1.0")] });
       expect((await c.out).state).toBe("current");
-      expect(c.sim.did).toEqual(["place"]);
+      expect(c.sim.did).toEqual(["quiesce", "place"]);
     }
   });
 
@@ -480,7 +484,7 @@ describe("the service, made to run this copy", () => {
       { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "launchd" } }) },
     );
     expect((await a.out).state).toBe("current");
-    expect(a.sim.did).toEqual(["place"]);
+    expect(a.sim.did).toEqual(["quiesce", "place"]);
     let asked = 0;
     const b = run(
       { latest: "1.0.0", look: service({ loaded: false }), status: [null, st("1.0.0")] },
@@ -582,19 +586,81 @@ describe("the service, made to run this copy", () => {
     });
   });
 
+  it("asks it to stop taking messages just before, in one step of its own; one that holds something by then is not cut short", async () => {
+    // It held nothing when looked at, and took a message before it could be stopped.
+    const free = st("0.9.0");
+    const took = st("0.9.0", { busy: "1 message(s) in hand" });
+    const a = run({ look: other, status: [free, took] }, { quiesce: async () => false, versionAt: () => "1.1.0" });
+    expect(await a.out).toEqual({
+      state: "waiting",
+      version: "1.1.0",
+      said: "The background service is busy: 1 message(s) in hand. It restarts by itself onto sessionpipe 1.1.0 when that is done: nothing more to type.",
+    });
+    expect(a.sim.did).toEqual(["restart"]);
+    // It says it holds something and is free again when asked what: still not replaced under it.
+    const b = run({ look: other, status: [free] }, { quiesce: async () => false, versionAt: () => "1.1.0" });
+    expect(await b.out).toMatchObject({
+      state: "waiting",
+      said: expect.stringContaining("The background service is busy: what it has just taken up."),
+    });
+    expect(b.sim.placed).toBe(0);
+    // It went away in between: there is nothing left to cut short, and it is started.
+    const c = run({ look: other, status: [free, null, null, st("1.1.0")] }, { quiesce: async () => false });
+    expect((await c.out).state).toBe("current");
+    expect(c.sim.did).toEqual(["place"]);
+    // One from before it knew the question gives no answer, and is replaced as it was before.
+    const d = run({ look: other, status: [free, null, st("1.1.0")] }, { quiesce: async () => null });
+    expect((await d.out).state).toBe("current");
+    expect(d.sim.placed).toBe(1);
+    // Paused and free: replaced. One that was never running, or is busy, is not asked.
+    const e = run({ look: other, status: [free, null, st("1.1.0")] });
+    expect((await e.out).state).toBe("current");
+    expect(e.sim.did).toEqual(["quiesce", "place"]);
+    const f = run({ latest: "1.0.0", look: service({ loaded: false }), status: [null, st("1.0.0")] });
+    expect((await f.out).state).toBe("current");
+    expect(f.sim.did).toEqual(["place"]);
+  });
+
+  it("a replace the manager refused: why, what answers now, and the one command for that", async () => {
+    const refuse = () => {
+      throw new Error("launchd refused it (launchctl answered 5); the service file that was there before was put back");
+    };
+    // The service that was there before was put back and answers again after a moment.
+    const a = run({ look: other, status: [st("0.9.0"), null, null, st("0.9.0")] }, { place: refuse });
+    expect(await a.out).toEqual({
+      state: "failed",
+      error:
+        "the background service couldn't be moved onto this copy: launchd refused it (launchctl answered 5); the service file that was there before was put back. The one that answers now runs sessionpipe 0.9.0",
+      next: "sessionpipe update",
+    });
+    // Nothing answers after the moment it is given: said, with the command that starts one.
+    const b = run({ look: other, status: [st("0.9.0"), null] }, { place: refuse });
+    expect(await b.out).toEqual({
+      state: "failed",
+      error:
+        "the background service couldn't be moved onto this copy: launchd refused it (launchctl answered 5); the service file that was there before was put back. Nothing answers now",
+      next: "sessionpipe control run",
+    });
+    expect(b.sim.clock).toBeGreaterThanOrEqual(10_000);
+    const c = run({ look: other, status: [st("0.9.0"), null] }, { place: refuse, backMs: 3000 });
+    await c.out;
+    expect(c.sim.clock).toBe(3000);
+  });
+
   it("says why when the service manager refuses, and when what it started isn't it", async () => {
     const a = run(
       { latest: "1.0.0", look: service({ loaded: false }), status: [null] },
       {
         place: () => {
-          throw new Error("launchd didn't start it (launchctl answered 5)");
+          throw new Error("launchd refused it (launchctl answered 5)");
         },
       },
     );
     expect(await a.out).toEqual({
       state: "failed",
-      error: "the background service couldn't be started: launchd didn't start it (launchctl answered 5)",
-      next: "sessionpipe update",
+      error:
+        "the background service couldn't be started: launchd refused it (launchctl answered 5). Nothing answers now",
+      next: "sessionpipe control run",
     });
     const b = run({ latest: "1.0.0", look: service({ loaded: false }), status: [null] });
     expect(await b.out).toEqual({

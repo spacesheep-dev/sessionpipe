@@ -338,14 +338,23 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     expect(await deps.status()).toBeNull();
     expect(await deps.health()).toBeNull();
     expect(await deps.restart()).toBe(false);
-    await daemon({
+    // No service, or one from before it knew the question: no answer to it.
+    expect(await deps.quiesce()).toBeNull();
+    const replies: Record<string, unknown> = {
       status: status("1.2.3"),
       restart: { op: "ok" },
       health: { op: "health", health: { accounts: [], copy: { cli: "/x/cli.js", via: null } } },
-    });
+    };
+    await daemon(replies);
     expect((await deps.status())?.version).toBe("1.2.3");
     expect((await deps.health())?.copy).toEqual({ cli: "/x/cli.js", via: null });
     expect(await deps.restart()).toBe(true);
+    expect(await deps.quiesce()).toBeNull();
+    // Paused and free; or it holds something, and nothing was paused.
+    replies.quiesce = { op: "ok" };
+    expect(await deps.quiesce()).toBe(true);
+    replies.quiesce = { op: "none" };
+    expect(await deps.quiesce()).toBe(false);
   });
 
   it("waits by the clock it is given", async () => {

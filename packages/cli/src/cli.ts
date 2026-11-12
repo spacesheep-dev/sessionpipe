@@ -1990,6 +1990,10 @@ async function update(): Promise<void> {
     look: () => serviceLook(),
     apart: noService(),
     place: () => placeService({ node, cli }),
+    quiesce: async () => {
+      const said = (await ask(sock, { op: "quiesce" }, 2000))?.op;
+      return said === "ok" ? true : said === "none" ? false : null;
+    },
     seed: (sessions) => writeTurnsSeed(controlState(), sessions),
     versionAt,
     globalPrefix,

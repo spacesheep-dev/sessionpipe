@@ -98,6 +98,11 @@ export interface CurrentDeps {
   /** Replace the service with one that runs this copy; throws with why it couldn't, also
    *  where nothing here could start one. */
   place: () => void;
+  /** Ask the running service to stop taking messages if, and only if, it holds nothing
+   *  right now: true when it has (it is paused and free), false when it holds something
+   *  (nothing was paused), null when it gave no answer (one from before it knew the
+   *  question). The look at what it holds and the stop are two steps without this. */
+  quiesce: () => Promise<boolean | null>;
   /** Leave the sessions that are mid-turn for the service that starts next (store.ts
    *  `writeTurnsSeed`): a service too old to write that down itself is about to be stopped. */
   seed: (sessions: string[]) => void;
@@ -109,10 +114,12 @@ export interface CurrentDeps {
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   say: (step: Step) => void;
-  /** How long the service is given to finish what it holds, to come up, to be heard. */
+  /** How long the service is given to finish what it holds, to come up, to be heard; and
+   *  how long the one from before is given to answer again after a replace was refused. */
   settleMs?: number;
   startMs?: number;
   heardMs?: number;
+  backMs?: number;
 }
 
 const LOOK_MS = 500;
@@ -250,7 +257,14 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
         d.say({ mark: "info", text: `the background service is busy (${held}): giving it a moment…` });
         running = await until(d, d.settleMs ?? 25_000, d.status, (s) => !s || !holding(s));
       }
-      const still = running ? holding(running) : null;
+      let still = running ? holding(running) : null;
+      // It held nothing when looked at, and may have taken a message since. It is asked
+      // to stop taking any if it still holds nothing, in one step of its own; one that
+      // holds something now says so, and is not cut short.
+      if (running && !still && (await d.quiesce()) === false) {
+        running = await d.status();
+        still = running ? (holding(running) ?? "what it has just taken up") : null;
+      }
       if (still) {
         // It can't be moved now. It restarts itself when it is done, onto its own copy:
         // the new release, where that copy was brought up above.
@@ -273,10 +287,16 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       try {
         d.place();
       } catch (e) {
+        // A replace that was refused puts back the service that was there (core's
+        // `installService`). What is true now is asked of the socket, once that one has
+        // had a moment to come up: whether anything answers decides what to run next.
+        const now = await until(d, d.backMs ?? 10_000, d.status, (s) => !!s);
         return {
           state: "failed",
-          error: `the background service couldn't be started: ${(e as Error).message}`,
-          next: "sessionpipe update",
+          error: `the background service couldn't be ${before ? "moved onto this copy" : "started"}: ${(e as Error).message}. ${
+            now ? `The one that answers now runs sessionpipe ${now.version}` : "Nothing answers now"
+          }`,
+          next: now ? "sessionpipe update" : "sessionpipe control run",
         };
       }
       running = await until(d, d.startMs ?? 30_000, d.status, (s) => s?.version === target);
