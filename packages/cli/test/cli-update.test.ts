@@ -28,6 +28,17 @@ vi.mock("node:url", async (original) => {
       dist.dir && String(u).endsWith("/src/cli.ts") ? `${dist.dir}/cli.ts` : real.fileURLToPath(u, o),
   };
 });
+// Doctor times the hook by starting it eight times. Here it answers at once, and the
+// clock that times it is the test's (`steadyHook`): how fast this machine starts node
+// says nothing about what these tests are for.
+vi.mock("node:child_process", async (original) => ({
+  ...(await original<typeof import("node:child_process")>()),
+  spawnSync: vi.fn((_cmd: string, args: string[]) => ({
+    status: args.some((a) => a.endsWith("hook.js")) ? 0 : 1,
+    stdout: "",
+    stderr: "",
+  })),
+}));
 vi.mock("../src/current.js", async (original) => ({
   ...(await original<typeof import("../src/current.js")>()),
   bringCurrent: vi.fn(),
@@ -109,12 +120,23 @@ beforeEach(() => {
 afterEach(async () => {
   Object.defineProperty(process, "platform", platform);
   process.exitCode = undefined;
+  clock?.mockRestore();
+  clock = undefined;
   vi.useRealTimers();
   vi.unstubAllEnvs();
   for (const stop of stops) await stop();
   rmSync(tmp, { recursive: true, force: true });
 });
 
+/** Each of the hook's eight timed runs takes one millisecond by this clock. */
+let clock: { mockRestore: () => void } | undefined;
+function steadyHook(): void {
+  let tick = 0n;
+  clock = vi.spyOn(process.hrtime, "bigint").mockImplementation(() => {
+    tick += 1_000_000n;
+    return tick;
+  });
+}
 function put(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(value)}\n`);
@@ -388,7 +410,12 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     await vi.advanceTimersByTimeAsync(1);
     await slept;
     expect(woke).toBe(true);
-    expect(typeof deps.now()).toBe("number");
+    // And reads the same clock: the five seconds it slept have passed by it.
+    const t0 = Date.parse("2026-11-12T10:00:00.000Z");
+    vi.setSystemTime(t0);
+    expect(deps.now()).toBe(t0);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(deps.now()).toBe(t0 + 5000);
   });
 
   it("from the npx cache it hands over to the persistent copy, as install does", async () => {
@@ -427,6 +454,7 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     ...o,
   });
   const fix = (text: string) => text.slice(text.indexOf("To fix"));
+  beforeEach(() => steadyHook());
 
   it("one copy, one version: nothing to say", async () => {
     paired();
@@ -435,6 +463,9 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     const r = await run({}, "doctor");
     expect(r.text).toMatch(/^ {2}✓ background service {2,}running$/m);
     expect(r.text).not.toContain("sessionpipe update");
+    // The hook was timed by the test's clock, not by how fast this machine starts node.
+    expect(r.text).toMatch(/^ {2}✓ hook speed {2,}1 ms each \(95 in 100 under 1 ms\)$/m);
+    expect(r.lines[0]).toBe("✓ All good");
   });
 
   it("the service on another copy and version, and the hooks on a third: one thing to run", async () => {

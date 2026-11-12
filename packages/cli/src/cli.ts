@@ -2009,7 +2009,7 @@ async function update(): Promise<void> {
     globalPrefix,
     same: samePath,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-    now: Date.now,
+    now: () => Date.now(),
     say: (step) => out(`  ${SIGN[step.mark]} ${step.text}`),
   });
   if (r.state === "failed") throw new Refusal(r.error, r.next);
