@@ -46,7 +46,7 @@ import {
   secretGet,
   secretSet,
 } from "../secrets.js";
-import { HOOKS_WORD_MS, stillRecent } from "./route.js";
+import { endStillCounts, HOOKS_WORD_MS, stillRecent } from "./route.js";
 
 export interface PairedReceiver {
   /** The receiver's origin, as the person typed it. */
@@ -378,7 +378,7 @@ export interface DaemonState {
    *  session's own end as its hooks reported it. What the transcript gained up to then
    *  has no writer behind it (CONTROL.md §6, What counts as held), and a daemon that
    *  forgot that across a restart answered the next message in a copy. Written and read
-   *  like `mid_turn`; read back pruned to the ends that still count (`stillRecent`).
+   *  like `mid_turn`; read back pruned to the ends that still count (`endStillCounts`).
    *  Absent: none. */
   ended?: Record<string, string>;
   /** Session ref → when a run asked to copy it, and not known to have run anywhere else,
@@ -443,8 +443,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
             ...(typeof m.transcript === "string" ? { transcript: m.transcript } : {}),
           };
       }
-    ended = recentTimes(j.ended, now);
-    strays = recentTimes(j.strays, now);
+    ended = timesKept(j.ended, now, endStillCounts);
+    strays = timesKept(j.strays, now, stillRecent);
     // The richer shape when it is there, the plain id map when it isn't.
     const from = j.copies_v2 && typeof j.copies_v2 === "object" ? j.copies_v2 : j.copies;
     if (from && typeof from === "object")
@@ -457,12 +457,17 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
 }
 
 /** A map of session ref → ISO time as state.json keeps one (`ended`, `strays`): the
- *  entries that are times and still recent, or nothing when there are none. */
-function recentTimes(v: unknown, now: number): Record<string, string> | undefined {
+ *  entries that are times and that `keep` says still decide something, or nothing when
+ *  there are none. */
+function timesKept(
+  v: unknown,
+  now: number,
+  keep: (at: number, now: number) => boolean,
+): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   if (v && typeof v === "object")
     for (const [k, at] of Object.entries(v as Record<string, unknown>))
-      if (typeof at === "string" && stillRecent(Date.parse(at), now)) out[k] = at;
+      if (typeof at === "string" && keep(Date.parse(at), now)) out[k] = at;
   return Object.keys(out).length ? out : undefined;
 }
 

@@ -86,6 +86,7 @@ import {
   copyNote,
   type DeliveryMode,
   earlier,
+  endStillCounts,
   frame,
   frameAsk,
   frameHandoff,
@@ -873,8 +874,9 @@ export class ControlDaemon {
    *    later message then went.
    *
    *  Each only for as long as it decides anything: a turn heard from in the last ten
-   *  minutes (`HOOKS_WORD_MS`, the one horizon of a turn remembered), an end or a stray
-   *  of the last 90 seconds (`stillRecent`). */
+   *  minutes (`HOOKS_WORD_MS`, the one horizon of a turn remembered); a stray of the
+   *  last 90 seconds, for which a transcript's write counts (`stillRecent`); an end for
+   *  as long as it can account for such a write (`endStillCounts`). */
   private rememberTurns(): void {
     const now = this.deps.now();
     const iso = (at: number): string => new Date(at).toISOString();
@@ -889,7 +891,7 @@ export class ControlDaemon {
     const ended: Record<string, string> = {};
     for (const ref of new Set([...this.lastEnd.keys(), ...this.live.keys()])) {
       const at = this.endedAt(ref);
-      if (at && stillRecent(at, now)) ended[ref] = iso(at);
+      if (at && endStillCounts(at, now)) ended[ref] = iso(at);
     }
     const strays: Record<string, string> = {};
     for (const [ref, at] of this.strays) if (stillRecent(at, now)) strays[ref] = iso(at);
@@ -907,7 +909,7 @@ export class ControlDaemon {
    *  A session that was mid-turn still is, on that word (`fromFile`): a message for it
    *  waits for its Stop, for as long as the session has been heard from in the last ten
    *  minutes. Named by both the file and the seed, it was last heard from at the later
-   *  of the two. An end and a stray account for what they did, for their 90 seconds.
+   *  of the two. An end and a stray go on deciding what they did, for as long as they do.
    *
    *  Then state.json says none of it any more: it was true of the last daemon's stop, and
    *  a daemon that dies without one of its own (a crash, a kill) must not hand the same

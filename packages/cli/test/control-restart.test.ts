@@ -327,22 +327,44 @@ describe.runIf(unix)("a run that has just ended, and a message after the restart
     });
   });
 
-  it("an end and a stray older than the 90 seconds are not written, and nothing to say writes nothing", async () => {
+  it("its last row landed a moment after its SessionEnd, and the restart comes 90 seconds after that end: the end still accounts for the row", async () => {
+    const first = await daemon();
+    await event(cc(SID), "SessionEnd");
+    const ended = Date.now();
+    // A harness writes its rows a moment after the fact: a write the end accounts for.
+    await vi.advanceTimersByTimeAsync(1500);
+    written(SID);
+    await vi.advanceTimersByTimeAsync(ended + 90_200 - Date.now());
+    await stop(first);
+    expect(onFile().ended).toEqual({ [cc(SID)]: iso(ended) });
+    // The row is under 90 seconds old: unaccounted for, it would hold the session.
+    const second = await daemon();
+    const q = await hand(second, "a minute and a half later");
+    const ack = await finalAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(ack.copy_of).toBeUndefined();
+    expect(ran()).toEqual([`resume ${SID}`]);
+  });
+
+  it("a stray is written for its 90 seconds and an end a little longer; past both, nothing to say writes nothing", async () => {
     written(SID, 5000);
     const first = await daemon();
     claude = { ignoresFork: true, hooks: false };
     const one = await hand(first, "one");
     expect(await finalAck(one.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
     await event(cc(SID), "SessionEnd");
+    const heard = iso(Date.now());
     await vi.advanceTimersByTimeAsync(91_000);
     await stop(first);
-    expect(existsSync(stateFile())).toBe(false);
-    // An end heard a moment before the stop is written, by itself.
-    const second = await daemon();
-    await event(cc(SID), "SessionEnd");
-    const heard = iso(Date.now());
-    await stop(second);
+    // The stray holds nothing any more. The end may still account for a row that landed
+    // just after it.
     expect(onFile()).toMatchObject({ mid_turn: {}, ended: { [cc(SID)]: heard }, strays: {} });
+    const second = await daemon();
+    const takenUp = readFileSync(stateFile(), "utf8");
+    expect(JSON.parse(takenUp).ended).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await stop(second);
+    expect(readFileSync(stateFile(), "utf8")).toBe(takenUp);
   });
 });
 
