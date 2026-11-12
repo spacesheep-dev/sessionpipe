@@ -311,8 +311,16 @@ starts with a verdict (`All good`, or how many things need attention), then what
 looked at in groups (this computer and its background service, the agents and their
 hooks, where it reports, who can message it and whether that is live, the accounts,
 updates), and ends with **To fix**: one sentence and one command each, in the order to
-run them. It exits 1 when anything needs attention, 0 otherwise, with `--json` too.
-`sessionpipe status` is the same in a few lines, without the slow checks.
+run them. `sessionpipe status` is the same in a few lines, without the slow checks.
+
+`doctor` exits 1 when **To fix** holds a command for you to run, and 0 otherwise. What
+only needs waiting for or knowing about (a slow hook, a receiver that hasn't answered
+yet, a disk that was full and has room again, hooks an agent's own setting turns off)
+is on the page and counted in the verdict, and leaves the exit code at 0: a script that
+reads the code does not fail because this computer was busy. `doctor --json` exits 0
+whatever it finds, as it always has, and so does `status`. A command under **To fix**
+quotes any path, name or address a shell would otherwise act on, so it can be pasted
+as it stands.
 
 What only the service's log used to know is on that page: a disk that filled up, a key
 it can't read from the keychain, a pool with no account left to try, a receiver that
@@ -324,14 +332,45 @@ not merely "offline".
 `sessionpipe control status` is a page for a person at a terminal, and the JSON it
 always printed when piped or given `--json`, which is what scripts read.
 
-Colour is on at a terminal and off in a pipe. `--no-color` turns it off, `NO_COLOR` too,
-`TERM=dumb` too; `FORCE_COLOR=1` turns it on anywhere. Nothing is said by colour alone:
-every state has a mark (`✓`, `!`, `✗`, `·`) and a word. Lines fold at the terminal's
-width, under their own text and never inside a command; a pipe gets whole lines. The
-old Windows console gets `√` and `×`, which its fonts have. A command that fails prints
-two lines on stderr: `error` with what is wrong, and `try` with the one command to run
-next. Nothing a program reads is touched: hook output, the worker, the status line,
-every `--json` and the daemon's log are as they were.
+Colour is on at a terminal and never in a pipe. At a terminal `--no-color` turns it
+off, `NO_COLOR` too, `TERM=dumb` too, and `FORCE_COLOR=1` turns it on whatever
+`NO_COLOR` says. `--no-color` may stand anywhere on the line: it is taken out before
+the command reads its arguments. Nothing is said by colour alone: every state has a
+mark (`✓`, `!`, `✗`, `·`) and a word. Lines fold at the terminal's width, under their
+own text and never inside a command; a pipe gets whole lines. The old Windows console
+gets `√` and `×`, which its fonts have.
+
+A command that fails exits 1. Where stderr is a terminal it prints two lines: `error`
+with what is wrong, and `try` with the one command to run next. That command is the
+one the code that failed names (pair again, list the pool's accounts), or the failing
+command's own `--help`; it is never taken from the message, which may be a receiver's
+or npm's words. Where stderr is not a terminal it prints the one line it always has,
+`sessionpipe: <message>`.
+
+Words that are not sessionpipe's own (a receiver's reason or last error, npm's last
+lines, a name from a file) are shown as words. Escape sequences, other control
+characters and the characters that turn the writing direction round are taken out of
+every line written for a person, at a terminal and in a pipe, and a line break inside
+such a value becomes a space, so it can't clear the screen, set the window's title or
+start a line that looks like one of sessionpipe's.
+
+For a program, nothing it reads is touched: hook output, the worker, the status line,
+every `--json` and the daemon's log are as they were, and so is `ask <agent>`. When a
+program runs `control pair` (not at a terminal), its lines are the ones it has always
+written, to the byte: the link, `The page shows these digits too: 123456` or
+`enter:  123 456`, `✓ Paired with …`, `Daemon: …`. At a terminal the link and the
+digits stand each on a line of their own, and that last line starts `Background
+service:`. `sink list` and `pool` keep their old lines in a pipe too.
+
+Some lines are worded anew wherever they are written. `doctor`, `status` and `--help`
+are new pages. `install` says `This computer: <name>` where it said `Machine: <name>`;
+`ask on`, `ask off` and `pool on` say `Background service: …` where they said
+`Daemon: …`; and a few sentences say "the background service" and "this computer" where
+they said "the control daemon" and "this machine". In `doctor --json` the shape is the
+same: `claude_accounts[].signed_in` is now what the running background service sees
+where it can be asked (this shell's view where it can't), and `warnings` may hold three
+new strings, for a service that launchd or systemd doesn't have, a disk that is or was
+full, and a pool with no account that has room.
 
 ## Help and status JSON
 

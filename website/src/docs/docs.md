@@ -87,8 +87,9 @@ self-update state. `--json` is described [below](#status-json).
 
 Everything `status` checks, plus a live hook benchmark, each Claude Code account's sign-in
 (as the background service sees it), the disk, and what the service's log says went wrong.
-It ends with what to fix: one sentence and one command each, in the order to run them. It
-exits 1 when anything needs attention.
+It ends with what to fix: one sentence and, where there is something to run, one command
+each, in the order to run them. It exits 1 when there is a command to run and 0 otherwise;
+`doctor --json` exits 0 whatever it finds.
 
 ### History
 
