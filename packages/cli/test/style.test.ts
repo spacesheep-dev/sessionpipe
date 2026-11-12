@@ -42,12 +42,21 @@ describe("makeUi: when colour is on", () => {
     expect(tty(80, { TERM: "xterm-256color" }).color).toBe(true);
   });
 
-  it("FORCE_COLOR decides before NO_COLOR, on a pipe too; 0 and false mean off", () => {
-    expect(makeUi({ isTTY: false, env: { FORCE_COLOR: "1" } }).color).toBe(true);
-    expect(makeUi({ isTTY: false, env: { FORCE_COLOR: "1" } }).width).toBe(Number.POSITIVE_INFINITY);
+  it("at a terminal FORCE_COLOR decides before NO_COLOR and TERM=dumb; 0 and false mean off", () => {
     expect(tty(80, { FORCE_COLOR: "1", NO_COLOR: "1" }).color).toBe(true);
+    expect(tty(80, { FORCE_COLOR: "1", TERM: "dumb" }).color).toBe(true);
     expect(tty(80, { FORCE_COLOR: "0" }).color).toBe(false);
     expect(tty(80, { FORCE_COLOR: "false" }).color).toBe(false);
+  });
+
+  it("a pipe is never coloured, whatever FORCE_COLOR says: a program reads it", () => {
+    for (const FORCE_COLOR of ["1", "2", "3", "true", ""])
+      expect(makeUi({ isTTY: false, env: { FORCE_COLOR } })).toEqual(PLAIN);
+    expect(makeUi({ env: { FORCE_COLOR: "1", TERM: "xterm-256color" } }).color).toBe(false);
+    // So a painted line is the line, and a table's cells are their words.
+    const piped = makeUi({ isTTY: false, env: { FORCE_COLOR: "1" } });
+    expect(paint(piped, "  ✓ done, see `sessionpipe status`")).toBe("  ✓ done, see `sessionpipe status`");
+    expect(mark(piped, "ok")).toBe("✓");
   });
 
   it("--no-color wins over everything", () => {

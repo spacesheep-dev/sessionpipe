@@ -2,9 +2,11 @@
 // How sessionpipe looks at a terminal, in one place and with no dependency: when colour
 // is on, the marks, the width a line may take, and how a long line folds.
 //
-//   colour   --no-color, then FORCE_COLOR (0 or false: off; anything else: on), then
-//            NO_COLOR, then TERM=dumb, then whether the output is a terminal. Only the
-//            eight basic colours, bold and dim, so a dark and a light theme both read.
+//   colour   only at a terminal. There --no-color, then FORCE_COLOR (0 or false: off;
+//            anything else: on, NO_COLOR or not), then NO_COLOR, then TERM=dumb decide.
+//            A pipe is never coloured, whatever the environment says: a program reads
+//            it. Only the eight basic colours, bold and dim, so a dark and a light theme
+//            both read.
 //   meaning  never by colour alone: every state has a mark (✓ ! ✗ ·) and a word.
 //   width    a terminal's columns, at most 100; a long line folds at a space, under
 //            its own text, and never inside a `command`. A pipe gets whole lines, so
@@ -43,15 +45,11 @@ export function makeUi(o: UiOptions = {}): Ui {
   const env = o.env ?? process.env;
   const tty = !!o.isTTY;
   const force = env.FORCE_COLOR;
-  const color = o.noColor
-    ? false
-    : force !== undefined
-      ? force !== "0" && force !== "false"
-      : env.NO_COLOR
-        ? false
-        : env.TERM === "dumb"
-          ? false
-          : tty;
+  // A pipe is never coloured: FORCE_COLOR says how a terminal looks, not what a program reads.
+  const color =
+    tty &&
+    !o.noColor &&
+    (force !== undefined ? force !== "0" && force !== "false" : !env.NO_COLOR && env.TERM !== "dumb");
   const oldConsole =
     tty && (o.platform ?? process.platform) === "win32" && !env.WT_SESSION && !env.TERM && !env.TERM_PROGRAM;
   return {
