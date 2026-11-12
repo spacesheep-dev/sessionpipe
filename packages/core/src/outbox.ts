@@ -120,16 +120,17 @@ export class Outbox {
       let chunk = READ_CHUNK;
       while (events.length < maxEvents && offset < size) {
         const buf = Buffer.alloc(Math.min(size - offset, chunk));
-        const n = readSync(fd, buf, 0, buf.length, offset);
-        const text = buf.subarray(0, n).toString("utf8");
-        let pos = 0;
+        const data = buf.subarray(0, readSync(fd, buf, 0, buf.length, offset));
+        // Lines are found and counted in the bytes as read, not in decoded text: a
+        // byte that is not UTF-8 (a torn append cut inside a character) decodes to
+        // U+FFFD, three bytes, and an offset counted from that would run past the
+        // line's end, so the next read would start inside a line and lose it.
         let used = 0;
         while (events.length < maxEvents) {
-          const nl = text.indexOf("\n", pos);
+          const nl = data.indexOf(0x0a, used);
           if (nl < 0) break;
-          const line = text.slice(pos, nl);
-          pos = nl + 1;
-          used += Buffer.byteLength(line, "utf8") + 1;
+          const line = data.toString("utf8", used, nl);
+          used = nl + 1;
           if (!line.trim()) continue;
           try {
             events.push(JSON.parse(line) as Event);
@@ -138,7 +139,7 @@ export class Outbox {
         offset += used;
         if (used) continue;
         // No whole line in this chunk: a line longer than it, or a write in progress.
-        if (offset + n >= size || chunk >= READ_MAX) break;
+        if (offset + data.length >= size || chunk >= READ_MAX) break;
         chunk *= 2;
       }
       return { events, offset };
