@@ -13,6 +13,12 @@ const dir = process.argv[2];
 if (!dir) throw new Error("usage: node scripts/build.mjs <package dir>");
 const pkgDir = path.join(root, "packages", dir);
 const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+// The name and the version are written into every bundle's first line, a comment: only a
+// package name and a version may go there (a line break in either would end the comment).
+if (typeof pkg.name !== "string" || !/^(?:@[a-z0-9-]+\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name))
+  throw new Error(`packages/${dir}/package.json: "name" is not a package name`);
+if (typeof pkg.version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(pkg.version))
+  throw new Error(`packages/${dir}/package.json: "version" is not a version`);
 
 /** Entries per package. `bundleWorkspace` folds @sessionpipe/* in (one file for the
  *  hook); `external` stays an import. */

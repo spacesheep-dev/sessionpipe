@@ -6,19 +6,14 @@
 //  2. Behaviour: when @sessionpipe/conformance is built (M2+), every adapter fixture
 //     is run through core's adapter and the events compared.
 // Exits non-zero on any miss.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { envelope } from "./lib/envelope.mjs";
+import { walkFiles as walk } from "./lib/walk.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const walk = (d) =>
-  existsSync(d)
-    ? readdirSync(d).flatMap((n) => {
-        const p = path.join(d, n);
-        return statSync(p).isDirectory() ? walk(p) : [p];
-      })
-    : [];
+// A symbolic link under conformance/ is an error (scripts/lib/walk.mjs): nothing outside is read.
 const harness = walk(path.join(root, "conformance/harness")).filter((f) => f.endsWith(".json"));
 const delivery = walk(path.join(root, "conformance/delivery")).filter((f) => f.endsWith(".json"));
 if (!harness.length && !delivery.length) {
@@ -36,21 +31,44 @@ const S = await import(pathToFileURL(schemaMod).href);
 let failed = 0;
 const rows = [];
 for (const f of harness) {
-  const fx = JSON.parse(readFileSync(f, "utf8"));
   const rel = path.relative(root, f);
   const problems = [];
+  // A fixture that is not JSON, or not the shape below, is a FAIL row, never a crash.
+  let fx = null;
+  try {
+    fx = JSON.parse(readFileSync(f, "utf8"));
+  } catch (e) {
+    problems.push(`not JSON: ${e.message}`);
+  }
+  if (fx === null || typeof fx !== "object") {
+    if (!problems.length) problems.push("not an object");
+    failed++;
+    rows.push([rel, "FAIL", problems.join(" | ")]);
+    continue;
+  }
   if (!fx.input || typeof fx.input.stdin !== "string" || !Array.isArray(fx.input.argv))
     problems.push("input.{argv,stdin} missing");
   // An empty `expect` is a payload the adapter must report nothing for; check 2 holds it to that.
   if (!Array.isArray(fx.expect)) problems.push("expect missing");
-  for (const [i, e] of (fx.expect ?? []).entries()) {
-    const ev = envelope(e, S.TYPE_TIER);
+  for (const [i, e] of (Array.isArray(fx.expect) ? fx.expect : []).entries()) {
+    if (e === null || typeof e !== "object") {
+      problems.push(`expect[${i}] is not an object`);
+      continue;
+    }
+    let ev;
+    try {
+      ev = envelope(e, S.TYPE_TIER);
+    } catch (err) {
+      problems.push(`expect[${i}] envelope: ${err.message}`);
+      continue;
+    }
     const r = S.Event.safeParse(ev);
     if (!r.success)
       problems.push(
         `expect[${i}] envelope: ${r.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`,
       );
-    const dataSchema = S.EventData.shape[e.type];
+    // Own keys only: "constructor" and "toString" are on every object, and are not schemas.
+    const dataSchema = Object.hasOwn(S.EventData.shape, e.type) ? S.EventData.shape[e.type] : null;
     if (dataSchema) {
       const d = dataSchema.safeParse(e.data);
       if (!d.success)
@@ -122,8 +140,10 @@ if (existsSync(runner)) {
   }
 }
 
+// A fixture's name and its error are a contributor's words: no control character reaches the terminal.
+const shown = (s) => s.replace(/\p{Cc}/gu, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
 const w = Math.max(...rows.map((r) => r[0].length));
-for (const [f, s, why] of rows) console.log(`${s.padEnd(4)} ${f.padEnd(w)} ${why}`);
+for (const [f, s, why] of rows) console.log(`${s.padEnd(4)} ${shown(f).padEnd(w)} ${shown(why)}`);
 console.log(
   `conformance: ${rows.length} fixture(s) checked against the schema${ran ? " and the adapters" : " (adapters land in M2)"}, ${failed} failed`,
 );

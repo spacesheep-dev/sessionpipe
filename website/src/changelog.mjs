@@ -5,7 +5,7 @@
 // will carry. Dates come from git: the commit that wrote a "## x.y.z" heading, the
 // commit that added a changeset. A shallow clone has no such history, so it gets none.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const PACKAGES = ["cli", "core", "receiver", "conformance"];
@@ -22,6 +22,14 @@ function git(root, args) {
   } catch {
     return null;
   }
+}
+
+/** A changelog or a changeset, read as the file it is: a symbolic link there would publish
+ *  some other file's words as release notes, so one is a build error. */
+function readPlain(file) {
+  if (lstatSync(file).isSymbolicLink())
+    throw new Error(`${file} is a symbolic link; the changelog is built from plain files`);
+  return readFileSync(file, "utf8");
 }
 
 /** "## 0.8.0" line → the date of the commit that wrote it, per `git blame`. */
@@ -106,7 +114,7 @@ export function loadChangelog(root) {
   for (const pkg of PACKAGES) {
     const file = `packages/${pkg}/CHANGELOG.md`;
     if (dated) releaseDates(root, file, dates);
-    for (const e of parseChangelog(readFileSync(path.join(root, file), "utf8"))) {
+    for (const e of parseChangelog(readPlain(path.join(root, file)))) {
       const key = `${e.version} ${e.hash}`;
       if (byKey.has(key)) byKey.get(key).packages.push(pkg);
       else byKey.set(key, { ...e, packages: [pkg] });
@@ -139,7 +147,7 @@ export function loadChangelog(root) {
   const pending = [];
   const dir = path.join(root, ".changeset");
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md")) {
-    const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(readFileSync(path.join(dir, f), "utf8"));
+    const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(readPlain(path.join(dir, f)));
     if (!m) continue;
     const pkgs = [...m[1].matchAll(/"sessionpipe(?:-([a-z]+))?":\s*(major|minor|patch)/g)];
     const bump = pkgs.map((p) => p[2]).sort((a, b) => BUMPS.indexOf(b) - BUMPS.indexOf(a))[0] ?? "patch";

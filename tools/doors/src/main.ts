@@ -2,7 +2,7 @@
 // One source per fact: schemas/v1/*.json and packages/core/gen/v1.ts are GENERATED from
 // proto/sessionpipe/v1/*.proto. `npm run schemas` rewrites them; `--check` exits 1 when a committed
 // file differs from what the proto says (CI runs that), and so does `buf lint`.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { build, lint } from "./buf.js";
 import { schemaFiles } from "./jsonschema.js";
@@ -21,6 +21,20 @@ export interface RunOptions {
 const SCHEMAS_DIR = "schemas/v1";
 const TYPES_FILE = "packages/core/gen/v1.ts";
 
+/** Throws when `rel`, or a folder on the way to it from the root, is a symbolic link. The
+ *  generated files are read, rewritten and deleted by name: through a link, that would be a
+ *  file somewhere else on the machine. Parts that are not there yet are fine. */
+function refuseLinks(root: string, rel: string): void {
+  let at = root;
+  for (const part of rel.split("/")) {
+    at = path.join(at, part);
+    if (lstatSync(at, { throwIfNoEntry: false })?.isSymbolicLink())
+      throw new Error(
+        `${path.relative(root, at)} is a symbolic link; generated files are plain files in plain folders`,
+      );
+  }
+}
+
 /** Lint, generate, then write or check. Returns the exit code. */
 export function run(o: RunOptions): number {
   const log = o.log ?? console.log;
@@ -30,10 +44,13 @@ export function run(o: RunOptions): number {
   const generated: Record<string, string> = { ...schemaFiles(d), [TYPES_FILE]: typesFile(d) };
 
   const schemasDir = path.join(o.root, SCHEMAS_DIR);
+  for (const rel of [SCHEMAS_DIR, ...Object.keys(generated)]) refuseLinks(o.root, rel);
   const existing: Record<string, string> = {};
   if (existsSync(schemasDir))
-    for (const f of readdirSync(schemasDir).filter((n) => n.endsWith(".json")))
+    for (const f of readdirSync(schemasDir).filter((n) => n.endsWith(".json"))) {
+      refuseLinks(o.root, `${SCHEMAS_DIR}/${f}`);
       existing[`${SCHEMAS_DIR}/${f}`] = readFileSync(path.join(schemasDir, f), "utf8");
+    }
   if (existsSync(path.join(o.root, TYPES_FILE)))
     existing[TYPES_FILE] = readFileSync(path.join(o.root, TYPES_FILE), "utf8");
 
