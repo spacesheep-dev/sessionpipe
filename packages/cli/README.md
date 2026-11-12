@@ -241,16 +241,25 @@ sessionpipe update
 ```
 
 When it ends well, the copy you type, the copy the background service runs and the
-hooks are one version, the newest; the service is running it and hearing from its
+hooks are one version, the newest; the service is running it and has heard from its
 receivers; and the last line says so. It does four things, in order:
 
 1. Reads npm's `latest` and installs it into the prefix this copy came from
    (`npm install --global --ignore-scripts sessionpipe@<version>`).
 2. Writes the hooks again from this copy.
-3. Makes the background service run this copy, the same one you type, so the two
-   cannot drift apart. A service that runs another copy, or that launchd or systemd no
-   longer has at all, is replaced; one that runs this copy already restarts itself.
-4. Looks: the service answers with the new version and is asking its receivers.
+3. Puts the background service on this copy, the same one you type, so the two cannot
+   drift apart. How depends on who runs it:
+   - **launchd or systemd has it, and it runs another copy or doesn't answer.** It is
+     replaced. It keeps the environment its service file gave it (its PATH, a
+     `SESSIONPIPE_CLAUDE` you added by hand); only the program changes.
+   - **Its service file is there and nothing runs** (a start that failed). It is put back.
+   - **It runs this copy already.** It restarts itself.
+   - **You run it yourself** (`control pair --no-service`, tmux, a container, WSL without
+     systemd). It is asked over its socket to restart itself. No service is installed
+     that you didn't ask for.
+4. Looks: the service answers with the new version and has heard from each receiver
+   since it started. A long-poll's first answer can take half a minute, so this waits
+   up to 40 seconds and says which receiver it waits for.
 
 When it can't get there it stops with one line that says what is wrong and one that
 says what to type next:
@@ -258,22 +267,52 @@ says what to type next:
 | What stood in the way | What it says to run |
 |---|---|
 | npm can't be reached | `sessionpipe update`, later. What needs no download is still done: the hooks and the service are put on this copy. Nothing is ever moved back to an older release |
-| npm can't write the prefix (installed with sudo) | `sudo npm install -g --prefix <prefix> sessionpipe@<version> && sessionpipe update` |
+| npm can't write the prefix (installed with sudo) | `sudo npm install -g --prefix <prefix> sessionpipe@<version> && sessionpipe update`. On Windows there is no sudo: `sessionpipe update`, from a terminal opened as administrator |
 | This copy isn't an npm install (a git checkout, a dev build) | `npx sessionpipe@latest update` |
 | The hooks couldn't be written | `sessionpipe install` |
-| The service started and a receiver doesn't answer it | `sessionpipe doctor` |
-| No launchd or systemd here (Windows, a container) and no service running | `sessionpipe control run` |
+| Nothing runs the service and there is no service file for it: you run it yourself, or nothing manages services here (Windows, a container) | `sessionpipe control run` |
+| You run the service yourself and it didn't restart | `sessionpipe control run`, after stopping it where it runs |
+| launchd or systemd refused the new service. The one that was there before is put back and started again | `sessionpipe update` when a service answers again; `sessionpipe control run` when nothing answers |
+| The service was started and doesn't answer, or answers as another version | `sessionpipe doctor` |
+
+A receiver that hasn't answered the service is not a failed update. The last line still
+says this computer is up to date; it names the receiver and what the service last heard
+of it, is printed in yellow under `!`, and the exit code is 0. `sessionpipe doctor`
+looks again.
 
 A restart never cuts short what the service itself holds: a turn it runs for you, a
 message in hand, a permission prompt it holds for your answer. It is given 25 seconds;
 past that the command says the service restarts by itself when that is done, and there
-is nothing more to type. A session you are working in yourself is not waited for: the
-service remembers across the restart that it is mid-turn, so a message to it still
-waits for its Stop.
+is nothing more to type. Just before it is replaced the service is asked to stop taking
+messages, in the same step in which it is found to hold nothing. A session you are
+working in yourself is not waited for: the service remembers across the restart that
+it is mid-turn, so a message to it still waits for its Stop.
 
-Exit codes: `0` everything is current; `3` the service finishes by itself; `1` it
-stopped, with the next command; `2` a wrong argument. Run from `npx`, it installs the
-persistent copy first and hands over, as `install` does.
+A service from before 0.15 has neither habit. It forgets who is mid-turn when it stops,
+so `update` writes that down for the new one before it replaces it. And where it
+restarts itself, it first waits for every session on the computer to end its turn:
+`update` says so, and that nothing more is to be typed.
+
+Exit codes:
+
+- `0`: everything is current. Also when a receiver hasn't answered (the yellow last
+  line), and when `SESSIONPIPE_NO_UPDATE_CHECK` is set (nothing was changed).
+- `3`: the service restarts by itself later, because it is busy with something of its
+  own, or is an older release waiting for a session to end its turn. Nothing to type.
+- `1`: it stopped, with what is wrong and the one command to run next.
+- `2`: a wrong argument.
+
+Run from `npx`, it installs the persistent copy first and hands over, as `install` does.
+
+`SESSIONPIPE_NO_UPDATE_CHECK=1 sessionpipe update` changes nothing. It says in one line
+that updating is off because that variable is set, and how to run it once without it:
+`env -u SESSIONPIPE_NO_UPDATE_CHECK sessionpipe update`.
+
+A sessionpipe that keeps its files somewhere other than this computer's usual place
+(`SESSIONPIPE_STATE`, `SESSIONPIPE_CONFIG`, `XDG_*` or `HOME` point elsewhere: a test, a
+throwaway world, a profile of your own) leaves the usual background service alone, and
+says so. Run `sessionpipe control run` for that one, or give it a service of its own
+with `SESSIONPIPE_SERVICE_LABEL=org.sessionpipe.<name>`.
 
 ### The daily update
 
@@ -283,8 +322,10 @@ so a restart or a machine that sleeps doesn't ask more often), it reads npm's `l
 When that is newer it waits until it holds nothing, stops taking new messages (the
 receiver holds them meanwhile), installs the release into its own copy and into the
 `sessionpipe` on its PATH when that is another install (the copy you type), writes the
-hooks again, and restarts onto the new code. `sessionpipe doctor` shows a split it
-could not close, and `sessionpipe update` closes it.
+hooks again, and restarts onto the new code. npm is only run on a folder that has
+`dist/cli.js` and a package.json that says it is sessionpipe: a script that merely has
+the name is left alone. `sessionpipe doctor` shows a split it could not close, and
+`sessionpipe update` closes it.
 
 How it restarts depends on how it runs:
 
@@ -314,6 +355,7 @@ sessionpipe update on
 `SESSIONPIPE_NO_UPDATE_CHECK=1` turns the daily update off too, but only where the
 service can see it: a launchd or systemd service doesn't inherit your shell's variables,
 while `sessionpipe update off` reaches it (it re-reads the config every ten minutes).
+Set in your shell, it makes `sessionpipe update` there change nothing (above).
 The registry asked is npm's own, or the one `npm_config_registry` names.
 
 ## Session names from claude.ai

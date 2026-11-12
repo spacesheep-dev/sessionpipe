@@ -25,10 +25,12 @@
 // A restart never cuts short what the service itself holds (a turn it runs, a message in
 // hand, a prompt held for an answer): it is given a moment, and past that the service
 // restarts by itself when it is done. A session someone is working in is not held back
-// for: the service remembers it is mid-turn across the restart (daemon.ts). A service
-// from before 0.15 doesn't remember, so what it knows of who is mid-turn is written down
-// for it before it is replaced (`seed`); and where such a one restarts itself it waits
-// for those sessions by its own older rule, which is said as it is: waiting, not failed.
+// for: the service remembers it is mid-turn across the restart (daemon.ts). Just before
+// it is replaced it is asked to stop taking messages in the same step in which it is
+// found to hold nothing (`quiesce`). A service from before 0.15 does neither: what it
+// knows of who is mid-turn is written down for the one that replaces it (`seed`); and
+// where such a one restarts itself it waits for those sessions by its own older rule,
+// which is said as it is: waiting, not failed.
 //
 // Everything that touches the computer comes in as a dependency, so each path is a test.
 import type { ServiceState } from "@sessionpipe/core/service";
