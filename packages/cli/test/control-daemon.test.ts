@@ -1790,11 +1790,13 @@ setTimeout(() => process.stdout.write(JSON.stringify({ type: "result", result: "
     expect(d?.busy()).toBeNull();
   });
 
-  it("busy while someone's session is mid-turn, until its Stop", async () => {
+  it("someone's own session mid-turn is known, and is nothing the daemon holds", async () => {
     await startDaemon();
     await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
-    expect(d?.busy()).toMatch(/mid-turn/);
+    expect(d?.status().mid_turn).toEqual([SESSION]);
+    expect(d?.busy()).toBeNull();
     await ask(sock, { op: "event", session: SESSION, event: "Stop" }, 500);
+    expect(d?.status().mid_turn).toEqual([]);
     expect(d?.busy()).toBeNull();
   });
 

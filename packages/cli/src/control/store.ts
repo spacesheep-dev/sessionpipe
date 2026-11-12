@@ -40,6 +40,7 @@ import {
   secretGet,
   secretSet,
 } from "../secrets.js";
+import { HOOKS_WORD_MS } from "./route.js";
 
 export interface PairedReceiver {
   /** The receiver's origin, as the person typed it. */
@@ -360,6 +361,19 @@ export interface DaemonState {
   /** Session ref → a message written into its own inbox that it has not taken. Read back
    *  pruned: only the ones still inside the hold window. */
   parked: Record<string, Parked>;
+  /** Session ref → a turn was running in it, by its own hooks' word, when the daemon
+   *  last stopped. Written at a stop and read at the next start, so a restart (an
+   *  update's) doesn't forget it and copy a session a message should have waited for.
+   *  Read back pruned: only those heard from within HOOKS_WORD_MS. */
+  mid_turn: Record<string, MidTurn>;
+}
+
+/** A session mid-turn when the daemon stopped. */
+export interface MidTurn {
+  /** When its hooks were last heard from, ISO-8601. */
+  at: string;
+  cwd?: string;
+  transcript?: string;
 }
 
 export function readState(file: string, now: number = Date.now()): DaemonState {
@@ -367,6 +381,7 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
   const started: Record<string, StartOptions> = {};
   const modes: Record<string, string> = {};
   const parked: Record<string, Parked> = {};
+  const mid_turn: Record<string, MidTurn> = {};
   try {
     const j = JSON.parse(readFileSync(file, "utf8")) as {
       copies?: unknown;
@@ -374,6 +389,7 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
       started?: unknown;
       modes?: unknown;
       parked?: unknown;
+      mid_turn?: unknown;
     };
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
@@ -391,6 +407,18 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
         if (Number.isFinite(at) && now - at <= HOLD_TTL_MS && typeof p.id === "string")
           parked[k] = { at: p.at as string, id: p.id };
       }
+    // A session silent for longer than its hooks' word is good for is no longer mid-turn.
+    if (j.mid_turn && typeof j.mid_turn === "object")
+      for (const [k, v] of Object.entries(j.mid_turn as Record<string, unknown>)) {
+        const m = v as { at?: unknown; cwd?: unknown; transcript?: unknown };
+        const at = typeof m?.at === "string" ? Date.parse(m.at) : Number.NaN;
+        if (Number.isFinite(at) && now - at < HOOKS_WORD_MS)
+          mid_turn[k] = {
+            at: m.at as string,
+            ...(typeof m.cwd === "string" ? { cwd: m.cwd } : {}),
+            ...(typeof m.transcript === "string" ? { transcript: m.transcript } : {}),
+          };
+      }
     // The richer shape when it is there, the plain id map when it isn't.
     const from = j.copies_v2 && typeof j.copies_v2 === "object" ? j.copies_v2 : j.copies;
     if (from && typeof from === "object")
@@ -399,7 +427,7 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
         if (c) copies[k] = c;
       }
   } catch {}
-  return { copies, started, modes, parked };
+  return { copies, started, modes, parked, mid_turn };
 }
 
 /** Both shapes of `copies`, every time. A daemon up to 0.10.0 reads `copies` as a map of

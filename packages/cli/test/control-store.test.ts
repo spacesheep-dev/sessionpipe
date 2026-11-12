@@ -222,9 +222,9 @@ describe("forks and aliases on disk", () => {
   it("state.json: the fork map, or nothing when it is missing or not a map", () => {
     const f = path.join(tmp, "state", "control", "state.json");
     const copy = { id: "b", at: "2026-10-26T00:00:00.000Z", reason: "no lane reached it" };
-    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
-    writeState(f, { copies: { a: copy }, started: {}, modes: {}, parked: {} });
-    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: { a: copy } });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: {} });
+    writeState(f, { copies: { a: copy }, started: {}, modes: {}, parked: {}, mid_turn: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: { a: copy } });
     // Written in both shapes, so a daemon that only knows the id map can still roll back.
     expect(JSON.parse(readFileSync(f, "utf8")) as { copies: unknown; copies_v2: unknown }).toMatchObject({
       copies: { a: "b" },
@@ -236,6 +236,7 @@ describe("forks and aliases on disk", () => {
       started: {},
       modes: {},
       parked: {},
+      mid_turn: {},
       copies: { a: { id: "b", at: "", reason: "" } },
     });
     writeFileSync(f, JSON.stringify({ copies: { a: 7, b: {}, c: { id: "" }, d: { id: "x" } } }));
@@ -243,7 +244,7 @@ describe("forks and aliases on disk", () => {
     // What held the session when the copy was made, where the record says: one of the
     // three the daemon writes, and nothing else is read as one.
     for (const why of COPY_WHYS) {
-      writeState(f, { copies: { a: { ...copy, why } }, started: {}, modes: {}, parked: {} });
+      writeState(f, { copies: { a: { ...copy, why } }, started: {}, modes: {}, parked: {}, mid_turn: {} });
       expect(readState(f).copies).toEqual({ a: { ...copy, why } });
     }
     writeFileSync(f, JSON.stringify({ copies_v2: { a: { ...copy, why: "window" }, b: { ...copy, why: 7 } } }));
@@ -277,9 +278,9 @@ describe("forks and aliases on disk", () => {
     writeFileSync(f, JSON.stringify({ modes: "plan" }));
     expect(readState(f).modes).toEqual({});
     writeFileSync(f, JSON.stringify({ copies: "b" }));
-    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: {} });
     writeFileSync(f, JSON.stringify({}));
-    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, copies: {} });
+    expect(readState(f)).toEqual({ started: {}, modes: {}, parked: {}, mid_turn: {}, copies: {} });
     // What each started session runs with: a known level, and a model only when well-formed.
     writeFileSync(
       f,

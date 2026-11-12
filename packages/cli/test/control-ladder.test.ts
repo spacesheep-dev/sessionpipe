@@ -554,6 +554,7 @@ describe.runIf(unix)("the answer read from a live session", () => {
       started: {},
       modes: {},
       parked: {},
+      mid_turn: {},
       copies: { [SID]: { id: COPY, at: new Date().toISOString(), reason: "a test put it there" } },
     });
     await startDaemon();
