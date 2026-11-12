@@ -255,7 +255,6 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
       prefix: null,
       unwritable: null,
       platform: process.platform,
-      unasked: null,
       harnesses: ["codex"],
       wanted: false,
     });
@@ -267,10 +266,30 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
       prefix: tmp,
       unwritable: expect.stringContaining("isn't writable by this user"),
     });
+  });
+
+  it("with SESSIONPIPE_NO_UPDATE_CHECK set it changes nothing, and says how to update once without it; exit 0", async () => {
     vi.stubEnv("SESSIONPIPE_NO_UPDATE_CHECK", "1");
-    expect((await update({ state: "current", version: VERSION, said: "ok" })).deps.unasked).toBe(
-      "SESSIONPIPE_NO_UPDATE_CHECK is set",
+    const r = await run({}, "update");
+    expect(r.lines).toEqual([
+      "  Updating is off, because SESSIONPIPE_NO_UPDATE_CHECK is set: nothing was changed. To update once without it: `env -u SESSIONPIPE_NO_UPDATE_CHECK sessionpipe update`",
+    ]);
+    expect(process.exitCode).toBeUndefined();
+    expect(r.exit).not.toHaveBeenCalled();
+    // Not from the npx cache either: handing over would install a copy.
+    vi.mocked(rerunGlobally).mockClear();
+    vi.mocked(viaNpx).mockReturnValue(true);
+    await run({}, "update");
+    expect(rerunGlobally).not.toHaveBeenCalled();
+    expect(bringCurrent).not.toHaveBeenCalled();
+    // Windows has no `env`: the line is one that cmd and PowerShell both run.
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    expect((await run({}, "update")).lines[0]).toContain(
+      'To update once without it: `cmd /c "set SESSIONPIPE_NO_UPDATE_CHECK=&& sessionpipe update"`',
     );
+    // Switching the daily update still works with it set.
+    Object.defineProperty(process, "platform", platform);
+    expect((await run({}, "update", "off")).text).toContain("no longer checks npm");
   });
 
   it("asks npm, and says in plain words why it couldn't", async () => {
