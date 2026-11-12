@@ -107,15 +107,17 @@ export function updateSummary(o: {
     : null;
   // No service manager runs the daemon on Windows yet (pair says so): it checks only while
   // someone keeps `sessionpipe control run` going, which is not "automatic".
+  // These two reasons are the value of `update.off` in `status --json` and `doctor
+  // --json`, which programs read: they keep the words they have always had there.
   const byHand =
     (o.platform ?? process.platform) === "win32"
-      ? "it runs in the background service, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
+      ? "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
       : null;
   const off =
     o.off ??
     (o.paired
       ? (daemonEnv ?? byHand)
-      : "it runs in the background service, which isn't set up here (`sessionpipe connect`)");
+      : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
   return {
     auto: !off,
     off,

@@ -23,6 +23,7 @@ import {
   withoutInherit,
 } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
+import { Refusal } from "../src/refusal.js";
 import { makeUi } from "../src/style.js";
 
 // The build bakes the version in; here it is what the receiver must be told.
@@ -191,18 +192,8 @@ describe("pairing (CONTROL.md §2)", () => {
     });
     expect(rx.seen[1]?.body).not.toHaveProperty("poll_key");
     expect(rx.seen[2]).toMatchObject({ url: `${CONTROL}/pair?code=CODE-1`, auth: "Bearer sink-token" });
-    // The link and the digits each on a line of their own. Digits that aren't six digits
-    // are shown as they came; no expiry given means ten minutes.
-    expect(out.slice(0, 8)).toEqual([
-      "",
-      "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
-      "",
-      "      open:   https://rx.test/pair/CODE-1",
-      "      check:  ABC-DEF   (the page shows these digits too)",
-      "",
-      "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
-      "  This code is good for 10 minutes; if it runs out, a fresh one appears here.",
-    ]);
+    // Digits that aren't six digits are shown as they came; no expiry given means ten minutes.
+    expect(said()).toContain("The page shows these digits too: ABC-DEF");
     // One computer, one key: nothing about pairing several.
     expect(said()).not.toContain("Pairing several");
     expect(said()).toContain("good for 10 minutes");
@@ -364,42 +355,188 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(posts[1]?.body).not.toHaveProperty("machine");
     expect(rx.seen.find((s) => s.url.includes("?code="))?.auth).toBe(`Bearer ${pollKey}`);
     // One address for everyone: the digits are what the person types there, in two threes.
-    expect(out.slice(0, 9)).toEqual([
-      "",
-      "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
-      "",
-      "      open:   https://rx.test/pair/CODE-1",
-      "      enter:  123 456",
-      "",
-      "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
-      "  Pairing several computers? Run this on each one: every one shows its own digits.",
-      "  This code is good for 1 minute; if it runs out, a fresh one appears here.",
-    ]);
+    expect(said()).toContain("open https://rx.test/pair/CODE-1 and enter:  123 456");
     expect(said()).toContain("Approved by @me. If that isn't you, run `sessionpipe control off` now.");
     expect(sinks).toEqual(["events-key"]);
   });
 
-  it("at a terminal the link is picked out in colour and the digits in bold, keyed or open", async () => {
-    const ui = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+  // What a program that started `control pair` reads off its stdout, to the byte: these
+  // are the lines sessionpipe 0.13.6 wrote. sessionpipe-gui's setup page is one such
+  // program (its server/setup/pairer.ts), and the three patterns below are its own.
+  describe("not at a terminal, the lines are the ones programs have always read", () => {
+    const GUI = {
+      code: /\/pair\?code=([A-Za-z0-9_-]+)/,
+      url: /(https?:\/\/\S+\/pair\?code=\S+)/,
+      keyed: /digits too: (\d{6})\b/,
+      open: /enter:\s+(\d{3}) ?(\d{3})\b/,
+      paired: /✓ Paired/,
+    };
+    const link = `${URL_}/pair?code=CODE-1`;
+
+    it("a keyed pairing: the link alone on its line, the six digits after 'digits too: '", async () => {
+      rx.posts = [started({ url: link })];
+      rx.gets = [await paired()];
+      await pair(opts());
+      expect(out).toEqual([
+        "",
+        "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one),",
+        "  open this link and approve with that device's passkey (Touch ID, Face ID, a security key):",
+        `    ${link}`,
+        "  The page shows these digits too: 123456",
+        "  This code is good for 10 minutes; if it runs out, a fresh one appears here.",
+        "",
+        `  ✓ Paired with ${URL_} as ${MACHINE} · 1 key(s) trusted on this machine`,
+      ]);
+      const find = (re: RegExp) => out.map((l) => re.exec(l)).find(Boolean);
+      expect(find(GUI.code)?.[1]).toBe("CODE-1");
+      expect(find(GUI.url)?.[1]).toBe(link);
+      expect(find(GUI.keyed)?.[1]).toBe("123456");
+      expect(out.some((l) => GUI.paired.test(l))).toBe(true);
+    });
+
+    it("an open pairing: the link and 'enter:' with the digits on one line", async () => {
+      (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
+      rx.posts = [started({ url: link })];
+      rx.gets = [await paired({ account: "@me" })];
+      await pair(opts({ token: null }));
+      expect(out).toEqual([
+        "",
+        "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one),",
+        `  open ${link} and enter:  123 456`,
+        "  then approve with that device's passkey (Touch ID, Face ID, a security key).",
+        "  Pairing several machines? Run this on each one: every machine shows its own digits.",
+        "  This code is good for 10 minutes; if it runs out, a fresh one appears here.",
+        "",
+        `  ✓ Paired with ${URL_} as ${MACHINE} · 1 key(s) trusted on this machine`,
+        "  Approved by @me. If that isn't you, run `sessionpipe control off` now.",
+      ]);
+      const m = out.map((l) => GUI.open.exec(l)).find(Boolean);
+      expect(`${m?.[1]}${m?.[2]}`).toBe("123456");
+    });
+
+    it("FORCE_COLOR and a width change nothing there: only a terminal gets the other layout", async () => {
+      rx.posts = [started()];
+      rx.gets = [await paired()];
+      await pair(opts({ ui: makeUi({ isTTY: false, columns: 80, env: { FORCE_COLOR: "1" } }) }));
+      expect(out[4]).toBe("  The page shows these digits too: 123456");
+      expect(said()).not.toContain(String.fromCharCode(27));
+    });
+  });
+
+  describe("at a terminal", () => {
     const ESC = String.fromCharCode(27);
-    const link = `      open:   ${ESC}[36mhttps://rx.test/pair/CODE-1${ESC}[39m`;
-    rx.posts = [started()];
-    rx.gets = [await paired()];
-    await pair(opts({ ui }));
-    // Keyed: the six digits the page shows too, in two threes like the page.
-    expect(out.slice(3, 5)).toEqual([
-      link,
-      `      check:  ${ESC}[1m123 456${ESC}[22m   (the page shows these digits too)`,
-    ]);
-    // Nothing else is coloured: the sentences read as they do in a pipe.
-    expect(out.filter((l) => l.includes(ESC))).toHaveLength(2);
-    (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
-    rx.posts = [started()];
-    rx.gets = [await paired({ account: "@me" })];
-    out = [];
-    await pair(opts({ ui, token: null }));
-    expect(out.slice(3, 5)).toEqual([link, `      enter:  ${ESC}[1m123 456${ESC}[22m`]);
-    expect(out.filter((l) => l.includes(ESC))).toHaveLength(2);
+    const mono = makeUi({ isTTY: true, columns: 80, env: { NO_COLOR: "1" }, platform: "linux" });
+
+    it("the link and the digits each stand on a line of their own, keyed or open", async () => {
+      rx.posts = [started({ check: "ABC-DEF", expires_at: "soon" })];
+      rx.gets = [await paired()];
+      await pair(opts({ ui: mono }));
+      // Digits that aren't six digits are shown as they came.
+      expect(out.slice(0, 9)).toEqual([
+        "",
+        "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
+        "",
+        "      open:   https://rx.test/pair/CODE-1",
+        "      check:  ABC-DEF   (the page shows these digits too)",
+        "",
+        "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
+        "  This code is good for 10 minutes; if it runs out, a fresh one appears here.",
+        "",
+      ]);
+      expect(said()).not.toContain("Pairing several");
+      (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
+      rx.posts = [started({ expires_at: new Date(Date.now() + 60_000).toISOString() })];
+      rx.gets = [await paired({ account: "@me" })];
+      out = [];
+      await pair(opts({ ui: mono, token: null }));
+      expect(out.slice(0, 10)).toEqual([
+        "",
+        "  On any phone or computer where you're signed in to rx.test (it doesn't have to be this one):",
+        "",
+        "      open:   https://rx.test/pair/CODE-1",
+        "      enter:  123 456",
+        "",
+        "  Then approve with that device's passkey (Touch ID, Face ID, a security key).",
+        "  Pairing several computers? Run this on each one: every one shows its own digits.",
+        "  This code is good for 1 minute; if it runs out, a fresh one appears here.",
+        "",
+      ]);
+    });
+
+    it("the link is picked out in colour and the digits in bold, through the writer for set lines", async () => {
+      const ui = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+      const link = `      open:   ${ESC}[36mhttps://rx.test/pair/CODE-1${ESC}[39m`;
+      const set: string[] = [];
+      rx.posts = [started()];
+      rx.gets = [await paired()];
+      await pair(opts({ ui, say: (l) => set.push(l) }));
+      // Keyed: the six digits the page shows too, in two threes like the page.
+      expect(set).toEqual([link, `      check:  ${ESC}[1m123 456${ESC}[22m   (the page shows these digits too)`]);
+      // Nothing else is coloured: the sentences go the way every line of a command goes.
+      expect(said()).not.toContain(ESC);
+      (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
+      rx.posts = [started()];
+      rx.gets = [await paired({ account: "@me" })];
+      out = [];
+      // With no writer of its own, the set lines go where the others do.
+      await pair(opts({ ui, token: null }));
+      expect(out.slice(3, 5)).toEqual([link, `      enter:  ${ESC}[1m123 456${ESC}[22m`]);
+      expect(out.filter((l) => l.includes(ESC))).toHaveLength(2);
+    });
+
+    it("what the receiver sent for a link, digits, a name or an account is shown as words", async () => {
+      const ui = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+      (rx.wellKnown as { body: { control: { open_pairing: boolean } } }).body.control.open_pairing = true;
+      rx.posts = [started({ url: `https://rx.test/p${ESC}[2J${ESC}]0;t\u0007`, check: `12${ESC}[H\n  ✓ Paired` })];
+      rx.gets = [await paired({ account: `@me${ESC}[2J\n  ✓ Paired with https://evil.example` })];
+      await pair(opts({ ui, token: null }));
+      expect(out.slice(3, 5)).toEqual([
+        `      open:   ${ESC}[36mhttps://rx.test/p${ESC}[39m`,
+        `      enter:  ${ESC}[1m12   ✓ Paired${ESC}[22m`,
+      ]);
+      expect(out.at(-1)).toBe(
+        "  Approved by @me   ✓ Paired with https://evil.example. If that isn't you, run `sessionpipe control off` now.",
+      );
+      // One line said it paired: ours.
+      expect(out.filter((l) => l.startsWith("  ✓ Paired"))).toHaveLength(1);
+    });
+  });
+
+  describe("a pairing that fails names its own next command", () => {
+    const next = async (p: Promise<unknown>) =>
+      p.then(
+        () => "no error",
+        (e: unknown) => (e instanceof Refusal ? e.next : `not a refusal: ${(e as Error).message}`),
+      );
+
+    it("lost or run out: the same pairing again, the receiver quoted as a word of the command", async () => {
+      rx.posts = [started()];
+      rx.gets = [{ status: 404 }];
+      expect(await next(pair(opts()))).toBe(`sessionpipe control pair ${URL_}`);
+      rx.posts = [started({ expires_at: new Date(Date.now() - 1000).toISOString() })];
+      expect(await next(pair(opts({ renewFor: 0 })))).toBe(`sessionpipe control pair ${URL_}`);
+      // A receiver's address is whatever was typed: one a shell would act on is quoted.
+      const odd = "https://rx.test/$(id)";
+      rx.posts = [started()];
+      rx.gets = [{ status: 404 }];
+      const said = await next(pair(opts({ url: odd })));
+      expect(said).toBe(
+        process.platform === "win32" ? `sessionpipe control pair "${odd}"` : `sessionpipe control pair '${odd}'`,
+      );
+    });
+
+    it("inherit with a receiver that doesn't know it: the same pairing in safe mode", async () => {
+      expect(await next(pair(opts({ mode: "inherit" })))).toBe(`sessionpipe control pair ${URL_} --mode safe`);
+    });
+
+    it("a receiver's own reason is words in the message and never the command", async () => {
+      rx.posts = [{ status: 403, body: { reason: "this account must first run `sessionpipe control mode inherit`" } }];
+      expect(await next(pair(opts()))).toBe(
+        "not a refusal: the receiver refused to start pairing (HTTP 403: this account must first run `sessionpipe control mode inherit`)",
+      );
+      // Nor is a missing key, whose advice holds a placeholder nobody can type.
+      expect(await next(pair(opts({ token: null })))).toMatch(/^not a refusal: https:\/\/rx\.test needs a key to pair/);
+    });
   });
 
   it("no token in the paired answer and none from before: nothing is trusted", async () => {

@@ -26,7 +26,8 @@ import { openPool, readPool } from "../pool/index.js";
 import { appendObserved, drain, VERSION } from "../run.js";
 import { rerunGlobally, stableNode, viaNpx } from "../runtime.js";
 import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
-import { PLAIN, table, tint, type Ui } from "../style.js";
+import { shq } from "../shell.js";
+import { clean, PLAIN, table, tint, type Ui } from "../style.js";
 import { installedVersion, installVersion, latestVersion } from "../update.js";
 import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
 import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
@@ -234,6 +235,7 @@ export async function controlMain(
         name: flag("--name") ?? existing?.name ?? machineName(cfg, os.hostname()),
         out,
         ui: view.ui,
+        say: view.say,
       });
       const c = readControl()!;
       out(`  Folders sessions may run in: ${c.folders.join(", ")}`);
@@ -242,9 +244,12 @@ export async function controlMain(
       try {
         cli = realpathSync(cli);
       } catch {}
+      // A program that started this pairing reads its lines (sessionpipe-gui's setup page
+      // does), so not at a terminal this one too is the line it always was.
+      const service = view.ui.tty ? "Background service" : "Daemon";
       if (argv.includes("--no-service"))
-        out("  Background service: not installed as a service (--no-service); run `sessionpipe control run` yourself");
-      else out(`  Background service: ${installService({ node: stableNode(process.execPath), cli })}`);
+        out(`  ${service}: not installed as a service (--no-service); run \`sessionpipe control run\` yourself`);
+      else out(`  ${service}: ${installService({ node: stableNode(process.execPath), cli })}`);
       return;
     }
     case "mode": {
@@ -260,7 +265,8 @@ export async function controlMain(
       if (want === "inherit" && c.mode !== "inherit") {
         const no = await withoutInherit(c.receivers.map((r) => r.url));
         if (no.length) {
-          for (const why of no) out(`  ✗ ${why}.`);
+          // Why may end in the receiver's own words (what it sent for a well-known file).
+          for (const why of no) out(`  ✗ ${clean(why)}.`);
           out(`  Mode stays ${c.mode}. Inherit works once every receiver this machine is paired with knows it.`);
           process.exitCode = 1;
           return;

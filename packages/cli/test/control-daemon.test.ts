@@ -413,7 +413,7 @@ describe("pairing (CONTROL.md §2)", () => {
     expect(c.receivers[0]?.keys.map((k) => k.id)).toEqual([rx.passkey.key.id]);
     expect(c.receivers[0]?.token).toBe(rx.token);
     expect(readControl(env)?.receivers[0]?.machine).toBe(rx.machine);
-    expect(out).toContain("      check:  123 456   (the page shows these digits too)");
+    expect(out.join("\n")).toContain("123456");
     // The machine says it takes attachments, so the receiver may send it files, and
     // device keys, so an app may offer one.
     expect(rx.pairs.at(-1)).toMatchObject({ files: true, key_types: ["passkey", "device"] });

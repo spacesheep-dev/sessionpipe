@@ -79,7 +79,7 @@ import {
   sinkWithSecrets,
   storeLabel,
 } from "./secrets.js";
-import { commands, failure, fold, makeUi, PLAIN, paint, span, table, type Ui } from "./style.js";
+import { clean, commands, failure, fold, makeUi, PLAIN, paint, span, table, type Ui } from "./style.js";
 import { globalPrefix, installVersion, isNewer, latestVersion } from "./update.js";
 import { overview, usage } from "./usage.js";
 import { applyWellKnown, readWellKnown } from "./wellknown.js";
@@ -146,8 +146,11 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
   ui = makeUi({ isTTY: io.tty, columns: io.columns, noColor });
   const people = forPeople(args, ui.tty);
   if (!people) ui = PLAIN;
-  out = people ? (s = "") => io.out(paint(ui, s)) : io.out;
-  say = io.out;
+  // The one way a line reaches a person: whatever a command put in it, nothing a
+  // terminal acts on is left but the colours style.ts wrote itself (style.ts `clean`).
+  const write = (s = ""): void => io.out(clean(s, { breaks: true, colour: true }));
+  out = people ? (s = "") => write(paint(ui, s)) : io.out;
+  say = write;
   state = stateDir();
   try {
     await command(args[0] ?? "help");
@@ -536,6 +539,7 @@ async function connect(): Promise<void> {
       ],
       out,
       distDir,
+      { ui, say },
     );
     if (mode === "safe")
       out(
@@ -1566,7 +1570,8 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
               : `checked ${ago(upd.last_check, now)}: ${upd.latest ?? "?"} is the newest`
             : "once a day; not checked yet",
         }
-      : { mark: "info", label: "by hand", value: `${upd.off}` },
+      : // Why is a --json value too and keeps its old words there; a person reads this page's.
+        { mark: "info", label: "by hand", value: `${upd.off}`.replace("the control daemon", "the background service") },
   );
   if (upd.pending)
     updates.rows.push({

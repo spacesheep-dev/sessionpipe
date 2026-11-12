@@ -3,7 +3,7 @@
 // itself, set out for a person. A pipe and --json still get the JSON it always printed
 // (control/cli.ts), which is what scripts and other tools read.
 import { type Group, group } from "../report.js";
-import { mark, span, tint, type Ui } from "../style.js";
+import { clean, mark, span, tint, type Ui } from "../style.js";
 import { ago, type UpdateRecord } from "./autoupdate.js";
 import type { Status } from "./daemon.js";
 
@@ -121,7 +121,12 @@ export function statusView(ui: Ui, st: Status, now: number): string[] {
   }
   return [
     `${mark(ui, "ok")} ${tint(ui, "bold", tint(ui, "green", "The background service is running"))}`,
-    tint(ui, "dim", `  sessionpipe ${st.version} · pid ${st.pid} · ${st.name}`),
+    // The service's own words about itself are still words from outside this process.
+    tint(
+      ui,
+      "dim",
+      `  sessionpipe ${clean(String(st.version))} · pid ${clean(String(st.pid))} · ${clean(String(st.name))}`,
+    ),
     ...[messages, now_, can, updates].filter((g) => g.rows.length).flatMap((g) => ["", ...group(ui, g)]),
     "",
     tint(ui, "dim", "  Every field: sessionpipe control status --json"),

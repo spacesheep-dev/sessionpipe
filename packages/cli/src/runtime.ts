@@ -5,6 +5,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { launcherState } from "./launcher.js";
+import { Refusal } from "./refusal.js";
 import { VERSION } from "./run.js";
 import { isNewer } from "./update.js";
 
@@ -51,8 +52,9 @@ export function assertSetupVersion(allowDowngrade: boolean, target?: string): vo
   if (allowDowngrade) return;
   const check = (installed: string | null, where: string): void => {
     if (installed && isNewer(installed, VERSION, true))
-      throw new Error(
+      throw new Refusal(
         `refusing to downgrade sessionpipe: ${installed} is installed at ${where}; this command would install ${VERSION}. Use the installed newer CLI, or pass --allow-downgrade to force ${VERSION}.`,
+        "sessionpipe update",
       );
   };
   const hooks = launcherState(VERSION);
