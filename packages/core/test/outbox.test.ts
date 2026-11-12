@@ -241,6 +241,25 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(r2.offset).toBe(statSync(o.file(ref)).size);
   });
 
+  it("a torn append cut inside a character, with the next append glued on, moves the offset to the line's end, not past it", () => {
+    const o = new Outbox(tmp);
+    o.append(ref, [ev(0)]);
+    const torn = Buffer.from(JSON.stringify({ ...ev(1), data: { text: "café" } }), "utf8");
+    appendFileSync(o.file(ref), torn.subarray(0, torn.indexOf(Buffer.from("é")) + 1));
+    o.append(ref, [ev(2), ev(3)]);
+    const r1 = o.read(ref, 0);
+    expect(r1.events.map((e) => e.session.seq)).toEqual([0, 3]);
+    expect(r1.offset).toBe(statSync(o.file(ref)).size);
+    o.append(ref, [ev(4)]);
+    const r2 = o.read(ref, r1.offset);
+    expect(r2.events.map((e) => e.session.seq)).toEqual([4]);
+    expect(r2.offset).toBe(statSync(o.file(ref)).size);
+    // The same in batches: the batch that ends after the torn line leaves the next one whole.
+    const b1 = o.read(ref, 0, 2);
+    expect(b1.events.map((e) => e.session.seq)).toEqual([0, 3]);
+    expect(o.read(ref, b1.offset, 2).events.map((e) => e.session.seq)).toEqual([4]);
+  });
+
   it("a read from past the end, or of a session with no file, returns the offset it was given", () => {
     const o = new Outbox(tmp);
     expect(o.read({ harness: "codex", session: "none" }, 7)).toEqual({ events: [], offset: 7 });
