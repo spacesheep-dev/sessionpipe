@@ -288,6 +288,7 @@ describe("a look at the service", () => {
       file: plist,
       installed: false,
       loaded: false,
+      argv: null,
     });
     // A look, in both domains: nothing but `print`.
     expect(neither.asked).toEqual([
@@ -302,6 +303,7 @@ describe("a look at the service", () => {
       file: plist,
       installed: true,
       loaded: true,
+      argv: null,
     });
     // Found at the screen: the other domain is not asked.
     expect(gui.asked).toEqual(["launchctl print gui/501/org.sessionpipe.gui"]);
@@ -321,6 +323,7 @@ describe("a look at the service", () => {
       file: unit,
       installed: false,
       loaded: true,
+      argv: null,
     });
     expect(active.asked).toEqual(["systemctl --user is-active sessionpipe-gui.service"]);
     mkdirSync(path.dirname(unit), { recursive: true });
@@ -330,12 +333,13 @@ describe("a look at the service", () => {
       file: unit,
       installed: true,
       loaded: false,
+      argv: null,
     });
   });
 
   it("another platform has no manager, and nothing is asked", () => {
     const none = manager();
-    const nothing = { manager: null, file: null, installed: false, loaded: false };
+    const nothing = { manager: null, file: null, installed: false, loaded: false, argv: null };
     expect(serviceState({ ...NAMES, home, platform: "win32", exec: none.exec })).toEqual(nothing);
     expect(none.asked).toEqual([]);
     // With no stand-in either: there is still nothing to run.

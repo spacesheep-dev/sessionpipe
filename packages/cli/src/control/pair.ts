@@ -22,6 +22,7 @@ import * as core from "@sessionpipe/core/service";
 import { Refusal } from "../refusal.js";
 import { shq } from "../shell.js";
 import { clean, PLAIN, tint, type Ui } from "../style.js";
+import { SERVICE_LABEL as LABEL, serviceNames, SERVICE_UNIT as UNIT } from "./health.js";
 import {
   askOn,
   type ControlConfig,
@@ -347,8 +348,6 @@ export function removeKey(id: string, env?: NodeJS.ProcessEnv): number {
 // The launchd agent and the systemd user unit are core's (sessionpipe-core/service);
 // this is the daemon's: its label, its command line, and what to tell the person.
 
-const LABEL = "org.sessionpipe.control";
-const UNIT = "sessionpipe-control.service";
 const DESCRIPTION = "sessionpipe control daemon (signed messages to your coding sessions)";
 
 export { type Exec, ensureLinger } from "@sessionpipe/core/service";
@@ -356,9 +355,16 @@ export { type Exec, ensureLinger } from "@sessionpipe/core/service";
 /** The daemon's service: `<node> <cli> control run`, logging to the state dir. Both files
  *  restart it when it exits non-zero; an update exits UPDATE_EXIT (75) to come back on
  *  the new code. SESSIONPIPE_SERVICE tells the daemon which manager that is. */
-const spec = (o: { node: string; cli: string; logDir: string; home?: string; env?: Record<string, string> }) => ({
-  label: LABEL,
-  unit: UNIT,
+const spec = (o: {
+  node: string;
+  cli: string;
+  logDir: string;
+  home?: string;
+  env?: Record<string, string>;
+  names?: { label: string; unit: string };
+}) => ({
+  label: o.names?.label ?? LABEL,
+  unit: o.names?.unit ?? UNIT,
   description: DESCRIPTION,
   argv: [o.node, o.cli, "control", "run"],
   logPath: path.join(o.logDir, "daemon.log"),
@@ -372,11 +378,19 @@ const spec = (o: { node: string; cli: string; logDir: string; home?: string; env
  *  SESSIONPIPE_CLAUDE (a path that stops existing is skipped and looked for again). */
 export function serviceEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const out: Record<string, string> = {};
+  // A sessionpipe with a service of its own (SESSIONPIPE_SERVICE_LABEL: a throwaway
+  // world) gives that service the same world: where its files are, whose home it is and
+  // which registry npm asks. Without this the service would come up in this computer's
+  // real home, beside the real one.
+  if (env.SESSIONPIPE_SERVICE_LABEL)
+    for (const [k, v] of Object.entries(env)) if (v !== undefined && WORLD.test(k)) out[k] = v;
   if (env.PATH) out.PATH = env.PATH;
   const claude = claudeControl.findClaude(env);
   if (claude) out.SESSIONPIPE_CLAUDE = claude;
   return out;
 }
+const WORLD =
+  /^(SESSIONPIPE_.+|HOME|USERPROFILE|XDG_[A-Z]+_HOME|CLAUDE_CONFIG_DIR|CODEX_HOME|GEMINI_CLI_HOME|GROK_HOME|npm_config_registry)$/;
 
 export function serviceFiles(o: {
   node: string;
@@ -388,7 +402,14 @@ export function serviceFiles(o: {
   return core.serviceFiles(spec(o));
 }
 
-/** Write and start the service for this platform. Returns what it did, in words. */
+/** Said where a sessionpipe pointed away from this computer's own files (a test, a
+ *  throwaway world) would otherwise have replaced this computer's real service. */
+export const NOT_THIS_COMPUTERS =
+  "not installed as a service: SESSIONPIPE_STATE or SESSIONPIPE_CONFIG points this sessionpipe away from this computer's own files, so its service is left alone; run `sessionpipe control run` yourself";
+
+/** Write and start the service for this platform. Returns what it did, in words. A
+ *  sessionpipe pointed away from this computer's files never replaces the real service
+ *  (health.ts `serviceNames`); a run with `exec` stood in runs nothing real, and may. */
 export function installService(o: {
   node: string;
   cli: string;
@@ -396,6 +417,9 @@ export function installService(o: {
   exec?: Exec;
   platform?: NodeJS.Platform;
 }): string {
+  const names = serviceNames(o.env) ?? (o.exec ? { label: LABEL, unit: UNIT } : null);
+  if (!names) return NOT_THIS_COMPUTERS;
+  const { label, unit } = names;
   const logDir = controlState(o.env);
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const log = path.join(logDir, "daemon.log");
@@ -408,20 +432,21 @@ export function installService(o: {
     chmodSync(log, 0o600);
   } catch {}
   const r = core.installService({
-    ...spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env) }),
+    ...spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env), names }),
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });
   if (r.manager === "launchd")
     return r.domain === "gui"
-      ? `launchd agent ${LABEL} (log: ${log})`
-      : `launchd agent ${LABEL} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${log})`;
-  if (r.manager === "systemd") return `systemd user unit ${UNIT}; ${r.linger?.note} (journalctl --user -u ${UNIT})`;
+      ? `launchd agent ${label} (log: ${log})`
+      : `launchd agent ${label} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${log})`;
+  if (r.manager === "systemd") return `systemd user unit ${unit}; ${r.linger?.note} (journalctl --user -u ${unit})`;
   if (r.unreachable)
     return `wrote ${r.unreachable}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
   return "no service manager for this platform yet; run `sessionpipe control run` yourself";
 }
 
-export function uninstallService(_env?: NodeJS.ProcessEnv): void {
-  core.uninstallService({ label: LABEL, unit: UNIT });
+export function uninstallService(env?: NodeJS.ProcessEnv): void {
+  const names = serviceNames(env);
+  if (names) core.uninstallService(names);
 }
