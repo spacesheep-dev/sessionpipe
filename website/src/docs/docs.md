@@ -26,9 +26,7 @@ Finds the agents on this machine, writes their hooks and backfills 30 days into 
 outbox. Nothing is sent until a sink exists. `--<harness>` hooks one even if it isn't detected;
 `--sink URL --tier N` adds a sink first.
 
-```sh
-sessionpipe uninstall [--keep-state]
-```
+{{usage uninstall}}
 
 Removes the hook entries sessionpipe wrote and nothing else: every config file is otherwise
 byte-identical. The outbox stays under the state folder and is pruned after 30 days.
@@ -81,13 +79,16 @@ each session instead of now; `--json` prints the filtered events whole.
 
 {{usage status}}
 
-Sinks and what each has waiting, queued jobs, hook timing (p50 and p95 of the last 100) and
-the self-update state. `--json` is described [below](#status-json).
+Whether this computer is fine, in a few lines: a verdict, then the background service, the
+agents and their hooks, the sinks and what each has waiting, who can message it, and the
+self-update state. `--json` is described [below](#status-json).
 
 {{usage doctor}}
 
-Everything `status` checks, plus a live hook benchmark, each Claude Code account's sign-in,
-keychain access, and warnings for what looks wrong.
+Everything `status` checks, plus a live hook benchmark, each Claude Code account's sign-in
+(as the background service sees it), the disk, and what the service's log says went wrong.
+It ends with what to fix: one sentence and one command each, in the order to run them. It
+exits 1 when anything needs attention.
 
 ### History
 
@@ -186,7 +187,8 @@ Changes that answer; the running daemon picks it up within seconds.
 
 {{usage control status}}
 
-Receivers, parked waiters, sessions mid-turn, open permission prompts.
+Who the background service hears, what it holds right now and what it can do. At a terminal
+this is a page to read; piped or with `--json` it is the JSON it always printed.
 
 {{usage control keys}}
 

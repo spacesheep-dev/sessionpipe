@@ -61,7 +61,7 @@ enroll at this terminal; the receiver can queue a message but can never forge on
 sessionpipe control pair spacesheep.dev   # one link: approve with your passkey; installs the daemon (this folder by default)
 sessionpipe control folders add ~/work/api   # let messages reach sessions in another folder too (no new pairing)
 sessionpipe control folders [remove <dir>]   # the list, or stop allowing a folder
-sessionpipe control status          # receivers, parked waiters, sessions mid-turn, open permission prompts
+sessionpipe control status          # who it hears, what it holds, what it can do (JSON when piped)
 sessionpipe control keys [remove <id>]
 sessionpipe control off             # tell the receiver, forget its token and keys
 ```
@@ -304,6 +304,35 @@ and sends each one a receiver already has under another name again, as
 `session.backfill` with claude.ai's name, so finished sessions are renamed too, not only
 the ones that run again. It prints how many it found named and how many it sent.
 
+## At the terminal
+
+`sessionpipe doctor` is the one place that says whether this computer is fine. It
+starts with a verdict (`All good`, or how many things need attention), then what it
+looked at in groups (this computer and its background service, the agents and their
+hooks, where it reports, who can message it and whether that is live, the accounts,
+updates), and ends with **To fix**: one sentence and one command each, in the order to
+run them. It exits 1 when anything needs attention, 0 otherwise, with `--json` too.
+`sessionpipe status` is the same in a few lines, without the slow checks.
+
+What only the service's log used to know is on that page: a disk that filled up, a key
+it can't read from the keychain, a pool with no account left to try, a receiver that
+hasn't answered. Whether Claude Code is signed in is asked of the running service over
+its socket, since a shell over ssh can't read a Mac's login keychain and would only
+guess; and a service that launchd or systemd doesn't have at all is said to be that,
+not merely "offline".
+
+`sessionpipe control status` is a page for a person at a terminal, and the JSON it
+always printed when piped or given `--json`, which is what scripts read.
+
+Colour is on at a terminal and off in a pipe. `--no-color` turns it off, `NO_COLOR` too,
+`TERM=dumb` too; `FORCE_COLOR=1` turns it on anywhere. Nothing is said by colour alone:
+every state has a mark (`✓`, `!`, `✗`, `·`) and a word. Lines fold at the terminal's
+width, under their own text and never inside a command; a pipe gets whole lines. The
+old Windows console gets `√` and `×`, which its fonts have. A command that fails prints
+two lines on stderr: `error` with what is wrong, and `try` with the one command to run
+next. Nothing a program reads is touched: hook output, the worker, the status line,
+every `--json` and the daemon's log are as they were.
+
 ## Help and status JSON
 
 `sessionpipe <command> --help` (or `-h`) prints usage and exits successfully before
@@ -327,8 +356,7 @@ including paused sinks; it counts files, not individual events. Empty collection
 are `{}` / `[]`. Status omits doctor's active hook benchmark, login/keychain checks,
 and warnings. Both commands still check hook installation, which can run
 `gemini --version` (up to four seconds) when `tools.enableHooks` is unset. JSON is an
-output format, not a promise of constant-time diagnostics. Plain `sessionpipe status`
-keeps its existing human output.
+output format, not a promise of constant-time diagnostics.
 
 ---
 
