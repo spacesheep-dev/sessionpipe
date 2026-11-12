@@ -65,6 +65,7 @@ import { helpFor } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
+import { Refusal } from "./refusal.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
 import { assertSetupVersion, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
@@ -156,7 +157,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
       failure(
         makeUi({ isTTY: io.errTty, columns: io.columns, noColor }),
         (e as Error).message,
-        `sessionpipe ${about ? `${about} ` : ""}--help`,
+        e instanceof Refusal ? e.next : `sessionpipe ${about ? `${about} ` : ""}--help`,
       ),
     );
     io.exit(1);
