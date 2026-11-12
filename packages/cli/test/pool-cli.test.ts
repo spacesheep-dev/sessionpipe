@@ -20,6 +20,7 @@ import {
 import { openPool, type Pool, type PoolStatus, summaryLine } from "../src/pool/index.js";
 import { readPool } from "../src/pool/store.js";
 import type { PoolLimits } from "../src/pool/types.js";
+import { makeUi } from "../src/style.js";
 import { credential, type FakeAdapter, fakeAdapter, uuidOf } from "./helpers/pool-fake.js";
 
 const T0 = Date.parse("2026-10-29T10:00:00Z");
@@ -304,6 +305,39 @@ describe("sessionpipe pool, with no daemon running", () => {
     expect(JSON.stringify(j)).not.toMatch(/access-|refresh-/);
   });
 
+  it("status at a terminal: an account is two lines, its windows under its name, so none runs past 80 columns", async () => {
+    const pool = open();
+    await three(pool);
+    pool.disable("Sheep");
+    await pool.setOn(true);
+    const ids = pool.accounts().map((a) => a.id);
+    const resets = `(resets ${clock(T0 + 3_600_000)}) · 7d  40% (resets ${day(T0 + 4 * 86_400_000)})`;
+    const terminal = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+    await poolMain(["pool", "status"], out, "/dist", deps({ open: () => pool }), terminal);
+    expect(lines.slice(2, 8)).toEqual([
+      `  ${ids[0]}  Fiction <a@fiction.tribe> · enabled · serving now`,
+      `            5h  12% ${resets}`,
+      `  ${ids[1]}  Misha <m@x.y> · enabled · none left until ${clock(T0 + 3_600_000)}`,
+      `            5h  99% ${resets}`,
+      `  ${ids[2]}  Sheep <s@spacesheep.dev> · disabled · off`,
+      `            5h  50% ${resets}`,
+    ]);
+    for (const l of lines.slice(2, 8)) expect(l.length).toBeLessThan(80);
+    // `refresh` prints the same rows, with what the vendor says now (the fake's last word: 50%).
+    lines = [];
+    await poolMain(["pool", "refresh"], out, "/dist", deps({ open: () => pool }), terminal);
+    expect(lines.slice(2, 6)).toEqual([
+      `  ${ids[0]}  Fiction <a@fiction.tribe> · enabled · serving now`,
+      `            5h  50% ${resets}`,
+      `  ${ids[1]}  Misha <m@x.y> · enabled · has room`,
+      `            5h  50% ${resets}`,
+    ]);
+    // Into a pipe, and for a caller that names no terminal, the one line it always was.
+    lines = [];
+    await poolMain(["pool", "status"], out, "/dist", deps({ open: () => pool }));
+    expect(lines[2]).toMatch(/^ {2}\S+ {2}Fiction <a@fiction\.tribe> {12}enabled {3}5h {2}50% .* serving now$/);
+  });
+
   it("status words: an account in error, one with no numbers yet, and a pending sign-in", async () => {
     const pool = open();
     adapter.logins.set("one", {
@@ -330,7 +364,7 @@ describe("sessionpipe pool, with no daemon running", () => {
       `  ✓ ${settings().replace(os.homedir(), "~")}: env block written (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN and the flag that keeps its first-party features on)`,
       "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
       "  No accounts yet: `sessionpipe pool add --import` copies this machine's Claude Code logins.",
-      "  Daemon: launchd agent org.sessionpipe.control (log: /x/daemon.log)",
+      "  Background service: launchd agent org.sessionpipe.control (log: /x/daemon.log)",
       "  pool:     on · 0 accounts",
     ]);
     expect(installed).toBe(1);
@@ -519,7 +553,7 @@ describe("sessionpipe pool, with the daemon running", () => {
     expect(opened).toBe(0);
     expect(installed).toBe(0);
     expect(lines).toContain("  daemon:   running · listening on 127.0.0.1:51234");
-    expect(lines).toContain("  Daemon: running · listening on 127.0.0.1:51234");
+    expect(lines).toContain("  Background service: running · listening on 127.0.0.1:51234");
   });
 
   it("what the daemon reports about each settings file, and each window and standing, is worded", async () => {
@@ -559,7 +593,7 @@ describe("sessionpipe pool, with the daemon running", () => {
       "  ! /h/.claude-c/settings.json: not touched — not JSON",
       "  New Claude Code sessions use the pool with the new token; running ones keep working for 10 minutes.",
     ]);
-    expect(lines).toContain("  Daemon: running");
+    expect(lines).toContain("  Background service: running");
     lines = [];
     await run(["status"]);
     const col = (...c: [string, number][]) => c.map(([t, w]) => t.padEnd(w)).join(" ");
@@ -608,7 +642,7 @@ describe("sessionpipe pool, with the daemon running", () => {
     expect(lines[1]).toBe("  daemon:   running · another daemon serves the pool on 127.0.0.1:51234");
     lines = [];
     await run(["on"]);
-    expect(lines).toContain("  Daemon: running · another daemon serves the pool on 127.0.0.1:51234");
+    expect(lines).toContain("  Background service: running · another daemon serves the pool on 127.0.0.1:51234");
     answer = { op: "pool", outcome: "refused", code: "pool_account", detail: "no pooled account is x" };
     await expect(run(["remove", "x"])).rejects.toThrow("no pooled account is x");
   });

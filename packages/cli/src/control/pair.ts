@@ -19,6 +19,7 @@ import {
 import { KEY_TYPES, type TrustedKey, verifyEnrollment } from "@sessionpipe/core/control";
 import type { Exec } from "@sessionpipe/core/service";
 import * as core from "@sessionpipe/core/service";
+import { PLAIN, tint, type Ui } from "../style.js";
 import {
   askOn,
   type ControlConfig,
@@ -54,6 +55,8 @@ export interface PairOptions {
   accounts?: HarnessAccount[];
   /** How long expired codes are renewed for (default RENEW_FOR_MS). */
   renewFor?: number;
+  /** The terminal the lines are for: the link and the digits are picked out on one. */
+  ui?: Ui;
 }
 
 /** How long `control pair` keeps asking for fresh codes when nobody approves one. */
@@ -183,22 +186,27 @@ export async function pair(o: PairOptions): Promise<ControlConfig> {
     };
   };
   const host = new URL(o.url).host;
+  const ui = o.ui ?? PLAIN;
   const announce = (p: { url: string; check: string; until: number }) => {
     const spaced = /^\d{6}$/.test(p.check) ? `${p.check.slice(0, 3)} ${p.check.slice(3)}` : p.check;
     o.out("");
     // The approval happens on whatever device holds the person's passkey, which is
     // rarely the machine being paired (a server may have no screen at all): say so, or
     // the "Touch ID" line reads as "do it here" (2026-10-02, four machines, one headless).
-    o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one),`);
+    o.out(`  On any phone or computer where you're signed in to ${host} (it doesn't have to be this one):`);
+    o.out("");
+    // The two things a person needs, each alone on its line: the link, and the digits.
+    o.out(`      open:   ${tint(ui, "cyan", p.url)}`);
     if (pollKey) {
       // Open pairing: one address for everyone, and the digits are what the person types.
-      o.out(`  open ${p.url} and enter:  ${spaced}`);
-      o.out("  then approve with that device's passkey (Touch ID, Face ID, a security key).");
-      o.out("  Pairing several machines? Run this on each one: every machine shows its own digits.");
+      o.out(`      enter:  ${tint(ui, "bold", spaced)}`);
+      o.out("");
+      o.out("  Then approve with that device's passkey (Touch ID, Face ID, a security key).");
+      o.out("  Pairing several computers? Run this on each one: every one shows its own digits.");
     } else {
-      o.out("  open this link and approve with that device's passkey (Touch ID, Face ID, a security key):");
-      o.out(`    ${p.url}`);
-      o.out(`  The page shows these digits too: ${p.check}`);
+      o.out(`      check:  ${tint(ui, "bold", spaced)}   (the page shows these digits too)`);
+      o.out("");
+      o.out("  Then approve with that device's passkey (Touch ID, Face ID, a security key).");
     }
     const mins = Math.max(1, Math.round((p.until - Date.now()) / 60_000));
     o.out(`  This code is good for ${mins} minute${mins === 1 ? "" : "s"}; if it runs out, a fresh one appears here.`);

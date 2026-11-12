@@ -109,13 +109,13 @@ export function updateSummary(o: {
   // someone keeps `sessionpipe control run` going, which is not "automatic".
   const byHand =
     (o.platform ?? process.platform) === "win32"
-      ? "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
+      ? "it runs in the background service, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
       : null;
   const off =
     o.off ??
     (o.paired
       ? (daemonEnv ?? byHand)
-      : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
+      : "it runs in the background service, which isn't set up here (`sessionpipe connect`)");
   return {
     auto: !off,
     off,
@@ -135,26 +135,6 @@ export function ago(iso: string, now: number): string {
   if (ms < 90 * 60_000) return `${Math.round(ms / 60_000)} min ago`;
   if (ms < 36 * 3600_000) return `${Math.round(ms / 3600_000)} h ago`;
   return `${Math.round(ms / DAY_MS)} days ago`;
-}
-
-/** One line: whether it's automatic, when it last looked, what it found. */
-export function updateLine(s: UpdateSummary, now: number): string {
-  const parts = [
-    s.auto
-      ? "automatic (the control daemon checks npm once a day and installs when idle; `sessionpipe update off` stops it)"
-      : `not automatic: ${s.off}`,
-  ];
-  if (s.last_check)
-    parts.push(
-      s.last_error
-        ? `last check ${ago(s.last_check, now)} failed: ${s.last_error}`
-        : `last check ${ago(s.last_check, now)}: latest ${s.latest ?? "?"}`,
-    );
-  else if (s.auto) parts.push("not checked yet (a minute after the daemon starts)");
-  if (s.pending) parts.push(`${s.pending} waits for the daemon to be idle`);
-  if (s.failed) parts.push(`installing ${s.failed.version} failed ${ago(s.failed.at, now)}: ${s.failed.error}`);
-  else if (s.updated) parts.push(`updated ${s.updated.from} → ${s.updated.to} ${ago(s.updated.at, now)}`);
-  return parts.join(" · ");
 }
 
 export type RestartVia = "launchd" | "systemd" | "supervisor";

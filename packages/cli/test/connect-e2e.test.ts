@@ -135,7 +135,7 @@ describe.skipIf(process.platform === "win32" || !existsSync(cli))("connect", () 
     const before = JSON.parse(readFileSync(controlFile, "utf8")) as { name: string; receivers: unknown[] };
     const r = await run(["connect", rx.url, "--no-service", "--machine", "Intel-mbp", "--rename-machine"]);
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toContain(`Renamed the control daemon ${before.name} → Intel-mbp`);
+    expect(r.out).toContain(`Renamed the background service ${before.name} → Intel-mbp`);
     expect(JSON.parse(readFileSync(configFile, "utf8")).machine).toBe("Intel-mbp");
     const after = JSON.parse(readFileSync(controlFile, "utf8")) as { name: string; receivers: unknown[] };
     expect(after.name).toBe("Intel-mbp");

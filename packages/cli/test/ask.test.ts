@@ -21,8 +21,9 @@ import {
 import type { LocalReply, LocalRequest } from "../src/control/local.js";
 import { installService, uninstallService } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
-import { commandHelp } from "../src/help.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
+import { PLAIN } from "../src/style.js";
+import { usage } from "../src/usage.js";
 
 vi.mock("../src/control/pair.js", async (original) => ({
   ...(await original<typeof import("../src/control/pair.js")>()),
@@ -243,7 +244,7 @@ describe.runIf(unix)("ask <agent> <task>", () => {
     const r = await run(["codex", "x"]);
     expect(r.code).toBe(1);
     expect(r.err).toBe(
-      `sessionpipe ask: codex is on it (ask ${ASK_ID})\npartial\nsessionpipe ask: the control daemon went away before codex answered\n`,
+      `sessionpipe ask: codex is on it (ask ${ASK_ID})\npartial\nsessionpipe ask: the background service went away before codex answered\n`,
     );
   });
 
@@ -304,7 +305,7 @@ describe("ask on / off / status", () => {
     expect(r.out).toContain("Sessions on this machine may ask another agent");
     expect(r.out).toContain("agents: codex, gemini-cli");
     expect(r.out).toContain(`Allowed ${project} for asked agents`);
-    expect(r.out).toContain("Daemon: launchd agent (stand-in)");
+    expect(r.out).toContain("  Background service: launchd agent (stand-in)\n");
     expect(r.out).toContain("`sessionpipe ask setup`");
   });
   it("on from inside a session is refused, unless --yes: allowing a folder and installing a service is the person's call", async () => {
@@ -375,7 +376,7 @@ describe("ask on / off / status", () => {
     expect(r.code).toBe(0);
     expect(readControl(env)?.ask).toBe(false);
     expect(uninstallService).toHaveBeenCalledTimes(1);
-    expect(r.out).toContain("Daemon: removed");
+    expect(r.out).toContain("  Background service: removed; with no receiver paired, nothing was left for it to do.");
     writeControl({ name: "box", folders: [], mode: "safe", receivers: [{ url: "https://rx.test" } as never] }, env);
     const kept = await run(["off"]);
     expect(uninstallService).toHaveBeenCalledTimes(1);
@@ -526,9 +527,11 @@ describe("ask setup", () => {
 
 describe("help", () => {
   it("has a usage row for ask and each of its subcommands", () => {
-    expect(commandHelp(["ask"], [])).toContain('ask <agent|harness:id> "<task>"');
-    expect(commandHelp(["ask", "codex", "x"], [])).toContain('ask <agent|harness:id> "<task>"');
-    for (const sub of ["on", "off", "status", "setup"]) expect(commandHelp(["ask", sub], [])).toContain(`ask ${sub}`);
-    expect(commandHelp(["ask", "setup"], [])).toContain("--remove");
+    // Into a pipe a command's usage is one whole line.
+    expect(usage(PLAIN, ["ask"], [])).toContain('Usage: sessionpipe ask <agent|harness:id> "<task>"');
+    expect(usage(PLAIN, ["ask", "codex", "x"], [])).toContain('ask <agent|harness:id> "<task>"');
+    for (const sub of ["on", "off", "status", "setup"])
+      expect(usage(PLAIN, ["ask", sub], [])).toContain(`Usage: sessionpipe ask ${sub}`);
+    expect(usage(PLAIN, ["ask", "setup"], [])).toContain("--remove");
   });
 });

@@ -15,7 +15,6 @@ import {
   supervise,
   UPDATE_EXIT,
   type UpdaterDeps,
-  updateLine,
   updateSummary,
 } from "../src/control/autoupdate.js";
 
@@ -86,39 +85,50 @@ describe("what status says", () => {
     expect(ago(new Date(NOW - 3 * 3600_000).toISOString(), NOW)).toBe("3 h ago");
     expect(ago(new Date(NOW - 4 * 24 * 3600_000).toISOString(), NOW)).toBe("4 days ago");
   });
-  it("one line: automatic or why not, the last check, what waits, what failed or was done", () => {
-    const base = updateSummary({ off: null, paired: true, rec: {}, platform: "linux" });
-    expect(updateLine(base, NOW)).toBe(
-      "automatic (the control daemon checks npm once a day and installs when idle; `sessionpipe update off` stops it) · not checked yet (a minute after the daemon starts)",
-    );
+  // The words a person reads are doctor's and status's rows (cli-main.test.ts); this is
+  // what they are made from.
+  it("the summary: automatic or why not, the last check, what waits, what failed or was done", () => {
+    const paired = { off: null, paired: true, platform: "linux" as const };
+    expect(updateSummary({ ...paired, rec: {} })).toEqual({
+      auto: true,
+      off: null,
+      last_check: null,
+      latest: null,
+      last_error: null,
+      pending: null,
+      updated: null,
+      failed: null,
+    });
     const checked = new Date(NOW - 60_000).toISOString();
-    expect(updateLine({ ...base, last_check: checked, latest: "0.6.0", pending: "0.6.0" }, NOW)).toBe(
-      "automatic (the control daemon checks npm once a day and installs when idle; `sessionpipe update off` stops it) · last check just now: latest 0.6.0 · 0.6.0 waits for the daemon to be idle",
+    expect(updateSummary({ ...paired, rec: { checked_at: checked, latest: "0.6.0", pending: "0.6.0" } })).toMatchObject(
+      {
+        auto: true,
+        last_check: checked,
+        latest: "0.6.0",
+        last_error: null,
+        pending: "0.6.0",
+      },
     );
-    expect(updateLine({ ...base, last_check: checked, last_error: "ENOTFOUND" }, NOW)).toContain(
-      "last check just now failed: ENOTFOUND",
-    );
-    expect(updateLine({ ...base, last_check: checked }, NOW)).toContain("latest ?");
+    expect(updateSummary({ ...paired, rec: { checked_at: checked, error: "ENOTFOUND" } })).toMatchObject({
+      last_check: checked,
+      latest: null,
+      last_error: "ENOTFOUND",
+    });
     const byHand = updateSummary({ off: null, paired: true, rec: {}, platform: "win32" });
     expect(byHand.auto).toBe(false);
     expect(byHand.off).toBe(
-      "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
+      "it runs in the background service, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
     );
     expect(updateSummary({ off: null, paired: true, rec: {}, platform: "linux" }).auto).toBe(true);
-    const off = updateSummary({ off: "npx", paired: false, rec: {} });
-    expect(
-      updateLine(
-        {
-          ...off,
-          failed: { version: "0.6.0", at: checked, error: "npm: 403" },
-          updated: { from: "a", to: "b", at: checked, ms: 1 },
-        },
-        NOW,
-      ),
-    ).toBe("not automatic: npx · installing 0.6.0 failed just now: npm: 403");
-    expect(updateLine({ ...off, updated: { from: "0.4.0", to: "0.5.0", at: checked, ms: 1 } }, NOW)).toBe(
-      "not automatic: npx · updated 0.4.0 → 0.5.0 just now",
-    );
+    // Why it is off is this copy's own reason first; what failed and what was done both stay.
+    const failed = { version: "0.6.0", at: checked, error: "npm: 403" };
+    const updated = { from: "0.4.0", to: "0.5.0", at: checked, ms: 1 };
+    expect(updateSummary({ off: "npx", paired: false, rec: { failed, updated } })).toMatchObject({
+      auto: false,
+      off: "npx",
+      failed,
+      updated,
+    });
   });
   it("on linux without a cgroup reader it reads the process's own; a stranger's cgroup is nobody", () => {
     expect(restartVia({ env: {}, platform: "linux", pid: 1, ppid: 1 })).toBeNull();

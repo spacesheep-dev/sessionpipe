@@ -200,7 +200,7 @@ async function askOnce(
     );
   else if (state === "asked") {
     endLine();
-    io.err(`sessionpipe ask: the control daemon went away before ${label} answered\n`);
+    io.err(`sessionpipe ask: the background service went away before ${label} answered\n`);
   }
   return code;
 }
@@ -269,13 +269,14 @@ function on(
     io.out(
       "  ! No folder is allowed, so every ask is refused until `sessionpipe control folders add <project>` names one.",
     );
-  if (noService) io.out("  Daemon: not installed as a service (--no-service); run `sessionpipe control run` yourself");
+  if (noService)
+    io.out("  Background service: not installed as a service (--no-service); run `sessionpipe control run` yourself");
   else {
     let cli = path.join(distDir ?? ".", "cli.js");
     try {
       cli = statSync(cli).isFile() ? path.resolve(cli) : cli;
     } catch {}
-    io.out(`  Daemon: ${installService({ node: stableNode(process.execPath), cli, env })}`);
+    io.out(`  Background service: ${installService({ node: stableNode(process.execPath), cli, env })}`);
   }
   io.out("  `sessionpipe ask setup` tells Claude Code and Codex the command exists.");
   return 0;
@@ -290,10 +291,10 @@ function off(io: AskIo, env: NodeJS.ProcessEnv): number {
   writeControl({ ...c, ask: false }, env);
   io.out("  ✓ Sessions on this machine can no longer ask another agent (`sessionpipe ask on` turns it back on).");
   if (c.receivers.length)
-    io.out("  The control daemon uses the new setting within seconds; your receivers' messages still arrive.");
+    io.out("  The background service uses the new setting within seconds; your receivers' messages still arrive.");
   else {
     uninstallService(env);
-    io.out("  Daemon: removed; with no receiver paired, nothing was left for it to do.");
+    io.out("  Background service: removed; with no receiver paired, nothing was left for it to do.");
   }
   return 0;
 }

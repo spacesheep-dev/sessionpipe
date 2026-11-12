@@ -11,10 +11,12 @@ import path from "node:path";
 import { readConfig, writeConfig } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "../src/control/cli.js";
+import type { Status } from "../src/control/daemon.js";
 import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
 import { readControl, writeControl } from "../src/control/store.js";
 import { readPool } from "../src/pool/index.js";
 import { rerunGlobally } from "../src/runtime.js";
+import { makeUi, PLAIN, plain } from "../src/style.js";
 
 vi.mock("../src/runtime.js", async (original) => ({
   ...(await original<typeof import("../src/runtime.js")>()),
@@ -49,6 +51,14 @@ let out: string[];
 let sock: string;
 const said = () => out.join("\n");
 const run = (...argv: string[]) => controlMain(["control", ...argv], (s) => out.push(s ?? ""), dist);
+/** The same at a terminal 80 columns wide: `shown` is what was set for it, line by line. */
+const terminal = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+let shown: string[];
+const atTerminal = (...argv: string[]) =>
+  controlMain(["control", ...argv], (s) => out.push(s ?? ""), dist, {
+    ui: terminal,
+    say: (s) => shown.push(s ?? ""),
+  });
 const receiver = {
   url: RX,
   control: `${RX}/api/sessionpipe/v1/control`,
@@ -87,6 +97,7 @@ beforeEach(() => {
   vi.spyOn(process, "cwd").mockReturnValue(project);
   Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
   out = [];
+  shown = [];
   rl.answers.length = 0;
   rl.closed = 0;
   vi.mocked(pair).mockClear();
@@ -140,7 +151,9 @@ describe("control pair", () => {
     expect(said()).toContain("Mode: safe for now. Run `sessionpipe control mode auto`");
     expect(said()).toContain(`Folders sessions may run in: ${project}`);
     expect(said()).toContain("Mode: safe (nothing that needs approval runs unattended)");
-    expect(said()).toContain("Daemon: not installed as a service (--no-service)");
+    expect(out).toContain(
+      "  Background service: not installed as a service (--no-service); run `sessionpipe control run` yourself",
+    );
     expect(installService).not.toHaveBeenCalled();
   });
 
@@ -156,7 +169,7 @@ describe("control pair", () => {
     expect(said()).toContain("Mode: auto (Claude Code's auto mode)");
     // The service is written through the stable node and the real cli.js path.
     expect(installService).toHaveBeenCalledWith({ node: expect.any(String), cli: path.join(dist, "cli.js") });
-    expect(said()).toContain("Daemon: launchd agent (stand-in)");
+    expect(out).toContain("  Background service: launchd agent (stand-in)");
   });
 
   it("a paired machine keeps its folders, mode, name and the sink's token unless told otherwise", async () => {
@@ -194,7 +207,19 @@ describe("control pair", () => {
     }
     expect(rl.closed).toBe(6);
     expect(said()).toContain("how may it run?");
-    expect(said()).toContain("inherit As your own sessions here run: no permission flag");
+    // Into a pipe each mode is one whole line, its name then what it lets a session do.
+    expect(said().split("\n")).toContain(
+      "  inherit  As your own sessions here run: no permission flag, so each harness starts in its own default on this machine. Claude Code takes permissions.defaultMode from its settings, whatever you set there, bypassPermissions included. Pick this if sessions you message should run the way you run them. (Codex follows the approval_policy and sandbox_mode in its config.toml; Antigravity gets no flag, as in safe.)",
+    );
+  });
+
+  it("hands the pairing the terminal it is at, so the link and the digits can be picked out there", async () => {
+    writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [receiver] });
+    await atTerminal("pair", RX, "--no-service");
+    expect(pair).toHaveBeenLastCalledWith(expect.objectContaining({ url: RX, ui: terminal }));
+    // A caller that names no terminal is a pipe.
+    await run("pair", RX, "--no-service");
+    expect(pair).toHaveBeenLastCalledWith(expect.objectContaining({ url: RX, ui: PLAIN }));
   });
 
   it("--mode inherit pairs in inherit mode and says what that means", async () => {
@@ -361,6 +386,104 @@ describe("control mode, keys, off, status, help", () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "status at a terminal: the service's own account as a page; --json there, like a pipe, gets the JSON",
+    async () => {
+      await atTerminal("status");
+      expect(out).toEqual(["  ✗ The background service isn't running. `sessionpipe doctor` says why, and what to do."]);
+      out = [];
+      await atTerminal("status", "--json");
+      expect(out).toEqual(["  the control daemon isn't running"]);
+      const status: Status = {
+        version: "1.2.3",
+        pid: 4242,
+        name: "lab-box",
+        receivers: [
+          {
+            url: RX,
+            machine: "m_1",
+            keys: 2,
+            polling: true,
+            last_poll: 1,
+            last_poll_age_ms: 12_000,
+            last_error: null,
+          },
+        ],
+        waiting: ["claude-code:a"],
+        mid_turn: [],
+        attentions: [],
+        sdk: [],
+        nonces: 0,
+        acks_pending: 0,
+        delivered: {},
+        start: { "claude-code": {} } as unknown as Status["start"],
+        ask: { on: false, harnesses: [] },
+        busy: null,
+      };
+      const server = net.createServer((s) =>
+        s.once("data", () => s.end(`${JSON.stringify({ op: "status", status })}\n`)),
+      );
+      await new Promise<void>((r) => server.listen(sock, r));
+      try {
+        out = [];
+        await atTerminal("status");
+        expect(out).toEqual([]);
+        expect(shown.map(plain)).toEqual([
+          "✓ The background service is running",
+          "  sessionpipe 1.2.3 · pid 4242 · lab-box",
+          "",
+          "Messages from",
+          "  ✓ rx.test  live · heard 12 s ago · 2 keys trusted",
+          "",
+          "Right now",
+          "  · in hand   nothing: it could restart at any moment",
+          "  · sessions  0 mid-turn · 1 waiting for a message · 0 questions held",
+          "",
+          "It can",
+          "  · start a session in     claude-code",
+          "  · let agents ask agents  no (`sessionpipe ask on`)",
+          "",
+          "  Every field: sessionpipe control status --json",
+        ]);
+        // In the terminal's colours: the mark green, the verdict bold.
+        expect(shown[0]).toBe("\x1b[32m✓\x1b[39m \x1b[1m\x1b[32mThe background service is running\x1b[39m\x1b[22m");
+        shown = [];
+        await atTerminal("status", "--json");
+        expect(shown).toEqual([]);
+        expect(JSON.parse(said())).toEqual(status);
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    },
+  );
+
+  it("mode at a terminal: each mode folded under its own text, its name in the first column", async () => {
+    await atTerminal("mode");
+    expect(out).toEqual(["  mode: not set up\n  usage: sessionpipe control mode auto|safe|inherit"]);
+    const rows = shown.join("\n").split("\n");
+    expect(rows.length).toBeGreaterThan(9);
+    for (const l of rows) expect(plain(l).length).toBeLessThan(80);
+    // A mode's name starts its first line, in bold; every further line hangs under the text.
+    const named = rows.filter((l) => !plain(l).startsWith(" ".repeat(11)));
+    expect(named.map((l) => l.split("\x1b[22m")[0])).toEqual(["  \x1b[1mauto", "  \x1b[1msafe", "  \x1b[1minherit"]);
+    expect(named.map((l) => plain(l).slice(0, 13))).toEqual(["  auto     Cl", "  safe     On", "  inherit  As"]);
+    // Folded, not cut: the words are all there, in order.
+    const words = rows
+      .map((l) => plain(l).trim())
+      .join(" ")
+      .replace(/ +/g, " ");
+    expect(words).toContain(
+      "auto Claude Code's auto mode: the session reads, edits and runs commands, and Claude Code's own safety check stops what looks dangerous.",
+    );
+    expect(words).toContain(
+      "(Codex follows the approval_policy and sandbox_mode in its config.toml; Antigravity gets no flag, as in safe.)",
+    );
+    // Into a pipe: three whole lines.
+    out = [];
+    await run("mode");
+    expect(out[1]?.split("\n").map((l) => l.slice(0, 11))).toEqual(["  auto     ", "  safe     ", "  inherit  "]);
   });
 
   it("anything else is the help", async () => {

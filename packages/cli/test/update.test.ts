@@ -28,7 +28,6 @@ import {
   supervise,
   UPDATE_EXIT,
   type UpdaterDeps,
-  updateLine,
   updateSummary,
 } from "../src/control/autoupdate.js";
 import { serviceFiles } from "../src/control/pair.js";
@@ -542,10 +541,10 @@ describe("the daemon's auto-update", () => {
     const rec = { checked_at: new Date(now - 3 * 3600_000).toISOString(), latest: "0.6.0" };
     const on = updateSummary({ off: null, paired: true, rec, platform: "linux" });
     expect(on.auto).toBe(true);
-    expect(updateLine(on, now)).toMatch(/^automatic .* · last check 3 h ago: latest 0\.6\.0$/);
+    expect(on).toMatchObject({ off: null, last_check: rec.checked_at, latest: "0.6.0", last_error: null });
     const noDaemon = updateSummary({ off: null, paired: false, rec: {} });
     expect(noDaemon.auto).toBe(false);
-    expect(updateLine(noDaemon, now)).toMatch(/^not automatic: it runs in the control daemon, which isn't set up here/);
+    expect(noDaemon.off).toMatch(/^it runs in the background service, which isn't set up here/);
     const envOff = updateSummary({ off: null, paired: true, rec: { off: "SESSIONPIPE_NO_UPDATE_CHECK is set" } });
     expect(envOff.off).toMatch(/daemon's environment/);
   });
