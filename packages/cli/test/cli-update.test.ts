@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServiceState } from "@sessionpipe/core/service";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { serviceLook } from "../src/control/health.js";
+import { noService, serviceLook } from "../src/control/health.js";
 import { placeService } from "../src/control/pair.js";
 import { bringCurrent, type CurrentDeps, type Outcome } from "../src/current.js";
 import { installLauncher } from "../src/launcher.js";
@@ -51,10 +51,10 @@ vi.mock("../src/control/pair.js", async (original) => ({
   ...(await original<typeof import("../src/control/pair.js")>()),
   placeService: vi.fn(),
 }));
-vi.mock("../src/control/health.js", async (original) => ({
-  ...(await original<typeof import("../src/control/health.js")>()),
-  serviceLook: vi.fn(() => null),
-}));
+vi.mock("../src/control/health.js", async (original) => {
+  const real = await original<typeof import("../src/control/health.js")>();
+  return { ...real, serviceLook: vi.fn(() => null), noService: vi.fn(real.noService) };
+});
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realDist = path.resolve(here, "../dist");
@@ -317,6 +317,10 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     ).toEqual(["claude-code:aaaa"]);
     deps.look();
     expect(serviceLook).toHaveBeenCalled();
+    // This test's own world keeps its files in a temp folder: it has no service here, and why is handed on.
+    expect(deps.apart).toMatch(/^this sessionpipe keeps its files somewhere other than this computer's usual place \(/);
+    vi.mocked(noService).mockReturnValueOnce(null);
+    expect((await update({ state: "current", version: VERSION, said: "ok" })).deps.apart).toBeNull();
   });
 
   it("reads the hooks' version from their own copy; on Windows they name this copy and have none", async () => {

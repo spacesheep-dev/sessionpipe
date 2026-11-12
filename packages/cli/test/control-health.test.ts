@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // control/health.ts and control/view.ts: what doctor finds out about the background
-// service, and `control status` as a terminal shows it.
+// service, and `control status` as a terminal shows it. Whose service it is, and the
+// look at launchd and systemd, are in control-service-world.test.ts, where nothing can
+// reach a real service manager.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -8,17 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Status } from "../src/control/daemon.js";
-import {
-  askHealth,
-  freeBytes,
-  logTroubles,
-  SERVICE_LABEL,
-  SERVICE_UNIT,
-  serviceLog,
-  serviceLook,
-  serviceNames,
-  tailOf,
-} from "../src/control/health.js";
+import { askHealth, freeBytes, logTroubles, serviceLog, tailOf } from "../src/control/health.js";
 import { heardAgo, hostOf, isLive, statusView } from "../src/control/view.js";
 import { makeUi, PLAIN, plain } from "../src/style.js";
 
@@ -38,108 +30,7 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("the service's names", () => {
-  it("are this computer's own, unless sessionpipe is pointed away from its files", () => {
-    expect(serviceNames({})).toEqual({ label: SERVICE_LABEL, unit: SERVICE_UNIT });
-    expect(serviceNames({ SESSIONPIPE_STATE: "/tmp/x" })).toBeNull();
-    expect(serviceNames({ SESSIONPIPE_CONFIG: "/tmp/x/config.json" })).toBeNull();
-    // The test's own sandbox sets both.
-    expect(serviceNames()).toBeNull();
-  });
-
-  it("a throwaway world may name a service of its own", () => {
-    expect(
-      serviceNames({ SESSIONPIPE_STATE: "/tmp/x", SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest" }),
-    ).toEqual({
-      label: "org.sessionpipe.racetest",
-      unit: "org.sessionpipe.racetest.service",
-    });
-    expect(serviceNames({ SESSIONPIPE_SERVICE_LABEL: "no/slashes here" })).toBeNull();
-  });
-});
-
-describe("a look at the service", () => {
-  it("asks launchd, in both domains, and never changes anything", () => {
-    const asked: string[] = [];
-    const exec = (answers: Record<string, boolean>) => (cmd: string, args: string[]) => {
-      asked.push([cmd, ...args].join(" "));
-      if (!answers[args[1] as string]) throw new Error("not loaded");
-      return "";
-    };
-    const o = { env: {}, platform: "darwin" as const, home: tmp };
-    const plist = path.join(tmp, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
-    expect(serviceLook({ ...o, exec: exec({}) })).toEqual({
-      manager: "launchd",
-      file: plist,
-      installed: false,
-      loaded: false,
-      argv: null,
-    });
-    expect(asked.every((a) => a.startsWith("launchctl print "))).toBe(true);
-    expect(asked.map((a) => a.split(" ")[2]?.split("/")[0])).toEqual(["gui", "user"]);
-    mkdirSync(path.dirname(plist), { recursive: true });
-    writeFileSync(plist, "");
-    const uid = String(process.getuid?.() ?? "");
-    expect(serviceLook({ ...o, exec: exec({ [`user/${uid}/${SERVICE_LABEL}`]: true }) })).toMatchObject({
-      installed: true,
-      loaded: true,
-      argv: null,
-    });
-    expect(serviceLook({ ...o, exec: exec({ [`gui/${uid}/${SERVICE_LABEL}`]: true }) })?.loaded).toBe(true);
-  });
-
-  it("asks systemd whether the unit is active", () => {
-    const o = { env: {}, platform: "linux" as const, home: tmp };
-    expect(serviceLook({ ...o, exec: () => "active\n" })).toEqual({
-      manager: "systemd",
-      file: path.join(tmp, ".config", "systemd", "user", SERVICE_UNIT),
-      installed: false,
-      loaded: true,
-      argv: null,
-    });
-    // Not active: systemd says so, and answers for itself.
-    expect(
-      serviceLook({
-        ...o,
-        exec: (_cmd, args) => {
-          if (args.includes("is-active")) throw new Error("inactive");
-          return "Version=257\n";
-        },
-      }),
-    ).toMatchObject({ manager: "systemd", loaded: false });
-    // No user manager that can be reached (a container, WSL without systemd): no look at all.
-    expect(
-      serviceLook({
-        ...o,
-        exec: () => {
-          throw new Error("Failed to connect to bus");
-        },
-      }),
-    ).toBeNull();
-  });
-
-  it("is null where there is no manager, and in a throwaway world", () => {
-    expect(serviceLook({ env: {}, platform: "win32" })).toBeNull();
-    expect(serviceLook({ env: { SESSIONPIPE_STATE: tmp }, platform: "darwin" })).toBeNull();
-    // Its own environment: the test's sandbox.
-    expect(serviceLook()).toBeNull();
-    // A world with a service of its own, on whatever this platform is: asked, never changed.
-    const asked: string[] = [];
-    const look = serviceLook({
-      env: { SESSIONPIPE_STATE: tmp, SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest" },
-      exec: (cmd, args) => {
-        asked.push([cmd, ...args].join(" "));
-        throw new Error("not loaded");
-      },
-    });
-    expect(look?.loaded ?? false).toBe(false);
-    for (const a of asked) expect(a).toMatch(/^(launchctl print |systemctl --user is-active )/);
-  });
-});
-
-// The daemon's socket is a Unix socket here; on Windows it is a named pipe, which a path
-// in the temp folder is not (the other socket tests are left out there the same way).
-describe.runIf(process.platform !== "win32")("what the service sees", () => {
+describe("what the service sees", () => {
   const serve = (answer: (req: { op: string }) => string | null): Promise<{ sock: string; close: () => void }> =>
     new Promise((resolve) => {
       const sock = path.join(tmp, "s.sock");
