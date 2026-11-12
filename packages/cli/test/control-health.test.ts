@@ -30,7 +30,9 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("what the service sees", () => {
+// A Unix socket in a temp folder: where there is one (the repo's other socket tests are
+// skipped on Windows the same way).
+describe.runIf(process.platform !== "win32")("what the service sees", () => {
   const serve = (answer: (req: { op: string }) => string | null): Promise<{ sock: string; close: () => void }> =>
     new Promise((resolve) => {
       const sock = path.join(tmp, "s.sock");
