@@ -17,6 +17,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -428,6 +429,31 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
       }
   } catch {}
   return { copies, started, modes, parked, mid_turn };
+}
+
+/** Sessions that were mid-turn under a daemon too old to write that down itself (before
+ *  `mid_turn`), left for the daemon that replaces it: `sessionpipe update` asks the old
+ *  one for its `status.mid_turn` and writes this just before it is replaced. A file of
+ *  its own, because the old daemon rewrites state.json without the key as it stops. */
+export const turnsSeedFile = (dir: string): string => path.join(dir, "turns-seed.json");
+
+export function writeTurnsSeed(dir: string, sessions: readonly string[], now: number = Date.now()): void {
+  writePrivate(turnsSeedFile(dir), { at: new Date(now).toISOString(), sessions: [...sessions] });
+}
+
+/** Take the seed: the sessions it names, each mid-turn as of when it was written, where
+ *  that is still within the hooks' word; the file is gone afterwards either way. */
+export function takeTurnsSeed(dir: string, now: number = Date.now()): Record<string, MidTurn> {
+  const file = turnsSeedFile(dir);
+  const out: Record<string, MidTurn> = {};
+  try {
+    const j = JSON.parse(readFileSync(file, "utf8")) as { at?: unknown; sessions?: unknown };
+    const at = typeof j.at === "string" ? Date.parse(j.at) : Number.NaN;
+    if (Number.isFinite(at) && now - at < HOOKS_WORD_MS && Array.isArray(j.sessions))
+      for (const s of j.sessions) if (typeof s === "string" && s) out[s] = { at: j.at as string };
+  } catch {}
+  rmSync(file, { force: true });
+  return out;
 }
 
 /** Both shapes of `copies`, every time. A daemon up to 0.10.0 reads `copies` as a map of
