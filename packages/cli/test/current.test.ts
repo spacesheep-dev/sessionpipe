@@ -48,6 +48,10 @@ interface Sim {
   status: (Status | null)[];
   look: ServiceState | null;
   installs: [string, string[]][];
+  /** The sessions left for the next service, each time they were; and what was done to
+   *  the service, in order. */
+  seeded: string[][];
+  did: string[];
   placed: number;
   restarts: number;
   rearms: number;
@@ -63,6 +67,8 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     status: [st("1.0.0")],
     look: service(),
     installs: [],
+    seeded: [],
+    did: [],
     placed: 0,
     restarts: 0,
     rearms: 0,
@@ -98,11 +104,17 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     health: async () => null,
     restart: async () => {
       s.restarts++;
+      s.did.push("restart");
       return true;
     },
     look: () => s.look,
     place: () => {
       s.placed++;
+      s.did.push("place");
+    },
+    seed: (sessions) => {
+      s.seeded.push(sessions);
+      s.did.push("seed");
     },
     versionAt: () => "1.0.0",
     globalPrefix: (d) => d.replace("/lib/node_modules/sessionpipe/dist", ""),
@@ -348,6 +360,49 @@ describe("the service, made to run this copy", () => {
     );
   });
 
+  it("one from before 0.15 forgets who is mid-turn when stopped: that is written down for the next one first", async () => {
+    const turns = ["claude-code:aaaa", "codex:bbbb"];
+    // It says a session is mid-turn, which was never its own to wait for, and answers no `health`.
+    const old = st("0.14.2", { busy: "a session on this machine mid-turn", mid_turn: turns });
+    const a = run({ look: other, status: [old, old, null, st("1.1.0")] });
+    expect((await a.out).state).toBe("current");
+    expect(a.sim.seeded).toEqual([turns]);
+    expect(a.sim.did).toEqual(["seed", "place"]);
+    // One that answers `health` without saying which copy it is, is as old.
+    const b = run({ look: other, status: [old, old, null, st("1.1.0")] }, { health: async () => ({ accounts: [] }) });
+    expect((await b.out).state).toBe("current");
+    expect(b.sim.seeded).toEqual([turns]);
+    // With no session mid-turn, or a status that names none, there is nothing to write.
+    for (const idle of [st("0.14.2", { mid_turn: [] }), st("0.14.2")]) {
+      const c = run({ look: other, status: [idle, idle, null, st("1.1.0")] });
+      expect((await c.out).state).toBe("current");
+      expect(c.sim.did).toEqual(["place"]);
+    }
+  });
+
+  it("one that remembers by itself is left to: nothing is written for it, nor where none was running", async () => {
+    const now = st("1.0.0", { mid_turn: ["claude-code:aaaa"] });
+    const a = run(
+      { look: other, status: [now, now, null, st("1.1.0")] },
+      { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "launchd" } }) },
+    );
+    expect((await a.out).state).toBe("current");
+    expect(a.sim.did).toEqual(["place"]);
+    let asked = 0;
+    const b = run(
+      { latest: "1.0.0", look: service({ loaded: false }), status: [null, st("1.0.0")] },
+      {
+        health: async () => {
+          asked++;
+          return null;
+        },
+      },
+    );
+    expect((await b.out).state).toBe("current");
+    expect(b.sim.did).toEqual(["place"]);
+    expect(asked).toBe(0);
+  });
+
   it("starts one launchd doesn't have, and one whose file is gone", async () => {
     const a = run({ latest: "1.0.0", look: service({ loaded: false }), status: [null, st("1.0.0")] });
     expect((await a.out).state).toBe("current");
@@ -472,7 +527,21 @@ describe("the service that runs this copy already", () => {
     });
   });
 
-  it("that won't restart, or didn't, or went away: try again", async () => {
+  it("one from before 0.15 waits for a session someone works in, by its own older rule: waiting, not failed", async () => {
+    const old = st("0.14.2", { busy: "a session on this machine mid-turn", mid_turn: ["claude-code:aaaa"] });
+    const { sim, out } = run({ version: "0.15.0", latest: "0.15.0", hooks: "0.15.0", status: [old] });
+    expect(await out).toEqual({
+      state: "waiting",
+      version: "0.15.0",
+      said: "The background service still runs sessionpipe 0.14.2, which waits for the sessions on this computer to end their turn before it restarts. It restarts by itself onto sessionpipe 0.15.0 when the one it waits for ends its turn: nothing more to type.",
+    });
+    expect(sim.did).toEqual(["restart"]);
+    expect(sim.clock).toBeGreaterThanOrEqual(25_000);
+    // It restarts itself when nothing is mid-turn: there is nothing to write down for it.
+    expect(sim.seeded).toEqual([]);
+  });
+
+  it("that won't restart, or didn't: try again; that stopped and doesn't come back: doctor", async () => {
     const failed = {
       state: "failed",
       error: "the background service still runs sessionpipe 1.0.0 and didn't restart onto 1.1.0",
@@ -483,8 +552,15 @@ describe("the service that runs this copy already", () => {
     expect(a.sim.clock).toBe(0);
     const b = run({});
     expect(await b.out).toEqual(failed);
+    // Busy and unwilling is no promise that it restarts by itself.
+    const busy = st("1.0.0", { busy: "a headless agent run" });
+    expect(await run({ status: [busy] }, { restart: async () => false }).out).toEqual(failed);
     const c = run({ status: [st("1.0.0"), st("1.0.0"), null] });
-    expect(await c.out).toEqual(failed);
+    expect(await c.out).toEqual({
+      state: "failed",
+      error: "the background service stopped to restart onto sessionpipe 1.1.0 and doesn't answer",
+      next: "sessionpipe doctor",
+    });
   });
 
   it("started by hand from another copy can't be moved from here", async () => {

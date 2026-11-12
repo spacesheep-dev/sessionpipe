@@ -2,7 +2,7 @@
 // `sessionpipe update` as the command wires it (current.ts has the flow itself, each way
 // it can go), and what `doctor` says when the three things that should be one version
 // (the command, the background service, the hooks) are not.
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -282,6 +282,12 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     expect(rearmHooks).toHaveBeenCalledWith({ node: process.execPath, distDir: realDist, harnesses: ["codex"] });
     deps.place();
     expect(installService).toHaveBeenCalledWith({ node: deps.node, cli: deps.cli });
+    // What an older service knew of who is mid-turn, left where the next one takes it.
+    deps.seed(["claude-code:aaaa"]);
+    expect(
+      JSON.parse(readFileSync(path.join(process.env.SESSIONPIPE_STATE as string, "control", "turns-seed.json"), "utf8"))
+        .sessions,
+    ).toEqual(["claude-code:aaaa"]);
     deps.look();
     expect(serviceLook).toHaveBeenCalled();
   });
