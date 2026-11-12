@@ -7,7 +7,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureLinger, installService, serviceFiles, serviceState, uninstallService } from "../src/service/index.js";
+import {
+  ensureLinger,
+  installService,
+  ServiceRefused,
+  serviceFiles,
+  serviceState,
+  uninstallService,
+} from "../src/service/index.js";
 import { compareVersions, isNewer, parseVersion, UPDATE_EXIT } from "../src/version.js";
 
 let home: string;
@@ -249,6 +256,192 @@ describe("installing and removing", () => {
     uninstallService({ label: SPEC.label, unit: SPEC.unit, home, exec, platform: "linux" });
     expect(existsSync(r.files[0]?.path as string)).toBe(false);
   });
+  it("linux: a unit that was running is restarted onto the new file; one that wasn't is only started", () => {
+    const unit = "sessionpipe-gui.service";
+    const systemd = (active: boolean) => {
+      const ran: string[] = [];
+      const exec = (cmd: string, args: string[]) => {
+        ran.push([cmd, ...args].join(" "));
+        if (args.includes("is-active") && !active) throw new Error("inactive");
+        return args[0] === "show-user" ? "Linger=yes\n" : "";
+      };
+      return { ran, exec };
+    };
+    const linger = "loginctl show-user misha --property=Linger";
+    // Not active: enabled and started, as a first install is.
+    const idle = systemd(false);
+    const first = installService({ ...SPEC, home, exec: idle.exec, platform: "linux", user: "misha" });
+    expect(first.commands).toEqual(["systemctl --user daemon-reload", `systemctl --user enable --now ${unit}`, linger]);
+    // The look at whether it runs is asked first, and is no step of the plan.
+    expect(idle.ran).toEqual([`systemctl --user is-active ${unit}`, ...first.commands]);
+    // Active: `enable --now` leaves the running process on the old file, so it is restarted.
+    const running = systemd(true);
+    const again = installService({
+      ...SPEC,
+      argv: ["/opt/node 22/bin/node", "/opt/gui-2/server.js"],
+      home,
+      exec: running.exec,
+      platform: "linux",
+      user: "misha",
+    });
+    expect(again.commands).toEqual([
+      "systemctl --user daemon-reload",
+      `systemctl --user enable --now ${unit}`,
+      `systemctl --user restart ${unit}`,
+      linger,
+    ]);
+    expect(running.ran).toEqual([`systemctl --user is-active ${unit}`, ...again.commands]);
+    expect(readFileSync(again.files[0]?.path as string, "utf8")).toContain("/opt/gui-2/server.js");
+  });
+  it("linux: a new unit systemd won't take is taken back, and the one from before started again", () => {
+    const quiet = () => "Linger=yes\n";
+    const first = installService({ ...SPEC, home, exec: quiet, platform: "linux", user: "misha" });
+    const file = first.files[0]?.path as string;
+    const old = readFileSync(file, "utf8");
+    const next = { ...SPEC, argv: ["/n", "/opt/gui-2/server.js"], home, platform: "linux" as const, user: "misha" };
+    // The restart onto the new file fails: the old file goes back and is started.
+    const ran: string[] = [];
+    const plan = installService({
+      ...next,
+      exec: (cmd, args) => {
+        ran.push([cmd, ...args].join(" "));
+        if (args.includes("restart")) throw new Error("Job for sessionpipe-gui.service failed");
+        return "";
+      },
+    });
+    expect(plan).toMatchObject({ manager: null, unreachable: file, restored: true });
+    expect(readFileSync(file, "utf8")).toBe(old);
+    expect(ran).toEqual([
+      "systemctl --user is-active sessionpipe-gui.service",
+      "systemctl --user daemon-reload",
+      "systemctl --user enable --now sessionpipe-gui.service",
+      "systemctl --user restart sessionpipe-gui.service",
+      "systemctl --user daemon-reload",
+      "systemctl --user enable --now sessionpipe-gui.service",
+    ]);
+    // systemd can't be reached at all: the file goes back, and nothing else can be done.
+    const calls: string[] = [];
+    const down = installService({
+      ...next,
+      exec: (cmd, args) => {
+        calls.push([cmd, ...args].join(" "));
+        throw new Error("Failed to connect to bus");
+      },
+    });
+    expect(down).toMatchObject({ manager: null, unreachable: file, restored: true });
+    expect(readFileSync(file, "utf8")).toBe(old);
+    expect(calls).toEqual([
+      "systemctl --user is-active sessionpipe-gui.service",
+      "systemctl --user daemon-reload",
+      "systemctl --user daemon-reload",
+    ]);
+    // The same file again has nothing to take back.
+    expect(
+      installService({
+        ...SPEC,
+        home,
+        platform: "linux",
+        exec: () => {
+          throw new Error("Failed to connect to bus");
+        },
+      }),
+    ).toEqual({ files: first.files, commands: ["systemctl --user daemon-reload"], manager: null, unreachable: file });
+  });
+  it("darwin: a new service launchd refuses is taken back: the old file, and the old service started again", () => {
+    const quiet = launchd({ running: false, leaves: 0 });
+    const first = installService({
+      ...SPEC,
+      home,
+      exec: quiet.exec,
+      sleep: quiet.sleep,
+      platform: "darwin",
+      uid: "501",
+    });
+    const old = readFileSync(plistPath(), "utf8");
+    expect(first.files[0]?.text).toBe(old);
+    const next = { ...SPEC, argv: ["/n", "/opt/gui-2/server.js"], home, platform: "darwin" as const, uid: "501" };
+    const refused = (fn: () => unknown): ServiceRefused => {
+      try {
+        fn();
+      } catch (e) {
+        return e as ServiceRefused;
+      }
+      throw new Error("it was not refused");
+    };
+    // launchd lets go of the old one and refuses the new file, then takes the old one back.
+    let loaded = true;
+    const picky = vi.fn((_c: string, args: string[]) => {
+      const [verb, target] = args;
+      if (verb === "bootout") {
+        if (!target?.startsWith("gui/501") || !loaded) throw failed(3, "Boot-out failed: 3: No such process");
+        loaded = false;
+      } else if (verb === "print") {
+        if (target !== "gui/501" && !(loaded && target?.startsWith("gui/501"))) throw failed(113, "Bad request.");
+      } else {
+        if (readFileSync(plistPath(), "utf8") !== old || target !== "gui/501")
+          throw failed(5, "Bootstrap failed: 5: Input/output error");
+        loaded = true;
+      }
+      return "";
+    });
+    const a = refused(() => installService({ ...next, exec: picky, sleep: vi.fn() }));
+    expect(a).toBeInstanceOf(ServiceRefused);
+    expect(a.message).toBe(
+      "launchd didn't start the new org.sessionpipe.gui (launchctl answered 5); the one that was there before is started again (the file that was there before is back in its place)",
+    );
+    expect(a.why).toBe("launchd refused it (launchctl answered 5)");
+    expect(a.back).toBe("running");
+    expect(readFileSync(plistPath(), "utf8")).toBe(old);
+    expect(loaded).toBe(true);
+    // launchd never lets go of the old one: its file goes back, and it is still the one loaded.
+    const stuck = launchd({ running: true, leaves: Number.POSITIVE_INFINITY });
+    const b = refused(() => installService({ ...next, exec: stuck.exec, sleep: stuck.sleep }));
+    expect(b.message).toBe(
+      `launchd didn't start the new org.sessionpipe.gui (launchctl answered 5): the one that was running is still loaded. \`launchctl bootout gui/501/org.sessionpipe.gui\`, then \`launchctl bootstrap gui/501 ${plistPath()}\` (the file that was there before is back in its place)`,
+    );
+    expect(b.why).toBe("launchd has not let go of the one that was running (launchctl answered 5)");
+    expect(b.back).toBe("running");
+    expect(readFileSync(plistPath(), "utf8")).toBe(old);
+    // No bootstrap of the old file was tried while the old one is still loaded.
+    expect(stuck.exec.mock.calls.filter((c) => c[1][0] === "bootstrap")).toHaveLength(3);
+    // It refuses the old one too (a label someone disabled): the file is back, nothing runs.
+    const off = launchd({ running: true, leaves: 1, disabled: true });
+    const c = refused(() => installService({ ...next, exec: off.exec, sleep: off.sleep }));
+    expect(c.message).toBe(
+      `launchd didn't start org.sessionpipe.gui (launchctl answered 119), and nothing runs it now: \`launchctl bootstrap gui/501 ${plistPath()}\` starts it (the file that was there before is back in its place)`,
+    );
+    expect(c.back).toBe("stopped");
+    expect(readFileSync(plistPath(), "utf8")).toBe(old);
+    expect(off.exec.mock.calls.filter((x) => x[1][0] === "bootstrap").map((x) => x[1][1])).toEqual([
+      "gui/501",
+      "gui/501",
+      "user/501",
+      "gui/501",
+      "user/501",
+    ]);
+    // Nobody at the screen and launchd refuses: said without a launchctl command in `why`.
+    const d = refused(() =>
+      installService({
+        ...next,
+        exec: (_c, args) => {
+          if (args[0] === "bootout") return "";
+          throw new Error("no such domain");
+        },
+        sleep: vi.fn(),
+      }),
+    );
+    expect(d.message).toContain("(the file that was there before is back in its place)");
+    expect(d.why).toBe(
+      "launchd can't be asked from here: nobody is logged in at this Mac's screen, or this shell isn't allowed to ask it",
+    );
+    expect(d.back).toBe("stopped");
+    // With no service there before, there is nothing to take back.
+    rmSync(plistPath());
+    const e = refused(() => installService({ ...next, exec: off.exec, sleep: off.sleep }));
+    expect(e.back).toBeNull();
+    expect(e.message).toContain("(its file is written)");
+    expect(readFileSync(plistPath(), "utf8")).toContain("/opt/gui-2/server.js");
+  });
   it("linger, through the stand-in", () => {
     expect(ensureLinger("me", () => "Linger=no\n").on).toBe(false);
   });
@@ -328,13 +521,58 @@ describe("a look at the service", () => {
     expect(active.asked).toEqual(["systemctl --user is-active sessionpipe-gui.service"]);
     mkdirSync(path.dirname(unit), { recursive: true });
     writeFileSync(unit, "");
-    expect(serviceState({ ...o, exec: manager().exec })).toEqual({
+    // Not active: systemd is asked for its own version, which only one that answers says.
+    const idle = manager("--property=Version");
+    expect(serviceState({ ...o, exec: idle.exec })).toEqual({
       manager: "systemd",
       file: unit,
       installed: true,
       loaded: false,
       argv: null,
     });
+    expect(idle.asked).toEqual([
+      "systemctl --user is-active sessionpipe-gui.service",
+      "systemctl --user show --property=Version",
+    ]);
+  });
+
+  it("a manager that can't be asked is none: no systemd user manager to reach, no launchctl to run", () => {
+    const unit = path.join(home, ".config", "systemd", "user", "sessionpipe-gui.service");
+    mkdirSync(path.dirname(unit), { recursive: true });
+    writeFileSync(unit, serviceFiles({ ...SPEC, home }).unit.text);
+    // A container, WSL without systemd, a shell with no session: every question fails.
+    // The file is still said to be there, with what it names.
+    expect(serviceState({ ...NAMES, home, platform: "linux", exec: manager().exec })).toEqual({
+      manager: null,
+      file: unit,
+      installed: true,
+      loaded: false,
+      argv: SPEC.argv,
+    });
+    // launchctl that isn't there, as execFileSync says it: an error with a code, no exit status.
+    const none = (): string => {
+      throw Object.assign(new Error("spawnSync launchctl ENOENT"), { code: "ENOENT" });
+    };
+    expect(serviceState({ ...NAMES, home, platform: "darwin", uid: "501", exec: none })).toEqual({
+      manager: null,
+      file: path.join(home, "Library", "LaunchAgents", "org.sessionpipe.gui.plist"),
+      installed: false,
+      loaded: false,
+      argv: null,
+    });
+    // One that ran and said no (an exit status) is launchd answering; so is anything else thrown.
+    for (const said of [Object.assign(new Error("Bad request."), { status: 113 }), null, "no"])
+      expect(
+        serviceState({
+          ...NAMES,
+          home,
+          platform: "darwin",
+          uid: "501",
+          exec: () => {
+            throw said;
+          },
+        }).manager,
+      ).toBe("launchd");
   });
 
   it("another platform has no manager, and nothing is asked", () => {

@@ -10,7 +10,12 @@
  *  UPDATE_EXIT (75, sessionpipe-core/version) to come back on new code. The process is
  *  told which manager that is in SESSIONPIPE_SERVICE (`launchd`, `systemd`). Nothing
  *  here needs root, and a dry run touches nothing: it answers the files it would write
- *  and the commands it would run. */
+ *  and the commands it would run.
+ *
+ *  Installing over a service that is there replaces it, and one that is running runs the
+ *  new file afterwards. Where the manager refuses the new one, the file that was there
+ *  before is put back and that service started again, so a refusal never leaves the
+ *  machine with the old one stopped and a file that names something else. */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -45,6 +50,25 @@ export type Exec = (cmd: string, args: string[]) => string;
 
 const execQuiet: Exec = (cmd, args) =>
   execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000 });
+
+/** Whether a command ran and said yes: a look that never throws. */
+const answers = (exec: Exec, cmd: string, args: string[]): boolean => {
+  try {
+    exec(cmd, args);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A file's text; null when there is none, or it can't be read. */
+function textOf(file: string): string | null {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 /** One systemd argument, quoted: backslashes and quotes escaped, `%` doubled (a specifier otherwise). */
@@ -132,8 +156,27 @@ export interface ServicePlan {
   domain?: "gui" | "user";
   /** systemd: whether it outlives the login, in words. */
   linger?: { on: boolean; note: string };
-  /** The file that was written for a manager that couldn't be reached. */
+  /** The file that was written for a manager that couldn't be reached, or that refused
+   *  to start it. */
   unreachable?: string;
+  /** That file is again the one that was there before: the new one was taken back. */
+  restored?: true;
+}
+
+/** launchd would not start a service. `message` names the launchctl commands that do it
+ *  by hand; `why` is the same in a sentence without them, for a caller with its own
+ *  words. `back` is what became of a service that was there before: `running` (still
+ *  loaded, or started again from its own file, which is back in place), `stopped` (its
+ *  file is back and launchd would not start that one either), null (there was none, or
+ *  it was the same file). */
+export class ServiceRefused extends Error {
+  constructor(
+    message: string,
+    readonly why: string,
+    readonly back: "running" | "stopped" | null,
+  ) {
+    super(message);
+  }
 }
 
 export interface InstallOptions extends ServiceSpec {
@@ -159,8 +202,12 @@ const sleepSync = (ms: number) => {
 const LET_GO_MS = 10_000;
 const LOOK_MS = 100;
 
-/** Write the service for this platform and start it now; a service already there is
- *  replaced (launchd: booted out first, and started once the old one is gone). */
+/** Write the service for this platform and start it now. A service already there is
+ *  replaced, and runs the new file afterwards (launchd: booted out first, and started
+ *  once the old one is gone; systemd: restarted where the unit was active, since
+ *  `enable --now` leaves a running unit on the file it was started from). Where the
+ *  manager will not have the new one, the file from before is put back and that service
+ *  started again. */
 export function installService(o: InstallOptions): ServicePlan {
   const f = serviceFiles(o);
   const platform = o.platform ?? process.platform;
@@ -176,7 +223,14 @@ export function installService(o: InstallOptions): ServicePlan {
     mkdirSync(path.dirname(file.path), { recursive: true });
     writeFileSync(file.path, file.text);
   };
+  /** The file as it was before this install, where that was another one: what is put
+   *  back when the new one is refused. A dry run changes nothing, so has none. */
+  const before = (file: ServiceFile): string | null => {
+    const old = o.dryRun ? null : textOf(file.path);
+    return old === file.text ? null : old;
+  };
   if (platform === "darwin") {
+    const old = before(f.plist);
     write(f.plist);
     for (const d of ["gui", "user"])
       try {
@@ -196,14 +250,7 @@ export function installService(o: InstallOptions): ServicePlan {
     if (gui()) return started;
     // `launchctl print` exits non-zero for a domain or a service launchd doesn't have.
     // A look, not a step: it isn't one of the plan's commands.
-    const has = (target: string): boolean => {
-      try {
-        real("launchctl", ["print", target]);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    const has = (target: string): boolean => answers(real, "launchctl", ["print", target]);
     const atScreen = has(`gui/${uid}`);
     // A service is in one domain, and a look at the other doesn't see it.
     const there = () => has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
@@ -226,23 +273,55 @@ export function installService(o: InstallOptions): ServicePlan {
       const code = (refusal as { status?: unknown }).status;
       const said = typeof code === "number" ? ` (launchctl answered ${code})` : "";
       const by = `\`launchctl bootstrap gui/${uid} ${f.plist.path}\``;
-      throw new Error(
+      const still = atScreen && there();
+      // Refused in both domains. A service that was here before is not left booted out
+      // beside a file that names something else: its file goes back, and where launchd
+      // has let go of it, it is started again from that file.
+      let back: ServiceRefused["back"] = null;
+      if (old !== null) {
+        writeFileSync(f.plist.path, old);
+        back =
+          still || ["gui", "user"].some((d) => answers(run, "launchctl", ["bootstrap", `${d}/${uid}`, f.plist.path]))
+            ? "running"
+            : "stopped";
+      }
+      const file = old === null ? "its file is written" : "the file that was there before is back in its place";
+      throw new ServiceRefused(
         !atScreen
-          ? `launchd didn't start ${o.label}${said}: no login at this Mac's screen can be seen from here (nobody is logged in there, or launchctl is blocked). From a login at the screen, ${by} starts it (its file is written)`
-          : there()
-            ? `launchd didn't start the new ${o.label}${said}: the one that was running is still loaded. \`launchctl bootout gui/${uid}/${o.label}\`, then ${by} (its file is written)`
-            : `launchd didn't start ${o.label}${said}, and nothing runs it now: ${by} starts it (its file is written)`,
+          ? `launchd didn't start ${o.label}${said}: no login at this Mac's screen can be seen from here (nobody is logged in there, or launchctl is blocked). From a login at the screen, ${by} starts it (${file})`
+          : still
+            ? `launchd didn't start the new ${o.label}${said}: the one that was running is still loaded. \`launchctl bootout gui/${uid}/${o.label}\`, then ${by} (${file})`
+            : back === "running"
+              ? `launchd didn't start the new ${o.label}${said}; the one that was there before is started again (${file})`
+              : `launchd didn't start ${o.label}${said}, and nothing runs it now: ${by} starts it (${file})`,
+        !atScreen
+          ? `launchd can't be asked from here${said}: nobody is logged in at this Mac's screen, or this shell isn't allowed to ask it`
+          : still
+            ? `launchd has not let go of the one that was running${said}`
+            : `launchd refused it${said}`,
+        back,
       );
     }
     return { files: [f.plist], commands, manager: "launchd", domain: "user" };
   }
   if (platform === "linux") {
+    const old = before(f.unit);
+    // A look, not a step: a unit that is running goes on running the file it was started
+    // from, whatever `enable --now` is told, so that one is restarted.
+    const active = !o.dryRun && answers(real, "systemctl", ["--user", "is-active", o.unit]);
     write(f.unit);
     try {
       run("systemctl", ["--user", "daemon-reload"]);
       run("systemctl", ["--user", "enable", "--now", o.unit]);
+      if (active) run("systemctl", ["--user", "restart", o.unit]);
     } catch {
-      return { files: [f.unit], commands, manager: null, unreachable: f.unit.path };
+      if (old === null) return { files: [f.unit], commands, manager: null, unreachable: f.unit.path };
+      // The unit that was there before goes back, and is started again where systemd
+      // answers at all.
+      writeFileSync(f.unit.path, old);
+      if (answers(run, "systemctl", ["--user", "daemon-reload"]))
+        answers(run, "systemctl", ["--user", "enable", "--now", o.unit]);
+      return { files: [f.unit], commands, manager: null, unreachable: f.unit.path, restored: true };
     }
     const user = o.user ?? os.userInfo().username;
     if (o.dryRun) {
@@ -256,7 +335,9 @@ export function installService(o: InstallOptions): ServicePlan {
 
 /** What a look at the service finds. */
 export interface ServiceState {
-  /** Which manager this platform has; null where there is none. */
+  /** The manager that can be asked here; null where this platform has none, and where
+   *  the one it has can't be asked from this process (no `launchctl` to run; no systemd
+   *  user manager to reach: a container, WSL without systemd, a shell with no session). */
   manager: "launchd" | "systemd" | null;
   /** Where its file is, or would be. */
   file: string | null;
@@ -269,6 +350,8 @@ export interface ServiceState {
 }
 
 const unxml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+/** One systemd argument as `sd` quoted it, back. */
+const unsd = (s: string) => s.replace(/\\(.)/g, "$1").replace(/%%/g, "%");
 
 /** The program and its arguments a service file names, as `serviceFiles` wrote them: a
  *  plist's ProgramArguments, a unit's ExecStart. Null when the text has neither. */
@@ -278,52 +361,62 @@ export function serviceArgv(text: string): string[] | null {
     return [...plist.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1] as string));
   const unit = /^ExecStart=(.*)$/m.exec(text)?.[1];
   if (unit === undefined) return null;
-  return [...unit.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
-    (m[1] as string).replace(/\\(.)/g, "$1").replace(/%%/g, "%"),
-  );
+  return [...unit.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => unsd(m[1] as string));
 }
 
 /** A service file's ProgramArguments or ExecStart, read from disk; null when it can't be. */
 function argvOf(file: string): string[] | null {
-  try {
-    return serviceArgv(readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
+  const text = textOf(file);
+  return text === null ? null : serviceArgv(text);
 }
 
+/** A command that could not be started at all (no such program, not allowed), as
+ *  `execFileSync` says it: an error with a code, where one that ran and said no has an
+ *  exit status. */
+const notRun = (e: unknown): boolean => typeof (e as { code?: unknown } | null)?.code === "string";
+
 /** Whether this platform's manager has the service now. A look only: nothing is
- *  written, started or stopped (`launchctl print`, `systemctl --user is-active`). */
+ *  written, started or stopped (`launchctl print`; `systemctl --user is-active`, and
+ *  where that says no, `systemctl --user show` to learn whether systemd answered at all). */
 export function serviceState(o: UninstallOptions): ServiceState {
   const f = serviceFiles({ ...o, description: "", argv: [], logPath: "" });
   const platform = o.platform ?? process.platform;
   const uid = o.uid ?? String(process.getuid?.() ?? "");
   const exec = o.exec ?? execQuiet;
-  const ok = (cmd: string, args: string[]): boolean => {
-    try {
-      exec(cmd, args);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (platform === "darwin")
+  if (platform === "darwin") {
+    // "Not loaded" is launchctl's answer; a launchctl that can't be run answers nothing.
+    let asked = true;
+    const has = (target: string): boolean => {
+      try {
+        exec("launchctl", ["print", target]);
+        return true;
+      } catch (e) {
+        if (notRun(e)) asked = false;
+        return false;
+      }
+    };
+    const loaded = has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
     return {
-      manager: "launchd",
+      manager: asked ? "launchd" : null,
       file: f.plist.path,
       installed: existsSync(f.plist.path),
-      loaded:
-        ok("launchctl", ["print", `gui/${uid}/${o.label}`]) || ok("launchctl", ["print", `user/${uid}/${o.label}`]),
+      loaded,
       argv: argvOf(f.plist.path),
     };
-  if (platform === "linux")
+  }
+  if (platform === "linux") {
+    const loaded = answers(exec, "systemctl", ["--user", "is-active", o.unit]);
+    // `is-active` fails alike for a unit that isn't running and for a user manager that
+    // can't be reached; the manager's own version is something only a reachable one says.
+    const reachable = loaded || answers(exec, "systemctl", ["--user", "show", "--property=Version"]);
     return {
-      manager: "systemd",
+      manager: reachable ? "systemd" : null,
       file: f.unit.path,
       installed: existsSync(f.unit.path),
-      loaded: ok("systemctl", ["--user", "is-active", o.unit]),
+      loaded,
       argv: argvOf(f.unit.path),
     };
+  }
   return { manager: null, file: null, installed: false, loaded: false, argv: null };
 }
 
