@@ -251,13 +251,16 @@ the live session's own thread and permission mode, the way the app's other chann
 
 {{usage update}}
 
-Installs the latest release now; a running daemon restarts onto it once nothing is in hand.
+Leaves the whole computer current in one step: the copy you type, the copy the background
+service runs and the hooks all on the newest release, the service running it and hearing
+from its receivers. If it can't get there it says what is wrong and the one command to run
+next; if the service is busy with a turn of its own, it restarts by itself when that ends.
 
 {{usage update off}}
 
 {{usage update on}}
 
-The daemon's daily update check, off or back on.
+The background service's own daily update, off or back on.
 
 {{usage version}}
 

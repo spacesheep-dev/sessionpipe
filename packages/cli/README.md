@@ -234,17 +234,57 @@ sessionpipe ask status                                    # on or off, the daemo
 
 ## Updates
 
-The control daemon keeps its own copy current. About a minute after it starts, and then
+One command leaves the whole computer current:
+
+```sh
+sessionpipe update
+```
+
+When it ends well, the copy you type, the copy the background service runs and the
+hooks are one version, the newest; the service is running it and hearing from its
+receivers; and the last line says so. It does four things, in order:
+
+1. Reads npm's `latest` and installs it into the prefix this copy came from
+   (`npm install --global --ignore-scripts sessionpipe@<version>`).
+2. Writes the hooks again from this copy.
+3. Makes the background service run this copy, the same one you type, so the two
+   cannot drift apart. A service that runs another copy, or that launchd or systemd no
+   longer has at all, is replaced; one that runs this copy already restarts itself.
+4. Looks: the service answers with the new version and is asking its receivers.
+
+When it can't get there it stops with one line that says what is wrong and one that
+says what to type next:
+
+| What stood in the way | What it says to run |
+|---|---|
+| npm can't be reached | `sessionpipe update`, later. What needs no download is still done: the hooks and the service are put on this copy. Nothing is ever moved back to an older release |
+| npm can't write the prefix (installed with sudo) | `sudo npm install -g --prefix <prefix> sessionpipe@<version> && sessionpipe update` |
+| This copy isn't an npm install (a git checkout, a dev build) | `npx sessionpipe@latest update` |
+| The hooks couldn't be written | `sessionpipe install` |
+| The service started and a receiver doesn't answer it | `sessionpipe doctor` |
+| No launchd or systemd here (Windows, a container) and no service running | `sessionpipe control run` |
+
+A restart never cuts short what the service itself holds: a turn it runs for you, a
+message in hand, a permission prompt it holds for your answer. It is given 25 seconds;
+past that the command says the service restarts by itself when that is done, and there
+is nothing more to type. A session you are working in yourself is not waited for: the
+service remembers across the restart that it is mid-turn, so a message to it still
+waits for its Stop.
+
+Exit codes: `0` everything is current; `3` the service finishes by itself; `1` it
+stopped, with the next command; `2` a wrong argument. Run from `npx`, it installs the
+persistent copy first and hands over, as `install` does.
+
+### The daily update
+
+The background service does the same by itself. About a minute after it starts, and then
 once a day (the last check is kept in `~/.local/state/sessionpipe/control/update.json`,
-so a restart or a machine that sleeps doesn't ask more often), it reads
-`https://registry.npmjs.org/sessionpipe/latest`. When that is a newer release it waits
-until nothing is in hand — no message being delivered, no headless run or new session,
-no Agent SDK turn, no permission prompt waiting for your answer, no session of yours
-mid-turn — stops taking new
-messages (the receiver holds them meanwhile), runs
-`npm install --global --ignore-scripts sessionpipe@<version>` into the prefix it was
-installed in, re-copies the hook launcher's files, and restarts onto the new code. A
-running turn is never interrupted.
+so a restart or a machine that sleeps doesn't ask more often), it reads npm's `latest`.
+When that is newer it waits until it holds nothing, stops taking new messages (the
+receiver holds them meanwhile), installs the release into its own copy and into the
+`sessionpipe` on its PATH when that is another install (the copy you type), writes the
+hooks again, and restarts onto the new code. `sessionpipe doctor` shows a split it
+could not close, and `sessionpipe update` closes it.
 
 How it restarts depends on how it runs:
 
@@ -260,21 +300,21 @@ One daemon runs per machine: a second `sessionpipe control run` finds the first 
 answering on the local socket, says so, and exits 0.
 
 Only a global npm install that this user can write updates itself; a copy in the npx
-cache, a git checkout or a dev build is left alone. `sessionpipe status` and
-`sessionpipe doctor` say whether it's on, when it last checked and what it found; the
-daemon's log (`~/.local/state/sessionpipe/control/daemon.log` under launchd,
+cache, a git checkout or a dev build is left alone. `sessionpipe doctor` says whether it's
+on, when it last checked and what it found; the daemon's log
+(`~/.local/state/sessionpipe/control/daemon.log` under launchd,
 `journalctl --user -u sessionpipe-control.service` under systemd) has one line per check
 and per update.
 
 ```sh
-sessionpipe update off      # the daemon stops checking ("update_check": false in config.json)
+sessionpipe update off      # the service stops checking ("update_check": false in config.json)
 sessionpipe update on
-sessionpipe update          # install the latest now; the daemon restarts onto it once idle
 ```
 
-`SESSIONPIPE_NO_UPDATE_CHECK=1` turns it off too, but only where the daemon can see it:
-a launchd or systemd service doesn't inherit your shell's variables, while
-`sessionpipe update off` reaches it (it re-reads the config every ten minutes).
+`SESSIONPIPE_NO_UPDATE_CHECK=1` turns the daily update off too, but only where the
+service can see it: a launchd or systemd service doesn't inherit your shell's variables,
+while `sessionpipe update off` reaches it (it re-reads the config every ten minutes).
+The registry asked is npm's own, or the one `npm_config_registry` names.
 
 ## Session names from claude.ai
 
