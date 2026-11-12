@@ -11,8 +11,16 @@ import { shq, shqPath } from "../src/shell.js";
 
 describe("a word of a printed command", () => {
   it("is left alone when a shell would read it as it stands", () => {
-    for (const w of ["sessionpipe", "~/.claude-second", "/usr/local/lib", "https://r.example:8443/x", "a_b@c%d+e=f,g"])
+    for (const w of ["sessionpipe", "/usr/local/lib", "https://r.example:8443/x", "a_b@c%d+e=f,g", "x~y", "a-b"])
       expect(shq(w, "darwin")).toBe(w);
+  });
+
+  it("is quoted when it starts with what a shell expands at the start of a word", () => {
+    // `~root` is root's home in every shell; zsh reads `=ls` as the path of `ls`.
+    expect(shq("~root", "darwin")).toBe("'~root'");
+    expect(shq("~", "linux")).toBe("'~'");
+    expect(shq("~/x", "linux")).toBe("'~/x'");
+    expect(shq("=ls", "darwin")).toBe("'=ls'");
   });
 
   it("is quoted when it holds a space, a quote, a `$` or anything else a shell acts on", () => {
@@ -44,6 +52,8 @@ describe("what a shell makes of it", () => {
     ["$HOME $", "{PATH} !! \\ * ? ~"].join(""),
     'say "hi"',
     "-rf",
+    "~root",
+    "=ls",
     "",
     "line\nbreak",
   ];
@@ -76,6 +86,10 @@ describe("a file or folder in a printed command", () => {
         process.platform === "win32" ? "/home/me/.claude-second" : "~/.claude-second",
       );
       expect(shqPath("/var/log/x.log", "linux")).toBe("/var/log/x.log");
+      // The home folder itself; and a folder under it whose name starts like an option is
+      // given whole, since `~/-x` would need quotes and a quoted `~` is not the home folder.
+      expect(shqPath(home, "linux")).toBe("~");
+      expect(shqPath(path.posix.join("/home/me", "-x"), "linux")).toBe("/home/me/-x");
     } finally {
       vi.unstubAllEnvs();
     }

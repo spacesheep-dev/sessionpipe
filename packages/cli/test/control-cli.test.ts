@@ -370,6 +370,20 @@ describe("control mode, keys, off, status, help", () => {
       "    rs256key01234567…  passkey  RS256  added 2026-10-02",
       "    devicekey0123456…  device   ES256  added 2026-10-03  Mac app",
     ]);
+    // A key's name is the receiver's word: it stays on its key's line, and nothing in it
+    // is left for a terminal to act on.
+    const named = {
+      ...(receiver.keys[2] as (typeof receiver.keys)[2]),
+      name: `Mac app\n    evil0123456789ab…  passkey  ES256  added 2026-10-04${String.fromCharCode(27)}[2J`,
+    };
+    writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [{ ...receiver, keys: [named] }] });
+    out = [];
+    await run("keys");
+    expect(out).toHaveLength(2);
+    expect(out[1]).toBe(
+      "    devicekey0123456…  device   ES256  added 2026-10-03  Mac app     evil0123456789ab…  passkey  ES256  added 2026-10-04",
+    );
+    writeControl({ name: "lab", folders: [project], mode: "safe", receivers: [receiver] });
     out = [];
     await run("keys", "remove", "rs256key");
     expect(said()).toBe("  removed 1 key(s)");
