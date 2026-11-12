@@ -5,7 +5,7 @@
 // the proof verifies here. Also the service files (launchd / systemd) that keep the
 // daemon running, and `control off`.
 import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   acpControl,
@@ -22,7 +22,7 @@ import * as core from "@sessionpipe/core/service";
 import { Refusal } from "../refusal.js";
 import { shq } from "../shell.js";
 import { clean, PLAIN, tint, type Ui } from "../style.js";
-import { SERVICE_LABEL as LABEL, serviceNames, SERVICE_UNIT as UNIT } from "./health.js";
+import { SERVICE_LABEL as LABEL, noService, serviceNames, SERVICE_UNIT as UNIT } from "./health.js";
 import {
   askOn,
   type ControlConfig,
@@ -402,10 +402,10 @@ export function serviceFiles(o: {
   return core.serviceFiles(spec(o));
 }
 
-/** Said where a sessionpipe pointed away from this computer's own files (a test, a
- *  throwaway world) would otherwise have replaced this computer's real service. */
-export const NOT_THIS_COMPUTERS =
-  "not installed as a service: SESSIONPIPE_STATE or SESSIONPIPE_CONFIG points this sessionpipe away from this computer's own files, so its service is left alone; run `sessionpipe control run` yourself";
+/** The way through for a sessionpipe that has no service to change (health.ts
+ *  `noService` says why): said after the why. */
+export const BY_HAND =
+  "run `sessionpipe control run` yourself, or give this one a service of its own with SESSIONPIPE_SERVICE_LABEL=org.sessionpipe.<name>";
 
 interface Placing {
   node: string;
@@ -415,18 +415,29 @@ interface Placing {
   platform?: NodeJS.Platform;
 }
 
-/** Write and start the service for this platform: what it came to, or null where
- *  nothing was touched. A sessionpipe pointed away from this computer's files never
- *  replaces the real service (health.ts `serviceNames`); a run with `exec` stood in runs
- *  nothing real, and may. */
-function put(o: Placing): { plan: core.ServicePlan; label: string; unit: string; file: string; log: string } | null {
+/** Write and start the service for this platform: what it came to, or why nothing was
+ *  touched. A sessionpipe that keeps its files somewhere other than this computer's
+ *  usual place never replaces the usual service (health.ts `serviceNames`); a run with
+ *  `exec` stood in runs nothing real, and may. */
+function put(
+  o: Placing,
+): { plan: core.ServicePlan; label: string; unit: string; file: string; log: string } | { left: string } {
   const names = serviceNames(o.env) ?? (o.exec ? { label: LABEL, unit: UNIT } : null);
-  if (!names) return null;
+  if (!names) return { left: noService(o.env) as string };
   const { label, unit } = names;
   const logDir = controlState(o.env);
-  const here = spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env), names });
+  const here = spec({ node: o.node, cli: o.cli, logDir, names });
   const files = core.serviceFiles(here);
   const file = (o.platform ?? process.platform) === "darwin" ? files.plist.path : files.unit.path;
+  let old: string | null = null;
+  try {
+    old = readFileSync(file, "utf8");
+  } catch {}
+  // A name of its own could be one another program's service has (the board's, say):
+  // a file there that doesn't run this daemon is never written over or booted out.
+  const was = old === null ? null : core.serviceArgv(old);
+  if (label !== LABEL && was && was.slice(-2).join(" ") !== "control run")
+    return { left: `${file} is another program's service (it runs ${was.join(" ")}), and is left as it is` };
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const log = path.join(logDir, "daemon.log");
   // launchd and systemd create this file themselves, with whatever the umask says. It
@@ -439,6 +450,7 @@ function put(o: Placing): { plan: core.ServicePlan; label: string; unit: string;
   } catch {}
   const plan = core.installService({
     ...here,
+    env: serviceEnv(o.env),
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });
@@ -453,7 +465,7 @@ const managed = (platform: NodeJS.Platform = process.platform) => platform === "
 export function installService(o: Placing): string {
   if (!managed(o.platform)) return NO_MANAGER;
   const r = put(o);
-  if (!r) return NOT_THIS_COMPUTERS;
+  if ("left" in r) return `left alone: ${r.left}; ${BY_HAND}`;
   const { plan, label, unit, file, log } = r;
   if (plan.manager === "launchd")
     return plan.domain === "gui"
@@ -478,7 +490,7 @@ export function placeService(o: Placing): void {
     if (!(e instanceof core.ServiceRefused)) throw e;
     throw new Error(`${e.why}${e.back ? back : ""}`);
   }
-  if (!r) throw new Error(NOT_THIS_COMPUTERS);
+  if ("left" in r) throw new Error(r.left);
   if (!r.plan.manager)
     throw new Error(
       `systemd --user didn't start it (it can't be reached from here, or it refused)${r.plan.restored ? back : ""}`,

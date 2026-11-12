@@ -87,6 +87,10 @@ export interface CurrentDeps {
   /** What launchd or systemd has; null where this sessionpipe has no service to manage,
    *  or no manager that can be asked from here. */
   look: () => ServiceState | null;
+  /** Why this sessionpipe has no service of its own to look at, in a sentence (it keeps
+   *  its files somewhere other than this computer's usual place: health.ts `noService`);
+   *  null where it has one, or where only a manager is missing. */
+  apart: string | null;
   /** Replace the service with one that runs this copy; throws with why it couldn't, also
    *  where nothing here could start one. */
   place: () => void;
@@ -283,7 +287,9 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       // no manager that can be asked. Only a person can start it.
       return {
         state: "failed",
-        error: "the background service isn't running, and nothing on this computer starts it by itself",
+        error: d.apart
+          ? `the background service isn't running, and nothing starts it by itself: ${d.apart}. Run it yourself, or give this one a service of its own with SESSIONPIPE_SERVICE_LABEL=org.sessionpipe.<name>`
+          : "the background service isn't running, and nothing on this computer starts it by itself",
         next: "sessionpipe control run",
       };
     } else if (before.version !== target) {

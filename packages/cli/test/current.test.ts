@@ -108,6 +108,7 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
       return true;
     },
     look: () => s.look,
+    apart: null,
     place: () => {
       s.placed++;
       s.did.push("place");
@@ -349,6 +350,15 @@ describe("a computer with no background service", () => {
     const b = run({ latest: "1.0.0", status: [null], look: service({ installed: false, loaded: false, argv: null }) });
     expect(await b.out).toEqual(failed);
     expect(a.sim.placed + b.sim.placed).toBe(0);
+    // A sessionpipe that keeps its files elsewhere has no service here: why, and the way through.
+    const apart =
+      "this sessionpipe keeps its files somewhere other than this computer's usual place (/x/state, not /home/me/.local/state/sessionpipe), so the usual background service is left alone";
+    const c = run({ latest: "1.0.0", status: [null], look: null }, { apart });
+    expect(await c.out).toEqual({
+      state: "failed",
+      error: `the background service isn't running, and nothing starts it by itself: ${apart}. Run it yourself, or give this one a service of its own with SESSIONPIPE_SERVICE_LABEL=org.sessionpipe.<name>`,
+      next: "sessionpipe control run",
+    });
   });
 });
 
