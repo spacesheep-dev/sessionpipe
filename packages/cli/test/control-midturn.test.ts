@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // A restart of the daemon is held back only by what the daemon itself holds. A session
 // someone is working in, mid-turn in its own window, is not waited for: that it is
-// mid-turn is written down at a stop and read back at the next start.
+// mid-turn is written down at a stop and read back at the next start. (What a message
+// sent after the restart then does is control-restart.test.ts.)
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import { readState } from "../src/control/store.js";
 
 const A = "claude-code:11111111-2222-4333-8444-555555555555";
 const B = "claude-code:66666666-7777-4888-8999-aaaaaaaaaaaa";
+const unix = process.platform !== "win32"; // the daemon's socket is a Unix socket here
 let tmp: string;
 let dir: string;
 let sock: string;
@@ -51,7 +53,7 @@ const event = (session: string, name: string, more: Record<string, string> = {})
   ask(sock, { op: "event", session, event: name, ...more }, 2000);
 const onFile = () => JSON.parse(readFileSync(path.join(dir, "state.json"), "utf8")) as { mid_turn?: unknown };
 
-describe("a session mid-turn in someone's own window", () => {
+describe.runIf(unix)("a session mid-turn in someone's own window", () => {
   it("is known, and doesn't hold a restart back", async () => {
     const d = daemon();
     await d.start();
@@ -111,6 +113,16 @@ describe("a session mid-turn in someone's own window", () => {
     expect(readState(path.join(dir, "state.json"), clock + HOOKS_WORD_MS).mid_turn).toEqual({});
   });
 
+  it("a daemon that only steps aside for another writes nothing", async () => {
+    const d = daemon();
+    await d.start();
+    await event(A, "UserPromptSubmit");
+    await d.stop({ leaveSocket: true });
+    expect(existsSync(path.join(dir, "state.json"))).toBe(false);
+  });
+});
+
+describe("state.json's `mid_turn`, read defensively", () => {
   it("a file that says something else than sessions and times is read as nothing", () => {
     const file = path.join(tmp, "state.json");
     const at = new Date(clock).toISOString();
@@ -124,17 +136,9 @@ describe("a session mid-turn in someone's own window", () => {
     writeFileSync(file, JSON.stringify({ mid_turn: "nope" }));
     expect(readState(file, clock).mid_turn).toEqual({});
   });
-
-  it("a daemon that only steps aside for another writes nothing", async () => {
-    const d = daemon();
-    await d.start();
-    await event(A, "UserPromptSubmit");
-    await d.stop({ leaveSocket: true });
-    expect(existsSync(path.join(dir, "state.json"))).toBe(false);
-  });
 });
 
-describe("what the daemon says of itself to doctor and update", () => {
+describe.runIf(unix)("what the daemon says of itself to doctor and update", () => {
   it("names the copy it runs and who restarts it, where it knows", async () => {
     const d = daemon({ copy: () => ({ cli: "/p/lib/node_modules/sessionpipe/dist/cli.js", via: "launchd" }) });
     await d.start();
