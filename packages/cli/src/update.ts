@@ -106,14 +106,16 @@ export function versionAt(distDir: string): string | null {
   }
 }
 
-/** Why npm can't write this prefix (installed with sudo, a read-only image), or null. */
+/** Why npm can't write this prefix (installed with sudo or as administrator, a read-only
+ *  image), or null. */
 export function unwritable(prefix: string, platform: NodeJS.Platform = process.platform): string | null {
-  const dir = platform === "win32" ? path.join(prefix, "node_modules") : path.join(prefix, "lib", "node_modules");
+  const win = platform === "win32";
+  const dir = win ? path.join(prefix, "node_modules") : path.join(prefix, "lib", "node_modules");
   try {
     accessSync(dir, constants.W_OK);
     return null;
   } catch {
-    return `${dir} isn't writable by this user (installed with sudo?)`;
+    return `${dir} isn't writable by this user (installed ${win ? "as administrator" : "with sudo"}?)`;
   }
 }
 

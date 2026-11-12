@@ -254,6 +254,7 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
       cli: realpathSync(path.join(realDist, "cli.js")),
       prefix: null,
       unwritable: null,
+      platform: process.platform,
       unasked: null,
       harnesses: ["codex"],
       wanted: false,
