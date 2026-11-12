@@ -407,20 +407,26 @@ export function serviceFiles(o: {
 export const NOT_THIS_COMPUTERS =
   "not installed as a service: SESSIONPIPE_STATE or SESSIONPIPE_CONFIG points this sessionpipe away from this computer's own files, so its service is left alone; run `sessionpipe control run` yourself";
 
-/** Write and start the service for this platform. Returns what it did, in words. A
- *  sessionpipe pointed away from this computer's files never replaces the real service
- *  (health.ts `serviceNames`); a run with `exec` stood in runs nothing real, and may. */
-export function installService(o: {
+interface Placing {
   node: string;
   cli: string;
   env?: NodeJS.ProcessEnv;
   exec?: Exec;
   platform?: NodeJS.Platform;
-}): string {
+}
+
+/** Write and start the service for this platform: what it came to, or null where
+ *  nothing was touched. A sessionpipe pointed away from this computer's files never
+ *  replaces the real service (health.ts `serviceNames`); a run with `exec` stood in runs
+ *  nothing real, and may. */
+function put(o: Placing): { plan: core.ServicePlan; label: string; unit: string; file: string; log: string } | null {
   const names = serviceNames(o.env) ?? (o.exec ? { label: LABEL, unit: UNIT } : null);
-  if (!names) return NOT_THIS_COMPUTERS;
+  if (!names) return null;
   const { label, unit } = names;
   const logDir = controlState(o.env);
+  const here = spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env), names });
+  const files = core.serviceFiles(here);
+  const file = (o.platform ?? process.platform) === "darwin" ? files.plist.path : files.unit.path;
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const log = path.join(logDir, "daemon.log");
   // launchd and systemd create this file themselves, with whatever the umask says. It
@@ -431,19 +437,52 @@ export function installService(o: {
     closeSync(openSync(log, "a", 0o600));
     chmodSync(log, 0o600);
   } catch {}
-  const r = core.installService({
-    ...spec({ node: o.node, cli: o.cli, logDir, env: serviceEnv(o.env), names }),
+  const plan = core.installService({
+    ...here,
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });
-  if (r.manager === "launchd")
-    return r.domain === "gui"
+  return { plan, label, unit, file, log };
+}
+
+const NO_MANAGER = "no service manager for this platform yet; run `sessionpipe control run` yourself";
+const managed = (platform: NodeJS.Platform = process.platform) => platform === "darwin" || platform === "linux";
+
+/** Write and start the service for this platform (`control pair`, `pool on`, `ask on`).
+ *  Returns what it did, in words. */
+export function installService(o: Placing): string {
+  if (!managed(o.platform)) return NO_MANAGER;
+  const r = put(o);
+  if (!r) return NOT_THIS_COMPUTERS;
+  const { plan, label, unit, file, log } = r;
+  if (plan.manager === "launchd")
+    return plan.domain === "gui"
       ? `launchd agent ${label} (log: ${log})`
       : `launchd agent ${label} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${log})`;
-  if (r.manager === "systemd") return `systemd user unit ${unit}; ${r.linger?.note} (journalctl --user -u ${unit})`;
-  if (r.unreachable)
-    return `wrote ${r.unreachable}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
-  return "no service manager for this platform yet; run `sessionpipe control run` yourself";
+  if (plan.manager === "systemd")
+    return `systemd user unit ${unit}; ${plan.linger?.note} (journalctl --user -u ${unit})`;
+  return `${plan.restored ? `left ${file} as it was` : `wrote ${file}`}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
+}
+
+/** The same for `sessionpipe update`, which replaces a service that is there. It answers
+ *  nothing; where the service could not be put in place it throws, with why in words
+ *  for a person (what to run next is the caller's to say, which knows whether anything
+ *  answers now). */
+export function placeService(o: Placing): void {
+  if (!managed(o.platform)) throw new Error("nothing on this computer starts the background service by itself");
+  const back = "; the service file that was there before was put back";
+  let r: ReturnType<typeof put>;
+  try {
+    r = put(o);
+  } catch (e) {
+    if (!(e instanceof core.ServiceRefused)) throw e;
+    throw new Error(`${e.why}${e.back ? back : ""}`);
+  }
+  if (!r) throw new Error(NOT_THIS_COMPUTERS);
+  if (!r.plan.manager)
+    throw new Error(
+      `systemd --user didn't start it (it can't be reached from here, or it refused)${r.plan.restored ? back : ""}`,
+    );
 }
 
 export function uninstallService(env?: NodeJS.ProcessEnv): void {

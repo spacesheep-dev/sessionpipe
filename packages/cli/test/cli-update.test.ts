@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import type { ServiceState } from "@sessionpipe/core/service";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceLook } from "../src/control/health.js";
-import { installService } from "../src/control/pair.js";
+import { placeService } from "../src/control/pair.js";
 import { bringCurrent, type CurrentDeps, type Outcome } from "../src/current.js";
 import { installLauncher } from "../src/launcher.js";
 import { VERSION } from "../src/run.js";
@@ -49,7 +49,7 @@ vi.mock("../src/runtime.js", async (original) => ({
 }));
 vi.mock("../src/control/pair.js", async (original) => ({
   ...(await original<typeof import("../src/control/pair.js")>()),
-  installService: vi.fn(() => "launchd agent"),
+  placeService: vi.fn(),
 }));
 vi.mock("../src/control/health.js", async (original) => ({
   ...(await original<typeof import("../src/control/health.js")>()),
@@ -280,8 +280,13 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     vi.mocked(rearmHooks).mockResolvedValueOnce({ ok: true, said: "x" });
     await deps.rearm();
     expect(rearmHooks).toHaveBeenCalledWith({ node: process.execPath, distDir: realDist, harnesses: ["codex"] });
+    // Placing throws where it can't, so nothing it says can be passed over.
     deps.place();
-    expect(installService).toHaveBeenCalledWith({ node: deps.node, cli: deps.cli });
+    expect(placeService).toHaveBeenCalledWith({ node: deps.node, cli: deps.cli });
+    vi.mocked(placeService).mockImplementationOnce(() => {
+      throw new Error("launchd refused it (launchctl answered 5)");
+    });
+    expect(() => deps.place()).toThrow("launchd refused it (launchctl answered 5)");
     // What an older service knew of who is mid-turn, left where the next one takes it.
     deps.seed(["claude-code:aaaa"]);
     expect(
@@ -442,7 +447,7 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     );
   });
 
-  it("loaded and silent: its log; no manager here: a person starts it", async () => {
+  it("loaded and silent: its log; no manager here, or no service anyone asked for: a person starts it", async () => {
     paired();
     vi.mocked(serviceLook).mockReturnValue(service());
     const silent = await run({}, "doctor");
@@ -452,6 +457,12 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     const none = await run({}, "doctor");
     expect(none.text).toMatch(/^ {2}✗ background service {2,}not running$/m);
     expect(fix(none.text)).toContain("Start it, and leave it running:\n       sessionpipe control run");
+    // launchd is there and no service file is: `update` would install none, and says the same.
+    vi.mocked(serviceLook).mockReturnValue(service({ installed: false, loaded: false, argv: null }));
+    const byHand = await run({}, "doctor");
+    expect(byHand.text).toMatch(/^ {2}✗ background service {2,}not loaded: launchd doesn't have it$/m);
+    expect(fix(byHand.text)).toContain("Start it, and leave it running:\n       sessionpipe control run");
+    expect(fix(byHand.text)).not.toContain("sessionpipe update");
   });
 
   it("with nothing that needs the service, nobody is asked about it", async () => {

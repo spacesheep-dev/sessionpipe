@@ -97,14 +97,25 @@ describe("a look at the service", () => {
       loaded: true,
       argv: null,
     });
+    // Not active: systemd says so, and answers for itself.
+    expect(
+      serviceLook({
+        ...o,
+        exec: (_cmd, args) => {
+          if (args.includes("is-active")) throw new Error("inactive");
+          return "Version=257\n";
+        },
+      }),
+    ).toMatchObject({ manager: "systemd", loaded: false });
+    // No user manager that can be reached (a container, WSL without systemd): no look at all.
     expect(
       serviceLook({
         ...o,
         exec: () => {
-          throw new Error("inactive");
+          throw new Error("Failed to connect to bus");
         },
-      })?.loaded,
-    ).toBe(false);
+      }),
+    ).toBeNull();
   });
 
   it("is null where there is no manager, and in a throwaway world", () => {

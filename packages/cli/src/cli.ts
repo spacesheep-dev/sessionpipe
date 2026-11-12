@@ -58,7 +58,7 @@ import {
   type Trouble,
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
-import { installService } from "./control/pair.js";
+import { placeService } from "./control/pair.js";
 import {
   controlState,
   moveControlSecrets,
@@ -1211,8 +1211,10 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
         say: "The background service was started and doesn't answer, so no message reaches this computer. Its log says why:",
         run: `tail -n 20 ${tilde(path.join(state, "control", "daemon.log"))}`,
       });
-    // Where launchd or systemd keeps it, `update` puts it back; elsewhere a person runs it.
-    else if (look) down = true;
+    // Where launchd or systemd should have it (its file is there), `update` puts it back.
+    // With no file nobody asked for a service here, and with no manager that can be asked
+    // there is none: a person runs it, and `update` says the same.
+    else if (look?.installed) down = true;
     else
       todo.push({
         order: 1,
@@ -1982,7 +1984,7 @@ async function update(): Promise<void> {
     health: () => askHealth(sock, 5000),
     restart: async () => (await ask(sock, { op: "restart" }, 2000))?.op === "ok",
     look: () => serviceLook(),
-    place: () => void installService({ node, cli }),
+    place: () => placeService({ node, cli }),
     seed: (sessions) => writeTurnsSeed(controlState(), sessions),
     versionAt,
     globalPrefix,

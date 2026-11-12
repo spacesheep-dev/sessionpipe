@@ -2324,18 +2324,25 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     let has = false;
     vi.mocked(execFileSync).mockImplementation(((cmd: string, args: string[]) => {
       asked.push([cmd, ...args].join(" "));
-      if (!has) throw new Error("not there");
+      // systemd answers for itself (its version); the service is there only when `has`.
+      if (!has && !args.includes("show")) throw new Error("not there");
       return "";
     }) as never);
-    // Where launchd or systemd keeps the service, `update` is what puts it back.
+    // Where launchd or systemd should have the service (its file is there), `update` is
+    // what puts it back; with no file nobody asked for one, and a person runs it.
     const start =
       "  1. The background service isn't running, so no message reaches this computer. One command puts it right:";
+    const byHandFix = [
+      "To fix",
+      "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
+      "       sessionpipe control run",
+    ];
 
     // A Mac where launchd has no such service and no plist was written.
     onPlatform("darwin");
     const never = await run("doctor");
     expect(never.text).toMatch(row("✗", "background service", "not loaded: launchd doesn't have it"));
-    expect(fixes(never)).toEqual(["To fix", start, "       sessionpipe update"]);
+    expect(fixes(never)).toEqual(byHandFix);
     expect(process.exitCode).toBe(1);
     const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
     expect(j.warnings).toEqual([
@@ -2373,7 +2380,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     paired({ receivers: [], ask: true });
     const byHand = await run("doctor");
     expect(byHand.text).toMatch(row("✗", "background service", "not loaded: systemd doesn't have it"));
-    expect(fixes(byHand)).toEqual(["To fix", start, "       sessionpipe update"]);
+    expect(fixes(byHand)).toEqual(byHandFix);
     // The unit is written and not active: the same.
     put(path.join(home, ".config", "systemd", "user", "org.sessionpipe.test.service"), "");
     expect(fixes(await run("doctor"))).toEqual(["To fix", start, "       sessionpipe update"]);
@@ -2382,7 +2389,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the background
     expect(asked.length).toBeGreaterThan(8);
     for (const a of asked)
       expect(a).toMatch(
-        /^(launchctl print (gui|user)\/\d*\/org\.sessionpipe\.test|systemctl --user is-active org\.sessionpipe\.test\.service|journalctl --user -u org\.sessionpipe\.test\.service )/,
+        /^(launchctl print (gui|user)\/\d*\/org\.sessionpipe\.test|systemctl --user is-active org\.sessionpipe\.test\.service|systemctl --user show --property=Version$|journalctl --user -u org\.sessionpipe\.test\.service )/,
       );
   });
 

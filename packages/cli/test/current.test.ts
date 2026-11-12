@@ -337,8 +337,59 @@ describe("a computer with no background service", () => {
   });
 
   it("that is wanted, where nothing starts it: only a person can", async () => {
-    const { out } = run({ latest: "1.0.0", status: [null], look: null });
-    expect(await out).toMatchObject({ state: "failed", next: "sessionpipe control run" });
+    const failed = {
+      state: "failed",
+      error: "the background service isn't running, and nothing on this computer starts it by itself",
+      next: "sessionpipe control run",
+    };
+    // No manager that can be asked (Windows, a container, WSL without systemd).
+    const a = run({ latest: "1.0.0", status: [null], look: null });
+    expect(await a.out).toEqual(failed);
+    // A manager, and no service file: nobody asked for a service here, so none is installed.
+    const b = run({ latest: "1.0.0", status: [null], look: service({ installed: false, loaded: false, argv: null }) });
+    expect(await b.out).toEqual(failed);
+    expect(a.sim.placed + b.sim.placed).toBe(0);
+  });
+});
+
+describe("a daemon someone runs by hand (pair --no-service, tmux, a container)", () => {
+  // launchd is there and has no such service; with a file left from a start that failed, or none.
+  const byHand = [
+    service({ installed: false, loaded: false, argv: null }),
+    service({ loaded: false }),
+    service({ loaded: false, argv: ["/usr/bin/node", `${THEIRS}/cli.js`, "control", "run"] }),
+    null,
+  ];
+
+  it("is restarted over its socket, and no service is installed for it", async () => {
+    for (const look of byHand) {
+      const { sim, out } = run({ look, status: [st("1.0.0"), st("1.0.0"), st("1.1.0")] });
+      expect(await out).toMatchObject({ state: "current", version: "1.1.0" });
+      expect(sim.did).toEqual(["restart"]);
+      expect(texts(sim).at(-1)).toBe("ok: the background service restarted onto sessionpipe 1.1.0");
+    }
+  });
+
+  it("on this version already is left as it is", async () => {
+    for (const look of byHand) {
+      const { sim, out } = run({ latest: "1.0.0", look });
+      expect((await out).state).toBe("current");
+      expect(sim.did).toEqual([]);
+    }
+  });
+
+  it("that doesn't restart is theirs to stop and start", async () => {
+    const failed = {
+      state: "failed",
+      error:
+        "the background service still runs sessionpipe 1.0.0 and didn't restart onto 1.1.0. It was started by hand: stop it where it runs, then start it again",
+      next: "sessionpipe control run",
+    };
+    const a = run({ look: byHand[0] as ServiceState }, { restart: async () => false });
+    expect(await a.out).toEqual(failed);
+    const b = run({ look: null });
+    expect(await b.out).toEqual(failed);
+    expect(a.sim.placed + b.sim.placed).toBe(0);
   });
 });
 
@@ -574,6 +625,30 @@ describe("the service that runs this copy already", () => {
       next: "sessionpipe control run",
     });
     expect(sim.restarts).toBe(0);
+  });
+
+  it("of another copy, under a manager this shell can't ask: said as that, and where to run this", async () => {
+    const { sim, out } = run(
+      { look: null },
+      { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "systemd" } }) },
+    );
+    expect(await out).toEqual({
+      state: "failed",
+      error: `the background service runs another copy (${THEIRS}/cli.js) on sessionpipe 1.0.0, and systemd can't be asked from this shell to move it onto this one. Run this from a terminal you opened on this computer yourself`,
+      next: "sessionpipe update",
+    });
+    expect(sim.did).toEqual([]);
+    const mac = run(
+      { look: null },
+      { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "launchd" } }) },
+    );
+    expect(((await mac.out) as { error: string }).error).toContain("and launchd can't be asked from this shell");
+    // A supervisor of its own is somebody's hand too.
+    const own = run(
+      { look: null },
+      { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "supervisor" } }) },
+    );
+    expect(await own.out).toMatchObject({ next: "sessionpipe control run" });
   });
 
   it("started by hand from this copy restarts itself", async () => {

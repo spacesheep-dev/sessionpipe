@@ -16,6 +16,7 @@ import {
   off,
   type PairOptions,
   pair,
+  placeService,
   removeKey,
   serviceEnv,
   serviceFiles,
@@ -763,13 +764,80 @@ describe("the service that keeps the daemon running", () => {
       if (args.includes("daemon-reload")) throw new Error("Failed to connect to bus");
       return "";
     });
+    // The same unit again has nothing to take back: it is written, and that is said.
     r = installService({ node: "/n", cli: "/c.js", env, exec, platform: "linux" });
     expect(r).toBe(
       `wrote ${unit}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`,
     );
-    expect(installService({ node: "/n", cli: "/c.js", env, exec, platform: "freebsd" })).toContain(
-      "no service manager for this platform yet",
+    // Another one is taken back, and the one that was there is left as it was.
+    r = installService({ node: "/n", cli: "/other.js", env, exec, platform: "linux" });
+    expect(r).toBe(
+      `left ${unit} as it was, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`,
     );
+    expect(readFileSync(unit, "utf8")).toContain('ExecStart="/n" "/c.js" "control" "run"');
+    // Where nothing manages services, nothing is written and no log is made for one.
+    rmSync(path.join(tmp, "state"), { recursive: true, force: true });
+    expect(installService({ node: "/n", cli: "/c.js", env, exec, platform: "freebsd" })).toBe(
+      "no service manager for this platform yet; run `sessionpipe control run` yourself",
+    );
+    on("win32");
+    expect(installService({ node: "/n", cli: "/c.js", env, exec })).toContain("no service manager for this platform");
+    expect(existsSync(path.join(tmp, "state"))).toBe(false);
+    expect(exec.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("update places the service or throws with why: it never answers words that could be passed over", () => {
+    const plist = path.join(home, "Library", "LaunchAgents", "org.sessionpipe.control.plist");
+    const unit = path.join(home, ".config", "systemd", "user", "sessionpipe-control.service");
+    expect(placeService({ node: "/n", cli: "/c.js", env, exec, platform: "darwin" })).toBeUndefined();
+    expect(readFileSync(plist, "utf8")).toContain("<string>/c.js</string>");
+    // Where nothing manages services there is none to place.
+    for (const p of ["win32", "freebsd"] as const)
+      expect(() => placeService({ node: "/n", cli: "/c.js", env, exec, platform: p })).toThrow(
+        "nothing on this computer starts the background service by itself",
+      );
+    on("win32");
+    expect(() => placeService({ node: "/n", cli: "/c.js", env, exec })).toThrow("nothing on this computer starts");
+    on(platform);
+    // A sessionpipe pointed away from this computer's files, with nothing stood in: left alone.
+    expect(() => placeService({ node: "/n", cli: "/c.js", env, platform: "darwin" })).toThrow("is left alone");
+    expect(execFileSync).not.toHaveBeenCalled();
+    // launchd refuses the new one: why, without a launchctl command, and that the old file is back.
+    const refusing = (_c: string, args: string[]): string => {
+      if (args[0] === "bootout") return "";
+      throw Object.assign(new Error("Bootstrap failed: 5: Input/output error"), { status: 5 });
+    };
+    expect(() => placeService({ node: "/n", cli: "/other.js", env, exec: refusing, platform: "darwin" })).toThrow(
+      /^launchd can't be asked from here \(launchctl answered 5\): nobody is logged in at this Mac's screen, or this shell isn't allowed to ask it; the service file that was there before was put back$/,
+    );
+    expect(readFileSync(plist, "utf8")).toContain("<string>/c.js</string>");
+    // With no file there before, there is none to speak of.
+    rmSync(plist);
+    expect(() => placeService({ node: "/n", cli: "/c.js", env, exec: refusing, platform: "darwin" })).toThrow(
+      /isn't allowed to ask it$/,
+    );
+    // systemd can't be reached, or won't start it.
+    const down = (): string => {
+      throw new Error("Failed to connect to bus");
+    };
+    expect(() => placeService({ node: "/n", cli: "/c.js", env, exec: down, platform: "linux" })).toThrow(
+      /^systemd --user didn't start it \(it can't be reached from here, or it refused\)$/,
+    );
+    expect(() => placeService({ node: "/n", cli: "/other.js", env, exec: down, platform: "linux" })).toThrow(
+      /or it refused\); the service file that was there before was put back$/,
+    );
+    expect(readFileSync(unit, "utf8")).toContain('"/c.js"');
+    // What isn't the manager's refusal is said as it is: here the state folder can't be made.
+    writeFileSync(path.join(tmp, "a-file"), "");
+    expect(() =>
+      placeService({
+        node: "/n",
+        cli: "/c.js",
+        env: { ...env, SESSIONPIPE_STATE: path.join(tmp, "a-file", "state") },
+        exec,
+        platform: "darwin",
+      }),
+    ).toThrow(/ENOTDIR|EEXIST|ENOENT/);
   });
 
   it("linger: already on, turned on now, or needs root (and a loginctl that isn't there)", () => {
