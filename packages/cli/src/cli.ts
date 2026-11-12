@@ -1929,8 +1929,10 @@ const SIGN = { ok: "✓", warn: "!", bad: "✗", info: "·", same: "=" } as cons
  *  copy typed, the copy the background service runs and the hooks all on the newest
  *  release, the service running it and hearing from its receivers. `update off|on`
  *  switches the service's own daily update (config.json `update_check`; it reads that
- *  every ten minutes). Exit 0: everything is current. 3: the service finishes by itself
- *  when what it holds is done. 1: what is wrong is said, with the one command to run next. */
+ *  every ten minutes). Exit 0: everything is current (a receiver that hasn't answered the
+ *  service is said in the last line, in yellow, and is still 0). 3: the service finishes
+ *  by itself when what it holds is done. 1: what is wrong is said, with the one command
+ *  to run next. */
 async function update(): Promise<void> {
   const sub = args[1];
   if (sub === "off" || sub === "on") {
@@ -1995,9 +1997,14 @@ async function update(): Promise<void> {
   });
   if (r.state === "failed") throw new Refusal(r.error, r.next);
   say("");
+  // Green only when nothing is left to say: the service finishing by itself, and a
+  // receiver that hasn't answered it, are yellow. The second is still exit 0: this
+  // computer is up to date, and a receiver that is down is not this command's failure.
   const waiting = r.state === "waiting";
-  for (const l of fold(ui, `${plain(mark(ui, waiting ? "warn" : "ok"))} `, r.said))
-    say(tint(ui, waiting ? "yellow" : "green", tint(ui, "bold", l)));
+  const warn = r.state === "current" ? r.warn : undefined;
+  const yellow = waiting || !!warn;
+  for (const l of fold(ui, `${plain(mark(ui, yellow ? "warn" : "ok"))} `, warn ? `${r.said} ${warn}` : r.said))
+    say(tint(ui, yellow ? "yellow" : "green", tint(ui, "bold", l)));
   if (waiting) process.exitCode = 3;
 }
 

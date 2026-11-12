@@ -671,35 +671,85 @@ describe("a last look", () => {
     });
   });
 
-  it("a receiver that isn't answering it, after being given a moment", async () => {
-    const down = (r: Partial<Status["receivers"][number]>) =>
-      st("1.0.0", {
-        receivers: [
-          {
-            url: "https://r.example",
-            machine: "m",
-            keys: 1,
-            polling: true,
-            last_poll: null,
-            last_poll_age_ms: 5,
-            last_error: null,
-            ...r,
-          },
-        ],
-      });
-    const a = run({ latest: "1.0.0", status: [down({ last_error: "fetch failed" })] });
+  const rx = (r: Partial<Status["receivers"][number]>, url = "https://r.example") => ({
+    url,
+    machine: "m",
+    keys: 1,
+    polling: true,
+    last_poll: null,
+    last_poll_age_ms: 5,
+    last_error: null,
+    ...r,
+  });
+  const down = (r: Partial<Status["receivers"][number]>) => st("1.0.0", { receivers: [rx(r)] });
+
+  it('"hears" is said of a receiver that has answered, never of one only being asked', async () => {
+    // Just started: the poll is under way, which is all `polling` says. Its first answer comes later.
+    const asking = down({});
+    const a = run({ latest: "1.0.0", status: [asking, asking, asking, down({ last_poll: 7 })] });
     expect(await a.out).toEqual({
-      state: "failed",
-      error:
-        "everything here runs sessionpipe 1.0.0, but r.example isn't answering the background service (fetch failed)",
-      next: "sessionpipe doctor",
+      state: "current",
+      version: "1.0.0",
+      said: "This computer is up to date: sessionpipe 1.0.0 runs the command, the hooks and the background service, which hears r.example.",
     });
-    expect(a.sim.clock).toBeGreaterThanOrEqual(15_000);
-    const b = run({ latest: "1.0.0", status: [down({ polling: false })] });
-    expect(await b.out).toMatchObject({ error: expect.stringContaining("(it hasn't been asked yet)") });
+    expect(texts(a.sim).at(-1)).toBe("info: waiting for r.example to answer the background service…");
+    expect(a.sim.clock).toBeGreaterThan(0);
+    // One that has answered already is not waited for.
+    const b = run({ latest: "1.0.0" });
+    expect(((await b.out) as { said: string }).said).toContain("which hears r.example.");
+    expect(b.sim.clock).toBe(0);
+  });
+
+  it("a receiver that hasn't answered in the time a long-poll takes is a warning: the computer is up to date", async () => {
+    const a = run({ latest: "1.0.0", status: [down({})] });
+    expect(await a.out).toEqual({
+      state: "current",
+      version: "1.0.0",
+      said: "This computer is up to date: sessionpipe 1.0.0 runs the command, the hooks and the background service.",
+      warn: "r.example hasn't answered the background service yet. `sessionpipe doctor` looks again.",
+    });
+    expect(a.sim.clock).toBeGreaterThanOrEqual(40_000);
+    // One that answers 401, or can't be reached: what the service last heard of it.
+    const gone = "the receiver no longer knows this machine (401); run `sessionpipe control pair` again";
+    const b = run({ latest: "1.0.0", status: [down({ polling: false, last_error: gone })] });
+    expect(await b.out).toMatchObject({
+      state: "current",
+      warn: `r.example hasn't answered the background service: ${gone}. \`sessionpipe doctor\` looks again.`,
+    });
+    // It answered once and fails now: not heard either.
+    const c = run({ latest: "1.0.0", status: [down({ last_poll: 7, last_error: "fetch failed" })] });
+    expect(await c.out).toMatchObject({ warn: expect.stringContaining("r.example hasn't answered") });
+    const d = run({ latest: "1.0.0", status: [down({ last_poll: 7, polling: false })] });
+    expect(await d.out).toMatchObject({ warn: expect.stringContaining("r.example hasn't answered") });
     // One that comes round within the moment is fine.
-    const c = run({ latest: "1.0.0", status: [st("1.0.0"), down({ polling: false }), down({})] });
-    expect((await c.out).state).toBe("current");
+    const e = run({ latest: "1.0.0", status: [down({ last_error: "fetch failed" }), down({ last_poll: 9 })] });
+    expect(await e.out).not.toHaveProperty("warn");
+  });
+
+  it("of two receivers, the one that answers is heard and the other is named", async () => {
+    const two = st("1.0.0", {
+      receivers: [
+        rx({ last_poll: 3 }, "https://a.example"),
+        rx({ last_error: "HTTP 503" }, "https://b.example"),
+        rx({}, "https://c.example"),
+      ],
+    });
+    const { sim, out } = run({ latest: "1.0.0", status: [two] });
+    expect(await out).toEqual({
+      state: "current",
+      version: "1.0.0",
+      said: "This computer is up to date: sessionpipe 1.0.0 runs the command, the hooks and the background service, which hears a.example.",
+      warn: "b.example hasn't answered the background service: HTTP 503. c.example hasn't answered the background service yet. `sessionpipe doctor` looks again.",
+    });
+    expect(texts(sim).at(-1)).toBe("info: waiting for b.example and c.example to answer the background service…");
+  });
+
+  it("a service that stops answering while its receivers are waited for", async () => {
+    const { out } = run({ latest: "1.0.0", status: [down({}), down({}), down({}), null] });
+    expect(await out).toMatchObject({
+      state: "failed",
+      error: "the background service was running sessionpipe 1.0.0 and has stopped answering",
+    });
   });
 
   it("two receivers, and none", async () => {

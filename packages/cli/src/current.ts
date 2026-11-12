@@ -16,7 +16,11 @@
 //      has it: `pair --no-service`, tmux, a container), it is asked to restart itself
 //      over its socket. A service nobody asked for is never installed: with no service
 //      file and nothing running, the next step is `sessionpipe control run`.
-//   4. A look: it answers with the new version and is asking its receivers.
+//   4. A look: it answers with the new version, and has heard from its receivers since
+//      it started (a first answer to a long-poll can take half a minute). A receiver
+//      that hasn't answered by then is named in the last line as a warning: the computer
+//      is up to date all the same, and a receiver that is down is not this command's to
+//      fail on.
 //
 // A restart never cuts short what the service itself holds (a turn it runs, a message in
 // hand, a prompt held for an answer): it is given a moment, and past that the service
@@ -42,8 +46,9 @@ export interface Step {
 }
 
 export type Outcome =
-  /** Everything runs `version`. */
-  | { state: "current"; version: string; said: string }
+  /** Everything runs `version`. `warn`: what is not as it should be all the same, and is
+   *  not this command's to put right (a receiver that hasn't answered the service). */
+  | { state: "current"; version: string; said: string; warn?: string }
   /** The rest happens by itself; nothing to type. */
   | { state: "waiting"; version: string; said: string }
   /** What is wrong, and the one command to run next. */
@@ -103,6 +108,13 @@ export interface CurrentDeps {
 }
 
 const LOOK_MS = 500;
+
+type Receiver = Status["receivers"][number];
+/** The service has had an answer from this receiver since it started, and nothing is
+ *  wrong now. A poll that is only under way has heard nothing yet: `polling` is true
+ *  from the moment the loop starts. */
+const hears = (r: Receiver): boolean => r.polling && r.last_poll !== null && !r.last_error;
+const hosts = (rs: Receiver[]): string => rs.map((r) => hostOf(r.url)).join(" and ");
 
 /** What a restart would cut short, in the service's own words; null when nothing. A
  *  service older than 0.15 also called a session in someone's own window "in hand":
@@ -326,24 +338,19 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       d.say({ mark: "ok", text: `the background service restarted onto sessionpipe ${target}` });
     } else d.say({ mark: "ok", text: `the background service runs sessionpipe ${target}` });
 
-    // --- 4. a look: it is asking its receivers, and nothing is wrong ------------------------
-    heard = await until(
-      d,
-      d.heardMs ?? 15_000,
-      d.status,
-      (s) => !s || s.receivers.every((r) => r.polling && !r.last_error),
-    );
+    // --- 4. a look: it has heard from its receivers ----------------------------------------
+    heard = await d.status();
+    if (heard && !heard.receivers.every(hears)) {
+      d.say({
+        mark: "info",
+        text: `waiting for ${hosts(heard.receivers.filter((r) => !hears(r)))} to answer the background service…`,
+      });
+      heard = await until(d, d.heardMs ?? 40_000, d.status, (s) => !s || s.receivers.every(hears));
+    }
     if (!heard)
       return {
         state: "failed",
         error: `the background service was running sessionpipe ${target} and has stopped answering`,
-        next: "sessionpipe doctor",
-      };
-    const deaf = heard.receivers.find((r) => !r.polling || r.last_error);
-    if (deaf)
-      return {
-        state: "failed",
-        error: `everything here runs sessionpipe ${target}, but ${hostOf(deaf.url)} isn't answering the background service (${deaf.last_error ?? "it hasn't been asked yet"})`,
         next: "sessionpipe doctor",
       };
   }
@@ -354,9 +361,17 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     ...(d.harnesses.length ? ["the hooks"] : []),
     ...(heard ? ["the background service"] : []),
   ];
+  const hearing = heard?.receivers.filter(hears) ?? [];
+  const deaf = heard?.receivers.filter((r) => !hears(r)) ?? [];
   const what =
     (parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : "the command") +
-    (heard?.receivers.length ? `, which hears ${heard.receivers.map((r) => hostOf(r.url)).join(" and ")}` : "");
+    (hearing.length ? `, which hears ${hosts(hearing)}` : "");
+  // A receiver that hasn't answered: said, with what the service last heard of it.
+  const warn = deaf
+    .map(
+      (r) => `${hostOf(r.url)} hasn't answered the background service${r.last_error ? `: ${r.last_error}.` : " yet."}`,
+    )
+    .join(" ");
   if (hooksError)
     return {
       state: "failed",
@@ -375,5 +390,6 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     said: d.unasked
       ? `Everything on this computer runs sessionpipe ${target}: ${what}. npm was not asked for a newer release.`
       : `This computer is up to date: sessionpipe ${target} runs ${what}.`,
+    ...(warn ? { warn: `${warn} \`sessionpipe doctor\` looks again.` } : {}),
   };
 }

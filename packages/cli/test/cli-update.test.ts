@@ -208,6 +208,28 @@ describe.skipIf(process.platform === "win32")("sessionpipe update", () => {
     expect(r.exit).not.toHaveBeenCalled();
   });
 
+  it("up to date, and a receiver hasn't answered the service: one yellow line that says both; exit 0", async () => {
+    const outcome = {
+      state: "current" as const,
+      version: "9.9.9",
+      said: "This computer is up to date: sessionpipe 9.9.9 runs the command and the background service.",
+      warn: "r.example hasn't answered the background service yet. `sessionpipe doctor` looks again.",
+    };
+    const r = await update(outcome);
+    expect(r.lines).toEqual(["", `! ${outcome.said} ${outcome.warn}`]);
+    expect(process.exitCode).toBeUndefined();
+    expect(r.exit).not.toHaveBeenCalled();
+    const ESC = String.fromCharCode(27);
+    const term = await update(outcome, { tty: true, columns: 60 });
+    // Every line of it yellow, under the warning's mark; nothing of it green.
+    expect(term.lines[1]).toBe(
+      `${ESC}[33m${ESC}[1m! This computer is up to date: sessionpipe 9.9.9 runs the${ESC}[22m${ESC}[39m`,
+    );
+    for (const l of term.lines.slice(1)) expect(l.startsWith(`${ESC}[33m${ESC}[1m`)).toBe(true);
+    expect(term.lines.at(-1)).toContain("looks again.");
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("it couldn't: one line that says what is wrong, one with the command to run next; exit 1", async () => {
     const r = await update({
       state: "failed",
