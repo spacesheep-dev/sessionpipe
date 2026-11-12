@@ -85,13 +85,23 @@ export const HELD: Record<Holder, (what: string) => string> = {
  *  message for it after a restart goes the way it does for any session a process holds. */
 export const HOOKS_WORD_MS = 10 * 60_000;
 
-/** Is a run's end, or a copy's stray run (daemon.ts `strays`), still recent enough to
- *  decide where a message goes? Each is weighed against a transcript's last write, and
- *  a write counts for 90 seconds (core's `recentWrite`, asked here as it is there): past
- *  that a stray holds nothing, and an end accounts for no write that still counts (but
- *  one made in the two seconds of slack after it, for those two seconds). It is what the
- *  daemon carries of them across its own restart. */
+/** Is a copy's stray run (daemon.ts `strays`) still recent enough to decide where a
+ *  message goes? It holds the session it may have run in for as long as a write to a
+ *  transcript counts, 90 seconds (core's `recentWrite`, asked here as it is there). It
+ *  is what the daemon carries of a stray across its own restart. */
 export const stillRecent = (at: number, now: number): boolean => claudeControl.recentWrite(at, undefined, now);
+
+/** How much longer than a write counts a run's end can still account for one: the last
+ *  rows of a transcript land a moment after its hooks' word, and `recentWrite` gives an
+ *  end two seconds for them. Ten here, on purpose more: an end kept after it can account
+ *  for anything decides nothing, and one dropped while it still could (at a restart)
+ *  sends the reply to a copy. */
+const END_SLACK_MS = 10_000;
+
+/** The same question for a run's end (daemon.ts `lastEnd`, a session's own `ended`):
+ *  can a transcript's write that still counts be one this end accounts for? It is what
+ *  the daemon carries of an end across its own restart. */
+export const endStillCounts = (at: number, now: number): boolean => stillRecent(at + END_SLACK_MS, now);
 
 /** What holds a Claude Code session, from what the machine can see of it (§6, What counts
  *  as held; conformance/control-held.json): the live rows of the harness's own session
