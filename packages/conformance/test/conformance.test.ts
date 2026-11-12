@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { runAdapterFixtures } from "../src/index.js";
+import { printable, runAdapterFixtures } from "../src/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../../..");
@@ -39,7 +39,11 @@ describe("runAdapterFixtures", () => {
     delete plain.input.env;
     delete plain.input.cwd;
     const wild = recorded();
-    wild.expect[0]!.data = { tool: "*", input: { command: "*" }, output: "*" };
+    Object.assign(wild.expect[0]!.data as object, {
+      tool: "*",
+      input: { command: "*", description: "*" },
+      output: "*",
+    });
     const files = [fixture(recorded()), fixture(plain), fixture(wild)];
     const r = await runAdapterFixtures(files);
     expect(r.results).toEqual(files.map((file) => ({ file, ok: true })));
@@ -117,6 +121,78 @@ describe("runAdapterFixtures", () => {
   });
 });
 
+describe("what a fixture may hold", () => {
+  it("a field in an event's data that the fixture does not name is a miss; a session's extra facts are not", async () => {
+    const less = recorded();
+    const data = less.expect[0]!.data as Record<string, unknown>;
+    delete data.output;
+    expect((await why(less)).why).toBe("[0].data.output: not in the fixture");
+    const nested = recorded();
+    (nested.expect[0]!.data as { input: unknown }).input = {};
+    expect((await why(nested)).why).toBe("[0].data.input.command: not in the fixture");
+    const session = recorded();
+    session.expect[0]!.session = { id: session.expect[0]!.session.id };
+    expect((await why(session)).ok).toBe(true);
+  });
+  it("a fixture whose fields are the wrong kind is a failure that says which, not a throw", async () => {
+    const input = "malformed fixture: input needs argv (strings) and stdin (a string)";
+    type Loose = { input: unknown; expect: unknown[] };
+    type LooseInput = { input: Record<string, unknown> };
+    const bend = async (change: (fx: Loose & LooseInput) => void) => {
+      const fx = recorded() as unknown as Loose & LooseInput;
+      change(fx);
+      return (await why(fx)).why;
+    };
+    expect(await why([])).toMatchObject({
+      ok: false,
+      why: "not an adapter fixture: it needs harness, input and expect",
+    });
+    expect(await bend((fx) => Object.assign(fx, { input: "argv" }))).toBe(input);
+    expect(await bend((fx) => (fx.input.argv = "claude"))).toBe(input);
+    expect(await bend((fx) => (fx.input.argv = [1]))).toBe(input);
+    expect(await bend((fx) => (fx.input.stdin = { hook: 1 }))).toBe(input);
+    expect(await bend((fx) => (fx.input.env = ["A=1"]))).toBe("malformed fixture: input.env is a map of strings");
+    expect(await bend((fx) => (fx.input.env = { A: 1 }))).toBe("malformed fixture: input.env is a map of strings");
+    expect(await bend((fx) => (fx.input.cwd = 7))).toBe("malformed fixture: input.cwd is a string");
+    expect(await bend((fx) => (fx.expect = [null]))).toBe(
+      "malformed fixture: expect[0] needs type, harness.event, session and data",
+    );
+    expect(await bend((fx) => fx.expect.push({ type: "tool.ended", harness: "PostToolUse" }))).toBe(
+      "malformed fixture: expect[1] needs type, harness.event, session and data",
+    );
+    // An expected event with no session names no session fact: the rest is still compared.
+    expect(await bend((fx) => delete (fx.expect[0] as { session?: unknown }).session)).toBeUndefined();
+  });
+  it("control characters in a fixture's name or its words are shown, never sent to the terminal", async () => {
+    expect(printable("plain — ünïcode ✓")).toBe("plain — ünïcode ✓");
+    expect(printable("a\x1b[2Jb\r\nc\x9bd\x7f")).toBe("a\\x1b[2Jb\\x0d\\x0ac\\x9bd\\x7f");
+    const named = path.join(tmp, "gone\x1b[31m.json");
+    const harness = recorded();
+    harness.harness = "nope\x1b]0;title\x07";
+    const r = await runAdapterFixtures([named, fixture(harness)]);
+    expect(r.results[0]).toEqual({ file: named, ok: false, why: "not readable: ENOENT" });
+    expect(r.table).not.toMatch(/\p{Cc}(?<!\n)/u);
+    expect(r.table.split("\n")).toEqual([
+      `FAIL ${path.join(tmp, "gone\\x1b[31m.json")} — not readable: ENOENT`,
+      `FAIL ${r.results[1]!.file} — no adapter nope\\x1b]0;title\\x07`,
+    ]);
+    const out: string[] = [];
+    const stdout = { write: (s: string) => out.push(s) };
+    expect(await main([path.join(tmp, "no\x1bdir")], { stdout })).toBe(2);
+    expect(out.join("")).toContain("no\\x1bdir");
+    expect(out.join("")).not.toContain("\x1b");
+    if (process.platform !== "win32") {
+      const empty = path.join(tmp, "empty\x1b[1m");
+      mkdirSync(empty, { recursive: true });
+      out.length = 0;
+      expect(await main([empty], { stdout })).toBe(2);
+      expect(out.join("")).toBe(
+        `sessionpipe-conformance: no .json fixtures under ${path.join(tmp, "empty\\x1b[1m")}\n`,
+      );
+    }
+  });
+});
+
 describe("the command", () => {
   const io = () => {
     const out: string[] = [];
@@ -171,8 +247,21 @@ describe("the command", () => {
       const broken = io();
       expect(await main([linked], broken)).toBe(2);
       expect(broken.out.join("")).toBe(
-        `sessionpipe-conformance: ENOENT: no such file or directory, stat '${dangling}'\n`,
+        `sessionpipe-conformance: ${dangling} is a symbolic link; fixtures are plain files in plain folders\n`,
       );
+      // A link to a real fixture elsewhere, or to a folder of them, is refused the same way: the
+      // folder named is the one that is read.
+      for (const target of [good, path.dirname(good)]) {
+        const dir = path.join(tmp, `linked-${++n}`, "nested");
+        mkdirSync(dir, { recursive: true });
+        const link = path.join(dir, "elsewhere.json");
+        symlinkSync(target, link);
+        const refused = io();
+        expect(await main([path.dirname(dir)], refused)).toBe(2);
+        expect(refused.out.join("")).toBe(
+          `sessionpipe-conformance: ${link} is a symbolic link; fixtures are plain files in plain folders\n`,
+        );
+      }
     }
     const empty = path.join(tmp, "empty");
     mkdirSync(empty, { recursive: true });
