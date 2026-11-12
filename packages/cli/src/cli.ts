@@ -725,7 +725,7 @@ async function sink(): Promise<void> {
   if (sub === "list") {
     if (!cfg.sinks.length) out("  no sinks");
     const rest = (s: SinkConfig): string =>
-      `tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${s.paused}` : ""}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`;
+      `tier ${s.tier}${s.max_tier !== undefined && s.max_tier < s.tier ? ` (capped ${s.max_tier})` : ""}${s.pii ? " pii" : ""}${s.control ? " control" : ""}${s.paused ? ` PAUSED ${clean(s.paused)}` : ""}${toolsNote(s.tier, s.max_tier, toolsMode(s))}`;
     // A pipe keeps the line it always had. A terminal gets columns as wide as they need,
     // the last one folded under itself: the old line is over 80 columns before it says much.
     if (ui.width === Number.POSITIVE_INFINITY)
@@ -767,7 +767,7 @@ async function sink(): Promise<void> {
     out(
       r.ok
         ? `  ✓ ${s.name}: ${r.status ?? "ok"} accepted ${r.accepted ?? 2} (a heartbeat and its forget)`
-        : `  ✗ ${s.name}: ${r.status ?? ""} ${r.error ?? ""} (${r.action})`,
+        : `  ✗ ${s.name}: ${r.status ?? ""} ${clean(r.error ?? "")} (${r.action})`,
     );
     return;
   }
@@ -986,7 +986,11 @@ async function forget(): Promise<void> {
     const sinks = buildSinks(cfg.sinks);
     for (const s of sinks) {
       const r = await s.send([filterEvent(e, s.tier, s.pii) as Event]);
-      out(r.ok ? `  ✓ ${s.name}: asked to delete ${harness}:${session}` : `  ✗ ${s.name}: ${r.error ?? r.status}`);
+      out(
+        r.ok
+          ? `  ✓ ${s.name}: asked to delete ${harness}:${session}`
+          : `  ✗ ${s.name}: ${clean(String(r.error ?? r.status))}`,
+      );
     }
     outbox.delete(ref);
     out("  local outbox for the session removed, and every sink's cursor into it");

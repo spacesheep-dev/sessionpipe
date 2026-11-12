@@ -317,7 +317,7 @@ export async function controlMain(
         out(`  ${r.url} · machine ${r.machine}`);
         for (const k of r.keys)
           out(
-            `    ${k.id.slice(0, 16)}…  ${k.type === "device" ? "device " : "passkey"}  ${k.alg === -7 ? "ES256" : "RS256"}  added ${k.added_at.slice(0, 10)}${k.name ? `  ${k.name}` : ""}`,
+            `    ${k.id.slice(0, 16)}…  ${k.type === "device" ? "device " : "passkey"}  ${k.alg === -7 ? "ES256" : "RS256"}  added ${k.added_at.slice(0, 10)}${k.name ? `  ${clean(k.name)}` : ""}`,
           );
       }
       return;
