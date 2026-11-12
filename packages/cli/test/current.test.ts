@@ -83,6 +83,7 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     cli: `${MINE}/cli.js`,
     prefix: "/p/typed",
     unwritable: null,
+    platform: "darwin",
     unasked: null,
     latest: async () => {
       if (s.latest instanceof Error) throw s.latest;
@@ -190,6 +191,32 @@ describe("the newest release, and this copy on it", () => {
       state: "failed",
       next: "sudo npm install -g --prefix /p/typed sessionpipe@1.1.0 && sessionpipe update",
     });
+    // A prefix with a space or a quote in it is one word of that line still.
+    const spaced = run(
+      {},
+      { prefix: "/Users/it's me/my node", unwritable: "/Users/it's me/my node/lib/node_modules isn't writable" },
+    );
+    expect(((await spaced.out) as { next: string }).next).toBe(
+      "sudo npm install -g --prefix '/Users/it'\\''s me/my node' sessionpipe@1.1.0 && sessionpipe update",
+    );
+  });
+
+  it("on Windows there is no sudo: the same command, from a terminal that may write there", async () => {
+    const { sim, out } = run(
+      {},
+      {
+        platform: "win32",
+        prefix: "C:\\Program Files\\nodejs",
+        unwritable: "C:\\Program Files\\nodejs\\node_modules isn't writable by this user (installed as administrator?)",
+      },
+    );
+    expect(await out).toEqual({
+      state: "failed",
+      error:
+        "sessionpipe 1.1.0 is out and this copy is 1.0.0, but C:\\Program Files\\nodejs\\node_modules isn't writable by this user (installed as administrator?). Open a terminal as administrator and run this there",
+      next: "sessionpipe update",
+    });
+    expect(sim.installs).toEqual([]);
   });
 
   it("npm failing leaves everything as it was", async () => {
@@ -252,6 +279,11 @@ describe("with npm out of reach", () => {
     });
     const b = run({ latest: "1.0.0", hooks: "1.3.0" }, { prefix: null });
     expect(((await b.out) as { next: string }).next).toBe("sessionpipe update");
+    // The prefix is one word of the command, quoted the way that system's shells read it.
+    const c = run({ latest: "1.0.0", hooks: "1.3.0" }, { prefix: "C:\\Program Files\\nodejs", platform: "win32" });
+    expect(((await c.out) as { next: string }).next).toBe(
+      'npm install -g --prefix "C:\\Program Files\\nodejs" sessionpipe@1.3.0',
+    );
   });
 });
 

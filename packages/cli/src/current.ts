@@ -36,6 +36,7 @@ import { isNewer } from "@sessionpipe/core/version";
 import type { Status } from "./control/daemon.js";
 import type { Health } from "./control/local.js";
 import { hostOf } from "./control/view.js";
+import { shq } from "./shell.js";
 import type { Mark } from "./style.js";
 import type { InstallResult } from "./update.js";
 
@@ -65,6 +66,9 @@ export interface CurrentDeps {
   prefix: string | null;
   /** Why npm can't write that prefix, or null. */
   unwritable: string | null;
+  /** The system this runs on: how a path is quoted in a command it prints, and whether
+   *  there is a `sudo` to name. */
+  platform: NodeJS.Platform;
   latest: () => Promise<string>;
   /** Why npm is not to be asked at all (SESSIONPIPE_NO_UPDATE_CHECK), or null. What is
    *  here is then made one version, and nothing newer is looked for. */
@@ -159,11 +163,18 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
         next: "npx sessionpipe@latest update",
       };
     if (d.unwritable)
-      return {
-        state: "failed",
-        error: `sessionpipe ${target} is out and this copy is ${d.version}, but ${d.unwritable}`,
-        next: `sudo npm install -g --prefix ${d.prefix} sessionpipe@${target} && sessionpipe update`,
-      };
+      // Windows has no sudo: the same command does it all from a terminal that may write there.
+      return d.platform === "win32"
+        ? {
+            state: "failed",
+            error: `sessionpipe ${target} is out and this copy is ${d.version}, but ${d.unwritable}. Open a terminal as administrator and run this there`,
+            next: "sessionpipe update",
+          }
+        : {
+            state: "failed",
+            error: `sessionpipe ${target} is out and this copy is ${d.version}, but ${d.unwritable}`,
+            next: `sudo npm install -g --prefix ${shq(d.prefix, d.platform)} sessionpipe@${target} && sessionpipe update`,
+          };
   }
 
   // The service's own copy, when that is another install than this one.
@@ -183,7 +194,10 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
       error: unasked
         ? `this copy is sessionpipe ${d.version}, older than what already runs on this computer (${ahead}), and npm couldn't be asked for the newest release: ${unasked}. Nothing was changed`
         : `sessionpipe ${ahead} already runs on this computer, newer than npm's latest (${target}); nothing was changed`,
-      next: unasked || !d.prefix ? "sessionpipe update" : `npm install -g --prefix ${d.prefix} sessionpipe@${ahead}`,
+      next:
+        unasked || !d.prefix
+          ? "sessionpipe update"
+          : `npm install -g --prefix ${shq(d.prefix, d.platform)} sessionpipe@${ahead}`,
     };
 
   let hooksError: string | null = null;

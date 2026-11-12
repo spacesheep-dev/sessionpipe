@@ -1967,6 +1967,7 @@ async function update(): Promise<void> {
     cli,
     prefix,
     unwritable: prefix ? unwritable(prefix) : null,
+    platform: process.platform,
     unasked: process.env.SESSIONPIPE_NO_UPDATE_CHECK ? "SESSIONPIPE_NO_UPDATE_CHECK is set" : null,
     latest: async () => {
       try {

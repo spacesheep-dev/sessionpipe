@@ -15,6 +15,7 @@ import {
   rearmHooks,
   registryLatest,
   samePath,
+  unwritable,
   versionAt,
 } from "../src/update.js";
 
@@ -78,6 +79,20 @@ describe("the version of a copy on disk", () => {
     expect(versionAt(d)).toBeNull();
     writeFileSync(path.join(d, "..", "package.json"), "null");
     expect(versionAt(d)).toBeNull();
+  });
+});
+
+describe("a prefix npm can't write", () => {
+  it("is said with how it came to be so on that system: sudo, or an administrator on Windows", () => {
+    const nowhere = path.join(tmp, "nowhere");
+    expect(unwritable(nowhere, "linux")).toBe(
+      `${path.join(nowhere, "lib", "node_modules")} isn't writable by this user (installed with sudo?)`,
+    );
+    expect(unwritable(nowhere, "win32")).toBe(
+      `${path.join(nowhere, "node_modules")} isn't writable by this user (installed as administrator?)`,
+    );
+    mkdirSync(path.join(tmp, "mine", "lib", "node_modules"), { recursive: true });
+    expect(unwritable(path.join(tmp, "mine"), "linux")).toBeNull();
   });
 });
 
