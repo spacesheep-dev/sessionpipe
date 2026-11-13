@@ -482,6 +482,7 @@ describe("a look at the service", () => {
       installed: false,
       loaded: false,
       argv: null,
+      pid: null,
     });
     // A look, in both domains: nothing but `print`.
     expect(neither.asked).toEqual([
@@ -497,6 +498,7 @@ describe("a look at the service", () => {
       installed: true,
       loaded: true,
       argv: null,
+      pid: null,
     });
     // Found at the screen: the other domain is not asked.
     expect(gui.asked).toEqual(["launchctl print gui/501/org.sessionpipe.gui"]);
@@ -517,8 +519,13 @@ describe("a look at the service", () => {
       installed: false,
       loaded: true,
       argv: null,
+      pid: null,
     });
-    expect(active.asked).toEqual(["systemctl --user is-active sessionpipe-gui.service"]);
+    // Active: it is asked which process that is, and nothing else.
+    expect(active.asked).toEqual([
+      "systemctl --user is-active sessionpipe-gui.service",
+      "systemctl --user show sessionpipe-gui.service --property=MainPID --value",
+    ]);
     mkdirSync(path.dirname(unit), { recursive: true });
     writeFileSync(unit, "");
     // Not active: systemd is asked for its own version, which only one that answers says.
@@ -529,6 +536,7 @@ describe("a look at the service", () => {
       installed: true,
       loaded: false,
       argv: null,
+      pid: null,
     });
     expect(idle.asked).toEqual([
       "systemctl --user is-active sessionpipe-gui.service",
@@ -548,6 +556,7 @@ describe("a look at the service", () => {
       installed: true,
       loaded: false,
       argv: SPEC.argv,
+      pid: null,
     });
     // launchctl that isn't there, as execFileSync says it: an error with a code, no exit status.
     const none = (): string => {
@@ -559,6 +568,7 @@ describe("a look at the service", () => {
       installed: false,
       loaded: false,
       argv: null,
+      pid: null,
     });
     // One that ran and said no (an exit status) is launchd answering; so is anything else thrown.
     for (const said of [Object.assign(new Error("Bad request."), { status: 113 }), null, "no"])
@@ -577,7 +587,7 @@ describe("a look at the service", () => {
 
   it("another platform has no manager, and nothing is asked", () => {
     const none = manager();
-    const nothing = { manager: null, file: null, installed: false, loaded: false, argv: null };
+    const nothing = { manager: null, file: null, installed: false, loaded: false, argv: null, pid: null };
     expect(serviceState({ ...NAMES, home, platform: "win32", exec: none.exec })).toEqual(nothing);
     expect(none.asked).toEqual([]);
     // With no stand-in either: there is still nothing to run.
@@ -601,6 +611,77 @@ describe("a look at the service", () => {
       if (getuid) Object.defineProperty(process, "getuid", getuid);
       else delete (process as { getuid?: unknown }).getuid;
     }
+  });
+
+  it("darwin: the process launchd runs for it, read from what `print` says; none for one that isn't running", () => {
+    const o = { ...NAMES, home, platform: "darwin" as const, uid: "501" };
+    /** launchd's own page for a service, as far as it matters here. */
+    const page = (lines: string[]) =>
+      ["gui/501/org.sessionpipe.gui = {", "\tactive count = 1", ...lines, "\tprogram = /usr/local/bin/node", "}"].join(
+        "\n",
+      );
+    const says =
+      (target: string, text: string) =>
+      (_cmd: string, args: string[]): string => {
+        if (args.at(-1) !== target) throw new Error("Could not find service");
+        return text;
+      };
+    // Running: `pid = <n>` on a line of its own, among the others.
+    const running = serviceState({
+      ...o,
+      exec: says("gui/501/org.sessionpipe.gui", page(["\tstate = running", "\tpid = 4242"])),
+    });
+    expect(running).toMatchObject({ manager: "launchd", loaded: true, pid: 4242 });
+    // Loaded and not running (it exited, launchd waits to start it again): no such line.
+    // `last exit pid`-like lines that only end the same way are not it.
+    const waiting = serviceState({
+      ...o,
+      exec: says("gui/501/org.sessionpipe.gui", page(["\tstate = not running", "\tlast pid = 4242 (exited)"])),
+    });
+    expect(waiting).toMatchObject({ loaded: true, pid: null });
+    // In the user domain (a Mac nobody is at the screen of): the same line, from that page.
+    const user = serviceState({ ...o, exec: says("user/501/org.sessionpipe.gui", page(["\tpid = 7"])) });
+    expect(user).toMatchObject({ loaded: true, pid: 7 });
+    // Not loaded at all: nothing was printed, so there is no process to name.
+    expect(serviceState({ ...o, exec: manager().exec })).toMatchObject({ loaded: false, pid: null });
+    // A number no process has is not one.
+    expect(serviceState({ ...o, exec: says("gui/501/org.sessionpipe.gui", page(["\tpid = 0"])) }).pid).toBeNull();
+  });
+
+  it("linux: systemd's MainPID for an active unit; 0, no answer, and a unit that isn't active are none", () => {
+    const o = { ...NAMES, home, platform: "linux" as const };
+    /** systemd with the unit active, answering `show … MainPID` as told. */
+    const systemd = (main: string | Error) => {
+      const asked: string[] = [];
+      const exec = (cmd: string, args: string[]): string => {
+        asked.push([cmd, ...args].join(" "));
+        if (args[1] === "is-active") return "active\n";
+        if (main instanceof Error) throw main;
+        return main;
+      };
+      return { asked, exec };
+    };
+    const running = systemd("31337\n");
+    expect(serviceState({ ...o, exec: running.exec })).toMatchObject({ manager: "systemd", loaded: true, pid: 31337 });
+    expect(running.asked).toEqual([
+      "systemctl --user is-active sessionpipe-gui.service",
+      "systemctl --user show sessionpipe-gui.service --property=MainPID --value",
+    ]);
+    // Between two starts systemd says 0: no process.
+    expect(serviceState({ ...o, exec: systemd("0\n").exec })).toMatchObject({ loaded: true, pid: null });
+    // Nothing printed, or something that is no number.
+    expect(serviceState({ ...o, exec: systemd("").exec }).pid).toBeNull();
+    expect(serviceState({ ...o, exec: systemd("n/a\n").exec }).pid).toBeNull();
+    // The question itself failing leaves the rest of the answer as it was.
+    expect(serviceState({ ...o, exec: systemd(new Error("Failed to connect to bus")).exec })).toMatchObject({
+      manager: "systemd",
+      loaded: true,
+      pid: null,
+    });
+    // A unit that isn't active runs nothing: it is not asked which process.
+    const idle = manager("--property=Version");
+    expect(serviceState({ ...o, exec: idle.exec })).toMatchObject({ manager: "systemd", loaded: false, pid: null });
+    expect(idle.asked.some((a) => a.includes("MainPID"))).toBe(false);
   });
 });
 
