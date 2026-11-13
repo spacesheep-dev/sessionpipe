@@ -15,8 +15,12 @@ import { holding, type Outcome, type Step as Said } from "../current.js";
 import type { Plan, Step } from "./plan.js";
 
 export type Done =
-  /** One copy, in use everywhere. `warn`: what is left to say all the same. */
+  /** One copy, in use everywhere. `said`: what works; `warn`: what is left to say all
+   *  the same, a sentence each. */
   | { state: "one"; said: string; warn: string[] }
+  /** The fresh copy is in use, and a copy this command would have removed is still
+   *  there: what works, what is left, and the one command for it. */
+  | { state: "left"; said: string; warn: string[]; still: string; next: string }
   /** The background service finishes by itself, or is still at work. */
   | { state: "waiting"; said: string }
   | { state: "failed"; error: string; next: string };
@@ -130,8 +134,6 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
   const removed: string[] = [];
   const stayed: { what: string; why: string }[] = [];
   const warn: string[] = [];
-  /** What a shell finds first, where the proof found that it is not the fresh copy. */
-  let typed: string | null = null;
   /** The service is still at work: what `update` said of it, and the copy it runs from. */
   let waiting: { said: string; from: string | null } | null = null;
   for (const s of p.steps) {
@@ -139,10 +141,10 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       const why = await d.fetch(s.version);
       if (why)
         return failed(
-          `sessionpipe ${s.version} couldn't be fetched from npm (${why}). Nothing was changed`,
+          `sessionpipe ${s.version} couldn't be downloaded from npm (${why}). Nothing was changed`,
           "sessionpipe reinstall",
         );
-      d.say({ mark: "ok", text: `sessionpipe ${s.version} fetched from npm` });
+      d.say({ mark: "ok", text: `sessionpipe ${s.version} downloaded` });
     } else if (s.do === "install") {
       const why = await fresh(s, d);
       if (why)
@@ -195,8 +197,10 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       // The copy a service still at work runs from stays until it is done.
       if (waiting?.from && path.resolve(waiting.from) === path.resolve(s.path)) continue;
       try {
-        removed.push(...(await d.remove(s.path)));
-        d.say({ mark: "ok", text: `removed ${s.what} (${d.tilde(s.path)})` });
+        const gone = await d.remove(s.path);
+        removed.push(...gone);
+        // The plan's own words for it; a copy's link went with it where it had one.
+        d.say({ mark: "ok", text: `removed ${s.say}${gone.length > 1 ? ", with its link" : ""}` });
       } catch (e) {
         stayed.push({ what: d.tilde(s.path), why: (e as Error).message });
         d.say({ mark: "warn", text: `${d.tilde(s.path)} could not be removed: ${(e as Error).message}` });
@@ -210,16 +214,19 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
         );
       d.say({ mark: "ok", text: `the fresh copy runs: \`--version\` says ${target}` });
       // What a person types is what a shell finds first: said only when that is this copy.
-      if (proof.first && proof.onPath.length === 1)
-        d.say({ mark: "ok", text: `a shell finds one sessionpipe: ${d.tilde(proof.onPath[0] as string)}` });
-      else if (proof.first)
-        warn.push(`A shell finds ${proof.onPath.length}, this copy first: ${proof.onPath.map(d.tilde).join(", ")}.`);
-      else if (proof.onPath.length) {
-        typed = proof.onPath[0] as string;
-        // The plan's own note says it already where this is the file it saw coming.
-        if (!p.first || path.resolve(p.first) !== path.resolve(typed))
-          warn.push(`What you type is still ${d.tilde(typed)}, not the fresh copy.`);
-      }
+      // What is behind it on PATH is what was left alone, and starts nothing typed.
+      if (proof.first)
+        d.say(
+          proof.onPath.length === 1
+            ? { mark: "ok", text: `a shell finds one sessionpipe: ${d.tilde(proof.onPath[0] as string)}` }
+            : {
+                mark: "info",
+                text: `a shell finds this copy first; behind it: ${proof.onPath.slice(1).map(d.tilde).join(", ")}`,
+              },
+        );
+      // The plan's own note says it already where this is the file it saw coming.
+      else if (proof.onPath.length && (!p.first || path.resolve(p.first) !== path.resolve(proof.onPath[0] as string)))
+        warn.push(`Typing \`sessionpipe\` still starts ${d.tilde(proof.onPath[0] as string)}, not the fresh copy.`);
       for (const n of proof.named) warn.push(`${d.tilde(n.file)} still names ${d.tilde(n.path)}, which was removed.`);
       if (!proof.named.length && removed.length)
         d.say({ mark: "ok", text: "nothing here names a removed copy any more" });
@@ -236,32 +243,29 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
         : waiting.said,
     };
   }
-  // A published copy that is still there means the job is not done: say the one line.
-  const ours = [
-    ...p.left.filter((l) => l.ours).map((l) => ({ what: l.where, why: l.why, line: l.line })),
+  // A published copy that is still there means the job is not done. What works is said
+  // first all the same, then what is left, and the one line for it.
+  const still = [
+    ...p.left.filter((l) => l.ours).map((l) => ({ what: `${l.version ?? "a broken copy"} in ${l.where}`, ...l })),
     ...stayed.map((x) => ({ ...x, line: null })),
   ];
-  if (ours.length)
-    return failed(
-      `sessionpipe ${target} is installed in ${home} and in use, and ${ours.length === 1 ? "one other copy is" : `${ours.length} other copies are`} still there: ${ours
-        .map((o) => `${o.what} (${o.why})`)
-        .join("; ")}${typed ? `. What you type is still ${d.tilde(typed)}` : ""}`,
-      ours
-        .map((o) => o.line)
-        .filter(Boolean)
-        .join(" && ") || "sessionpipe reinstall",
-    );
-  const alone = p.left.length;
+  if (still.length)
+    return {
+      state: "left",
+      said: `sessionpipe ${target} is installed in ${home} and in use. Pairings and settings are as they were.`,
+      warn,
+      still: `${still.length === 1 ? "One other copy is" : `${still.length} other copies are`} still there: ${still
+        .map((o) => `${o.what} (${o.line ? "needs sudo" : o.why})`)
+        .join("; ")}.`,
+      next:
+        still
+          .map((o) => o.line)
+          .filter(Boolean)
+          .join(" && ") || "sessionpipe reinstall",
+    };
   return {
     state: "one",
     said: `This computer has one sessionpipe: ${target}, in ${home}. Pairings and settings are as they were.`,
-    warn: [
-      ...warn,
-      ...(alone
-        ? [
-            `${alone === 1 ? "One thing" : `${alone} things`} above that ${alone === 1 ? "is" : "are"} no install of it ${alone === 1 ? "was" : "were"} left alone.`,
-          ]
-        : []),
-    ],
+    warn,
   };
 }
