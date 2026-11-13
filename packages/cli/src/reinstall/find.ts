@@ -362,7 +362,7 @@ export function look(o: Looking): Inventory {
   // The copy typed may be where this user can't write: another copy's folder that is on
   // PATH will do, before one that isn't.
   for (const c of copies) if (c.slot === "global" && !c.aside) offer(c.prefix, "where another copy of it already is");
-  offer(o.npmPrefix, "where npm puts what is installed for every folder");
+  offer(o.npmPrefix, "npm's global folder");
   offer(
     o.platform === "win32" ? o.env.APPDATA && path.join(o.env.APPDATA, "npm") : path.join(o.home, ".local"),
     "a folder of your own",

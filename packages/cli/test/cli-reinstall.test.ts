@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // `sessionpipe reinstall` as the command wires it: what it reads before it decides, the
-// two screens, the one question, each way a run ends, and every effect it hands the run
+// two screens, the one question, each way a run ends (what works in green, then a yellow
+// line for each thing left to say, then the one command where there is one), and every
+// effect it hands the run
 // (run.ts has the run itself, plan.ts the plan, find.ts the look, ours.ts the removal).
 // And what `doctor` and `status` say of the same look. The look, the run, the removal,
 // npm, the service manager and the question are all stood in for at their module
@@ -309,6 +311,30 @@ const ONE: Done = {
   said: `This computer has one sessionpipe: ${NEWEST}, in ~/.local. Pairings and settings are as they were.`,
   warn: [],
 };
+/** The fresh copy is in use, and a copy that should have gone is still there. */
+const SUDO = "sudo npm uninstall -g --prefix /usr/local sessionpipe";
+const LEFT: Extract<Done, { state: "left" }> = {
+  state: "left",
+  said: `sessionpipe ${NEWEST} is installed in ~/.local and in use. Pairings and settings are as they were.`,
+  warn: [],
+  still: "One other copy is still there: 1.0.0 in /usr/local (needs sudo).",
+  next: SUDO,
+};
+/** The sentences the plan and the run write, as these tests meet them. */
+const NOTHING = `Nothing to repair: one sessionpipe, ${NEWEST}, the newest release.`;
+const ONE_COPY = `One sessionpipe on this computer: ${NEWEST}, the newest release.`;
+const NOT_ON_PATH = "~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.";
+const NOTHING_STARTS_IT =
+  "The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.";
+const TYPED = "Typing `sessionpipe` starts ~/bin/sessionpipe, not the copy in ~/.local.";
+const SAFE = `Nothing is touched until ${NEWEST} has downloaded. A failed install is undone.`;
+const KEEP = "  = keep     pairings, settings, keys, messages waiting to be sent";
+const DRY_RUN = "Dry run: nothing was changed. `sessionpipe reinstall` does it.";
+/** A line that says how a command ended, as a terminal shows it: bold, in its colour. */
+const green = (s: string) => `${ESC}[32m${ESC}[1m${s}${ESC}[22m${ESC}[39m`;
+const yellow = (s: string) => `${ESC}[33m${ESC}[1m${s}${ESC}[22m${ESC}[39m`;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the colours this page writes
+const bare = (lines: string[]): string[] => lines.map((l) => l.replace(/\u001b\[\d+m/g, ""));
 /** What the command read, as it handed it to the plan; and the plan it got. */
 const facts = (): Facts => vi.mocked(plan).mock.calls.at(-1)?.[1] as Facts;
 const planned = (): Plan => vi.mocked(plan).mock.results.at(-1)?.value as Plan;
@@ -625,39 +651,72 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       "Found one copy of sessionpipe on this computer",
       "  · 9.9.9  ~/.local  you type this",
       "",
-      "✓ This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release. Nothing to repair.",
+      "✓ Nothing to repair: one sessionpipe, 9.9.9, the newest release.",
     ]);
     expect(process.exitCode).toBeUndefined();
     expect(r.exit).not.toHaveBeenCalled();
+    expect(r.err).not.toHaveBeenCalled();
     expect(createInterface).not.toHaveBeenCalled();
     expect(carryOut).not.toHaveBeenCalled();
+    // Nothing is left alone, so nothing is said to be; and no plan, for there is none.
+    expect(r.text).not.toMatch(/Left alone|This will|Dry run/);
     // The same with every option, and at a terminal: green, bold, under its mark.
     for (const o of [["--yes"], ["-y"], ["--dry-run"], ["--dry-run", "--yes"]])
       expect((await run({}, "reinstall", ...o)).lines).toEqual(r.lines);
     const term = await run({ tty: true, columns: 80 }, "reinstall");
-    expect(term.lines.slice(-2)).toEqual([
-      `${ESC}[32m${ESC}[1m✓ This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release.${ESC}[22m${ESC}[39m`,
-      `${ESC}[32m${ESC}[1m  Nothing to repair.${ESC}[22m${ESC}[39m`,
+    expect(term.lines.slice(-2)).toEqual(["", green(`✓ ${NOTHING}`)]);
+    // A terminal too narrow for the sentence: each line of it green, the second under its words.
+    const narrow = await run({ tty: true, columns: 50 }, "reinstall");
+    expect(narrow.lines.slice(-3)).toEqual([
+      "",
+      green("✓ Nothing to repair: one sessionpipe, 9.9.9, the"),
+      green("  newest release."),
     ]);
     expect(carryOut).not.toHaveBeenCalled();
   });
 
-  it("nothing to repair, and something to say beside it: each note on its line, the last line yellow", async () => {
+  it("one copy, and something to say beside it: what is here in green, then each note on a yellow line of its own; exit 0", async () => {
     paired();
     vi.mocked(look).mockReturnValue(one({ onPath: [], homes: [home0({ pathAt: null })] }));
     const r = await run({}, "reinstall");
     expect(r.lines.slice(2)).toEqual([
-      // The folder is under the home: `~/…`, as everywhere on this page.
-      "  ! ~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-      "  ! The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
       "",
-      "! This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release. Nothing to repair.",
+      // Not "nothing to repair" while there is something to look at: what is here, then what.
+      `✓ ${ONE_COPY}`,
+      // The folder is under the home: `~/…`, as everywhere on this page.
+      `! ${NOT_ON_PATH}`,
+      `! ${NOTHING_STARTS_IT}`,
+    ]);
+    expect(r.text).not.toContain("Nothing to repair");
+    // Each note is said once: there is no plan's screen to say it a first time.
+    expect(r.lines.filter((l) => l.includes("is not on your PATH"))).toHaveLength(1);
+    expect(process.exitCode).toBeUndefined();
+    expect(r.exit).not.toHaveBeenCalled();
+    expect(carryOut).not.toHaveBeenCalled();
+    // At a terminal: the first line green, every line of every note yellow, in the same order.
+    const term = await run({ tty: true, columns: 200 }, "reinstall");
+    expect(term.lines.slice(-5)).toEqual([
+      "",
+      green(`✓ ${ONE_COPY}`),
+      yellow(`! ${NOT_ON_PATH}`),
+      // Longer than the 100 columns a line is set to: it goes on under its own words.
+      yellow("! The background service isn't running, and nothing here starts it by itself:"),
+      yellow("  `sessionpipe control run` does."),
+    ]);
+    // npm out of reach is a note as any other, and the sentence calls nothing the newest.
+    vi.mocked(latestVersion).mockRejectedValue(
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }),
+    );
+    vi.mocked(look).mockReturnValue(one());
+    const offline = await run({}, "reinstall");
+    expect(offline.lines.slice(2)).toEqual([
+      "",
+      "✓ One sessionpipe on this computer: 9.9.9.",
+      "! The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
+      "! npm couldn't be asked whether 9.9.9 is the newest release: registry.npmjs.org can't be reached (ENOTFOUND).",
     ]);
     expect(process.exitCode).toBeUndefined();
-    const term = await run({ tty: true, columns: 200 }, "reinstall");
-    expect(term.lines.at(-1)).toBe(
-      `${ESC}[33m${ESC}[1m! This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release. Nothing to repair.${ESC}[22m${ESC}[39m`,
-    );
+    expect(offline.err).not.toHaveBeenCalled();
   });
 
   it("it won't act: what it found, then one line with what stands in the way and the command to run; exit 1", async () => {
@@ -709,27 +768,62 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     expect(r.lines).toEqual([]);
   });
 
-  it("one clean copy beside what npx fetched to run this, and a checkout: both found, both said to be left, nothing to repair", async () => {
+  it("one clean copy beside what npx fetched to run this, and a checkout: both found, both listed as left alone, nothing to repair", async () => {
     vi.mocked(look).mockReturnValue(
       one({
         copies: [copy(LOCAL(), { uses: ["typed"] }), npxEntry("0a1b2c3d4e5f6a7b", { uses: ["this"] }), checkout()],
       }),
     );
     const r = await run({}, "reinstall");
-    // Three were found and one is this computer's: the sentence says what the others are.
+    // Three were found and one is this computer's: a row each says what the others are,
+    // under "Left alone" and after an empty line, before the one green line.
     expect(r.lines).toEqual([
       "Found 3 copies of sessionpipe on this computer",
       "  · 9.9.9  ~/.local                        you type this",
       "  · 9.9.9  ~/.npm/_npx/0a1b2c3d4e5f6a7b    this command",
-      "  · 9.9.9  ~/src/sessionpipe/packages/cli  nothing uses it · not an install: it is not a folder named node_modules/sessionpipe",
+      "  · 9.9.9  ~/src/sessionpipe/packages/cli  nothing uses it · not an install",
       "",
-      "✓ This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release. Nothing to repair. The copy in the npx cache is npm's own cache: it is left. What is no install of it is left alone.",
+      "Left alone",
+      "  · ~/src/sessionpipe/packages/cli  it is not a folder named node_modules/sessionpipe",
+      "  · ~/.npm/_npx/0a1b2c3d4e5f6a7b    npm's cache of what npx ran",
+      "",
+      "✓ Nothing to repair: one sessionpipe, 9.9.9, the newest release.",
     ]);
+    // What is left alone is no note: the line is green, and it is "nothing to repair".
+    expect(planned()).toMatchObject({ notes: [], steps: [] });
+    expect(planned().left.map((l) => l.ours)).toEqual([false, false]);
     expect(process.exitCode).toBeUndefined();
     expect(carryOut).not.toHaveBeenCalled();
     // The same through `npx … reinstall --yes`: run again, it is still nothing to repair.
     expect((await run({}, "reinstall", "--yes")).lines).toEqual(r.lines);
     expect(carryOut).not.toHaveBeenCalled();
+    // At a terminal: the heading bold, each row under its mark, the last line green.
+    const term = await run({ tty: true, columns: 80 }, "reinstall");
+    expect(term.lines.slice(-7)).toEqual([
+      "",
+      `${ESC}[1mLeft alone${ESC}[22m`,
+      // Why folds under its own column.
+      `  ${ESC}[2m·${ESC}[22m ~/src/sessionpipe/packages/cli  it is not a folder named`,
+      "                                    node_modules/sessionpipe",
+      `  ${ESC}[2m·${ESC}[22m ~/.npm/_npx/0a1b2c3d4e5f6a7b    npm's cache of what npx ran`,
+      "",
+      green(`✓ ${NOTHING}`),
+    ]);
+    for (const l of bare(term.lines)) expect(l.length).toBeLessThan(80);
+    // A file of the name that is no install is such a row too, and no finding above it.
+    const script = path.join(home, "bin", "sessionpipe");
+    vi.mocked(look).mockReturnValue(
+      one({ strangers: [{ file: script, why: "a file of that name that npm didn't put there" }] }),
+    );
+    expect((await run({}, "reinstall")).lines).toEqual([
+      "Found one copy of sessionpipe on this computer",
+      "  · 9.9.9  ~/.local  you type this",
+      "",
+      "Left alone",
+      "  · ~/bin/sessionpipe  a file of that name that npm didn't put there",
+      "",
+      `✓ ${NOTHING}`,
+    ]);
   });
 
   it("a node and a copy the service file names that are gone are said under 'Also found', the node as a person reads it", async () => {
@@ -763,22 +857,24 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       });
     const behind = await ends(ONE, {}, world(0));
     expect(planned()).toMatchObject({ first: null, notes: [] });
-    expect(behind.text).not.toContain("What a shell finds first");
-    expect(behind.lines.at(-1)).toBe(`✓ ${ONE.said}`);
-    // The same link ahead of the home's bin folder: said on the plan's screen and on the last line.
+    expect(behind.text).not.toContain("Typing `sessionpipe` starts");
+    expect(behind.lines.slice(-2)).toEqual(["", `✓ ${ONE.said}`]);
+    // The same link ahead of the home's bin folder: said on the plan's screen, and again
+    // when it is done, on a yellow line of its own under the green one.
     const ahead = await ends(ONE, {}, world(2));
     expect(planned().first).toBe(stays);
-    const note =
-      "What a shell finds first is ~/bin/sessionpipe, which is not this copy: typing `sessionpipe` starts that one.";
-    expect(ahead.lines).toContain(`  ! ${note}`);
-    expect(ahead.lines.at(-1)).toBe(`! ${ONE.said} ${note}`);
+    expect(planned().notes).toEqual([TYPED]);
+    expect(ahead.lines).toContain(`  ! ${TYPED}`);
+    expect(ahead.lines.slice(-3)).toEqual(["", `✓ ${ONE.said}`, `! ${TYPED}`]);
     // And where the home's bin folder is not on PATH at all, with the note that says so first.
     const off = await ends(ONE, {}, world(null));
-    expect(planned().notes).toEqual([
-      "~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-      note,
-    ]);
-    expect(off.lines.at(-1)).toBe(`! ${ONE.said} ${planned().notes.join(" ")}`);
+    expect(planned().notes).toEqual([NOT_ON_PATH, TYPED]);
+    expect(off.lines.slice(-4)).toEqual(["", `✓ ${ONE.said}`, `! ${NOT_ON_PATH}`, `! ${TYPED}`]);
+    // Why the link stays is its own row on the plan's screen, whichever way round PATH is.
+    for (const r of [behind, ahead, off])
+      expect(r.lines).toContain(
+        "  · ~/src/sessionpipe/packages/cli  it is not a folder named node_modules/sessionpipe",
+      );
   });
 
   it("a file that is no install of sessionpipe where the fresh copy's link goes: nothing is done, and the one line moves it", async () => {
@@ -793,14 +889,18 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
         ...o,
       });
     vi.mocked(look).mockReturnValue(blocked({}));
-    const said = `sessionpipe: ~/.local/bin/sessionpipe is a file sessionpipe did not put there, and it sits where the link to the fresh copy goes: npm will not put its link over it. Nothing was changed. Move it out of the way, then run this again. Next: mv ${script} ${script}.old\n`;
+    const said = `sessionpipe: ~/.local/bin/sessionpipe is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again. Next: mv ${script} ${script}.old\n`;
     for (const flags of [[], ["--yes"], ["--dry-run"]]) {
       const r = await run({}, "reinstall", ...flags);
       expect(r.err).toHaveBeenCalledWith(said);
       expect(r.exit).toHaveBeenCalledWith(1);
-      // What was found is shown; no plan is, for there is none.
-      expect(r.lines).toContain("  ! ~/.local/bin/sessionpipe is a file of that name that npm didn't put there");
-      expect(r.lines).not.toContain("What happens");
+      // What was found is shown; no plan is, for there is none. The file is no copy and
+      // no finding: the one line that refuses is what names it, and says what to do with it.
+      expect(r.lines).toEqual([
+        "Found 2 copies of sessionpipe on this computer",
+        "  · 1.0.0  ~/.local                      you type this",
+        "  · 0.9.0  ~/.nvm/versions/node/v22.1.0  nothing uses it",
+      ]);
     }
     expect(planned()).toMatchObject({ steps: [], nothing: null, first: script });
     expect(carryOut).not.toHaveBeenCalled();
@@ -824,7 +924,7 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     );
   });
 
-  it("one clean copy, and what you type is something else that stays: said in place of 'Nothing to repair', in yellow; exit 0", async () => {
+  it("one clean copy, and what you type is something else that stays: not 'Nothing to repair', and said in yellow under the green line; exit 0", async () => {
     // A checkout's link ahead of ~/.local/bin on PATH: not an install, never moved.
     const stays = path.join(home, "bin", "sessionpipe");
     vi.mocked(look).mockReturnValue(
@@ -838,10 +938,18 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       }),
     );
     const r = await run({}, "reinstall");
-    expect(r.lines.slice(-3)).toEqual([
-      "  ! What a shell finds first is ~/bin/sessionpipe, which is not this copy: typing `sessionpipe` starts that one.",
+    expect(r.lines).toEqual([
+      "Found 2 copies of sessionpipe on this computer",
+      "  · 9.9.9  ~/.local                        the background service",
+      "  · 9.9.9  ~/src/sessionpipe/packages/cli  you type this · not an install",
       "",
-      "! This computer has one sessionpipe: 9.9.9, in ~/.local, the newest release. But what you type is ~/bin/sessionpipe, which is not it, and not sessionpipe's to move. What is no install of it is left alone.",
+      // Why what is typed stays where it is: its own row.
+      "Left alone",
+      "  · ~/src/sessionpipe/packages/cli  it is not a folder named node_modules/sessionpipe",
+      "",
+      // What is here and works, in green; then what a person should still look at.
+      `✓ ${ONE_COPY}`,
+      `! ${TYPED}`,
     ]);
     expect(r.text).not.toContain("Nothing to repair");
     expect(process.exitCode).toBeUndefined();
@@ -850,9 +958,7 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     // No plan, no question, nothing run: at a terminal too.
     keyboard(true);
     const term = await run({ tty: true, columns: 200 }, "reinstall");
-    const last = term.lines.slice(term.lines.lastIndexOf("") + 1);
-    expect(last[0]?.startsWith(`${ESC}[33m${ESC}[1m! This computer has one sessionpipe`)).toBe(true);
-    for (const l of last) expect(l.startsWith(`${ESC}[33m${ESC}[1m`)).toBe(true);
+    expect(term.lines.slice(term.lines.lastIndexOf("") + 1)).toEqual([green(`✓ ${ONE_COPY}`), yellow(`! ${TYPED}`)]);
     expect(createInterface).not.toHaveBeenCalled();
     expect(carryOut).not.toHaveBeenCalled();
   });
@@ -865,16 +971,18 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       "  · 1.0.0  ~/.local                      you type this",
       "  · 0.9.0  ~/.nvm/versions/node/v22.1.0  nothing uses it",
       "",
-      "What happens",
-      "  1. sessionpipe 9.9.9, the newest release, is fetched from npm. Until that has worked, nothing here is touched.",
-      "  2. It is installed fresh in ~/.local (where the one you type is); sessionpipe 1.0.0, which is there now, is taken out first and put back if the install fails.",
-      "  3. No agent is hooked here, so there are no hooks to write.",
-      "  4. ~/.nvm/versions/node/v22.1.0 holds sessionpipe 0.9.0: it is removed, with its link.",
-      "  5. Then it is checked: the fresh copy runs, a shell finds it, and nothing here names a copy that was removed.",
-      "     Pairings, settings, keys and what waits to be sent are kept.",
+      // A row an action. No agent is hooked here and nothing runs in the background: there
+      // is nothing to switch, and no row for it.
+      "This will",
+      "  + install  9.9.9, the newest release, fresh in ~/.local (replaces 1.0.0)",
+      "  - remove   0.9.0 in ~/.nvm/versions/node/v22.1.0",
+      KEEP,
+      "",
+      SAFE,
       "",
     ];
-    expect(dry.lines).toEqual([...page, "  Nothing was changed: this was a dry run. `sessionpipe reinstall` does it."]);
+    // A dry run ends by saying that it was one, from the first column, and what does it.
+    expect(dry.lines).toEqual([...page, DRY_RUN]);
     expect(process.exitCode).toBeUndefined();
     expect(dry.exit).not.toHaveBeenCalled();
     expect(carryOut).not.toHaveBeenCalled();
@@ -897,12 +1005,29 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     vi.mocked(look).mockReturnValue(two());
     const r = await run({ tty: true, columns: 80 }, "reinstall", "--dry-run");
     expect(r.lines[0]).toBe(`${ESC}[1mFound 2 copies of sessionpipe on this computer${ESC}[22m`);
-    expect(r.lines).toContain(`${ESC}[1mWhat happens${ESC}[22m`);
-    expect(r.lines.at(-1)).toBe(
-      `  Nothing was changed: this was a dry run. ${ESC}[36m\`sessionpipe reinstall\`${ESC}[39m does it.`,
+    expect(r.lines).toContain(`${ESC}[1mThis will${ESC}[22m`);
+    // The rows in the colour of their kind: green for what is added, red and bold for what goes.
+    expect(r.lines).toContain(
+      `  ${ESC}[32m+ install${ESC}[39m  9.9.9, the newest release, fresh in ~/.local (replaces 1.0.0)`,
     );
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: the colours this page writes
-    for (const l of r.lines) expect(l.replace(/\u001b\[\d+m/g, "").length).toBeLessThan(80);
+    expect(r.lines).toContain(
+      `  ${ESC}[1m${ESC}[31m- remove ${ESC}[39m${ESC}[22m  0.9.0 in ~/.nvm/versions/node/v22.1.0`,
+    );
+    expect(r.lines).toContain(`  ${ESC}[2m= keep   ${ESC}[22m  pairings, settings, keys, messages waiting to be sent`);
+    expect(r.lines.slice(-3)).toEqual([
+      SAFE,
+      "",
+      // The command that does it is shown as one, as on every other line.
+      `Dry run: nothing was changed. ${ESC}[36m\`sessionpipe reinstall\`${ESC}[39m does it.`,
+    ]);
+    for (const l of bare(r.lines)) expect(l.length).toBeLessThan(80);
+    // Without colour the page is the pipe's, line for line: nothing here is long enough to fold.
+    const mono = await run({ tty: true, columns: 80 }, "reinstall", "--dry-run", "--no-color");
+    expect(mono.text).not.toContain(ESC);
+    expect(mono.lines).toEqual(bare(r.lines));
+    expect(mono.lines).toEqual((await run({}, "reinstall", "--dry-run")).lines);
+    // A terminal of 120 columns shows the same rows.
+    expect(bare((await run({ tty: true, columns: 120 }, "reinstall", "--dry-run")).lines)).toEqual(mono.lines);
   });
 
   it("without --yes and with nobody to ask it changes nothing, and says how to run it unattended; exit 1", async () => {
@@ -915,7 +1040,8 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     expect(piped.err).toHaveBeenCalledWith(refused);
     expect(piped.exit).toHaveBeenCalledWith(1);
     // The page was shown all the same: it says what `--yes` would do.
-    expect(piped.lines).toContain("What happens");
+    expect(piped.lines).toContain("This will");
+    expect(piped.lines.slice(-3)).toEqual(["", SAFE, ""]);
     // To a terminal, with the keyboard closed (a script's stdin, `< /dev/null`).
     keyboard(false);
     const closed = await run({ tty: true, columns: 200 }, "reinstall");
@@ -1038,34 +1164,61 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       mirror,
       path.join(spaced, "old", "bin", "sessionpipe"),
     ]);
-    // The command is printed as the plan has it: pasted, it names the folder that is there.
-    expect(r.lines).toContain(`       ${line}`);
+    // The plan's screen prints no command to paste: the copy that needs one is marked, and
+    // a run ends with the line. So no quoted path is on the page at all.
+    expect(r.text).not.toContain("sudo npm");
     expect(r.text).not.toContain("'~");
+    expect(r.text).not.toContain(`'${nvm}'`);
     // In a sentence the same home is `~/…`; a longer path that only has it inside is whole.
-    expect(r.lines).toContain("  ! ~/old/bin/sessionpipe is a link to a sessionpipe that is gone");
-    expect(r.lines).toContain(`  ! ${mirror} is a link to a sessionpipe that is gone`);
-    expect(r.lines).toContain("  ! ~/bin/sessionpipe is a file of that name that npm didn't put there");
-    expect(r.text).toContain("~/old/bin/sessionpipe leads to a sessionpipe that is gone: the link is removed.");
-    expect(r.text).toContain(`${mirror} leads to a sessionpipe that is gone: the link is removed.`);
-    expect(r.lines).toContain(
-      "  ! ~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-    );
-    expect(r.lines).toContain(
-      "  ! What a shell finds first is ~/bin/sessionpipe, which is not this copy: typing `sessionpipe` starts that one.",
-    );
+    expect(r.lines).toEqual([
+      "Found 2 copies of sessionpipe on this computer",
+      "  · 1.0.0  ~/.local                      this command",
+      "  · 0.9.0  ~/.nvm/versions/node/v22.1.0  nothing uses it",
+      "",
+      "Also found",
+      `  ! ${mirror} is a link to a sessionpipe that is gone`,
+      "  ! ~/old/bin/sessionpipe is a link to a sessionpipe that is gone",
+      "",
+      "This will",
+      "  + install  9.9.9, the newest release, fresh in ~/.local (replaces 1.0.0)",
+      // A link's row names the file as the findings above do.
+      `  - remove   ${mirror} (a link to a copy that is gone)`,
+      "  - remove   ~/old/bin/sessionpipe (a link to a copy that is gone)",
+      KEEP,
+      "",
+      "Left alone",
+      // The file that is no install is a row here, and no finding above.
+      "  · ~/bin/sessionpipe             a file of that name that npm didn't put there",
+      "  ! ~/.nvm/versions/node/v22.1.0  0.9.0 · needs sudo: a run ends with its line",
+      "",
+      `  ! ${NOT_ON_PATH}`,
+      `  ! ${TYPED}`,
+      "",
+      SAFE,
+      "",
+      DRY_RUN,
+    ]);
     for (const l of r.lines.filter((x) => !x.includes(mirror))) expect(l).not.toContain(path.join(spaced, "bin"));
     // At a terminal a line breaks by what is printed, and a note's second line is under its words.
-    const term = await run({ tty: true, columns: 80 }, "reinstall", "--dry-run");
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: the colours this page writes
-    const bare = term.lines.map((l) => l.replace(/\u001b\[\d+m/g, ""));
-    const at = bare.findIndex((l) => l.startsWith("  ! What a shell finds first is ~/bin/sessionpipe,"));
-    expect(at).toBeGreaterThan(0);
-    expect(bare[at + 1]).toMatch(/^ {4}\S.* starts that one\.$/);
-    expect(`${bare[at]} ${(bare[at + 1] as string).trim()}`).toBe(
-      "  ! What a shell finds first is ~/bin/sessionpipe, which is not this copy: typing `sessionpipe` starts that one.",
+    const term = bare((await run({ tty: true, columns: 80 }, "reinstall", "--dry-run")).lines);
+    const at = term.findIndex((l) => l.startsWith("  ! ~/.local/bin is not on your PATH"));
+    expect(term.slice(at, at + 3)).toEqual([
+      "  ! ~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found",
+      "    when you type it.",
+      `  ! ${TYPED}`,
+    ]);
+    // A row too long for the line goes on under its own words, a folder in it broken
+    // after a separator: put together again it names the whole path, never `~/…`.
+    const row = term.findIndex((l) => l.startsWith("  - remove   "));
+    const end = term.findIndex((l, n) => n > row && /^ {2}\S/.test(l));
+    expect(end).toBeGreaterThan(row + 1);
+    for (const l of term.slice(row + 1, end)) expect(l).toMatch(/^ {13}\S/);
+    const pieces = term.slice(row, end).map((l) => l.slice(13));
+    expect(pieces.reduce((whole, piece) => `${whole}${whole.endsWith(path.sep) ? "" : " "}${piece}`)).toBe(
+      `${mirror} (a link to a copy that is gone)`,
     );
-    // (A path outside the home is as long as it is: nothing folds one.)
-    for (const l of bare.filter((x) => !x.includes(tmp))) expect(l.length).toBeLessThan(80);
+    // (A path outside the home is as long as it is: in a finding nothing folds one.)
+    for (const l of term.filter((x) => !x.includes(tmp))) expect(l.length).toBeLessThan(80);
   });
 
   it("a sentence from elsewhere (the run's, `update`'s, the last line) has the home as `~/…` where it starts a word, and nowhere else", async () => {
@@ -1087,20 +1240,36 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
     at = lines.length;
     handed().say({ mark: "info", text: said });
     expect(lines.slice(at)).toEqual([`  · ${short}`]);
-    // The last line, with what the run warned of.
+    // The line under the last one, with what the run warned of.
     const r = await ends({ ...ONE, warn: [said] });
-    expect(r.lines.at(-1)).toBe(`! ${ONE.said} ${short}`);
+    expect(r.lines.slice(-2)).toEqual([`✓ ${ONE.said}`, `! ${short}`]);
+    // What works is the run's sentence too, and so is what is left: both as a person reads
+    // a path. The command to run next is for a shell, which leaves `~` in quotes as it is:
+    // it keeps the whole path.
+    const next = `sudo npm uninstall -g --prefix '${under}' sessionpipe`;
+    const stays = await ends({
+      ...LEFT,
+      said: `sessionpipe 9.9.9 is installed in ${path.join(spaced, ".local")} and in use.`,
+      warn: [said],
+      still: `One other copy is still there: 1.0.0 in ${under} (${under} can't be written).`,
+      next,
+    });
+    expect(stays.lines.slice(-2)).toEqual(["✓ sessionpipe 9.9.9 is installed in ~/.local and in use.", `! ${short}`]);
+    expect(stays.err).toHaveBeenCalledWith(
+      `sessionpipe: One other copy is still there: 1.0.0 in ~/.nvm/lib (~/.nvm/lib can't be written). Next: ${next}\n`,
+    );
+    expect(String(stays.err.mock.calls[0]?.[0])).toContain(`'${under}'`);
+    process.exitCode = undefined;
     // At a terminal it is shortened before it is folded: no line of it is cut short for
     // a path it no longer shows.
     const term = await ends(
       { ...ONE, warn: [`${under} still names ${under}, which was removed.`] },
       { tty: true, columns: 80 },
     );
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: the colours this page writes
-    const bare = term.lines.map((l) => l.replace(/\u001b\[\d+m/g, ""));
-    expect(bare.slice(-2)).toEqual([
-      "! This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings",
-      "  are as they were. ~/.nvm/lib still names ~/.nvm/lib, which was removed.",
+    expect(bare(term.lines).slice(-3)).toEqual([
+      "✓ This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings",
+      "  are as they were.",
+      "! ~/.nvm/lib still names ~/.nvm/lib, which was removed.",
     ]);
   });
 });
@@ -1109,53 +1278,112 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: how a run 
   it("one copy, in use everywhere: the steps as they happen, then one green line; exit 0", async () => {
     vi.mocked(look).mockReturnValue(two());
     vi.mocked(carryOut).mockImplementation(async (_p, d) => {
-      d.say({ mark: "ok", text: `sessionpipe ${NEWEST} fetched from npm` });
+      d.say({ mark: "ok", text: `sessionpipe ${NEWEST} downloaded` });
+      d.say({
+        mark: "info",
+        text: `a shell finds this copy first; behind it: ${path.join(home, "bin", "sessionpipe")}`,
+      });
       d.say({ mark: "warn", text: `${path.join(home, "old")} could not be removed: EBUSY` });
       return ONE;
     });
     const r = await run({}, "reinstall", "--yes");
-    expect(r.lines.slice(-5)).toEqual([
+    expect(r.lines.slice(-6)).toEqual([
       "",
-      "  ✓ sessionpipe 9.9.9 fetched from npm",
+      "  ✓ sessionpipe 9.9.9 downloaded",
       // A step names a folder under the home as the page does.
+      "  · a shell finds this copy first; behind it: ~/bin/sessionpipe",
       "  ! ~/old could not be removed: EBUSY",
       "",
       "✓ This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings are as they were.",
     ]);
     expect(process.exitCode).toBeUndefined();
     expect(r.exit).not.toHaveBeenCalled();
+    expect(r.err).not.toHaveBeenCalled();
     const term = await run({ tty: true, columns: 200 }, "reinstall", "--yes");
-    expect(term.lines.at(-1)).toBe(
-      `${ESC}[32m${ESC}[1m✓ This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings are as they were.${ESC}[22m${ESC}[39m`,
+    expect(term.lines.slice(-2)).toEqual(["", green(`✓ ${ONE.said}`)]);
+    expect(term.lines.at(-5)).toBe(`  ${ESC}[32m✓${ESC}[39m sessionpipe 9.9.9 downloaded`);
+    expect(term.lines.at(-4)).toBe(
+      `  ${ESC}[2m·${ESC}[22m a shell finds this copy first; behind it: ~/bin/sessionpipe`,
     );
-    expect(term.lines.at(-4)).toBe(`  ${ESC}[32m✓${ESC}[39m sessionpipe 9.9.9 fetched from npm`);
   });
 
-  it("one copy, and something left to say: the run's warnings and the plan's notes on the last line, in yellow; exit 0", async () => {
+  it("one copy, and something left to say: what works in green, then a yellow line for each warning of the run and each note of the plan; exit 0", async () => {
     const warned: Done = {
       ...ONE,
-      warn: [`What you type is still ${path.join(home, "bin", "sessionpipe")}, not the fresh copy.`],
+      warn: [`Typing \`sessionpipe\` still starts ${path.join(home, "bin", "sessionpipe")}, not the fresh copy.`],
     };
+    const typing = "Typing `sessionpipe` still starts ~/bin/sessionpipe, not the fresh copy.";
     const r = await ends(warned);
-    expect(r.lines.slice(-2)).toEqual([
-      "",
-      "! This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings are as they were. What you type is still ~/bin/sessionpipe, not the fresh copy.",
-    ]);
+    expect(r.lines.slice(-3)).toEqual(["", `✓ ${ONE.said}`, `! ${typing}`]);
     expect(process.exitCode).toBeUndefined();
-    // A note of the plan's alone makes it yellow too, and is said again at the end.
+    // A note of the plan's alone is a yellow line too: said on the plan's screen, and
+    // again when it is done. What works is green all the same.
     const off = two({
       onPath: [],
       homes: [home0({ pathAt: null })],
     });
     const noted = await ends(ONE, {}, off);
-    expect(noted.lines.at(-1)).toBe(
-      "! This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings are as they were. ~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-    );
-    const both = await ends(warned, { tty: true, columns: 200 }, off);
-    expect(both.lines.at(-1)?.startsWith(`${ESC}[33m${ESC}[1m`)).toBe(true);
-    expect(both.lines.slice(-3).join(" ")).toContain("not the fresh copy.");
-    expect(both.lines.slice(-3).join(" ")).toContain("is not on your PATH");
-    expect(both.exit).not.toHaveBeenCalled();
+    expect(noted.lines.slice(-3)).toEqual(["", `✓ ${ONE.said}`, `! ${NOT_ON_PATH}`]);
+    expect(noted.lines.filter((l) => l.includes("is not on your PATH"))).toEqual([
+      `  ! ${NOT_ON_PATH}`,
+      `! ${NOT_ON_PATH}`,
+    ]);
+    // Both: the run's warnings first, in the order it gave them, then the plan's notes.
+    const several: Done = { ...ONE, warn: [...warned.warn, "A receiver hasn't answered."] };
+    const all = await ends(several, {}, off);
+    expect(all.lines.slice(-5)).toEqual([
+      "",
+      `✓ ${ONE.said}`,
+      `! ${typing}`,
+      "! A receiver hasn't answered.",
+      `! ${NOT_ON_PATH}`,
+    ]);
+    // At a terminal each is a line of its own in its colour, and no line is a `try`.
+    const both = await ends(several, { tty: true, columns: 200 }, off);
+    expect(both.lines.slice(-5)).toEqual([
+      "",
+      green(`✓ ${ONE.said}`),
+      yellow(`! ${typing}`),
+      yellow("! A receiver hasn't answered."),
+      yellow(`! ${NOT_ON_PATH}`),
+    ]);
+    // Folded to 80 columns, every line of a sentence is in that sentence's colour.
+    const narrow = await ends(warned, { tty: true, columns: 80 }, off);
+    expect(narrow.lines.slice(-6)).toEqual([
+      "",
+      green("✓ This computer has one sessionpipe: 9.9.9, in ~/.local. Pairings and settings"),
+      green("  are as they were."),
+      yellow(`! ${typing}`),
+      yellow("! ~/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when"),
+      yellow("  you type it."),
+    ]);
+    for (const x of [r, noted, all, both, narrow]) {
+      expect(x.exit).not.toHaveBeenCalled();
+      expect(x.err).not.toHaveBeenCalled();
+      expect(x.text).not.toMatch(/^(\S*try\S*) {4}/m);
+    }
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("a copy that is still there: what works is said first, then it stops with what is left and the one line to run", async () => {
+    const r = await ends(LEFT);
+    expect(r.lines.slice(-2)).toEqual(["", `✓ ${LEFT.said}`]);
+    // The job is not done: what is left is the error, and its line the next step.
+    expect(r.err).toHaveBeenCalledWith(`sessionpipe: ${LEFT.still.slice(0, -1)}. Next: ${SUDO}\n`);
+    expect(r.exit).toHaveBeenCalledWith(1);
+    // The line to run is nowhere on the screen before it.
+    expect(r.lines.filter((l) => l.includes(SUDO))).toEqual([]);
+    // At a terminal: what works in green, and the refusal as any other.
+    const term = await ends(LEFT, { tty: true, errTty: true, columns: 200 });
+    expect(term.lines.slice(-2)).toEqual(["", green(`✓ ${LEFT.said}`)]);
+    expect(bare([String(term.err.mock.calls[0]?.[0])])).toEqual([
+      `error  ${LEFT.still.slice(0, -1)}\ntry    ${SUDO}\n`,
+    ]);
+    // What else there is to say comes before it, a yellow line each: warnings, then notes.
+    const off = two({ onPath: [], homes: [home0({ pathAt: null })] });
+    const more = await ends({ ...LEFT, warn: ["A receiver hasn't answered."] }, {}, off);
+    expect(more.lines.slice(-4)).toEqual(["", `✓ ${LEFT.said}`, "! A receiver hasn't answered.", `! ${NOT_ON_PATH}`]);
+    expect(more.exit).toHaveBeenCalledWith(1);
   });
 
   it("the background service finishes by itself: said in yellow, exit 3", async () => {
@@ -1174,20 +1402,30 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: how a run 
   it("it stopped: one line with what is wrong and the command to run next; exit 1", async () => {
     const failed: Done = {
       state: "failed",
-      error:
-        "sessionpipe 9.9.9 is installed in ~/.local and in use, and one other copy is still there: /usr/local (you may not write where it is)",
-      next: "sudo npm uninstall -g --prefix /usr/local sessionpipe",
+      error: "sessionpipe 9.9.9 couldn't be downloaded from npm (npm error code E404). Nothing was changed",
+      next: "sessionpipe reinstall",
     };
     const r = await ends(failed);
     expect(r.err).toHaveBeenCalledWith(
-      "sessionpipe: sessionpipe 9.9.9 is installed in ~/.local and in use, and one other copy is still there: /usr/local (you may not write where it is). Next: sudo npm uninstall -g --prefix /usr/local sessionpipe\n",
+      "sessionpipe: sessionpipe 9.9.9 couldn't be downloaded from npm (npm error code E404). Nothing was changed. Next: sessionpipe reinstall\n",
     );
     expect(r.exit).toHaveBeenCalledWith(1);
-    // No last line of its own: the failure is it.
+    // No last line of its own: the failure is it. And no `try` line among what was printed.
     expect(r.lines.at(-1)).toBe("");
+    expect(r.lines.filter((l) => l.startsWith("try"))).toEqual([]);
     const term = await ends(failed, { errTty: true, columns: 200 });
     expect(term.err).toHaveBeenCalledWith(
-      expect.stringMatching(/try.* {4}.*sudo npm uninstall -g --prefix \/usr\/local sessionpipe.*\n$/),
+      expect.stringMatching(
+        /error.* {2}sessionpipe 9\.9\.9 couldn't be downloaded.*\n.*try.* {4}.*sessionpipe reinstall.*\n$/,
+      ),
+    );
+    // Any other command a failure names is the one to try, as it names it.
+    const other = await ends(
+      { ...failed, next: "npx -y sessionpipe@latest reinstall" },
+      { errTty: true, columns: 200 },
+    );
+    expect(other.err).toHaveBeenCalledWith(
+      expect.stringMatching(/try.* {4}.*npx -y sessionpipe@latest reinstall.*\n$/),
     );
   });
 });
@@ -1638,7 +1876,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     const r = await run({}, "doctor");
     expect(r.lines[0]).toBe("! 1 thing needs attention");
     expect(r.lines).toContain(
-      "  ! copies              1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (nothing uses it)",
+      "  ! copies              1.0.0 in ~/.local (you type this); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (nothing uses it)",
     );
     expect(fix(r)).toEqual([
       "To fix",
@@ -1662,25 +1900,42 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     const brief = await run({}, "status");
     expect(brief.lines[0]).toBe("! 1 thing needs attention");
     expect(brief.text).toContain(
-      "copies: 1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (nothing uses it)",
+      "copies: 1.0.0 in ~/.local (you type this); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (nothing uses it)",
     );
     expect(brief.lines.at(-1)).toBe("  `sessionpipe doctor` says what to do about it.");
   });
 
-  it("which copy is used by what: the one typed, the one the service runs, the one that wrote the hooks, or nothing", async () => {
-    vi.mocked(look).mockReturnValue(
-      inventory({
-        copies: [
-          copy(LOCAL(), { uses: ["typed", "service", "this"] }),
-          copy(NVM(), { version: "0.9.0", uses: ["service"] }),
-          copy(path.join(home, ".npm-global"), { where: "~/.npm-global", version: "0.8.0", uses: ["hooks"] }),
-          copy(path.join(home, ".old"), { where: "~/.old", version: "0.7.0", uses: [] }),
-        ],
-      }),
+  it("which copy is used by what, in the words `reinstall` has for it: typed, the service, the hooks, this command, or nothing", async () => {
+    const used = async (...copies: Copy[]) => {
+      vi.mocked(look).mockReturnValue(inventory({ copies }));
+      return row(await run({}, "doctor"));
+    };
+    expect(
+      await used(
+        copy(LOCAL(), { uses: ["typed"] }),
+        copy(NVM(), { version: "0.9.0", uses: ["service"] }),
+        copy(path.join(home, ".npm-global"), { where: "~/.npm-global", version: "0.8.0", uses: ["hooks"] }),
+        copy(path.join(home, ".fnm"), { where: "~/.fnm", version: "0.7.5", uses: ["this"] }),
+        copy(path.join(home, ".old"), { where: "~/.old", version: "0.7.0", uses: [] }),
+      ),
+    ).toBe(
+      "9.9.9 in ~/.local (you type this); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (the background service); 0.8.0 in ~/.npm-global (the hooks); 0.7.5 in ~/.fnm (this command); 0.7.0 in ~/.old (nothing uses it)",
     );
-    expect(row(await run({}, "doctor"))).toBe(
-      "9.9.9 in ~/.local (you type this one); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (the background service runs this one); 0.8.0 in ~/.npm-global (the hooks were written by this one); 0.7.0 in ~/.old (nothing uses it)",
+    // Every use of a copy is said, not only the first; "this command" only of one nobody types.
+    expect(
+      await used(
+        copy(LOCAL(), { uses: ["typed", "service", "this"] }),
+        copy(NVM(), { version: "0.9.0", uses: ["service", "this", "hooks"] }),
+      ),
+    ).toBe(
+      "9.9.9 in ~/.local (you type this, the background service); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (the background service, this command, the hooks)",
     );
+    // The same words as the table `reinstall` prints of the same look.
+    const table = (await run({}, "reinstall", "--dry-run")).lines.slice(1, 3);
+    expect(table).toEqual([
+      "  · 9.9.9  ~/.local                      you type this, the background service",
+      "  · 0.9.0  ~/.nvm/versions/node/v22.1.0  the background service, this command, the hooks",
+    ]);
   });
 
   it("with the versions apart as well it is still one thing to run, and that is reinstall: never update beside it", async () => {
@@ -1697,8 +1952,22 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     await daemon({ status: status("0.9.0") });
     const r = await run({}, "doctor");
     const todo = fix(r).join("\n");
-    expect(todo).toContain(
-      `This command is sessionpipe ${VERSION}, and the background service runs 0.9.0 from another copy (in ~/.nvm/versions/node/v22.1.0), and the hooks run 0.8.0. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:\n       sessionpipe reinstall`,
+    // The fix is said by the number of copies alone: which release runs where is in the
+    // rows above it, and is not said a second time.
+    expect(fix(r).slice(0, 3)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(todo).not.toContain("This command is sessionpipe");
+    expect(todo).not.toMatch(/runs 0\.9\.0|run 0\.8\.0/);
+    const above = r.lines.slice(0, r.lines.indexOf("To fix")).join("\n");
+    expect(above).toMatch(
+      /^ {2}! background service +running sessionpipe 0\.9\.0 from another copy, in ~\/\.nvm\/versions\/node\/v22\.1\.0$/m,
+    );
+    expect(above).toContain(`run sessionpipe 0.8.0, and this command is ${VERSION}`);
+    expect(row(r)).toBe(
+      "9.9.9 in ~/.local (you type this); 0.9.0 in ~/.nvm/versions/node/v22.1.0 (the background service)",
     );
     // One item for all of it: `update` would leave the second copy where it is.
     expect(todo).not.toContain("sessionpipe update");
@@ -1707,6 +1976,17 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     // The look was handed the service file's own copy: the manager is asked once, for both.
     expect(looked().serviceCli).toBe(other);
     expect(serviceLook).toHaveBeenCalledTimes(1);
+    // With one copy and the same releases apart there is no row of copies to say it, and
+    // the fix is `update`: there the sentence still says which release runs where.
+    vi.mocked(look).mockReturnValue(inventory({ copies: [copy(LOCAL(), { uses: ["typed", "this"] })] }));
+    const apart = await run({}, "doctor");
+    expect(row(apart)).toBeUndefined();
+    expect(fix(apart).slice(0, 3)).toEqual([
+      "To fix",
+      `  1. This command is sessionpipe ${VERSION}, and the background service runs 0.9.0 from another copy (in ~/.nvm/versions/node/v22.1.0), and the hooks run 0.8.0. One command puts it right:`,
+      "       sessionpipe update",
+    ]);
+    expect(fix(apart).join("\n")).not.toContain("sessionpipe reinstall\n");
   });
 
   it("a service that isn't running and a second copy: one item, reinstall", async () => {
@@ -1754,7 +2034,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     const link = path.join(home, "bin", "sessionpipe");
     vi.mocked(look).mockReturnValue(one({ dangling: [link] }));
     const dangling = await run({}, "doctor");
-    expect(row(dangling)).toBe("9.9.9 in ~/.local (you type this one); ~/bin/sessionpipe, a link to one that is gone");
+    expect(row(dangling)).toBe("9.9.9 in ~/.local (you type this); ~/bin/sessionpipe, a link to one that is gone");
     expect(fix(dangling)[1]).toBe(
       "  1. The copy of sessionpipe on this computer is not whole. One command puts it right:",
     );
@@ -1791,7 +2071,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     );
     const r = await run({}, "doctor");
     expect(row(r)).toBe(
-      "9.9.9 in ~/.local (you type this one); a leftover in ~/.local (left behind by an install that was cut off)",
+      "9.9.9 in ~/.local (you type this); a leftover in ~/.local (left behind by an install that was cut off)",
     );
     expect(fix(r)[1]).toBe(
       "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
@@ -1842,7 +2122,7 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     vi.mocked(look).mockReturnValue(one({ copies: [copy(LOCAL(), { uses: ["typed"] }), used] }));
     const second = await run({}, "doctor");
     expect(row(second)).toBe(
-      "9.9.9 in ~/.local (you type this one); 0.9.0 in ~/.npm/_npx/0a1b2c3d4e5f6a7b (the background service runs this one)",
+      "9.9.9 in ~/.local (you type this); 0.9.0 in ~/.npm/_npx/0a1b2c3d4e5f6a7b (the background service)",
     );
     expect(fix(second)[2]).toBe("       sessionpipe reinstall");
     // And so is one that wrote the hooks, or that is typed.

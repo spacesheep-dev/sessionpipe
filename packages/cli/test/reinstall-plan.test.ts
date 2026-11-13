@@ -2,7 +2,8 @@
 // The plan `sessionpipe reinstall` makes (reinstall/plan.ts), from inventories and facts
 // written out here: no file is made and nothing is run. One clean copy in use everywhere
 // is nothing to repair, and each thing that breaks that is tried by itself; then every
-// refusal, the steps and their order, what is left alone, and what is said beside them.
+// refusal, the steps and their order, what each step's row says, what is left alone,
+// what keeps a run safe, and what is said beside them.
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Copy, Inventory } from "../src/reinstall/find.js";
@@ -10,7 +11,10 @@ import { type Facts, idle, plan as made, type Plan, type Step, slotIn } from "..
 
 /** The plan, as every test here asks for it, held each time to what no plan may do:
  *  touch what it says it leaves. Nothing a step touches is the whole path of a thing
- *  left alone, and nothing left alone is a folder a step removes or installs into. */
+ *  left alone, and nothing left alone is a folder a step removes or installs into.
+ *  And to what every plan's screen is made of: a step that is shown has words for its
+ *  row, the download and the check have none, and what keeps a run safe is said of a
+ *  plan that does something and of no other. */
 const plan = (...given: Parameters<typeof made>): Plan => {
   const p = made(...given);
   const kept = p.left.map((l) => path.resolve(l.path));
@@ -18,7 +22,11 @@ const plan = (...given: Parameters<typeof made>): Plan => {
     for (const t of s.touches) expect(kept, `${s.do} touches what is left alone`).not.toContain(path.resolve(t));
     if (s.do === "remove") expect(kept, "a removal of what is left alone").not.toContain(path.resolve(s.path));
     if (s.do === "install") expect(kept, "an install into what is left alone").not.toContain(path.resolve(s.dir));
+    if (s.do === "fetch" || s.do === "prove") expect("say" in s, `${s.do} has no row`).toBe(false);
+    else if (s.do !== "use") expect(s.say, `${s.do} has a row`).toMatch(/\S/);
+    expect("why" in s, `${s.do} says its row and nothing else`).toBe(false);
   }
+  expect(p.safety.length > 0, "what keeps a run safe is said where something is done").toBe(p.steps.length > 0);
   return p;
 };
 
@@ -160,41 +168,42 @@ const step = <K extends Step["do"]>(p: Plan, k: K): Extract<Step, { do: K }> =>
 /** What a repair of the one copy is, with nothing else to remove. */
 const REPAIR = ["fetch", "install", "use", "prove"];
 
-const ONE_COPY = "This computer has one sessionpipe: 1.2.0, in ~/.local, the newest release.";
-const NOTHING = `${ONE_COPY} Nothing to repair.`;
-/** The same one copy where what a person types is another file: said in place of
- *  "Nothing to repair", which it then is not, though no step would change it. */
-const TYPED = (file: string) =>
-  `${ONE_COPY} But what you type is ${file}, which is not it, and not sessionpipe's to move.`;
-/** What that sentence goes on to say of what else was found, and is left. */
-const NPX_CACHE = " The copy in the npx cache is npm's own cache: it is left.";
-const LEFT_ALONE = " What is no install of it is left alone.";
+/** One clean copy and nothing more to say: the one sentence that says "nothing to repair". */
+const NOTHING = "Nothing to repair: one sessionpipe, 1.2.0, the newest release.";
+/** The same one copy with a note beside it (what a person types is another file, a
+ *  folder is not on PATH, nothing starts the service): no step would change it, and the
+ *  sentence no longer calls it nothing to repair. The note says what there is to say. */
+const ONE_COPY = "One sessionpipe on this computer: 1.2.0, the newest release.";
+/** And where npm couldn't be asked: no release is called the newest, and a note says why. */
+const UNASKED = (version: string) => `One sessionpipe on this computer: ${version}.`;
+const OFFLINE = "registry.npmjs.org can't be reached (ENOTFOUND)";
+const NPM_UNASKED = (version: string, error = OFFLINE) =>
+  `npm couldn't be asked whether ${version} is the newest release: ${error}.`;
+/** An npx cache entry nothing uses, where there is nothing to repair: a row of what is left. */
+const NPX_CACHE = "npm's cache of what npx ran";
 const NOT_ON_PATH = (dir: string) =>
   `${dir} is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`;
 const NOTHING_STARTS_IT =
   "The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.";
-const FOUND_FIRST = (file: string) =>
-  `What a shell finds first is ${file}, which is not this copy: typing \`sessionpipe\` starts that one.`;
+/** `shown`: the home the fresh copy goes to, as the look shows it. */
+const FOUND_FIRST = (file: string, shown = "~/.local") =>
+  `Typing \`sessionpipe\` starts ${file}, not the copy in ${shown}.`;
 /** What a plan says of what a shell finds first: the file as it is, and the notes. */
 const finds = (p: Plan) => ({ first: p.first, notes: p.notes });
 /** The fresh copy is what a shell finds, or it finds nothing: no file, and nothing said. */
 const ITSELF = { first: null, notes: [] };
 /** Another file comes first: named as it is, and the one note built from it. */
 const FIRST = (file: string) => ({ first: file, notes: [FOUND_FIRST(file)] });
-const FETCH: Step = {
-  do: "fetch",
-  version: NEW,
-  touches: [],
-  why: "sessionpipe 1.2.0, the newest release, is fetched from npm. Until that has worked, nothing here is touched.",
-};
-/** The last step where agents are hooked and there is a service to move. */
-const PROVE: Step = {
-  do: "prove",
-  touches: [],
-  why: "Then it is checked: the fresh copy runs, a shell finds it, the hooks run it, the background service runs it, and nothing here names a copy that was removed.",
-};
-const SERVED =
-  "The hooks are written again from it, and the background service is made to run it (its environment kept), restarted once it holds nothing.";
+/** The first and the last step: neither has a row, so neither has words for one. */
+const FETCH: Step = { do: "fetch", version: NEW, touches: [] };
+const PROVE: Step = { do: "prove", touches: [] };
+/** What the "switch" row says where agents are hooked and there is a service to move. */
+const SERVED = "the hooks and the background service to it";
+/** What keeps a run safe: said of every plan that does something. */
+const SAFE = "Nothing is touched until 1.2.0 has downloaded. A failed install is undone.";
+/** And what restarts, where something runs in the background. */
+const SERVICE_RESTARTS = "The service keeps its environment and restarts once it holds nothing.";
+const DAEMON_RESTARTS = "The daemon restarts once it holds nothing.";
 
 describe("slotIn: the package folder a prefix holds sessionpipe in", () => {
   it("is lib/node_modules/sessionpipe, and node_modules\\sessionpipe on Windows", () => {
@@ -212,6 +221,7 @@ describe("nothing to repair", () => {
       target: NEW,
       home: home(),
       steps: [],
+      safety: [],
       left: [],
       notes: [],
       first: null,
@@ -220,7 +230,7 @@ describe("nothing to repair", () => {
     expect(plan(inv({ platform: "win32" }), facts()).nothing).toBe(NOTHING);
   });
 
-  it("what is no install of it is left and said, with no step; one that is typed is named in the sentence", () => {
+  it("what is no install of it is left and said, with no step; one that is typed is named in a note, and it is not 'nothing to repair'", () => {
     const checkout = copy(path.join(HOME, "code"), {
       where: "~/code/lib/node_modules/sessionpipe",
       version: "9.9.9",
@@ -247,11 +257,13 @@ describe("nothing to repair", () => {
       }),
       facts(),
     );
-    // That file is what a shell finds first: the sentence says so in place of "Nothing to
-    // repair", the note beside it says the same, and there is no step: it is not ours to move.
-    expect(p.nothing).toBe(TYPED(script) + LEFT_ALONE);
+    // That file is what a shell finds first: the note beside the sentence says so, the
+    // sentence no longer says "nothing to repair", and there is no step: it is not ours to move.
+    expect(p.nothing).toBe(ONE_COPY);
+    expect(p.nothing).not.toContain("Nothing to repair");
     expect(p.refuse).toBeNull();
     expect(p.steps).toEqual([]);
+    expect(p.safety).toEqual([]);
     expect(finds(p)).toEqual(FIRST(script));
     expect(p.left).toEqual([
       {
@@ -299,22 +311,25 @@ describe("nothing to repair", () => {
     const none = plan(unserved, facts({ service: null, daemon: null, wanted: false }));
     expect(none.nothing).toBe(NOTHING);
     expect(none.notes).toEqual([]);
-    // Something needs it and nothing starts it: that is said, and is not this command's to repair.
+    // Something needs it and nothing starts it: that is said, and is not this command's to
+    // repair. With a note beside it the sentence says what is here, not "nothing to repair".
     const wanted = plan(unserved, facts({ service: null, daemon: null }));
-    expect(wanted.nothing).toBe(NOTHING);
+    expect(wanted.nothing).toBe(ONE_COPY);
     expect(wanted.steps).toEqual([]);
     expect(wanted.notes).toEqual([NOTHING_STARTS_IT]);
   });
 
   it("the copy's bin folder not being on PATH is said beside it", () => {
     const p = plan(inv({ ...shell([]) }), facts());
-    expect(p.nothing).toBe(NOTHING);
+    expect(p.nothing).toBe(ONE_COPY);
     expect(p.notes).toEqual([NOT_ON_PATH(path.join(LOCAL, "bin"))]);
-    // On PATH with nothing in it yet, there is nothing to say.
-    expect(plan(inv({ ...shell([EMPTY]) }), facts()).notes).toEqual([]);
+    // On PATH with nothing in it yet, there is nothing to say: nothing to repair.
+    const empty = plan(inv({ ...shell([EMPTY]) }), facts());
+    expect(empty.notes).toEqual([]);
+    expect(empty.nothing).toBe(NOTHING);
     // On Windows npm's shims sit in the prefix itself.
     const w = plan(inv({ platform: "win32", ...shell([], {}, "win32") }), facts());
-    expect(w.nothing).toBe(NOTHING);
+    expect(w.nothing).toBe(ONE_COPY);
     expect(w.notes).toEqual([NOT_ON_PATH(LOCAL)]);
     // The folder named is the one the look gives for the command, whatever the prefix:
     // the real one where `<prefix>/bin` is a link to another.
@@ -322,25 +337,56 @@ describe("nothing to repair", () => {
     expect(plan(inv({ ...shell([], { bin: real }) }), facts()).notes).toEqual([NOT_ON_PATH(real)]);
   });
 
-  it("what was found beside the one copy is said to be left: npm's cache entry, then what is no install", () => {
+  it("what was found beside the one copy is a row of what is left: what is no install, then npm's cache entry", () => {
     const entry = cached({ uses: ["this"] });
     const checkout = copy(path.join(HOME, "code"), { where: "~/code", slot: null, not: "it holds src" });
-    const strangers = [
-      { file: path.join(HOME, "bin", "sessionpipe"), why: "a file of that name that npm didn't put there" },
-    ];
-    const said = (i: Partial<Inventory>, f: Partial<Facts> = {}) => plan(inv(i), facts(f)).nothing;
-    // "Found 2 copies" above the sentence is then no contradiction of it.
-    expect(said({ copies: [entry, one()] })).toBe(NOTHING + NPX_CACHE);
-    expect(said({ copies: [one(), checkout] })).toBe(NOTHING + LEFT_ALONE);
-    expect(said({ strangers })).toBe(NOTHING + LEFT_ALONE);
-    expect(said({ copies: [checkout, one(), entry], strangers })).toBe(NOTHING + NPX_CACHE + LEFT_ALONE);
-    // Alone, the one copy is all there is to say.
-    expect(said({})).toBe(NOTHING);
-    // After what is said of npm when it couldn't be asked, the same.
-    const latest = { error: "registry.npmjs.org can't be reached (ENOTFOUND)" };
-    expect(said({ copies: [one(), checkout, entry] }, { latest })).toBe(
-      `This computer has one sessionpipe: 1.2.0, in ~/.local (npm couldn't be asked whether that is the newest: registry.npmjs.org can't be reached (ENOTFOUND)). Nothing to repair.${NPX_CACHE}${LEFT_ALONE}`,
-    );
+    const script = path.join(HOME, "bin", "sessionpipe");
+    const strangers = [{ file: script, why: "a file of that name that npm didn't put there" }];
+    const beside = (i: Partial<Inventory>, f: Partial<Facts> = {}) => {
+      const p = plan(inv(i), facts(f));
+      expect(p.steps).toEqual([]);
+      return { nothing: p.nothing, left: p.left, notes: p.notes };
+    };
+    /** The rows, as each kind is listed. */
+    const inCache = {
+      where: "~/.npm/_npx/0a1b2c3d4e5f6a7b",
+      path: CACHED,
+      version: NEW,
+      why: NPX_CACHE,
+      line: null,
+      ours: false,
+    };
+    const noInstall = {
+      where: "~/code",
+      path: checkout.dir,
+      version: NEW,
+      why: "it holds src",
+      line: null,
+      ours: false,
+    };
+    const aFile = { where: script, path: script, version: null, why: strangers[0]?.why, line: null, ours: false };
+    // "Found 2 copies" above the sentence is then no contradiction of it: the second is
+    // listed, as npm's own cache, and is no copy this command would have removed.
+    expect(beside({ copies: [entry, one()] })).toEqual({ nothing: NOTHING, left: [inCache], notes: [] });
+    // One nothing uses at all, the same.
+    expect(beside({ copies: [one(), cached()] })).toEqual({ nothing: NOTHING, left: [inCache], notes: [] });
+    expect(beside({ copies: [one(), checkout] })).toEqual({ nothing: NOTHING, left: [noInstall], notes: [] });
+    expect(beside({ strangers })).toEqual({ nothing: NOTHING, left: [aFile], notes: [] });
+    // All of them: what is no install first, as in every plan, then the cache.
+    expect(beside({ copies: [checkout, one(), entry], strangers })).toEqual({
+      nothing: NOTHING,
+      left: [noInstall, aFile, inCache],
+      notes: [],
+    });
+    // A row of what is left is no note: it is still "nothing to repair". Alone, the one
+    // copy is all there is to say.
+    expect(beside({})).toEqual({ nothing: NOTHING, left: [], notes: [] });
+    // Where npm couldn't be asked, the rows are the same beside the note that says so.
+    expect(beside({ copies: [one(), checkout, entry] }, { latest: { error: OFFLINE } })).toEqual({
+      nothing: UNASKED(NEW),
+      left: [noInstall, inCache],
+      notes: [NPM_UNASKED(NEW)],
+    });
   });
 
   it("what else a shell finds behind this copy is nothing to say; ahead of it, it is what is typed: said, and no step", () => {
@@ -354,12 +400,12 @@ describe("nothing to repair", () => {
     // After this copy on PATH, a folder that is left alone is in nobody's way: no repair
     // (none could change it), and nothing to say.
     const after = plan(inv({ copies: [one(), checkout], ...shell([mine, theirs]) }), facts());
-    expect(after.nothing).toBe(NOTHING + LEFT_ALONE);
+    expect(after.nothing).toBe(NOTHING);
     expect(finds(after)).toEqual(ITSELF);
     // Before it, it is what typing `sessionpipe` starts: no step could change that, and
-    // the sentence no longer ends "Nothing to repair".
+    // the sentence no longer says "nothing to repair".
     const before = plan(inv({ copies: [checkout, one()], ...shell([theirs, mine]) }), facts());
-    expect(before.nothing).toBe(TYPED(theirs.file) + LEFT_ALONE);
+    expect(before.nothing).toBe(ONE_COPY);
     expect(before.steps).toEqual([]);
     expect(finds(before)).toEqual(FIRST(theirs.file));
     // The same on Windows, where the shim sits in the prefix itself.
@@ -372,49 +418,60 @@ describe("nothing to repair", () => {
       }),
       facts(),
     );
-    expect(w.nothing).toBe(TYPED(shim.file) + LEFT_ALONE);
+    expect(w.nothing).toBe(ONE_COPY);
     expect(finds(w)).toEqual(FIRST(shim.file));
   });
 
-  it("the sentence about what is typed: as the caller shows the path, after the offline wording, before what is left", () => {
+  it("the note about what is typed: as the caller shows the path, before what is said of npm, with the rows of what is left", () => {
     const script = path.join(HOME, "bin", "sessionpipe");
-    const typed = shell([
+    const folders = [
       { file: script, dir: null },
       { file: bin(LOCAL), dir: slotIn(LOCAL, "linux") },
-    ]);
+    ];
+    const typed = shell(folders);
     const whole = plan(inv({ ...typed }), facts());
-    expect(whole.nothing).toBe(TYPED(script));
+    expect(whole.nothing).toBe(ONE_COPY);
+    expect(whole.notes).toEqual([FOUND_FIRST(script)]);
     expect(whole.steps).toEqual([]);
     expect(whole.target).toBe(NEW);
-    // The path is said as a sentence says one; the file itself stays whole beside it.
+    // The path is said as a sentence says one; the file itself stays whole beside it. The
+    // sentence names no path at all.
     const shown = plan(inv({ ...typed }), facts(), (p) => `<${p}>`);
-    expect(shown.nothing).toBe(TYPED(`<${script}>`));
+    expect(shown.nothing).toBe(ONE_COPY);
+    expect(shown.notes).toEqual([FOUND_FIRST(`<${script}>`)]);
     expect(shown.first).toBe(script);
-    // Offline, after what is said of npm.
-    const latest = { error: "registry.npmjs.org can't be reached (ENOTFOUND)" };
-    expect(plan(inv({ ...typed }), facts({ latest })).nothing).toBe(
-      `This computer has one sessionpipe: 1.2.0, in ~/.local (npm couldn't be asked whether that is the newest: registry.npmjs.org can't be reached (ENOTFOUND)). But what you type is ${script}, which is not it, and not sessionpipe's to move.`,
-    );
-    // And what else was found is said after it, as after "Nothing to repair".
+    // The home it names is the look's own word for it, whatever that is.
+    const elsewhere = plan(inv({ ...shell(folders, { shown: "~/.npm-global" }) }), facts());
+    expect(elsewhere.notes).toEqual([FOUND_FIRST(script, "~/.npm-global")]);
+    // Offline, what is said of npm comes after it, and the sentence calls nothing the newest.
+    const offline = plan(inv({ ...typed }), facts({ latest: { error: OFFLINE } }));
+    expect(offline.nothing).toBe(UNASKED(NEW));
+    expect(offline.notes).toEqual([FOUND_FIRST(script), NPM_UNASKED(NEW)]);
+    // And what else was found is listed as left, as beside "Nothing to repair".
     const strangers = [{ file: script, why: "a file of that name that npm didn't put there" }];
-    expect(plan(inv({ copies: [cached({ uses: ["this"] }), one()], strangers, ...typed }), facts()).nothing).toBe(
-      TYPED(script) + NPX_CACHE + LEFT_ALONE,
-    );
+    const more = plan(inv({ copies: [cached({ uses: ["this"] }), one()], strangers, ...typed }), facts());
+    expect(more.nothing).toBe(ONE_COPY);
+    expect(more.left.map((l) => [l.where, l.why])).toEqual([
+      [script, "a file of that name that npm didn't put there"],
+      ["~/.npm/_npx/0a1b2c3d4e5f6a7b", NPX_CACHE],
+    ]);
     // With this copy what a shell finds, it is "Nothing to repair" as ever.
-    expect(plan(inv({ strangers }), facts()).nothing).toBe(NOTHING + LEFT_ALONE);
+    expect(plan(inv({ strangers }), facts()).nothing).toBe(NOTHING);
   });
 
-  it("offline, one clean copy is still nothing to repair, and the sentence says npm wasn't asked", () => {
-    const latest = { error: "registry.npmjs.org can't be reached (ENOTFOUND)" };
+  it("offline, one clean copy is still no repair: a note says npm wasn't asked, and nothing is called the newest release", () => {
+    const latest = { error: OFFLINE };
     expect(plan(inv(), facts({ latest }))).toEqual({
-      nothing:
-        "This computer has one sessionpipe: 1.2.0, in ~/.local (npm couldn't be asked whether that is the newest: registry.npmjs.org can't be reached (ENOTFOUND)). Nothing to repair.",
+      nothing: "One sessionpipe on this computer: 1.2.0.",
       refuse: null,
       target: NEW,
       home: home(),
       steps: [],
+      safety: [],
       left: [],
-      notes: [],
+      notes: [
+        "npm couldn't be asked whether 1.2.0 is the newest release: registry.npmjs.org can't be reached (ENOTFOUND).",
+      ],
       first: null,
     });
     // Whatever release that copy is: with nothing to compare it to, the hooks and the
@@ -423,10 +480,22 @@ describe("nothing to repair", () => {
       inv({ copies: [one({ version: OLD })] }),
       facts({ latest, hooks: { version: OLD, wrong: [] }, daemon: { pid: 100, version: OLD } }),
     );
-    expect(older.nothing).toBe(
-      "This computer has one sessionpipe: 1.1.0, in ~/.local (npm couldn't be asked whether that is the newest: registry.npmjs.org can't be reached (ENOTFOUND)). Nothing to repair.",
-    );
+    expect(older.nothing).toBe(UNASKED(OLD));
+    expect(older.notes).toEqual([NPM_UNASKED(OLD)]);
     expect(older.target).toBe(OLD);
+    // Why it couldn't be asked is npm's own word, whatever it is; it comes after every other note.
+    const both = plan(
+      inv({ ...shell([]) }),
+      facts({ latest: { error: "npm error code E503" }, service: null, daemon: null }),
+    );
+    expect(both.nothing).toBe(UNASKED(NEW));
+    expect(both.notes).toEqual([
+      NOT_ON_PATH(path.join(LOCAL, "bin")),
+      NOTHING_STARTS_IT,
+      NPM_UNASKED(NEW, "npm error code E503"),
+    ]);
+    // Never "nothing to repair" there: that is said only of the newest release.
+    for (const p of [older, both]) expect(p.nothing).not.toMatch(/Nothing to repair|newest/);
   });
 });
 
@@ -492,6 +561,8 @@ describe("each thing that makes it a repair, by itself", () => {
     expect(p.home).toBe(given.homes[0]);
     expect(p.home?.prefix).toBe(LOCAL);
     expect(does(p)).toEqual(steps);
+    // Whatever the repair is, the first thing said of how it is kept safe is the same.
+    expect(p.safety[0]).toBe(SAFE);
   });
 });
 
@@ -502,6 +573,8 @@ describe("it refuses, and changes nothing", () => {
   const refused = (p: Plan) => {
     expect(p.nothing).toBeNull();
     expect(p.steps).toEqual([]);
+    // Nothing is done, so there is nothing to say of how it is kept safe.
+    expect(p.safety).toEqual([]);
     expect(p.target).toBeNull();
     expect(p.home).toBeNull();
     return p.refuse;
@@ -538,6 +611,7 @@ describe("it refuses, and changes nothing", () => {
       target: null,
       home: null,
       steps: [],
+      safety: [],
       left: [],
       notes: [],
       first: null,
@@ -655,7 +729,7 @@ describe("it refuses, and changes nothing", () => {
 
   /** What it says of a file that is not npm's link, where npm's link goes. */
   const inTheWay = (file: string) =>
-    `${file} is a file sessionpipe did not put there, and it sits where the link to the fresh copy goes: npm will not put its link over it. Nothing was changed. Move it out of the way, then run this again`;
+    `${file} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again`;
 
   it("a file that is not npm's link sits where the fresh copy's link goes: refused, with the line that moves it", () => {
     // The paths are written out: they are only said and quoted, as any computer would have them.
@@ -791,48 +865,31 @@ describe("the steps, in the order they are taken", () => {
           dir: typed.dir,
           replaces: true,
           touches: [typed.dir, bin(LOCAL)],
-          why: "It is installed fresh in ~/.local (where the one you type is); sessionpipe 1.1.0, which is there now, is taken out first and put back if the install fails.",
+          // The copy that is there now is named by its release: the table says what uses it.
+          say: "1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)",
         },
-        { do: "use", serve: true, touches: [...HOOKS, FILE], why: SERVED },
+        { do: "use", serve: true, touches: [...HOOKS, FILE], say: SERVED },
         {
           do: "remove",
           path: bin(USR),
-          what: "a link to a sessionpipe that is gone",
           touches: [bin(USR)],
-          why: `${bin(USR)} leads to a sessionpipe that is gone: the link is removed.`,
+          say: `${bin(USR)} (a link to a copy that is gone)`,
         },
         // What nothing uses first: the leftover, then the spare copy. Then the one in
-        // use; the copy this command runs from last.
-        {
-          do: "remove",
-          path: cut.dir,
-          what: "a folder left behind by an install that was cut off",
-          touches: [cut.dir],
-          why: "~/.local holds a folder left behind by an install that was cut off: it is removed.",
-        },
-        {
-          do: "remove",
-          path: spare.dir,
-          what: "sessionpipe 1.0.0",
-          touches: [spare.dir, bin(BREW)],
-          why: "/opt/homebrew holds sessionpipe 1.0.0: it is removed, with its link.",
-        },
+        // use; the copy this command runs from last. A row says the release and the
+        // folder; a link that goes with a copy is touched, and is the run's to say.
+        { do: "remove", path: cut.dir, touches: [cut.dir], say: "a leftover folder in ~/.local" },
+        { do: "remove", path: spare.dir, touches: [spare.dir, bin(BREW)], say: "1.0.0 in /opt/homebrew" },
         {
           do: "remove",
           path: served.dir,
-          what: "sessionpipe 1.1.0",
           touches: [served.dir, bin(NVM)],
-          why: "~/.nvm/versions/node/v22.1.0 holds sessionpipe 1.1.0: it is removed, with its link.",
+          say: "1.1.0 in ~/.nvm/versions/node/v22.1.0",
         },
-        {
-          do: "remove",
-          path: CACHED,
-          what: "sessionpipe 1.2.0",
-          touches: [CACHED],
-          why: "~/.npm/_npx/0a1b2c3d4e5f6a7b holds sessionpipe 1.2.0: it is removed.",
-        },
+        { do: "remove", path: CACHED, touches: [CACHED], say: "1.2.0 in ~/.npm/_npx/0a1b2c3d4e5f6a7b" },
         PROVE,
       ],
+      safety: [SAFE, SERVICE_RESTARTS],
       left: [
         {
           where: "~/code/lib/node_modules/sessionpipe",
@@ -875,7 +932,7 @@ describe("the steps, in the order they are taken", () => {
     expect(removed([a, one({ version: OLD }), d])).toEqual(["d", "a"]);
   });
 
-  it("a broken copy where the fresh one goes is taken out first, and the sentence says what it was", () => {
+  it("a broken copy where the fresh one goes is replaced, and the row says so; what is wrong with it is the table's to say", () => {
     const install = (c: Copy) => step(plan(inv({ copies: [c] }), facts()), "install");
     const cut = {
       version: null,
@@ -889,17 +946,22 @@ describe("the steps, in the order they are taken", () => {
       dir: slotIn(LOCAL, "linux"),
       replaces: true,
       touches: [slotIn(LOCAL, "linux"), bin(LOCAL)],
-      why: "It is installed fresh in ~/.local (where the one you type is); sessionpipe (a broken copy), which is broken: its dist/cli.js is missing (an install that was cut off?), which is there now, is taken out first and put back if the install fails.",
+      // It says no release of its own: it is named as what it is.
+      say: "1.2.0, the newest release, fresh in ~/.local (replaces the broken copy)",
     });
+    // One that says its release and doesn't run is named by the release.
     const silent = one({ runs: false, wrong: "it doesn't run: `--version` printed nothing" });
-    expect(install(silent).why).toBe(
-      "It is installed fresh in ~/.local (where the one you type is); sessionpipe 1.2.0, which is broken: it doesn't run: `--version` printed nothing, which is there now, is taken out first and put back if the install fails.",
-    );
-    // The same copy anywhere else is removed, and said the same way.
+    expect(install(silent).say).toBe("1.2.0, the newest release, fresh in ~/.local (replaces 1.2.0)");
+    // Neither row repeats what is wrong: that is on the copy's own row of what was found.
+    for (const c of [one(cut), silent]) expect(install(c).say).not.toContain(c.wrong as string);
+    // The same copy anywhere else is removed, and named the same way.
     const p = plan(inv({ copies: [one(), copy(BREW, { where: "/opt/homebrew", bins: [], ...cut })] }), facts());
-    expect(p.steps.find((s) => s.do === "remove")?.why).toBe(
-      "/opt/homebrew holds sessionpipe (a broken copy), which is broken: its dist/cli.js is missing (an install that was cut off?): it is removed.",
-    );
+    expect(p.steps.find((s) => s.do === "remove")).toEqual({
+      do: "remove",
+      path: slotIn(BREW, "linux"),
+      touches: [slotIn(BREW, "linux")],
+      say: "the broken copy in /opt/homebrew",
+    });
   });
 
   it("an empty slot is installed into, with nothing to take out; the home is the first one offered", () => {
@@ -913,7 +975,7 @@ describe("the steps, in the order they are taken", () => {
           home({
             prefix: BREW,
             shown: "/opt/homebrew",
-            why: "where npm puts what is installed for every folder",
+            why: "npm's global folder",
             bin: binOf(BREW),
             pathAt: 1,
           }),
@@ -930,9 +992,24 @@ describe("the steps, in the order they are taken", () => {
       dir: slotIn(BREW, "linux"),
       replaces: false,
       touches: [slotIn(BREW, "linux"), bin(BREW)],
-      why: "It is installed fresh in /opt/homebrew (where npm puts what is installed for every folder).",
+      // No copy is there for the table to say anything of: why this folder is said here.
+      say: "1.2.0, the newest release, fresh in /opt/homebrew (npm's global folder)",
     });
     expect(does(p)).toEqual(["fetch", "install", "use", `remove ${away.dir}`, "prove"]);
+    // The reason is the look's own, whichever it gave for the home.
+    const said = (why: string) =>
+      step(plan(inv({ copies: [away], onPath: [], homes: [home({ why, pathAt: null })] }), facts()), "install").say;
+    for (const why of ["a folder of your own", "where another copy of it already is", "where this command runs from"])
+      expect(said(why)).toBe(`1.2.0, the newest release, fresh in ~/.local (${why})`);
+    // A leftover beside an empty slot is no copy in it: the reason is still the home's.
+    const beside = plan(
+      inv({ copies: [away, leftover(LOCAL, { where: "~/.local" })], onPath: [], homes: [home({ pathAt: null })] }),
+      facts(),
+    );
+    expect(step(beside, "install")).toMatchObject({
+      replaces: false,
+      say: "1.2.0, the newest release, fresh in ~/.local (where the one you type is)",
+    });
   });
 
   it("a service file nothing needs is removed, and the fresh copy serves nothing", () => {
@@ -942,20 +1019,18 @@ describe("the steps, in the order they are taken", () => {
       do: "unserve",
       file: FILE,
       touches: [FILE],
-      why: "Nothing on this computer needs the background service (it is paired with nobody, the pool is off, asking is off): its service file is removed.",
+      say: "the service file, which nothing here needs",
     });
-    // The hooks alone are written: the service file is no longer one of the files touched.
-    expect(step(p, "use")).toEqual({
-      do: "use",
-      serve: false,
-      touches: HOOKS,
-      why: "The hooks are written again from it.",
-    });
+    // The hooks alone are switched: the service file is no longer one of the files touched.
+    expect(step(p, "use")).toEqual({ do: "use", serve: false, touches: HOOKS, say: "the hooks to it" });
     expect(p.notes).toEqual([]);
+    // Nothing runs in the background afterwards, so nothing is said to restart.
+    expect(p.safety).toEqual([SAFE]);
     // While a daemon still answers, the file stays and is made to run the fresh copy.
     const answered = plan(inv(), facts({ wanted: false }));
     expect(does(answered)).toEqual(REPAIR);
-    expect(step(answered, "use")).toEqual({ do: "use", serve: true, touches: [...HOOKS, FILE], why: SERVED });
+    expect(step(answered, "use")).toEqual({ do: "use", serve: true, touches: [...HOOKS, FILE], say: SERVED });
+    expect(answered.safety).toEqual([SAFE, SERVICE_RESTARTS]);
   });
 
   it("two daemons: the one someone started by hand is stopped before the service is moved", () => {
@@ -965,15 +1040,18 @@ describe("the steps, in the order they are taken", () => {
       do: "stop",
       pid: 222,
       touches: [],
-      why: "A daemon someone started by hand (pid 222) holds the socket the background service needs: it is stopped once it holds nothing, and the service takes over.",
+      say: "the daemon started by hand (pid 222), once it holds nothing",
     });
-    expect(step(p, "use")).toEqual({ do: "use", serve: true, touches: [...HOOKS, FILE], why: SERVED });
+    expect(step(p, "use")).toEqual({ do: "use", serve: true, touches: [...HOOKS, FILE], say: SERVED });
+    // The service is what runs afterwards: it is the one said to restart.
+    expect(p.safety).toEqual([SAFE, SERVICE_RESTARTS]);
     // A manager that names no process while a daemon answers is the same state: the
     // service's own process leaves when it finds another daemon on the socket, so the
     // one that answers is not the service's.
     const unnamed = plan(inv({ copies: [one({ version: OLD })] }), facts({ service: service({ pid: null }) }));
     expect(does(unnamed)).toEqual(["fetch", "install", "stop", "use", "prove"]);
     expect(step(unnamed, "stop").pid).toBe(100);
+    expect(step(unnamed, "stop").say).toBe("the daemon started by hand (pid 100), once it holds nothing");
     // Wanted or not: with a daemon in the way the file is not removed, the daemon is stopped.
     expect(does(plan(inv(), facts({ wanted: false, daemon: { pid: 222, version: NEW } })))).toEqual([
       "fetch",
@@ -992,44 +1070,61 @@ describe("the steps, in the order they are taken", () => {
       do: "use",
       serve: true,
       touches: HOOKS,
-      why: "The hooks are written again from it, and the daemon that runs here is asked to restart onto it.",
+      say: "the hooks and the daemon that runs here to it",
     });
     expect(byHand.notes).toEqual([]);
+    // There is no service to keep an environment for: the daemon is what restarts.
+    expect(byHand.safety).toEqual([SAFE, DAEMON_RESTARTS]);
     const neither = plan(unserved, facts({ service: null, daemon: null }));
     expect(does(neither)).toEqual(REPAIR);
-    expect(step(neither, "use")).toEqual({
-      do: "use",
-      serve: false,
-      touches: HOOKS,
-      why: "The hooks are written again from it.",
-    });
+    expect(step(neither, "use")).toEqual({ do: "use", serve: false, touches: HOOKS, say: "the hooks to it" });
+    expect(neither.safety).toEqual([SAFE]);
     // Something here needs the service and nothing starts it: said beside the plan.
     expect(neither.notes).toEqual([NOTHING_STARTS_IT]);
     expect(plan(unserved, facts({ service: null, daemon: null, wanted: false })).notes).toEqual([]);
   });
 
-  it("no agent hooked: no hook file is touched, and the sentence says why", () => {
+  it("no agent hooked: no hook file is touched, and the row names only what runs in the background; with neither there is no row", () => {
     const old = inv({ copies: [one({ version: OLD })] });
     expect(step(plan(old, facts({ harnesses: [] })), "use")).toEqual({
       do: "use",
       serve: true,
       touches: [FILE],
-      why: "No agent is hooked here, so there are no hooks to write, and the background service is made to run it (its environment kept), restarted once it holds nothing.",
+      say: "the background service to it",
     });
     expect(step(plan(old, facts({ harnesses: [], service: null, daemon: { pid: 222, version: OLD } })), "use")).toEqual(
-      {
-        do: "use",
-        serve: true,
-        touches: [],
-        why: "No agent is hooked here, so there are no hooks to write, and the daemon that runs here is asked to restart onto it.",
-      },
+      { do: "use", serve: true, touches: [], say: "the daemon that runs here to it" },
     );
-    expect(step(plan(old, facts({ harnesses: [], service: null, daemon: null })), "use")).toEqual({
-      do: "use",
-      serve: false,
-      touches: [],
-      why: "No agent is hooked here, so there are no hooks to write.",
-    });
+    // Nothing to switch: the step is still taken (`update`'s own steps say what they
+    // find), and the plan has no row for it.
+    const bare = plan(old, facts({ harnesses: [], service: null, daemon: null }));
+    expect(step(bare, "use")).toEqual({ do: "use", serve: false, touches: [], say: null });
+    expect(does(bare)).toEqual(REPAIR);
+    // A service file that is removed is nothing to switch to either.
+    const unserved = plan(old, facts({ harnesses: [], wanted: false, daemon: null }));
+    expect(does(unserved)).toEqual(["fetch", "install", "unserve", "use", "prove"]);
+    expect(step(unserved, "use")).toEqual({ do: "use", serve: false, touches: [], say: null });
+  });
+
+  it("the switch row: the hooks where an agent is hooked, then what runs in the background where something does", () => {
+    const old = inv({ copies: [one({ version: OLD })] });
+    const switched = (f: Partial<Facts>) => step(plan(old, facts(f)), "use").say;
+    const byHand = { pid: 222, version: OLD };
+    // Hooked, with each thing that may run in the background.
+    expect(switched({})).toBe("the hooks and the background service to it");
+    expect(switched({ service: null, daemon: byHand })).toBe("the hooks and the daemon that runs here to it");
+    expect(switched({ service: null, daemon: null })).toBe("the hooks to it");
+    // A service file and a daemon someone started by hand: the service is what is switched
+    // (the daemon has a row of its own, where it is stopped).
+    expect(switched({ daemon: byHand })).toBe("the hooks and the background service to it");
+    // A service file with nothing answering yet is started on the fresh copy.
+    expect(switched({ daemon: null })).toBe("the hooks and the background service to it");
+    // One that is removed is not switched.
+    expect(switched({ wanted: false, daemon: null })).toBe("the hooks to it");
+    // Nobody hooked.
+    expect(switched({ harnesses: [] })).toBe("the background service to it");
+    expect(switched({ harnesses: [], service: null, daemon: byHand })).toBe("the daemon that runs here to it");
+    expect(switched({ harnesses: [], service: null, daemon: null })).toBeNull();
   });
 
   it("a copy where this user may not write stays, with the one line that removes it where there is one", () => {
@@ -1097,7 +1192,7 @@ describe("the steps, in the order they are taken", () => {
       dir: path.join(LOCAL, "node_modules", "sessionpipe"),
       replaces: true,
       touches: [path.join(LOCAL, "node_modules", "sessionpipe"), path.join(LOCAL, "sessionpipe.cmd")],
-      why: "It is installed fresh in ~\\AppData\\Roaming\\npm (where the one you type is); sessionpipe 1.1.0, which is there now, is taken out first and put back if the install fails.",
+      say: "1.2.0, the newest release, fresh in ~\\AppData\\Roaming\\npm (replaces 1.1.0)",
     });
     expect(does(p)).toEqual(["fetch", "install", "use", `remove ${spare.dir}`, "prove"]);
     expect(p.steps.find((s) => s.do === "remove")?.touches).toEqual([spare.dir, path.join(BREW, "sessionpipe.cmd")]);
@@ -1128,9 +1223,8 @@ describe("the steps, in the order they are taken", () => {
     expect(w.steps.find((s) => s.do === "remove")).toEqual({
       do: "remove",
       path: bin(USR, "win32"),
-      what: "a link to a sessionpipe that is gone",
       touches: [bin(USR, "win32")],
-      why: `${bin(USR, "win32")} leads to a sessionpipe that is gone: the link is removed.`,
+      say: `${bin(USR, "win32")} (a link to a copy that is gone)`,
     });
     // The home's own is told by the folder the look gives for its command, not by a
     // name put together from the prefix: where `<prefix>/bin` is a link to another
@@ -1156,32 +1250,130 @@ describe("the steps, in the order they are taken", () => {
     expect(both.notes).toEqual([NOT_ON_PATH(path.join(LOCAL, "bin")), NOTHING_STARTS_IT]);
   });
 
-  it("the first and the last step are always the same two", () => {
+  it("the first and the last step are always the same two, and neither has a row: the download is the safety line's to say, the check the run's", () => {
+    for (const f of [{}, { harnesses: [] }, { service: null, daemon: null }, { wanted: false, daemon: null }]) {
+      const p = plan(inv({ copies: [one({ version: OLD })] }), facts(f));
+      expect(p.steps[0]).toEqual(FETCH);
+      expect(p.steps.at(-1)).toEqual(PROVE);
+    }
+    expect(Object.keys(FETCH).sort()).toEqual(["do", "touches", "version"]);
+    expect(Object.keys(PROVE).sort()).toEqual(["do", "touches"]);
+    // What the download is for is said once, under the rows, with the release by its number.
     const p = plan(inv({ copies: [one({ version: OLD })] }), facts());
-    expect(p.steps[0]).toEqual(FETCH);
-    expect(p.steps.at(-1)).toEqual(PROVE);
+    expect(p.safety[0]).toBe("Nothing is touched until 1.2.0 has downloaded. A failed install is undone.");
+    const next = plan(inv({ copies: [one({ version: OLD })] }), facts({ latest: { version: "1.2.1" } }));
+    expect(next.safety[0]).toBe("Nothing is touched until 1.2.1 has downloaded. A failed install is undone.");
   });
 
-  it("the last step says what is checked, and names the hooks and the service only where there are any", () => {
+  it("what keeps a run safe: the download first, then what restarts, named only where something runs in the background", () => {
     const old = inv({ copies: [one({ version: OLD })] });
-    const checked = (f: Partial<Facts>) => step(plan(old, facts(f)), "prove").why;
-    const that = (...parts: string[]) =>
-      `Then it is checked: ${["the fresh copy runs", "a shell finds it", ...parts].join(", ")}, and nothing here names a copy that was removed.`;
-    expect(checked({})).toBe(that("the hooks run it", "the background service runs it"));
-    expect(checked({})).toBe(PROVE.why);
-    // No agent hooked: no hooks to check.
-    expect(checked({ harnesses: [] })).toBe(that("the background service runs it"));
-    // No service file and no daemon: nothing runs it in the background.
-    expect(checked({ service: null, daemon: null })).toBe(that("the hooks run it"));
-    expect(checked({ harnesses: [], service: null, daemon: null })).toBe(that());
+    const safe = (f: Partial<Facts>) => plan(old, facts(f)).safety;
+    // A service file that is moved onto the fresh copy: its environment is kept.
+    expect(safe({})).toEqual([SAFE, SERVICE_RESTARTS]);
+    // Hooked or not: the hooks restart nothing.
+    expect(safe({ harnesses: [] })).toEqual([SAFE, SERVICE_RESTARTS]);
+    // A service file with nothing answering yet is started on it, and said the same way.
+    expect(safe({ daemon: null })).toEqual([SAFE, SERVICE_RESTARTS]);
+    // A daemon someone started by hand beside a service file: the service takes over.
+    expect(safe({ daemon: { pid: 222, version: OLD } })).toEqual([SAFE, SERVICE_RESTARTS]);
+    // A daemon someone runs by hand, with no service file, is asked to restart onto it.
+    expect(safe({ service: null, daemon: { pid: 222, version: OLD } })).toEqual([SAFE, DAEMON_RESTARTS]);
+    // No service file and no daemon: nothing runs it in the background, and one line is all.
+    expect(safe({ service: null, daemon: null })).toEqual([SAFE]);
+    expect(safe({ harnesses: [], service: null, daemon: null })).toEqual([SAFE]);
     // A service file that is removed, with no daemon: the same.
-    expect(checked({ wanted: false, daemon: null })).toBe(that("the hooks run it"));
-    // A daemon someone runs by hand, with no service file, is asked onto it and checked.
-    expect(checked({ service: null, daemon: { pid: 222, version: OLD } })).toBe(
-      that("the hooks run it", "the background service runs it"),
+    expect(safe({ wanted: false, daemon: null })).toEqual([SAFE]);
+    // Never both: a service that is moved is the one thing said to restart.
+    for (const f of [{}, { daemon: { pid: 222, version: OLD } }, { service: null, daemon: { pid: 222, version: OLD } }])
+      expect(safe(f)).toHaveLength(2);
+  });
+
+  it("where nothing is done nothing is said of safety: nothing to repair, and every refusal", () => {
+    const two = inv({ copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD })] });
+    const blocked = shell([EMPTY], { blocked: bin(LOCAL) });
+    const apart = { said: "This sessionpipe keeps its files in /tmp/world", line: "sessionpipe reinstall" };
+    for (const p of [
+      plan(inv(), facts()),
+      plan(inv({ ...shell([]) }), facts()),
+      plan(inv(), facts({ latest: { error: OFFLINE } })),
+      plan(inv({ ...two, reach: null }), facts({ apart })),
+      plan(inv({ ...two, ...blocked }), facts()),
+      plan(two, facts({ latest: { error: OFFLINE } })),
+      plan(two, facts({ npm: false })),
+      plan(two, facts({ hooks: { version: "9.9.9", wrong: [] } })),
+      plan(inv({ ...two, homes: [] }), facts()),
+    ]) {
+      expect(p.steps).toEqual([]);
+      expect(p.safety).toEqual([]);
+      expect(p.nothing === null).toBe(p.refuse !== null);
+    }
+  });
+});
+
+describe("what a removal's row says: the release and the folder, and of a link, the file", () => {
+  /** The words of the one removal a plan has. */
+  const removed = (i: Partial<Inventory>, show?: (p: string) => string) => {
+    const p = plan(inv(i), facts(), show);
+    const all = p.steps.filter((s) => s.do === "remove");
+    expect(all).toHaveLength(1);
+    return (all[0] as Extract<Step, { do: "remove" }>).say;
+  };
+
+  it("a copy by its release, a broken one as that, npm's leftover as a leftover folder", () => {
+    expect(removed({ copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD })] })).toBe(
+      "1.1.0 in /opt/homebrew",
     );
-    // A service file with nothing answering yet: the service is started on it, and checked.
-    expect(checked({ daemon: null })).toBe(that("the hooks run it", "the background service runs it"));
+    // The same release as the fresh copy is still named by it: the folder tells them apart.
+    expect(removed({ copies: [one(), copy(NVM, { where: "~/.nvm/versions/node/v22.1.0" })] })).toBe(
+      "1.2.0 in ~/.nvm/versions/node/v22.1.0",
+    );
+    expect(
+      removed({
+        copies: [
+          one(),
+          copy(BREW, { where: "/opt/homebrew", version: null, runs: false, wrong: "its package.json can't be read" }),
+        ],
+      }),
+    ).toBe("the broken copy in /opt/homebrew");
+    // One that says a release and doesn't run is named by the release: the table says the rest.
+    expect(
+      removed({
+        copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD, runs: false, wrong: "it doesn't run" })],
+      }),
+    ).toBe("1.1.0 in /opt/homebrew");
+    // npm's leftover has no release worth naming, whatever its package.json says.
+    expect(removed({ copies: [one(), leftover(BREW, { where: "/opt/homebrew" })] })).toBe(
+      "a leftover folder in /opt/homebrew",
+    );
+    expect(removed({ copies: [one(), leftover(LOCAL, { where: "~/.local", version: null })] })).toBe(
+      "a leftover folder in ~/.local",
+    );
+    expect(removed({ copies: [one(), cached({ uses: ["hooks"] })] })).toBe("1.2.0 in ~/.npm/_npx/0a1b2c3d4e5f6a7b");
+  });
+
+  it("a copy's folder is the look's own word for it; a link is the file, as the caller shows a path", () => {
+    const show = (p: string) => `<${p}>`;
+    // The look shortened the folder already: it is not shown a second time.
+    expect(removed({ copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD })] }, show)).toBe(
+      "1.1.0 in /opt/homebrew",
+    );
+    expect(removed({ dangling: [bin(USR)] })).toBe(`${bin(USR)} (a link to a copy that is gone)`);
+    expect(removed({ dangling: [bin(USR)] }, show)).toBe(`<${bin(USR)}> (a link to a copy that is gone)`);
+    expect(removed({ platform: "win32", dangling: [bin(USR, "win32")] }, show)).toBe(
+      `<${bin(USR, "win32")}> (a link to a copy that is gone)`,
+    );
+  });
+
+  it("a row says nothing of the link that goes with a copy: it is touched, and the run says it when it is gone", () => {
+    const linked = plan(inv({ copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD })] }), facts());
+    const bare = plan(
+      inv({ copies: [one(), copy(BREW, { where: "/opt/homebrew", version: OLD, bins: [] })] }),
+      facts(),
+    );
+    const row = (p: Plan) => p.steps.find((s) => s.do === "remove") as Extract<Step, { do: "remove" }>;
+    expect(row(linked).say).toBe(row(bare).say);
+    expect(row(linked).touches).toEqual([slotIn(BREW, "linux"), bin(BREW)]);
+    expect(row(bare).touches).toEqual([slotIn(BREW, "linux")]);
   });
 });
 
@@ -1279,12 +1471,13 @@ describe("what a shell finds first, once every copy that goes is gone and the fr
     // And a file there that leads to no folder at all.
     const file = { file: bin(LOCAL), dir: null };
     expect(finds(plan(inv({ copies: [mine, old], ...shell([older, file]) }), facts()))).toEqual(FIRST(bin(LOCAL)));
-    // With one clean copy otherwise, the sentence says what is typed.
+    // With one clean copy otherwise, the note says what is typed, and it is not "nothing to repair".
     const fine = plan(
       inv({ copies: [one({ uses: ["service", "hooks", "this"] }), checkout], ...shell([inPlace]) }),
       facts(),
     );
-    expect(fine.nothing).toBe(TYPED(bin(LOCAL)) + LEFT_ALONE);
+    expect(fine.nothing).toBe(ONE_COPY);
+    expect(finds(fine)).toEqual(FIRST(bin(LOCAL)));
     // The home's own link there, to the home's own copy, is the fresh copy's: nothing to name.
     expect(finds(plan(inv({ copies: [mine, old], ...shell([older, here]) }), facts()))).toEqual(ITSELF);
     // One folder further on PATH is behind it.
@@ -1338,7 +1531,7 @@ describe("what a shell finds first, once every copy that goes is gone and the fr
       expect(finds(p)).toEqual(FIRST(script));
       // The same where there is nothing to repair.
       const fine = plan(inv({ ...shell([stranger, here]) }), facts());
-      expect(fine.nothing).toBe(TYPED(script));
+      expect(fine.nothing).toBe(ONE_COPY);
       expect(finds(fine)).toEqual(FIRST(script));
     } finally {
       cwd.mockRestore();
@@ -1430,15 +1623,15 @@ describe("a path in a sentence is said as the caller shows it; what is touched, 
     const p = plan(mixed(), facts(), show);
     expect(p.notes).toEqual([
       `<${path.join(LOCAL, "bin")}> is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`,
-      `What a shell finds first is <${script}>, which is not this copy: typing \`sessionpipe\` starts that one.`,
+      // The home is the look's own word for it, shortened already: only the file is shown.
+      `Typing \`sessionpipe\` starts <${script}>, not the copy in ~/.local.`,
     ]);
-    // The link's own step: what it removes and touches is the file, whole.
+    // The link's own step: what it removes and touches is the file, whole; its row shows it.
     expect(p.steps.find((s) => s.do === "remove")).toEqual({
       do: "remove",
       path: gone,
-      what: "a link to a sessionpipe that is gone",
       touches: [gone],
-      why: `<${gone}> leads to a sessionpipe that is gone: the link is removed.`,
+      say: `<${gone}> (a link to a copy that is gone)`,
     });
     expect(p.left).toEqual([
       // A copy's place is the look's own word for it, which the caller shortened already;
@@ -1463,8 +1656,10 @@ describe("a path in a sentence is said as the caller shows it; what is touched, 
       },
     ]);
     // Those four and no more: not the file a shell finds first, not the home, not a step's
-    // folder or what it touches, not a copy's removal.
+    // folder or what it touches, not a copy's removal, not a line under the rows.
     expect(shown(p)).toBe(4);
+    expect(JSON.stringify(p.safety)).not.toContain("<");
+    expect(step(p, "install").say).toBe("1.2.0, the newest release, fresh in ~/.local (replaces 1.2.0)");
     expect(p.first).toBe(script);
     expect(p.home).toEqual(home({ pathAt: null }));
     expect(step(p, "install")).toMatchObject({
@@ -1475,9 +1670,8 @@ describe("a path in a sentence is said as the caller shows it; what is touched, 
     expect(p.steps.at(-2)).toEqual({
       do: "remove",
       path: spare.dir,
-      what: "sessionpipe 1.1.0",
       touches: [spare.dir, bin(BREW)],
-      why: "/opt/homebrew holds sessionpipe 1.1.0: it is removed, with its link.",
+      say: "1.1.0 in /opt/homebrew",
     });
     expect(step(p, "use").touches).toEqual([...HOOKS, FILE]);
   });
@@ -1488,19 +1682,21 @@ describe("a path in a sentence is said as the caller shows it; what is touched, 
     expect(whole).toEqual(plan(mixed(), facts(), (p) => p));
     expect(whole.notes).toEqual([NOT_ON_PATH(path.join(LOCAL, "bin")), FOUND_FIRST(script)]);
     expect(whole.left[1]?.where).toBe(script);
-    expect(whole.steps.find((s) => s.do === "remove")?.why).toBe(
-      `${gone} leads to a sessionpipe that is gone: the link is removed.`,
-    );
+    expect(whole.steps.find((s) => s.do === "remove")).toMatchObject({
+      say: `${gone} (a link to a copy that is gone)`,
+    });
   });
 
   it("the notes are shown where there is nothing to repair, and where it refuses", () => {
     const fine = { copies: [one(), checkout], dangling: [] };
     const nothing = plan(mixed(fine), facts(), show);
-    expect(nothing.nothing).toBe(TYPED(`<${script}>`) + LEFT_ALONE);
+    // The sentence names no path; the notes beside it do, each as the caller shows one.
+    expect(nothing.nothing).toBe(ONE_COPY);
     expect(nothing.notes).toEqual([
       `<${path.join(LOCAL, "bin")}> is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`,
-      `What a shell finds first is <${script}>, which is not this copy: typing \`sessionpipe\` starts that one.`,
+      `Typing \`sessionpipe\` starts <${script}>, not the copy in ~/.local.`,
     ]);
+    expect(shown(nothing)).toBe(3);
     expect(nothing.first).toBe(script);
     expect(nothing.left.map((l) => l.where)).toEqual(["~/code", `<${script}>`]);
     const refused = plan(mixed(), facts({ npm: false }), show);
@@ -1548,19 +1744,48 @@ describe("idle: an npx cache entry nothing uses but this command is no copy to r
         [one({ uses: ["typed", "service", "hooks"] }), entry],
       ]) {
         const p = plan(inv({ copies }), facts());
-        // The clean copy is the one named; the entry is said to be npm's own, and left.
-        expect(p.nothing).toBe(NOTHING + NPX_CACHE);
+        // The clean copy is the one the sentence is about; the entry is listed as npm's
+        // own, left, and not a copy this command would have removed.
+        expect(p.nothing).toBe(NOTHING);
         expect(p.steps).toEqual([]);
-        expect(p.left).toEqual([]);
+        expect(p.notes).toEqual([]);
+        expect(p.left).toEqual([
+          {
+            where: "~/.npm/_npx/0a1b2c3d4e5f6a7b",
+            path: CACHED,
+            version: NEW,
+            why: NPX_CACHE,
+            line: null,
+            ours: false,
+          },
+        ]);
       }
     }
-    // Offline too, where the one copy's own release is all there is to hold things to.
-    const latest = { error: "registry.npmjs.org can't be reached (ENOTFOUND)" };
-    expect(
-      plan(inv({ copies: [cached({ uses: ["this"], version: "1.0.0" }), one()] }), facts({ latest })).nothing,
-    ).toBe(
-      `This computer has one sessionpipe: 1.2.0, in ~/.local (npm couldn't be asked whether that is the newest: registry.npmjs.org can't be reached (ENOTFOUND)). Nothing to repair.${NPX_CACHE}`,
+    // Offline too, where the one copy's own release is all there is to hold things to:
+    // the sentence and the note name the clean copy's release, the row the entry's own.
+    const offline = plan(
+      inv({ copies: [cached({ uses: ["this"], version: "1.0.0" }), one()] }),
+      facts({ latest: { error: OFFLINE } }),
     );
+    expect(offline.nothing).toBe(UNASKED(NEW));
+    expect(offline.notes).toEqual([NPM_UNASKED(NEW)]);
+    expect(offline.left).toEqual([
+      {
+        where: "~/.npm/_npx/0a1b2c3d4e5f6a7b",
+        path: CACHED,
+        version: "1.0.0",
+        why: NPX_CACHE,
+        line: null,
+        ours: false,
+      },
+    ]);
+    // An entry that something runs from is no cache: it is a second copy, and no such row.
+    const used = plan(
+      inv({ copies: [one({ uses: ["typed", "service", "this"] }), cached({ uses: ["hooks"] })] }),
+      facts(),
+    );
+    expect(used.nothing).toBeNull();
+    expect(used.left).toEqual([]);
   });
 
   it("an entry of a newer release than npm's newest (`npx sessionpipe@next reinstall`) moves nothing back", () => {
@@ -1576,9 +1801,12 @@ describe("idle: an npx cache entry nothing uses but this command is no copy to r
     expect(unused.refuse).toBeNull();
     expect(does(unused)).toContain(`remove ${CACHED}`);
     // Nothing to repair beside it: nothing to repair.
-    expect(plan(inv({ copies: [next, one({ uses: ["typed", "service", "hooks"] })] }), facts()).nothing).toBe(
-      NOTHING + NPX_CACHE,
-    );
+    const beside = plan(inv({ copies: [next, one({ uses: ["typed", "service", "hooks"] })] }), facts());
+    expect(beside.nothing).toBe(NOTHING);
+    // Its row names the release it is, newer than the newest or not.
+    expect(beside.left.map((l) => [l.where, l.version, l.why])).toEqual([
+      ["~/.npm/_npx/0a1b2c3d4e5f6a7b", "1.3.0-rc.1", NPX_CACHE],
+    ]);
     // One that something here runs from is what this computer runs: moving it back is refused.
     const refusal = {
       error:
