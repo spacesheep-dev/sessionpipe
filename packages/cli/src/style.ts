@@ -255,11 +255,6 @@ export function failure(ui: Ui, message: string, next: string, mild = false): st
   return `${fold(ui, label, what).join("\n")}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n`;
 }
 
-/** The one command to run next, on a line of its own so it can be copied whole: never
- *  folded, whatever its length. */
-export const tryLine = (ui: Ui, next: string): string =>
-  `${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}`;
-
 /** A length of time, in the two units a person reads: "12 s", "3 min", "2 h", "5 days". */
 export function span(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
