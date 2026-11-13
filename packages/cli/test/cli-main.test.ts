@@ -328,6 +328,10 @@ beforeEach(() => {
     SESSIONPIPE_STATE: state,
     SESSIONPIPE_DATA: path.join(tmp, "data"),
     SESSIONPIPE_SOCKET: path.join(tmp, "ctl.sock"),
+    // This runner's own npmrc is no part of the home that is looked in: npm names it to
+    // all it starts (`npm test`, `npx vitest`), and doctor reads npm's prefix from the
+    // file named there.
+    npm_config_userconfig: undefined,
     SESSIONPIPE_SECRETS: "file",
     SESSIONPIPE_CLAUDE: path.join(tmp, "no-claude"),
     SESSIONPIPE_NO_UPDATE_CHECK: undefined,
@@ -2043,30 +2047,139 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
     expect(readdirSync(ran())).toEqual([]);
   });
 
-  it("M3: what typing starts is said where it is no installed copy: a checkout linked first on PATH: a row, a warning, and a thing to fix that has no command", async () => {
+  it("T2: npm's own prefix, where the person's npmrc sets one, is looked in by doctor as by reinstall: a second copy there whose command folder is off PATH is a thing to fix (it was 'All good', and reinstall then removed that copy)", async () => {
+    // The reviewer's computer: the copy that is typed is whole, and a second one sits in
+    // the prefix `~/.npmrc` names, a folder nothing else leads to. `reinstall` asks npm for
+    // its prefix and finds it; doctor asked nobody, and said all good.
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const prefix = path.join(home, "tools", "npm");
+    const second = install(prefix, "0.9.0");
+    const well = await run("doctor");
+    expect(well.lines[0]).toBe("✓ All good");
+    expect(vi.mocked(look).mock.calls.at(-1)?.[0].npmPrefix).toBeNull();
+    put(path.join(home, ".npmrc"), `registry=https://registry.npmjs.org/\nprefix=${prefix}\n`);
+    const d = await run("doctor");
+    expect(vi.mocked(look).mock.calls.at(-1)?.[0].npmPrefix).toBe(prefix);
+    expect(d.lines[0]).toBe("! 1 thing needs attention");
+    expect(d.text).toMatch(
+      row("!", "copies", "1.0.0 in ~/.local (you type this); 0.9.0 in ~/tools/npm (nothing uses it)"),
+    );
+    expect(fixes(d)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const j = await json();
+    expect(j.copies.map((c: { dir: string }) => c.dir)).toEqual([local, second]);
+    expect((await run("status")).lines[0]).toBe("! 1 thing needs attention");
+    // No npm was started to be asked, and no copy.
+    const started = [...vi.mocked(spawnSync).mock.calls, ...vi.mocked(execFileSync).mock.calls].map((c) =>
+      [c[0], ...((Array.isArray(c[1]) ? c[1] : []) as string[])].join(" "),
+    );
+    expect(started.filter((x) => /\bnpm\b|--version|prefix/.test(x))).toEqual([]);
+    expect(readdirSync(ran())).toEqual([]);
+  });
+
+  it("npmrc: the prefix doctor hands the look is the one the person's npmrc sets: the file npm names or `~/.npmrc`, its `prefix=` line, without its quotes, with `~` and the HOME variable as npm reads them; none where it sets none", async () => {
+    const asked = async (): Promise<string | null | undefined> => {
+      vi.mocked(look).mockClear();
+      await run("status");
+      expect(vi.mocked(look)).toHaveBeenCalledTimes(1);
+      return vi.mocked(look).mock.calls[0]?.[0].npmPrefix;
+    };
+    const rc = path.join(home, ".npmrc");
+    // No file: none. A folder where the file would be: none, and nothing is thrown.
+    expect(await asked()).toBeNull();
+    mkdirSync(rc);
+    expect(await asked()).toBeNull();
+    rmSync(rc, { recursive: true });
+    // (Folders of this test's own: the look is handed each, and reads there.)
+    const O = path.join(tmp, "opt");
+    for (const [text, prefix] of [
+      // Set outright, alone or among other lines, with or without spaces about the `=`.
+      [`prefix=${O}/npm\n`, `${O}/npm`],
+      [`registry=https://registry.npmjs.org/\nprefix = ${O}/npm  \nfund=false\n`, `${O}/npm`],
+      [`  prefix=${O}/npm`, `${O}/npm`],
+      // In quotes of either kind: the folder is what is between them.
+      [`prefix="${O}/my npm"\n`, `${O}/my npm`],
+      [`prefix='${O}/npm'\n`, `${O}/npm`],
+      // npm's own two ways to say the home folder; `~` only where it is the whole first part.
+      ["prefix=~/.npm-packages\n", path.join(home, ".npm-packages")],
+      ["prefix=~\n", home],
+      ["prefix=~\\tools\n", `${home}\\tools`],
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: npm's own spelling in an npmrc
+      ["prefix=${HOME}/.npm-global\n", path.join(home, ".npm-global")],
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: npm's own spelling in an npmrc
+      ['prefix="${HOME}/a/${HOME}"\n', `${home}/a/${home}`],
+      ["prefix=~other/npm\n", "~other/npm"],
+      [`prefix=${O}/~/npm\n`, `${O}/~/npm`],
+      // No line that sets it: another key that ends in the word, a line that is a comment,
+      // a file with nothing in it.
+      ["save-prefix=~\ntag-version-prefix=v\n", null],
+      [`# prefix=${O}/npm\n;prefix=${O}/npm\n`, null],
+      ["", null],
+      ["registry=https://registry.npmjs.org/\n", null],
+      // A `prefix=` with nothing after it names no folder (npm reads it as none set): it
+      // took the next line of the file for one. Nor do blanks alone; and the line after
+      // it is still read as its own.
+      ["prefix=\nfund=false\n", null],
+      ["prefix= \t\nfund=false\n", null],
+      [`prefix=\nprefix=${O}/npm\n`, `${O}/npm`],
+      [`\n\n\tprefix\t=\t${O}/npm\t\n`, `${O}/npm`],
+    ] as const) {
+      put(rc, text);
+      expect(await asked(), JSON.stringify(text)).toBe(prefix);
+    }
+    // The file npm itself names (`npm_config_userconfig`) is the one read, and then
+    // `~/.npmrc` is not; named and not there, none.
+    put(rc, `prefix=${O}/home\n`);
+    const other = path.join(tmp, "elsewhere", "npmrc");
+    put(other, `prefix=${O}/named\n`);
+    vi.stubEnv("npm_config_userconfig", other);
+    expect(await asked()).toBe(`${O}/named`);
+    put(other, "fund=false\n");
+    expect(await asked()).toBeNull();
+    vi.stubEnv("npm_config_userconfig", path.join(tmp, "elsewhere", "none"));
+    expect(await asked()).toBeNull();
+    // Named by an empty word, it is `~/.npmrc` again.
+    vi.stubEnv("npm_config_userconfig", "");
+    expect(await asked()).toBe(`${O}/home`);
+    // `reinstall` does not read it: it asks npm itself (cli-reinstall.test.ts).
+  });
+
+  it("M3, N4: what typing starts is said where npm did not install it: a checkout linked first on PATH is a row that only informs, no warning, nothing to fix, all good", async () => {
     checkout();
     onPath(path.join(home, "bin"), path.join(home, ".local", "bin"));
-    const sentence = "Typing `sessionpipe` starts ~/src/sessionpipe, which is no installed copy of it.";
+    // `reinstall`'s own sentence for it (plan.ts `typedAs`), without its full stop.
+    const sentence =
+      "Typing `sessionpipe` starts ~/src/sessionpipe, which npm did not install (a checkout, a linked folder)";
     const d = await run("doctor");
-    expect(d.text).toMatch(row("!", "copies", sentence));
-    // It is a finding, so this computer is not "All good": it is counted, and said among
-    // what is to fix, in `reinstall`'s own words for it. There is nothing to type for it:
-    // no command under the sentence, `sessionpipe reinstall` is not named, and the exit
-    // code is left alone (doctor exits 1 only where there is a command to run).
-    expect(d.lines[0]).toBe("! 1 thing needs attention");
-    expect(fixes(d)).toEqual(["To fix", `  1. ${sentence}`]);
+    expect(d.text).toMatch(row("·", "copies", sentence));
+    expect(d.text.match(/^ {2}. copies /gm)).toHaveLength(1);
+    // It is what is so on a contributor's computer, and no finding: it was "1 thing needs
+    // attention" there for good, with nothing to type. It counts for nothing: all good,
+    // nothing to fix, `sessionpipe reinstall` is not named, and the exit code is left alone.
+    expect(d.lines[0]).toBe("✓ All good");
+    expect(fixes(d)).toEqual([]);
     expect(d.text).not.toContain("sessionpipe reinstall");
     expect(process.exitCode).toBeUndefined();
+    // `status` leaves out a row that only informs.
     const brief = await run("status");
-    expect(brief.lines[0]).toBe("! 1 thing needs attention");
-    expect(said(brief, "This computer")).toMatch(new RegExp(`^! .*, copies: ${quoted(sentence)}$`));
-    expect(brief.lines.at(-1)).toBe("  `sessionpipe doctor` says what to do about it.");
+    expect(brief.lines[0]).toBe("✓ All good");
+    expect(said(brief, "This computer")).not.toContain("copies");
+    // And a program is warned of nothing.
     const j = await json();
     expect(j.copies).toEqual([]);
-    expect(about(j)).toEqual([sentence]);
+    expect(about(j)).toEqual([]);
+    expect(j.warnings.join("\n")).not.toContain("Typing");
 
-    // With two installed copies beside it: one row, the copies first and the sentence
-    // after them, and now there is a command, the one that leaves one copy.
+    // With two installed copies beside it the row is the finding's: the copies, then what
+    // is typed. And `sessionpipe reinstall` is not named as the way out: run there it
+    // leaves what is typed alone and refuses (these tests reported that doctor named it,
+    // and no longer said why it did nothing). One thing to fix, with no command, so the
+    // exit code is left alone.
     const local = install(path.join(home, ".local"), "1.0.0");
     const other = install(path.join(home, ".npm-global"), "0.9.0");
     const both = await run("doctor");
@@ -2074,18 +2187,14 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
       row("!", "copies", `1.0.0 in ~/.local (nothing uses it); 0.9.0 in ~/.npm-global (nothing uses it); ${sentence}`),
     );
     expect(both.text.match(/^ {2}. copies /gm)).toHaveLength(1);
-    // Two things to fix: the one with a command first, then what is typed, which
-    // `reinstall` will say again (it leaves what is typed alone).
-    expect(both.lines[0]).toBe("! 2 things need attention");
+    expect(both.lines[0]).toBe("! 1 thing needs attention");
     expect(fixes(both)).toEqual([
       "To fix",
-      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
-      "       sessionpipe reinstall",
-      `  2. ${sentence}`,
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. What you type is not a copy npm installed, so `sessionpipe reinstall` leaves it alone and can't put this right from here.",
     ]);
-    expect(process.exitCode).toBe(1);
+    expect(both.text).not.toMatch(/^ {7}sessionpipe reinstall$/m);
+    expect(process.exitCode).toBeUndefined();
     expect(about(await json())).toEqual([
-      sentence,
       `2 copies of sessionpipe are on this computer (1.0.0 in ${local}; 0.9.0 in ${other}); \`sessionpipe reinstall\` leaves one clean copy`,
     ]);
   });
@@ -2253,24 +2362,42 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
     mkdirSync(path.join(home, "bin"), { recursive: true });
     symlinkSync(path.join(source, "dist", "cli.js"), path.join(home, "bin", "sessionpipe"));
     onPath(path.join(home, "bin"), path.join(odd, "bin"));
-    const sentence = "Typing `sessionpipe` starts ~/src ✓ All good/sessionpipe, which is no installed copy of it.";
+    // The checkout alone on PATH: what is typed is said on doctor's plain row.
+    onPath(path.join(home, "bin"));
+    const sentence =
+      "Typing `sessionpipe` starts ~/src ✓ All good/sessionpipe, which npm did not install (a checkout, a linked folder)";
+    const typed = await run("doctor");
+    expect(typed.text).not.toContain(ESC);
+    expect(typed.text).toMatch(row("·", "copies", sentence));
+    // With the link's folder on PATH too, the row is the finding's.
+    onPath(path.join(home, "bin"), path.join(odd, "bin"));
     const piped = await run("doctor");
     expect(piped.text).not.toContain(ESC);
     expect(piped.text).toMatch(row("!", "copies", `~/prefix/bin/sessionpipe, a link to one that is gone; ${sentence}`));
-    for (const where of [{ tty: true, columns: 100 }, { tty: true, columns: 40 }, {}]) {
-      const d = await runAt(where, "doctor", "--no-color");
-      expect(d.text).not.toContain(ESC);
-      // One verdict, and it is doctor's own: the folder's name starts no line of the page.
-      expect(d.lines[0]).toBe("! 2 things need attention");
-      expect(d.lines.filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
-      const s = await runAt(where, "status", "--no-color");
-      expect(s.text).not.toContain(ESC);
-      expect(s.lines.filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
+    for (const [dirs, verdict] of [
+      [[path.join(home, "bin")], "✓ All good"],
+      [[path.join(home, "bin"), path.join(odd, "bin")], "! 1 thing needs attention"],
+    ] as const) {
+      onPath(...dirs);
+      for (const where of [{ tty: true, columns: 100 }, { tty: true, columns: 40 }, {}]) {
+        const d = await runAt(where, "doctor", "--no-color");
+        expect(d.text).not.toContain(ESC);
+        // One verdict, and it is doctor's own: the folder's name starts no line of the page.
+        expect(d.lines[0]).toBe(verdict);
+        expect(d.lines.slice(1).filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
+        const s = await runAt(where, "status", "--no-color");
+        expect(s.text).not.toContain(ESC);
+        expect(s.lines[0]).toBe(verdict);
+        expect(s.lines.slice(1).filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
+      }
+      // For a program: a path is the disk's own name for it, written as JSON writes one,
+      // so nothing of it is left that a terminal printing those lines would act on. What
+      // is typed is no warning of its own.
+      const printed = (await run("doctor", "--json")).text;
+      expect(printed).not.toContain(ESC);
+      expect(about(JSON.parse(printed)).filter((w) => w.startsWith("Typing"))).toEqual([]);
     }
-    // For a program the sentence is the one a person reads, with nothing of the folder's
-    // name left in it that a terminal printing it would act on.
-    const j = await json();
-    expect(about(j).filter((w) => w.startsWith("Typing"))).toEqual([sentence]);
+    process.exitCode = undefined;
   });
 
   it("Windows: doctor and status do not look for copies of sessionpipe there, whatever is on the disk", async () => {
@@ -2283,10 +2410,10 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
       onPlatform(p);
       const j = await json();
       expect(j.copies.map((c: { dir: string }) => c.dir)).toEqual([local, other]);
-      expect(about(j)).toHaveLength(2);
+      expect(about(j)).toHaveLength(1);
       const d = await run("doctor");
       expect(d.text).toMatch(/^ {2}! copies /m);
-      expect(fixes(d)).toContain("       sessionpipe reinstall");
+      expect(fixes(d)[1]).toMatch(/^ {2}1\. 2 copies of sessionpipe are on this computer/);
       expect(said(await run("status"), "This computer")).toContain("copies: ");
     }
     expect(vi.mocked(look)).toHaveBeenCalledTimes(6);

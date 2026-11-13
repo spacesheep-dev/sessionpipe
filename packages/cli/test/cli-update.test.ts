@@ -107,6 +107,10 @@ beforeEach(() => {
     FORCE_COLOR: undefined,
     NO_COLOR: undefined,
     npm_config_registry: undefined,
+    // This runner's own npmrc is no part of the home that is looked in: npm names it to
+    // all it starts (`npm test`, `npx vitest`), and doctor reads npm's prefix from the
+    // file named there.
+    npm_config_userconfig: undefined,
     NPM_CONFIG_REGISTRY: undefined,
   }))
     vi.stubEnv(k, v);

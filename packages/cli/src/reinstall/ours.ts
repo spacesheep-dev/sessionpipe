@@ -50,11 +50,19 @@ export interface Proving {
   npx: string | null;
   /** Folders that are never removed: the copy this run put in place. */
   keep?: readonly string[];
+  /** Folders this very run had npm install into, beside a slot. One of these is ours by
+   *  who made it, whatever the release that npm unpacked there holds; a folder of that
+   *  shape that was only found must hold a copy the proof accepts. */
+  made?: readonly string[];
 }
 
 /** Every entry a published sessionpipe has at its top; the manifest is the last to go. */
 const REST = ["dist", "README.md", "LICENSE", "NOTICE"] as const;
 const PUBLISHED: ReadonlySet<string> = new Set(["package.json", ...REST]);
+/** What an operating system drops into a folder by itself when someone looks at it: the
+ *  Finder's `.DS_Store`, Explorer's `Thumbs.db` and `desktop.ini`. Nobody put them there
+ *  and nobody misses them, so they say nothing about whose a folder is, and go with it. */
+const DROPPED: ReadonlySet<string> = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 /** What npm calls a folder it has moved out of the way, and what this command calls the
  *  folder it has npm install into. */
 export const ASIDE = /^\.sessionpipe-[A-Za-z0-9]{8}$/;
@@ -148,19 +156,39 @@ const entries = (dir: string): string[] | null => {
     return null;
   }
 };
-const only = (dir: string, names: readonly string[]): boolean => entries(dir)?.every((e) => names.includes(e)) ?? false;
+const only = (dir: string, names: readonly string[]): boolean =>
+  entries(dir)?.every((e) => names.includes(e) || DROPPED.has(e)) ?? false;
 
 /** The entry of a folder that no published sessionpipe has; null where it holds nothing
  *  but those; undefined where it is no real folder that can be read. */
 const extra = (dir: string): string | null | undefined => {
   const all = entries(dir);
-  return all === null ? undefined : (all.find((e) => !PUBLISHED.has(e)) ?? null);
+  return all === null ? undefined : (all.find((e) => !PUBLISHED.has(e) && !DROPPED.has(e)) ?? null);
 };
+
+/** Nothing in it but, at most, what a system dropped there. */
+const empty = (dir: string): boolean => entries(dir)?.every((e) => DROPPED.has(e)) ?? false;
+
+/** Why a folder's package.json does not say it is a release of sessionpipe; null where
+ *  it does. */
+function unnamed(dir: string): string | null {
+  let manifest: { name?: unknown; version?: unknown };
+  try {
+    manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")) as typeof manifest;
+  } catch {
+    return "it has no package.json that can be read (an install that was cut off?)";
+  }
+  if (manifest.name !== "sessionpipe")
+    return `its package.json says it is ${clean(JSON.stringify(manifest.name) ?? "nothing")}, not sessionpipe`;
+  return typeof manifest.version === "string" && parseVersion(manifest.version)
+    ? null
+    : "its package.json names no release of sessionpipe";
+}
 
 /** A folder this command had npm install into, as npm lays a prefix out for one package:
  *  `lib/node_modules/sessionpipe` (while it is still there), npm's own list beside it,
  *  and `bin/sessionpipe`. Nothing else, each a real folder, and no link on the way. */
-function staged(dir: string): boolean {
+function staged(dir: string, made: boolean): boolean {
   const modules = path.join(dir, "lib", "node_modules");
   const copy = path.join(modules, "sessionpipe");
   const link = path.join(dir, "bin", "sessionpipe");
@@ -171,8 +199,9 @@ function staged(dir: string): boolean {
     (gone(link) || binTarget(link) !== null) &&
     holds(path.join(dir, "lib"), ["node_modules"]) &&
     holds(modules, ["sessionpipe", ".package-lock.json"]) &&
-    // What npm unpacked there is the release it was asked for, whatever that holds.
-    (gone(copy) || entries(copy) !== null)
+    // What npm unpacked there is a copy by the same proof as any other, or nothing yet;
+    // or it is what this run asked npm for, a moment ago.
+    (gone(copy) || empty(copy) || (extra(copy) === null && unnamed(copy) === null) || (made && entries(copy) !== null))
   );
 }
 
@@ -222,24 +251,16 @@ export function prove(asked: string, o: Proving): Proof {
   // (By the name it was asked for and by where it really is.)
   if (slot === "global" && [what, real].some((x) => !gone(path.join(path.dirname(path.dirname(x)), "package.json"))))
     return not("the node_modules folder it is in is a project's own (a package.json is beside it)");
-  if (aside && staged(what)) return { is: "folder", slot, aside, staging: true };
+  if (aside && staged(what, o.made?.some((m) => same(m, what)) ?? false))
+    return { is: "folder", slot, aside, staging: true };
   const more = extra(what);
   if (more === undefined) return not("it can't be read");
   if (more !== null) return not(`it holds ${clean(more)}, which no published sessionpipe has (a checkout or a build?)`);
   // Nothing in it: what is left of a copy that could only be removed in part. Taking an
   // empty folder away loses nothing.
-  if (entries(what)?.length === 0) return { is: "folder", slot, aside, staging: false };
-  let manifest: { name?: unknown; version?: unknown };
-  try {
-    manifest = JSON.parse(readFileSync(path.join(what, "package.json"), "utf8")) as typeof manifest;
-  } catch {
-    return not("it has no package.json that can be read (an install that was cut off?)");
-  }
-  if (manifest.name !== "sessionpipe")
-    return not(`its package.json says it is ${clean(JSON.stringify(manifest.name) ?? "nothing")}, not sessionpipe`);
-  if (typeof manifest.version !== "string" || !parseVersion(manifest.version))
-    return not("its package.json names no release of sessionpipe");
-  return { is: "folder", slot, aside, staging: false };
+  if (empty(what)) return { is: "folder", slot, aside, staging: false };
+  const flaw = unnamed(what);
+  return flaw ? not(flaw) : { is: "folder", slot, aside, staging: false };
 }
 
 const gone = (p: string): boolean => {
@@ -281,7 +302,7 @@ export function remove(asked: string, o: Proving): string[] {
   try {
     if (p.staging) rmSync(what, { recursive: true });
     else {
-      for (const e of REST) rmSync(path.join(what, e), { recursive: true, force: true });
+      for (const e of [...REST, ...DROPPED]) rmSync(path.join(what, e), { recursive: true, force: true });
       rmSync(path.join(what, "package.json"), { force: true });
       rmdirSync(what);
     }

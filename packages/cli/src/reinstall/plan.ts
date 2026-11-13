@@ -91,6 +91,11 @@ export interface Plan {
   steps: Step[];
   /** What keeps a run safe, under the rows: a line each. */
   safety: string[];
+  /** The file first on PATH that npm did not make, where what typing starts was taken
+   *  from how this command was started and not read (find.ts `inferred`); and how many
+   *  installed copies stay for that reason. A run then says nothing of what typing starts. */
+  inferred: string | null;
+  kept: number;
   left: Left[];
   /** Said beside the plan, and again when it is done: what is not this command's to repair. */
   notes: string[];
@@ -125,11 +130,7 @@ const named = (c: Copy): string => (c.aside ? `a leftover folder in ${c.where}` 
  *  no fault of a copy, and not this command's to mend: `reinstall` and `doctor` both say
  *  it, and neither calls such a computer all good. */
 export function typing(inv: Inventory, show: (p: string) => string = (p) => p): string | null {
-  const typed = inv.copies.find((c) => c.dir === inv.typed);
-  if (inv.typed)
-    return typed?.slot === "global"
-      ? null
-      : `Typing \`sessionpipe\` starts ${typed?.where ?? show(inv.typed)}, which is no installed copy of it.`;
+  if (inv.typed) return null;
   // Nothing is typed. With a copy installed, that is a finding where no installed copy's
   // command folder is one a shell looks in. (With none installed there is nothing to say
   // of a computer: where a fresh one would go is `reinstall`'s to decide when it acts.)
@@ -139,6 +140,21 @@ export function typing(inv: Inventory, show: (p: string) => string = (p) => p): 
     ? `${show(path.join(off.prefix as string, "bin"))} is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`
     : null;
 }
+
+/** What typing `sessionpipe` starts, where that is something other than a copy npm
+ *  installed: a contributor's checkout, a linked folder, the copy Volta keeps. Nothing is
+ *  wrong with that, and it is not this command's to change: it is said as what is so. */
+export function typedAs(inv: Inventory, show: (p: string) => string = (p) => p): string | null {
+  const typed = inv.copies.find((c) => c.dir === inv.typed);
+  if (!inv.typed || typed?.slot === "global") return null;
+  const where = typed?.where ?? show(inv.typed);
+  return typed?.keeper
+    ? `Typing \`sessionpipe\` starts the copy Volta keeps, in ${where}.`
+    : `Typing \`sessionpipe\` starts ${where}, which npm did not install (a checkout, a linked folder).`;
+}
+
+/** The way in when the command itself may no longer be typed. */
+const NPX = "npx -y sessionpipe@latest reinstall";
 
 /** `show`: how a path is said in a sentence for a person (the caller's `~/…`). It is
  *  used in prose only: what a step touches, and a command to paste, keep the whole path. */
@@ -151,6 +167,8 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
     stays: null,
     steps: [],
     safety: [],
+    inferred: null,
+    kept: 0,
     left: [],
     notes: [],
   };
@@ -192,7 +210,13 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
   ];
   // What can't be known, said beside a computer that is otherwise fine. It is no finding:
   // a file first on PATH that npm did not make may well be the shim that starts this copy.
+  const own = typedAs(inv, show);
+  const typed = inv.copies.find((c) => c.dir === inv.typed);
+  // What is typed is a folder where npm keeps the package. Not what someone else's tool
+  // keeps (Volta's copy): that is theirs to remove, not to move.
+  const inSlot = !typed?.keeper && inv.prefixes.some((p) => slotIn(p) === inv.typed);
   const unknown = [
+    ...(own ? [own] : []),
     ...(inv.unsure
       ? [
           `Typing \`sessionpipe\` starts ${show(inv.unsure)}, which is no link of npm's: which copy it starts can't be told from here.`,
@@ -255,6 +279,20 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
     };
   }
 
+  // What is typed is not a copy npm installed (a checkout, Volta's copy), and no copy npm
+  // installed is here: nothing is this command's to repair, and `doctor` says the same.
+  // (Not where what is typed sits where npm keeps the package: that is what an install
+  // that was cut off left, and it is in the way. Nor with two daemons to sort out.)
+  if (own && !inSlot && !live.length && !inv.dangling.length && !twins(f.service, f.daemon))
+    return {
+      ...none,
+      target,
+      home,
+      left,
+      notes: [...notes, ...unknown],
+      nothing: "Nothing to repair: no copy that npm installed is on this computer.",
+    };
+
   // --- something to repair: what must hold before anything is touched ----------------------
   if (!known)
     return stop(
@@ -281,20 +319,21 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
   // this command can't name unless it was started through it.
   if (inv.unsure)
     return stop(
-      `${show(inv.unsure)} is the first \`sessionpipe\` on your PATH and no link of npm's, and this command was not started through it: it can't tell which copy that file starts, so it can't tell where the one clean copy goes. Nothing was changed. Install it into the Node you use, then run it from there`,
-      `npm install -g sessionpipe@${known} && sessionpipe reinstall`,
+      `${show(inv.unsure)} is the first \`sessionpipe\` on your PATH and no link of npm's: this command can't tell which copy that file starts, so it can't tell where the one clean copy goes. Nothing was changed. If the file is yours, point it at one copy or take it off your PATH (\`which -a sessionpipe\` shows what your PATH finds), then run this again`,
+      // No command leads out by itself (installing another copy leads back here): none is named.
+      "",
     );
-  const typed = inv.copies.find((c) => c.dir === inv.typed);
-  // Not what someone else's tool keeps (Volta's copy): that is theirs to remove, not to move.
-  const inSlot = !typed?.keeper && inv.prefixes.some((p) => slotIn(p) === inv.typed);
-  /** The line that moves something out of the way, and writes over nothing. */
-  const aside = (file: string): string => `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")}`;
+  /** The line that moves something out of the way, and writes over nothing. Once it has
+   *  run, `sessionpipe` may be nowhere to type: the repair goes on through npx, in the
+   *  same line. */
+  const aside = (file: string): string => `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")} && ${NPX}`;
+  const ASIDE = "The line moves it aside and runs the repair again, through npx";
   if (inv.typed && typed?.slot !== "global")
     return stop(
-      `Typing \`sessionpipe\` starts ${typed?.where ?? show(inv.typed)}, which is no installed copy of it${
-        typed?.not ? ` (${typed.not})` : ""
-      }: this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed${
-        inSlot ? ". Move it aside, then run this again" : ""
+      `${(own as string).slice(0, -1)}${
+        typed?.not && !typed.keeper ? `: ${typed.not}` : ""
+      }. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed${
+        inSlot ? `. ${ASIDE}` : ""
       }`,
       // A folder where npm keeps the package (what an install that was cut off left, a
       // build) is in the way of the one copy, and the person's to move: the line moves it,
@@ -304,7 +343,7 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
     );
   if (!home && inv.taken)
     return stop(
-      `${show(inv.taken.dir)} is not provably sessionpipe's (${inv.taken.why}), and it is where the one copy goes. Nothing was changed. Move it aside, then run this again`,
+      `${show(inv.taken.dir)} is not provably sessionpipe's (${inv.taken.why}), and it is where the one copy goes. Nothing was changed. ${ASIDE}`,
       aside(inv.taken.dir),
     );
   if (!home)
@@ -318,7 +357,7 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
   // and what is not provably ours is never moved by this command.
   if (home.blocked)
     return stop(
-      `${show(home.blocked)} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again`,
+      `${show(home.blocked)} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. ${ASIDE}`,
       aside(home.blocked),
     );
   if (!inv.typed && !home.onPath)
@@ -393,8 +432,23 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
       say: `${show(file)} (a link to a copy that is gone)`,
     });
   // What is in nobody's use goes first; the copy this command runs from goes last.
+  let kept = 0;
   const rank = (c: Copy) => (c.uses.includes("this") ? 3 : c.uses.length ? 2 : c.aside ? 0 : 1);
   for (const c of ours.filter((c) => c.dir !== at).sort((a, b) => rank(a) - rank(b))) {
+    // What typing starts was not read, only taken from how this command was started: the
+    // file first on PATH may start any installed copy. None is removed.
+    if (inv.inferred && c.slot === "global" && !c.aside) {
+      left.push({
+        where: c.where,
+        path: c.dir,
+        version: c.version,
+        why: `${show(inv.inferred)} may be what starts it`,
+        line: null,
+        ours: false,
+      });
+      kept++;
+      continue;
+    }
     if (!c.writable) {
       left.push({
         where: c.where,
@@ -428,8 +482,20 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
           : []),
     ],
     left,
+    inferred: inv.inferred,
+    kept,
     // What typing starts was either a refusal above or is what this run puts right: of
-    // the notes, only what it does not mend is said beside a plan.
-    notes: notes.filter((n) => n !== astray),
+    // the notes, only what it does not mend is said beside a plan. And what is not known
+    // is said as that.
+    notes: [
+      ...notes.filter((n) => n !== astray),
+      ...(inv.inferred
+        ? [
+            `Typing \`sessionpipe\` starts ${show(inv.inferred)}, which is no link of npm's: which copy it starts is not known${
+              kept ? ", so no other installed copy is removed" : ""
+            }.`,
+          ]
+        : []),
+    ],
   };
 }

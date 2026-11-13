@@ -37,6 +37,8 @@
 //    AND this command was started as npm's link to it (how a shim starts one), else null
 //    with `unsure` naming the file. A link to a copy that is gone starts nothing: it is in
 //    `dangling`, as is such a link in a prefix that is not on PATH.
+//  - `inferred`: that file, where what is typed was taken from how the command was started
+//    (as npm's link to an installed copy) and so is not read from anywhere.
 //  - `home`: the typed copy's prefix when that copy is a global one of ours, whatever
 //    folder that is; null when what is typed is no install of ours, and with `unsure`;
 //    with nothing typed, the first of (the prefix whose copy has a file where its link
@@ -503,6 +505,8 @@ function seen(m: Model): Inventory {
     onPath,
     typed,
     unsure,
+    // What is typed was taken from how the command was started, not read: by which file.
+    inferred: shimmed ? opaque : null,
     home: homes.find((h) => h.onPath) ?? homes[0] ?? null,
     taken: homes.length ? null : taken,
     prefixes: places.map((p) => p.prefix),

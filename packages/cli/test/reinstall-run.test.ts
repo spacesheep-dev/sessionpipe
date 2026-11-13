@@ -24,8 +24,9 @@ import type { Status } from "../src/control/daemon.js";
 import type { Health } from "../src/control/local.js";
 import type { Outcome } from "../src/current.js";
 import { binTarget, ASIDE as LEFT_BEHIND, remove as removeOurs, same } from "../src/reinstall/ours.js";
-import type { Left, Plan, Step } from "../src/reinstall/plan.js";
+import { type Left, plan as makePlan, type Plan, type Step } from "../src/reinstall/plan.js";
 import { carryOut, type Doing, type Done, type Proof } from "../src/reinstall/run.js";
+import { world } from "./helpers/reinstall-worlds.js";
 
 const HOME = path.join(path.sep, "home", "u");
 /** The home of the fresh copy and its slot. */
@@ -106,6 +107,8 @@ const plan = (steps: Step[], o: Partial<Plan> = {}): Plan => ({
   steps,
   // The plan's screen says it; the run has nothing to do with it.
   safety: ["Nothing is touched until 2.0.0 has been downloaded and seen to run."],
+  inferred: null,
+  kept: 0,
   left: [],
   notes: [],
   ...o,
@@ -575,7 +578,7 @@ describe("the fresh install: beside the slot, then two moves", () => {
     expect(w.all).toEqual([
       `install 2.0.0 in ${STAGE}`,
       `remove ${STAGE}`,
-      `warn: ${tilde(STAGE)} could not be removed (EACCES: permission denied, rmdir): the next run takes it`,
+      `warn: ${tilde(STAGE)} could not be removed (EACCES: permission denied, rmdir)`,
     ]);
     expect(w.done).toEqual(failed(`${WHY}. Nothing was changed`));
     expect(folders(w)).toEqual(sorted(SLOT, STAGE));
@@ -618,9 +621,7 @@ describe("the fresh install: beside the slot, then two moves", () => {
       unmovable: { [SLOT]: "EACCES: permission denied, rename" },
       stuck: { [STAGE]: "EBUSY: resource busy or locked" },
     });
-    expect(stuck.said).toEqual([
-      `warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked): the next run takes it`,
-    ]);
+    expect(stuck.said).toEqual([`warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked)`]);
     expect(stuck.done).toEqual(w.done);
   });
 
@@ -755,7 +756,7 @@ describe("the fresh install: beside the slot, then two moves", () => {
     const old = await carry(plan(steps), { there: [SLOT], stuck: { [ASIDE]: IN_PART(ASIDE) } });
     expect(old.all).toEqual([
       ...SWAP.slice(0, 5),
-      `warn: ${tilde(ASIDE)} could not be removed (${IN_PART(ASIDE)}): the next run takes it`,
+      `warn: ${tilde(ASIDE)} could not be removed (${IN_PART(ASIDE)})`,
       `relink ${PREFIX}`,
       REPLACED,
       "use 2.0.0, the service too",
@@ -768,17 +769,15 @@ describe("the fresh install: beside the slot, then two moves", () => {
     expect(old.disk.get(SLOT)).toBe(FRESH);
     // npm's own folder: the same, and the old copy still goes.
     const stage = await carry(plan(steps), { there: [SLOT], stuck: { [STAGE]: "EBUSY: resource busy or locked" } });
-    expect(stage.said[0]).toBe(
-      `warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked): the next run takes it`,
-    );
+    expect(stage.said[0]).toBe(`warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked)`);
     expect(stage.did.slice(0, SWAP.length)).toEqual(SWAP);
     expect(stage.done).toEqual(ONE);
     expect(folders(stage)).toEqual(sorted(SLOT, STAGE));
     // Both: a line each.
     const both = await carry(plan(steps), { there: [SLOT], stuck: { [STAGE]: "EBUSY", [ASIDE]: "EPERM" } });
     expect(both.said.filter((l) => l.startsWith("warn: "))).toEqual([
-      `warn: ${tilde(STAGE)} could not be removed (EBUSY): the next run takes it`,
-      `warn: ${tilde(ASIDE)} could not be removed (EPERM): the next run takes it`,
+      `warn: ${tilde(STAGE)} could not be removed (EBUSY)`,
+      `warn: ${tilde(ASIDE)} could not be removed (EPERM)`,
     ]);
     expect(both.done).toEqual(ONE);
   });
@@ -1382,6 +1381,120 @@ describe("the proof at the end", () => {
     expect(after.said).toEqual(["ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0"]);
   });
 
+  it("N1: what typing starts was taken, not read (a file npm did not make is first on PATH): the proof is not asked about typing, before a removal or at the end, and no line says 'starts it'", async () => {
+    const SHIM = path.join(path.dirname(path.dirname(BIN)), "shims", "sessionpipe");
+    const taken0 = { inferred: SHIM };
+    // Whatever the look answers of what is typed, either way: it is not what decides.
+    for (const typed of [true, false]) {
+      const proof = { typed, onPath: [SHIM, BIN] };
+      // With removals (a leftover, a cache entry): the proof before the first one asks
+      // only that the copy runs, and the run goes on.
+      const w = await carry(plan([fetch(), install(true), use(), remove(LEFTOVER), remove(NPX), prove()], taken0), {
+        there: [SLOT, LEFTOVER, NPX],
+        proof,
+      });
+      expect(w.done.state, String(typed)).toBe("one");
+      expect(taken(w)).toEqual([LEFTOVER, NPX]);
+      expect(w.proved).toEqual([[], [LEFTOVER, NPX]]);
+      for (const line of [...w.said, ...(w.done.state === "one" ? [w.done.said, ...w.done.warn] : [])]) {
+        expect(line).not.toMatch(/starts it|does not start/);
+        expect(line).not.toContain(tilde(SHIM));
+      }
+      expect(w.said).toContain(RUNS);
+      // With none: the same silence at the end.
+      const bare = await carry(plan([use(), prove()], taken0), { proof });
+      expect(bare.said).toEqual([RUNS]);
+      expect(bare.done).toEqual(ONE);
+    }
+    // A copy that does not run still ends it, before any removal: that much is read.
+    const dead = await carry(plan([use(), remove(LEFTOVER), prove()], taken0), {
+      there: [SLOT, LEFTOVER],
+      proof: { runs: null, typed: true },
+    });
+    expect(dead.done).toEqual({
+      state: "failed",
+      error: `${UNFIT("nothing")}: no other copy was removed`,
+      next: BY_NPX,
+    });
+    expect(taken(dead)).toEqual([]);
+    // The same plan where what is typed WAS read is held to it, as ever.
+    const read = await carry(plan([use(), remove(LEFTOVER), prove()]), {
+      there: [SLOT, LEFTOVER],
+      proof: { typed: false, onPath: [SHIM, BIN] },
+    });
+    expect(read.done.state).toBe("failed");
+    expect(taken(read)).toEqual([]);
+  });
+
+  it("N1: with installed copies kept for that reason, the last sentence does not say this computer has ONE sessionpipe", async () => {
+    const kept = await carry(plan([use(), prove()], { inferred: "/x/shims/sessionpipe", kept: 2 }), {
+      proof: { typed: true, onPath: [] },
+    });
+    expect(kept.done).toEqual({
+      state: "one",
+      said: "sessionpipe 2.0.0 is installed in ~/.local and in use. Pairings and settings are as they were.",
+      warn: [],
+    });
+    // And where the home's copy stayed as it was.
+    const stays = await carry(
+      plan([use(), prove()], { inferred: "/x/shims/sessionpipe", kept: 1, stays: "2.0.0 in ~/.local as it is" }),
+      { proof: { typed: true, onPath: [] } },
+    );
+    expect(stays.done.state === "one" && stays.done.said).toBe(
+      "sessionpipe 2.0.0 is installed in ~/.local and in use (not installed again: it is whole, the newest, and not yours to write). Pairings and settings are as they were.",
+    );
+    // None kept: one sessionpipe, as ever, inferred or not.
+    expect((await carry(plan([use(), prove()], { inferred: "/x/shims/sessionpipe" }), {})).done).toEqual(ONE);
+  });
+
+  it("N1: over computers made up from a seed, no run of a plan whose `inferred` is set says what typing starts, or fails for it; and with a copy kept it never says this computer has ONE", async () => {
+    let ran = 0;
+    let keeping = 0;
+    const wrong: string[] = [];
+    for (let seed = 1; seed <= 2500; seed++) {
+      const w = world(seed);
+      const p = makePlan(w.inv, w.facts);
+      if (!p.steps.length || !p.inferred) continue;
+      ran++;
+      const said: string[] = [];
+      // Every effect works, and the look says typing does NOT start the copy: were it
+      // asked, the run would stop before a removal, or say so at the end.
+      const done = await carryOut(p, {
+        say: (step) => void said.push(step.text),
+        tilde: (x) => x,
+        fetch: async () => null,
+        install: async () => null,
+        exists: () => false,
+        rename: () => {},
+        id: () => "a1b2c3d4",
+        status: async () => null,
+        health: async () => null,
+        quiesce: async () => true,
+        seed: () => {},
+        stop: () => {},
+        use: async (version) => ({ state: "current", version, said: "ok" }),
+        runningFrom: async () => null,
+        same: (x, y) => x === y,
+        remove: async (what) => [what],
+        relink: () => true,
+        prove: async () => ({ runs: p.target, typed: false, onPath: [p.inferred as string], named: [] }),
+        sleep: async () => {},
+        now: () => 0,
+      });
+      const text = [...said, ...("said" in done ? [done.said] : []), ...("warn" in done ? done.warn : [])].join("\n");
+      if (/starts it|does not start the copy/.test(text)) wrong.push(`seed ${seed}: it says what typing starts`);
+      if (done.state === "failed") wrong.push(`seed ${seed}: it failed: ${done.error}`);
+      if (p.kept) {
+        keeping++;
+        if (/This computer has one sessionpipe/.test(text))
+          wrong.push(`seed ${seed}: copies were kept, and it says there is one`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(ran).toBeGreaterThan(20);
+    expect(keeping).toBeGreaterThan(5);
+  });
+
   it("typing starts this copy and a shell finds nothing else: said in green, with the file it finds", async () => {
     const w = await carry(plan([use(), prove()]), { proof: { onPath: [BIN], typed: true } });
     expect(w.said).toEqual([RUNS, TYPED]);
@@ -1770,8 +1883,10 @@ describe.skipIf(process.platform === "win32" || path.sep !== "/")(
 
     /** A computer in a folder: a prefix (with a copy of `was` in it, or none), and a run
      *  whose moves and removals are real. `npm`: what the stand-in for npm does in the
-     *  prefix it is handed, and what it answers. */
-    async function swap(was: string | null, npm: (stage: string) => string | null) {
+     *  prefix it is handed, and what it answers. `noted`: whether the folder npm is told
+     *  to install into is written down as this run's own, as the command does it (cli.ts
+     *  `made`). */
+    async function swap(was: string | null, npm: (stage: string) => string | null, noted = true) {
       const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sp-reinstall-run-")));
       try {
         const prefix = path.join(root, "home", ".local");
@@ -1782,12 +1897,17 @@ describe.skipIf(process.platform === "win32" || path.sep !== "/")(
         if (was) lay(prefix, was);
         const { w, d } = start();
         // Only what is inside this test's folder may be proven, and the copy in the slot never.
-        const proving = { reach: root, prefixes: [prefix], npx: null, keep: [slot] };
+        // And what this run has npm install into is its own to remove again.
+        const made: string[] = [];
+        const proving = { reach: root, prefixes: [prefix], npx: null, keep: [slot], made };
         const done = await carryOut(
           plan([{ ...base, do: "install", version: "2.0.0", prefix, dir: slot, replaces: !!was, say: "" }]),
           {
             ...d,
-            install: async (stage) => npm(stage),
+            install: async (stage) => {
+              if (noted) made.push(stage);
+              return npm(stage);
+            },
             exists: existsSync,
             rename: renameSync,
             same,
@@ -1863,11 +1983,51 @@ describe.skipIf(process.platform === "win32" || path.sep !== "/")(
       });
       for (const r of [half, mute, bare]) {
         expect(r.done.state === "failed" && r.done.next).toBe("sessionpipe reinstall");
-        expect(r.said).toEqual([]);
-        expect(r.beside).toEqual(["sessionpipe"]);
         expect(r.slot).toBe("1.0.0");
         expect(r.starts).toBe(CLI);
       }
+      // The folder is this run's own, whatever npm had got into it by then (no package.json
+      // yet: npm's tarball has it last): it is taken, and nothing is said of it.
+      for (const r of [half, mute, bare]) {
+        expect(r.said).toEqual([]);
+        expect(r.beside).toEqual(["sessionpipe"]);
+      }
+    });
+
+    it("N5: the folder this run had npm install into is its own to remove whatever that release holds; the same folder, only found, must hold a copy the proof accepts", async () => {
+      // A release with a file this version does not know of, which then fails to run: what
+      // npm unpacked is no copy by this version's proof.
+      const newer = (stage: string): string => {
+        lay(stage, "2.0.0");
+        writeFileSync(path.join(slotOf(stage), "CHANGELOG.md"), "");
+        return "npm finished, but the copy says nothing, not 2.0.0";
+      };
+      // Written down as this run's own (as cli.ts does when it has npm install): it goes.
+      const mine = await swap("1.0.0", newer);
+      expect(mine.done.state).toBe("failed");
+      expect(mine.said).toEqual([]);
+      expect(mine.beside).toEqual(["sessionpipe"]);
+      expect(mine.slot).toBe("1.0.0");
+      // Not written down, the same folder is one that was found: it stays, and that is said.
+      const found = await swap("1.0.0", newer, false);
+      expect(found.said).toHaveLength(1);
+      expect(found.said[0]).toMatch(
+        /^warn: .*\.sessionpipe-a1b2c3d4 could not be removed \(.* was left alone: it holds (bin|lib), which no published sessionpipe has \(a checkout or a build\?\)\)$/,
+      );
+      expect(found.beside).toEqual([".sessionpipe-a1b2c3d4", "sessionpipe"]);
+      expect(found.slot).toBe("1.0.0");
+      // And half a copy in a folder that was only found is not this command's either.
+      const half = await swap(
+        "1.0.0",
+        (stage) => {
+          mkdirSync(path.join(slotOf(stage), "dist"), { recursive: true });
+          writeFileSync(path.join(slotOf(stage), "dist", "cli.js"), "");
+          return "npm install: npm error code ENOSPC";
+        },
+        false,
+      );
+      expect(half.said).toHaveLength(1);
+      expect(half.beside).toEqual([".sessionpipe-a1b2c3d4", "sessionpipe"]);
     });
 
     it("L1: into a prefix with no copy: npm's prefix is taken, and the copy is in its place", async () => {
@@ -1891,7 +2051,8 @@ describe.skipIf(process.platform === "win32" || path.sep !== "/")(
       });
       expect(r.said).toHaveLength(2);
       expect(r.said[0]).toMatch(
-        /^warn: .*\.sessionpipe-a1b2c3d4 could not be removed \(.* was left alone: it holds .*, which no published sessionpipe has \(a checkout or a build\?\)\): the next run takes it$/,
+        // (No "the next run takes it" of such a folder: the next run leaves it alone too.)
+        /^warn: .*\.sessionpipe-a1b2c3d4 could not be removed \(.* was left alone: it holds .*, which no published sessionpipe has \(a checkout or a build\?\)\)$/,
       );
       expect(r.said[1]).toBe("ok: installed fresh in ~/.local, and it runs (what was there is gone)");
       // The swap itself was made, and the old copy is gone.

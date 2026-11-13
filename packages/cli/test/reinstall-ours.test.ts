@@ -57,6 +57,8 @@ const fake = vi.hoisted(() => ({
   /** A builtin that fails on cue: a folder the system won't let anyone read, an entry it
    *  won't let anyone remove. */
   fails: null as ((call: Cue, p: string) => boolean) | null,
+  /** A folder's device and inode as a test says them; null: as the disk has them. */
+  ids: null as ((p: string) => { dev: number; ino: number } | null) | null,
   /** node:fs as it is: what the tests build, look and clean up with. */
   real: null as unknown as typeof import("node:fs"),
 }));
@@ -100,7 +102,12 @@ vi.mock("node:fs", async (original) => {
     },
     { native: real.realpathSync.native },
   ) as typeof real.realpathSync;
-  return { ...real, rmSync, rmdirSync, unlinkSync, readdirSync, realpathSync };
+  const statSync = ((what: unknown, ...rest: unknown[]) => {
+    const st = (real.statSync as (...a: unknown[]) => object)(what, ...rest);
+    const said = typeof what === "string" ? fake.ids?.(what) : null;
+    return said ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, said) : st;
+  }) as typeof real.statSync;
+  return { ...real, rmSync, rmdirSync, unlinkSync, readdirSync, realpathSync, statSync };
 });
 
 /** What is on the disk is tested where the module runs: `reinstall` refuses on Windows
@@ -177,9 +184,11 @@ const FOLDER = { is: "folder", slot: "global", aside: false, staging: false };
 /** What the removal of a whole copy hands to a deletion, in its order: every entry a
  *  published copy has, its package.json the last of them, then the emptied folder. */
 const emptied = (dir: string): string[] => [
-  ...["dist", "README.md", "LICENSE", "NOTICE", "package.json"].map((e) => path.join(dir, e)),
+  ...["dist", "README.md", "LICENSE", "NOTICE", ...DROPPED, "package.json"].map((e) => path.join(dir, e)),
   dir,
 ];
+/** What an operating system drops into a folder when someone looks at it. */
+const DROPPED = [".DS_Store", "Thumbs.db", "desktop.ini"];
 const FIVE = ["LICENSE", "NOTICE", "README.md", "dist", "package.json"];
 
 /** Everything under the temp dir, by what it is: a folder, a link and its text, a file
@@ -344,6 +353,35 @@ disk("by the path alone: inside a folder, the slot, the prefix, npm's name for a
 });
 
 disk("same: one folder, by whatever name it is reached", () => {
+  it("N7: one folder is one device AND one inode: the same inode on another device is another folder, and so is another inode on the same device", () => {
+    const a = path.join(tmp, "a");
+    const b = path.join(tmp, "b");
+    mkdirSync(a);
+    mkdirSync(b);
+    const ids = (of: Record<string, { dev: number; ino: number }>) => {
+      fake.ids = (p) => of[p] ?? null;
+    };
+    try {
+      // Two disks number their folders each from the start: the same number on both.
+      ids({ [a]: { dev: 1, ino: 42 }, [b]: { dev: 2, ino: 42 } });
+      expect(same(a, b)).toBe(false);
+      ids({ [a]: { dev: 1, ino: 42 }, [b]: { dev: 1, ino: 43 } });
+      expect(same(a, b)).toBe(false);
+      ids({ [a]: { dev: 1, ino: 42 }, [b]: { dev: 1, ino: 42 } });
+      expect(same(a, b)).toBe(true);
+      // And what `keep` and a prefix are held to goes by it: the copy on the other disk
+      // with the kept copy's inode number is not the kept copy.
+      const kept = unpack(slot(path.join(tmp, "prefix1")));
+      const other = unpack(slot(path.join(tmp, "prefix2")));
+      ids({ [kept]: { dev: 1, ino: 7 }, [other]: { dev: 2, ino: 7 } });
+      expect(prove(other, posix(true, { keep: [kept] }))).toEqual(FOLDER);
+      ids({ [kept]: { dev: 1, ino: 7 }, [other]: { dev: 1, ino: 7 } });
+      expect(prove(other, posix(true, { keep: [kept] }))).toEqual({ is: "not", why: KEPT });
+    } finally {
+      fake.ids = null;
+    }
+  });
+
   it("M1: a folder and a link to it are one folder, and so is everything under them", () => {
     const home = path.join(tmp, "home");
     const dir = unpack(slot(path.join(home, ".local")));
@@ -1477,9 +1515,10 @@ disk("remove: a removal that stops half-way is said, and the next run takes what
         `${dir} could only be removed in part (EACCES: permission denied, rmSync '${path.join(dir, stuck)}'): what is left of it no longer runs, and the next run takes it`,
       );
       // Every entry before the one that stuck is gone; that one and all after it are there.
-      expect(fake.gone, stuck).toEqual(emptied(dir).slice(0, n + 1));
+      const at = emptied(dir).indexOf(path.join(dir, stuck));
+      expect(fake.gone, stuck).toEqual(emptied(dir).slice(0, at + 1));
       expect(readdirSync(dir).sort(), stuck).toEqual(
-        FIVE.filter((f) => !emptied(dir).slice(0, n).includes(path.join(dir, f))),
+        FIVE.filter((f) => !emptied(dir).slice(0, at).includes(path.join(dir, f))),
       );
       expect(readFileSync(path.join(dir, "package.json"), "utf8")).toBe(PACKAGE);
       expect(readlinkSync(bin)).toBe(INTO);
@@ -1593,24 +1632,157 @@ disk("the folder this command has npm install into, beside the slot", () => {
     expect(readdirSync(path.dirname(fresh))).toEqual(["sessionpipe"]);
   });
 
-  it("L2: it goes whatever npm unpacked in the copy: a release this version doesn't know the files of, a dependency of its own", () => {
-    const prefix = path.join(tmp, "prefix");
-    const dir = staged(prefix);
-    // What a later release with a wider `files`, or with a dependency, is to this one.
-    writeFileSync(path.join(slot(dir), "CHANGELOG.md"), "new in this release");
-    mkdirSync(path.join(slot(dir), "node_modules", "dep"), { recursive: true });
-    writeFileSync(path.join(slot(dir), "node_modules", "dep", "index.js"), "dep");
-    fake.real.unlinkSync(path.join(slot(dir), "package.json"));
-    expect(prove(dir, posix())).toEqual(STAGING);
-    expect(take(dir, posix())).toEqual([dir]);
-    expect(fake.gone).toEqual([dir]);
-    expect(existsSync(dir)).toBe(false);
-    // The same copy anywhere else is no published sessionpipe to this version: only the
-    // folder this command made is taken whatever it holds.
-    const elsewhere = unpack(slot(path.join(tmp, "a")));
-    writeFileSync(path.join(elsewhere, "CHANGELOG.md"), "new in this release");
+  it("N5: a folder of that shape is this command's only where what is in its `lib/node_modules/sessionpipe` is a copy by the same proof as any other, or nothing: never a look-alike holding someone's files", () => {
+    // The folder was taken whole "whatever npm unpacked in it": so any folder of that name
+    // and shape went by one recursive removal, with whatever a person kept in the place
+    // where the copy would be.
+    const STAGE_HOLDS = "it holds bin, which no published sessionpipe has (a checkout or a build?)";
+    let n = 0;
+    const made = (spoil: (copy: string) => void): string => {
+      const dir = staged(path.join(tmp, `prefix${n++}`));
+      spoil(slot(dir));
+      return dir;
+    };
+    // An entry no published copy has; a dependency of its own; no package.json; another
+    // package's; one that names no release: each is no copy, so the folder is no staging
+    // folder, and it is judged as any leftover (it holds `bin` and `lib`) and stays.
+    const spoiled = [
+      made((c) => writeFileSync(path.join(c, "notes.txt"), "mine")),
+      made((c) => {
+        mkdirSync(path.join(c, "node_modules", "dep"), { recursive: true });
+        writeFileSync(path.join(c, "node_modules", "dep", "index.js"), "dep");
+      }),
+      made((c) => fake.real.unlinkSync(path.join(c, "package.json"))),
+      made((c) => writeFileSync(path.join(c, "package.json"), JSON.stringify({ name: "left-pad", version: "1.3.0" }))),
+      made((c) => writeFileSync(path.join(c, "package.json"), JSON.stringify({ name: "sessionpipe" }))),
+    ];
+    for (const dir of spoiled) refused(dir, posix(), STAGE_HOLDS);
+    expect(readFileSync(path.join(slot(spoiled[0] as string), "notes.txt"), "utf8")).toBe("mine");
+    // A copy as published, an empty folder where it was unpacked, or none yet: this command's.
+    const whole = made(() => {});
+    const emptyCopy = made((c) => {
+      fake.real.rmSync(c, { recursive: true });
+      mkdirSync(c);
+    });
+    const none = made((c) => fake.real.rmSync(c, { recursive: true }));
+    for (const dir of [whole, emptyCopy, none]) {
+      expect(prove(dir, posix())).toEqual(STAGING);
+      fake.gone = [];
+      expect(take(dir, posix())).toEqual([dir]);
+      expect(fake.gone).toEqual([dir]);
+      expect(existsSync(dir)).toBe(false);
+    }
+  });
+
+  it("N5: the folder this very run had npm install into is ours whatever the release unpacked there holds; the same folder that was only found is refused, and so is one of another shape, written down or not", () => {
+    // A release with a file this version does not know of (and, a release later, a
+    // dependency of its own): by this version's proof what npm unpacked is no copy, and
+    // the run's own folder stayed beside the slot for good.
+    const STAGE_HOLDS = "it holds bin, which no published sessionpipe has (a checkout or a build?)";
+    let n = 0;
+    const next = (spoil: (dir: string) => void = () => {}, prefix = `prefix${n++}`): string => {
+      const dir = staged(path.join(tmp, prefix));
+      writeFileSync(path.join(slot(dir), "CHANGELOG.md"), "new in this release");
+      mkdirSync(path.join(slot(dir), "node_modules", "dep"), { recursive: true });
+      spoil(dir);
+      return dir;
+    };
+    // Only found: refused, as any look-alike is, and nothing of it is touched.
+    const found = next();
+    refused(found, posix(), STAGE_HOLDS);
+    refused(found, posix(true, { made: [] }), STAGE_HOLDS);
+    // Another folder was written down, not this one: refused the same.
+    refused(found, posix(true, { made: [next()] }), STAGE_HOLDS);
+    // Written down as this run's: ours by who made it, and it goes whole by one removal.
+    expect(prove(found, posix(true, { made: [found] }))).toEqual(STAGING);
     fake.gone = [];
-    refused(elsewhere, posix(), "it holds CHANGELOG.md, which no published sessionpipe has (a checkout or a build?)");
+    expect(take(found, posix(true, { made: [found] }))).toEqual([found]);
+    expect(fake.gone).toEqual([found]);
+    expect(existsSync(found)).toBe(false);
+    fake.gone = [];
+    // Half of a copy (npm stopped while it unpacked: no package.json yet) is the same.
+    const half = next((dir) => fake.real.unlinkSync(path.join(slot(dir), "package.json")));
+    refused(half, posix(), STAGE_HOLDS);
+    expect(take(half, posix(true, { made: [half] }))).toEqual([half]);
+    fake.gone = [];
+    // By another name for the same folder (N7: one device and one inode).
+    const named = next();
+    const alias = path.join(tmp, "alias");
+    symlinkSync(path.dirname(named), alias);
+    expect(prove(named, posix(true, { made: [path.join(alias, path.basename(named))] }))).toEqual(STAGING);
+    // Written down, and of another SHAPE: what is beside the copy is still npm's layout
+    // and nothing else, each a real folder. A file of someone's at its top, a second
+    // package beside the copy, a file where the copy would be, a link for the copy.
+    const shapes = [
+      next((dir) => writeFileSync(path.join(dir, "notes.txt"), "mine")),
+      next((dir) => mkdirSync(path.join(dir, "lib", "node_modules", "left-pad"))),
+      next((dir) => mkdirSync(path.join(dir, "lib", "other"))),
+      next((dir) => writeFileSync(path.join(dir, "bin", "other"), "#!/bin/sh")),
+      next((dir) => {
+        fake.real.rmSync(slot(dir), { recursive: true });
+        writeFileSync(slot(dir), "a file");
+      }),
+      next((dir) => {
+        fake.real.renameSync(slot(dir), path.join(tmp, `elsewhere${n}`));
+        symlinkSync(path.join(tmp, `elsewhere${n}`), slot(dir));
+      }),
+    ];
+    for (const dir of shapes) refused(dir, posix(true, { made: [dir] }), /^it holds (bin|lib), which no published/);
+    expect(readFileSync(path.join(shapes[0] as string, "notes.txt"), "utf8")).toBe("mine");
+    // Written down, and not a folder of that name beside a slot: a copy in a slot with that
+    // file in it is judged as any copy, and what a run keeps is kept.
+    const inSlot = unpack(slot(path.join(tmp, "a")));
+    writeFileSync(path.join(inSlot, "CHANGELOG.md"), "");
+    refused(
+      inSlot,
+      posix(true, { made: [inSlot] }),
+      "it holds CHANGELOG.md, which no published sessionpipe has (a checkout or a build?)",
+    );
+    const kept = next(() => {}, "b");
+    expect(thrownBy(() => remove(kept, posix(true, { made: [kept], keep: [kept] })))).toBeInstanceOf(NotOurs);
+    expect(existsSync(path.join(slot(kept), "CHANGELOG.md"))).toBe(true);
+  });
+
+  it("N3: what an operating system drops into a folder by itself (.DS_Store, Thumbs.db, desktop.ini) says nothing of whose it is: a copy, an empty folder and a staging folder are ours with it, and it goes with them", () => {
+    // Someone opened the folder in the Finder: with a `.DS_Store` in it the copy "held
+    // what no published sessionpipe has", was left alone, and was what typing started.
+    for (const [n, name] of DROPPED.entries()) {
+      const prefix = path.join(tmp, `prefix${n}`);
+      const dir = unpack(slot(prefix));
+      const bin = link(prefix);
+      writeFileSync(path.join(dir, name), "");
+      writeFileSync(path.join(dir, "dist", name), "");
+      expect(prove(dir, posix()), name).toEqual(FOLDER);
+      fake.gone = [];
+      expect(take(dir, posix()), name).toEqual([dir, bin]);
+      // Each by its own name, before package.json; the one inside dist went with dist.
+      expect(fake.gone, name).toEqual([...emptied(dir), bin]);
+      expect(existsSync(dir), name).toBe(false);
+    }
+    // An empty folder with nothing but those in it is still what is left of a copy.
+    const hollow = slot(path.join(tmp, "prefix4"));
+    mkdirSync(hollow, { recursive: true });
+    for (const name of DROPPED) writeFileSync(path.join(hollow, name), "");
+    expect(prove(hollow, posix())).toEqual(FOLDER);
+    expect(take(hollow, posix())).toEqual([hollow]);
+    expect(existsSync(hollow)).toBe(false);
+    // In the folder npm installs into, at any level of it.
+    const stage = staged(path.join(tmp, "prefix5"));
+    for (const at of [stage, path.join(stage, "bin"), path.join(stage, "lib"), path.dirname(slot(stage)), slot(stage)])
+      writeFileSync(path.join(at, ".DS_Store"), "");
+    expect(prove(stage, posix())).toEqual(STAGING);
+    expect(take(stage, posix())).toEqual([stage]);
+    // Only those names: a file of any other name is somebody's, as it was.
+    const theirs = unpack(slot(path.join(tmp, "prefix6")));
+    writeFileSync(path.join(theirs, ".DS_Store"), "");
+    writeFileSync(path.join(theirs, ".env"), "SECRET=1");
+    fake.gone = [];
+    refused(theirs, posix(), "it holds .env, which no published sessionpipe has (a checkout or a build?)");
+    // And it is no package.json: a folder with nothing but a dropped file and a `dist` is cut off.
+    const cut = slot(path.join(tmp, "prefix7"));
+    mkdirSync(path.join(cut, "dist"), { recursive: true });
+    writeFileSync(path.join(cut, ".DS_Store"), "");
+    refused(cut, posix(), NO_MANIFEST);
   });
 
   it("L1: nothing is removed through it: a link in it is taken as a link, and what it leads to stays", () => {
@@ -1816,7 +1988,8 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
    *  opens none (or, with no such line, where the lines stop being set in). Null: the
    *  file declares nothing of the name. */
   const statement = (text: string, name: string): string | null => {
-    const n = name.replace(/\$/g, "\\$");
+    // The name as a literal in the pattern: every character a pattern reads as its own.
+    const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const m = new RegExp(
       `^(?:export\\s+)?(?:(?:async\\s+)?function\\*?\\s+${n}\\b|(?:const|let|var|class)\\s+${n}\\b)`,
       "m",
@@ -2375,7 +2548,7 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     const order = [
       "const bins = binsOf(what, o);",
       "if (p.staging) rmSync(what, { recursive: true });",
-      "for (const e of REST) rmSync(path.join(what, e), { recursive: true, force: true });",
+      "for (const e of [...REST, ...DROPPED]) rmSync(path.join(what, e), { recursive: true, force: true });",
       'rmSync(path.join(what, "package.json"), { force: true });',
       "rmdirSync(what);",
       "} catch (e) {",
@@ -2387,6 +2560,7 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     for (const [i, at] of order.entries()) if (i) expect(at, String(i)).toBeGreaterThan(order[i - 1] as number);
     expect(text).toContain('const REST = ["dist", "README.md", "LICENSE", "NOTICE"] as const;');
     expect(text).toContain('const PUBLISHED: ReadonlySet<string> = new Set(["package.json", ...REST]);');
+    expect(text).toContain('const DROPPED: ReadonlySet<string> = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);');
     // What is deleted is the one path that was proven: `what`, by its one spelling.
     expect(body).toContain("const what = path.resolve(asked);\n  const p = prove(what, o);");
     // (Its only other mention, comments apart, is the parameter itself.)
@@ -2398,8 +2572,16 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
       "prefixes",
       "npx",
       "keep",
+      "made",
     ]);
     expect(code(proving)).not.toMatch(/=>|Promise|npm:|alone/);
+    // `made` widens one thing only: what the copy inside a folder of the staging shape may
+    // hold. It is read in one place, and what it is handed there is the path being proven.
+    expect(code(text).match(/\bmade\b/g)).toHaveLength(4);
+    expect(text).toContain("if (aside && staged(what, o.made?.some((m) => same(m, what)) ?? false))");
+    expect(text).toContain(
+      "(gone(copy) || empty(copy) || (extra(copy) === null && unnamed(copy) === null) || (made && entries(copy) !== null))",
+    );
   }, 60_000);
 
   it("cli.ts's reinstall() deletes nothing itself, nor one call away: its removal is ours.ts's; two renames and npm's own link are all it writes", () => {
@@ -2417,7 +2599,15 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     expect(body).toContain("\n    remove: async (what) => remove(what, proving),\n");
     expect(body.match(/\bremove\(/g)).toHaveLength(1);
     // Those terms: what the look found, and the copy in the home, which is never removed.
-    expect(body).toContain("const proving = { reach: inv.reach, prefixes: inv.prefixes, npx: inv.npx, keep: [slot] };");
+    // And the folders this run has npm install into: each written down as it is handed to
+    // npm, by the one name npm is given, and by nothing else in the command.
+    expect(body).toContain(
+      "const made: string[] = [];\n  const proving = { reach: inv.reach, prefixes: inv.prefixes, npx: inv.npx, keep: [slot], made };",
+    );
+    expect(body).toContain(
+      "install: async (stage, v) => {\n      made.push(stage);\n      const r = await installInto(stage, v, {",
+    );
+    expect(code(body).match(/\bmade\b/g)).toHaveLength(3);
     expect(body).toContain("const home = (p.home as NonNullable<typeof p.home>).prefix;\n  const slot = slotIn(home);");
     expect(body.match(/\bproving\b/g)).toHaveLength(2);
     // What it writes with node:fs: the renames of the swap, and one link, npm's own, made

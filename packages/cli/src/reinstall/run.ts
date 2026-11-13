@@ -108,11 +108,7 @@ async function fresh(s: Extract<Step, { do: "install" }>, d: Doing): Promise<{ e
   /** What this made beside the slot goes; one that stays is the next run's, and is said. */
   const tidy = async (...made: string[]) => {
     for (const x of made)
-      await d
-        .remove(x)
-        .catch((e) =>
-          d.say({ mark: "warn", text: `${d.tilde(x)} could not be removed (${said(e)}): the next run takes it` }),
-        );
+      await d.remove(x).catch((e) => d.say({ mark: "warn", text: `${d.tilde(x)} could not be removed (${said(e)})` }));
   };
   const why = await d.install(stage, s.version);
   if (why) {
@@ -234,7 +230,9 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       if (!proven) {
         const proof = await d.prove([]);
         if (proof.runs !== target) return failed(`${unfit(proof)}: no other copy was removed`, NPX);
-        if (!proof.typed) return failed(`${untyped(proof)}: no other copy was removed`, "sessionpipe doctor");
+        // (Where what typing starts was never read, it is not asked of the proof either.)
+        if (!p.inferred && !proof.typed)
+          return failed(`${untyped(proof)}: no other copy was removed`, "sessionpipe doctor");
         proven = true;
       }
       try {
@@ -252,8 +250,10 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       d.say({ mark: "ok", text: `the copy in ${home} runs: \`--version\` says ${target}` });
       // What a person types is what a shell finds first. What is behind it on PATH is what
       // was left alone, and starts nothing typed.
-      if (!proof.typed) warn.push(`${untyped(proof)}.`);
-      else
+      // Where it was not read, nothing is said of it here: the plan's note says what is
+      // not known.
+      if (!p.inferred && !proof.typed) warn.push(`${untyped(proof)}.`);
+      else if (!p.inferred)
         d.say(
           proof.onPath.length < 2
             ? {
@@ -303,7 +303,7 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
     };
   return {
     state: "one",
-    said: `This computer has one sessionpipe: ${target}, in ${home}${
+    said: `${p.kept ? `sessionpipe ${target} is installed in ${home} and in use` : `This computer has one sessionpipe: ${target}, in ${home}`}${
       p.stays ? " (not installed again: it is whole, the newest, and not yours to write)" : ""
     }. Pairings and settings are as they were.`,
     warn,
