@@ -1781,9 +1781,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     const other = install(path.join(home, ".npm-global"), "0.9.0");
     const brief = await run("status");
     expect(brief.lines[0]).toBe("! 1 thing needs attention");
-    expect(brief.text).toContain(
-      "copies: 1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.npm-global (nothing uses it)",
-    );
+    expect(brief.text).toContain("copies: 1.0.0 in ~/.local (you type this); 0.9.0 in ~/.npm-global (nothing uses it)");
     expect(vi.mocked(spawnSync).mock.calls.some((c) => (c[1] as string[]).includes("--version"))).toBe(false);
     // `doctor` runs each to ask its version: here each prints what its package.json says.
     vi.mocked(spawnSync).mockImplementation(((_cmd: string, argv: string[]) =>
@@ -1797,7 +1795,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     steadyHook();
     const d = await run("doctor");
     expect(d.text).toMatch(
-      row("!", "copies", "1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.npm-global (nothing uses it)"),
+      row("!", "copies", "1.0.0 in ~/.local (you type this); 0.9.0 in ~/.npm-global (nothing uses it)"),
     );
     expect(fixes(d)).toEqual([
       "To fix",

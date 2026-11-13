@@ -168,7 +168,7 @@ const TYPED = "where the one you type is";
 const THIS = "where this command runs from";
 const SERVICE = "where the one the background service runs is";
 const ANOTHER = "where another copy of it already is";
-const NPM = "where npm puts what is installed for every folder";
+const NPM = "npm's global folder";
 const OWN = "a folder of your own";
 /** A folder the look offers for the fresh copy. `pathAt`: which folder of PATH its
  *  command goes in, counted from the first; null: none. `bin`: that folder, where it is

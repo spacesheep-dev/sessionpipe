@@ -85,7 +85,7 @@ import { readPool } from "./pool/index.js";
 import { Refusal } from "./refusal.js";
 import { type Inventory, look, spelled } from "./reinstall/find.js";
 import { binTarget, remove } from "./reinstall/ours.js";
-import { found, planned } from "./reinstall/page.js";
+import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
 import { type Facts, idle, plan, slotIn } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
@@ -1314,20 +1314,12 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   const collide = installs.length > 1 || around.dangling.length > 0 || installs.some((c) => c.wrong);
   report.copies = installs.map((c) => ({ dir: c.dir, version: c.version, runs: c.runs, uses: c.uses }));
   if (collide) {
-    const used = (c: (typeof installs)[number]) =>
-      c.uses.includes("typed")
-        ? "you type this one"
-        : c.uses.includes("service")
-          ? "the background service runs this one"
-          : c.uses.includes("hooks")
-            ? "the hooks were written by this one"
-            : "nothing uses it";
     computer.rows.push({
       mark: "warn",
       label: "copies",
       value: [
         ...installs.map(
-          (c) => `${c.aside ? "a leftover" : (c.version ?? "a broken copy")} in ${c.where} (${c.wrong ?? used(c)})`,
+          (c) => `${c.aside ? "a leftover" : (c.version ?? "a broken copy")} in ${c.where} (${c.wrong ?? usedBy(c)})`,
         ),
         ...around.dangling.map((f) => `${tilde(f)}, a link to one that is gone`),
       ].join("; "),
@@ -1347,14 +1339,16 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   if (down || apart.length || collide)
     todo.push({
       order: 1,
+      // Which release runs where is in the rows above: with copies to clear away the fix
+      // is said by their number alone.
       say: `${down ? "The background service isn't running, so no message reaches this computer. " : ""}${
-        apart.length ? `This command is sessionpipe ${VERSION}, and ${apart.join(", and ")}. ` : ""
-      }${
         collide
           ? installs.length > 1
             ? `${installs.length} copies of sessionpipe are on this computer, and one is enough. `
             : "The copy of sessionpipe on this computer is not whole. "
-          : ""
+          : apart.length
+            ? `This command is sessionpipe ${VERSION}, and ${apart.join(", and ")}. `
+            : ""
       }One command puts it right:`,
       run: collide ? "sessionpipe reinstall" : "sessionpipe update",
     });
@@ -2112,6 +2106,12 @@ function onCopy(o: { version: string; dist: string }): CurrentDeps {
  *  say, yellow when something is. */
 function lastLine(said: string, yellow: boolean): void {
   say("");
+  closing(said, yellow);
+}
+
+/** A sentence that says how a command ended, under its mark: green, or yellow for what a
+ *  person should still look at. */
+function closing(said: string, yellow: boolean): void {
   for (const l of fold(ui, `${plain(mark(ui, yellow ? "warn" : "ok"))} `, said))
     say(tint(ui, yellow ? "yellow" : "green", tint(ui, "bold", l)));
 }
@@ -2258,14 +2258,20 @@ async function reinstall(): Promise<void> {
   // that was not looked at, only why (the plan's refusal).
   if (inv.reach !== null) for (const l of found(ui, inv, facts, tilde)) say(l);
   if (p.refuse) throw new Refusal(p.refuse.error, p.refuse.next, true);
+  // What works is said first, in green; then what is left to say, a yellow line each.
+  const ending = (works: string, more: string[]): void => {
+    lastLine(works, false);
+    for (const m of more) closing(m, true);
+  };
   if (p.nothing) {
-    for (const n of p.notes) out(`  ! ${n}`);
-    return lastLine(p.nothing, p.notes.length > 0);
+    const left = leftAlone(ui, p.left);
+    for (const l of left.length ? ["", ...left] : []) say(l);
+    return ending(p.nothing, p.notes);
   }
   say("");
   for (const l of planned(ui, p)) say(l);
   say("");
-  if (has("--dry-run")) return out("  Nothing was changed: this was a dry run. `sessionpipe reinstall` does it.");
+  if (has("--dry-run")) return out("Dry run: nothing was changed. `sessionpipe reinstall` does it.");
   if (!has("--yes") && !has("-y")) {
     // It removes folders, so it asks once, where there is someone to ask.
     if (!ui.tty || !process.stdin.isTTY)
@@ -2391,7 +2397,9 @@ async function reinstall(): Promise<void> {
     process.exitCode = 3;
     return lastLine(done.said, true);
   }
-  lastLine(short([done.said, ...done.warn, ...p.notes].join(" ")), done.warn.length + p.notes.length > 0);
+  ending(short(done.said), [...done.warn, ...p.notes].map(short));
+  // A copy that is still there: the job is not done, and it stops with the one line for it.
+  if (done.state === "left") throw new Refusal(short(done.still).replace(/\.$/, ""), done.next, true);
 }
 
 /** `sessionpipe titles [on|off]`: whether the worker asks a harness's own service for a
