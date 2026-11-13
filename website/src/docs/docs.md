@@ -262,7 +262,8 @@ The repair. Whatever state this computer's sessionpipe is in (several copies, se
 versions, an install that was cut off, hooks or a service that name what is gone), it
 leaves one clean copy of the newest release, in use everywhere, and removes the rest.
 Pairings and settings are never touched. When the installed command is itself what is
-broken: `npx -y sessionpipe@latest reinstall`.
+broken: `npx -y sessionpipe@latest reinstall`. On macOS and Linux; on Windows it changes
+nothing and names `sessionpipe update`.
 
 {{usage update off}}
 
