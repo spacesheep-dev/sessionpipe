@@ -31,6 +31,7 @@ export function launcherScript(node: string, hook: string, version: string): str
 # sessionpipe ${version} hook launcher, written by \`sessionpipe install\`. Harnesses run
 # this; it runs hook.js beside it with the node sessionpipe was installed with, or with
 # any node on PATH once that one is gone (an nvm uninstall, a Homebrew upgrade).
+# If hooks have stopped working: npx -y sessionpipe@latest reinstall
 n=${sq(node)}
 [ -x "$n" ] || n=$(command -v node) || { [ "$1" = antigravity ] && if [ "$2" = PreToolUse ]; then echo ${sq(AG_STALE_PRETOOL.trim())}; else echo '{}'; fi; exit 0; }
 exec "$n" ${sq(hook)} "$@"

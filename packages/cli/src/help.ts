@@ -23,6 +23,8 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     forget: "forget <harness> <session>",
     replay: "replay [--sink NAME] [--from-start] [--tools all|main|beat]",
     update: "update [off|on] (bring this whole computer up to date now; off/on: the background service's daily update)",
+    reinstall:
+      "reinstall [--dry-run] [--yes] (repair: find every copy of sessionpipe on this computer, install the newest release fresh, move the hooks and the background service onto it, remove the rest; pairings and settings are kept)",
     "update off": "update off",
     "update on": "update on",
     titles:
