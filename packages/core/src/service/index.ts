@@ -347,6 +347,8 @@ export interface ServiceState {
   loaded: boolean;
   /** The program and arguments the file names; null when there is no file or it has none. */
   argv: string[] | null;
+  /** The process the manager runs for it now; null when it runs none (or won't say). */
+  pid: number | null;
 }
 
 const unxml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
@@ -414,22 +416,24 @@ export function serviceState(o: UninstallOptions): ServiceState {
   if (platform === "darwin") {
     // "Not loaded" is launchctl's answer; a launchctl that can't be run answers nothing.
     let asked = true;
-    const has = (target: string): boolean => {
+    // What launchd prints of a service it has; null for one it doesn't.
+    const has = (target: string): string | null => {
       try {
-        exec("launchctl", ["print", target]);
-        return true;
+        return exec("launchctl", ["print", target]);
       } catch (e) {
         if (notRun(e)) asked = false;
-        return false;
+        return null;
       }
     };
-    const loaded = has(`gui/${uid}/${o.label}`) || has(`user/${uid}/${o.label}`);
+    const said = has(`gui/${uid}/${o.label}`) ?? has(`user/${uid}/${o.label}`);
     return {
       manager: asked ? "launchd" : null,
       file: f.plist.path,
       installed: existsSync(f.plist.path),
-      loaded,
+      loaded: said !== null,
       argv: argvOf(f.plist.path),
+      // launchd prints `pid = <n>` only for a service whose process is running.
+      pid: pidIn(/^\s*pid = (\d+)$/m.exec(said ?? "")?.[1]),
     };
   }
   if (platform === "linux") {
@@ -437,16 +441,25 @@ export function serviceState(o: UninstallOptions): ServiceState {
     // `is-active` fails alike for a unit that isn't running and for a user manager that
     // can't be reached; the manager's own version is something only a reachable one says.
     const reachable = loaded || answers(exec, "systemctl", ["--user", "show", "--property=Version"]);
+    let main: string | undefined;
+    if (loaded)
+      try {
+        main = exec("systemctl", ["--user", "show", o.unit, "--property=MainPID", "--value"]).trim();
+      } catch {}
     return {
       manager: reachable ? "systemd" : null,
       file: f.unit.path,
       installed: existsSync(f.unit.path),
       loaded,
       argv: argvOf(f.unit.path),
+      pid: pidIn(main),
     };
   }
-  return { manager: null, file: null, installed: false, loaded: false, argv: null };
+  return { manager: null, file: null, installed: false, loaded: false, argv: null, pid: null };
 }
+
+/** A process id as a manager printed it; null for none (systemd prints 0) or anything else. */
+const pidIn = (s: string | undefined): number | null => (s && /^[1-9]\d*$/.test(s) ? Number(s) : null);
 
 export interface UninstallOptions {
   label: string;
