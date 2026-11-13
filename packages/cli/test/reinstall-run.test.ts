@@ -1,23 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 // reinstall/run.ts: a plan carried out, one step after the other. Everything that would
 // touch the computer is stood in for and written down in the order it happened, the plan
-// is a literal, and time is a counter: each way a run can go is one test, with no file,
-// no process and no clock in it.
+// is a literal, the disk is a list of folders, and time is a counter: each way a run can
+// go is one test, with no file, no process and no clock in it. (The last test is the one
+// exception: what the swap leaves beside the slot is handed to the real proof and the
+// real removal, in a folder of its own, to see that they take it.)
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Status } from "../src/control/daemon.js";
 import type { Health } from "../src/control/local.js";
 import type { Outcome } from "../src/current.js";
+import { binTarget, ASIDE as LEFT_BEHIND, remove as removeOurs, same } from "../src/reinstall/ours.js";
 import type { Left, Plan, Step } from "../src/reinstall/plan.js";
 import { carryOut, type Doing, type Done, type Proof } from "../src/reinstall/run.js";
 
 const HOME = path.join(path.sep, "home", "u");
-/** The home of the fresh copy, its slot, and the name the old folder is moved aside under. */
+/** The home of the fresh copy and its slot. */
 const PREFIX = path.join(HOME, ".local");
 const MODULES = path.join(PREFIX, "lib", "node_modules");
 const SLOT = path.join(MODULES, "sessionpipe");
-const ASIDE = path.join(MODULES, ".sessionpipe-a1b2c3d4");
 const BIN = path.join(PREFIX, "bin", "sessionpipe");
+/** The two names a fresh install asks for, in the order it asks: the folder npm installs
+ *  into beside the slot (a prefix of its own, with the copy where npm puts one), and the
+ *  name what is in the slot steps aside under. */
+const IDS = ["a1b2c3d4", "e5f6a7b8"] as const;
+const STAGE = path.join(MODULES, `.sessionpipe-${IDS[0]}`);
+const STAGED = path.join(STAGE, "lib", "node_modules", "sessionpipe");
+const ASIDE = path.join(MODULES, `.sessionpipe-${IDS[1]}`);
 /** An older copy under nvm with its bin link, and what npm left beside it. */
 const NVM = path.join(HOME, ".nvm", "versions", "node", "v22.1.0");
 const OLD = path.join(NVM, "lib", "node_modules", "sessionpipe");
@@ -27,6 +49,8 @@ const LEFTOVER = path.join(NVM, "lib", "node_modules", ".sessionpipe-Zz9Yy8Xx");
 const NPX = path.join(HOME, ".npm", "_npx", "0a1b2c3d", "node_modules", "sessionpipe");
 const LINK = path.join(path.sep, "usr", "local", "bin", "sessionpipe");
 const tilde = (p: string): string => (p.startsWith(HOME) ? `~${p.slice(HOME.length)}` : p);
+/** The way in that needs no working copy on this computer. */
+const BY_NPX = "npx -y sessionpipe@latest reinstall";
 
 type Kind = Step["do"];
 /** The steps as a plan writes them: what a row says of each is the plan's (`say`), and
@@ -47,12 +71,6 @@ const stop = (pid = 41): Step => ({
   do: "stop",
   pid,
   say: `the daemon started by hand (pid ${pid}), once it holds nothing`,
-});
-const unserve = (): Step => ({
-  ...base,
-  do: "unserve",
-  file: path.join(HOME, "Library", "LaunchAgents", "x.plist"),
-  say: "the service file, which nothing here needs",
 });
 const use = (serve = true): Step => ({
   ...base,
@@ -80,26 +98,30 @@ const plan = (steps: Step[], o: Partial<Plan> = {}): Plan => ({
     shown: "~/.local",
     why: "a folder of your own",
     bin: path.dirname(BIN),
-    pathAt: 0,
+    onPath: true,
     blocked: null,
+    writable: true,
   },
+  stays: null,
   steps,
   // The plan's screen says it; the run has nothing to do with it.
-  safety: ["Nothing is touched until 2.0.0 has downloaded. A failed install is undone."],
+  safety: ["Nothing is touched until 2.0.0 has been downloaded and seen to run."],
   left: [],
   notes: [],
-  first: null,
   ...o,
 });
 
 /** The package folder of a prefix: what a left copy is by its whole path. */
 const slotOf = (prefix: string): string => path.join(prefix, "lib", "node_modules", "sessionpipe");
+/** The line a plan writes for a copy this user may not write: the folder and its own
+ *  link, by name. The run hands it on as it is. */
+const SUDO = "sudo rm -r /usr/local/lib/node_modules/sessionpipe /usr/local/bin/sessionpipe";
 const left = (o: Partial<Left> = {}): Left => ({
   where: "/usr/local",
   path: slotOf(path.join(path.sep, "usr", "local")),
   version: "1.0.0",
   why: "you may not write where it is",
-  line: "sudo npm uninstall -g --prefix /usr/local sessionpipe",
+  line: SUDO,
   ours: true,
   ...o,
 });
@@ -110,15 +132,23 @@ const st = (o: Partial<Status> = {}): Status =>
 const SAYS: Health = { accounts: [], copy: { cli: path.join(OLD, "dist", "cli.js"), via: null } };
 const SILENT: Health = { accounts: [] };
 
+/** What a folder on the stand-in disk is: one that was there before the run, the copy
+ *  npm has just unpacked, or the prefix npm was told to install into. */
+const WAS = "what was there";
+const FRESH = "the fresh copy";
+const NPMS = "the folder npm installed into";
+
 /** The computer a run meets. */
 interface Sim {
   /** The folders that are there when it starts. */
   there: string[];
   /** Why the release can't be fetched; null: it can. */
   fetch: string | null;
-  /** Why npm couldn't install it (null: it did), and whether npm left a folder in the slot. */
+  /** Why npm couldn't install it (null: it did), and whether it left its folder beside the slot. */
   install: string | null;
   partial: boolean;
+  /** npm never comes back: the run ends there, as a signal ends it, with these words. */
+  cut: string | null;
   /** A move that fails, by the folder that was to be moved, with what the system says. */
   unmovable: Record<string, string>;
   /** What can't be removed, with why. */
@@ -131,8 +161,12 @@ interface Sim {
   status: (Status | null)[];
   health: Health | null;
   use: Outcome;
-  serviceDir: string | null;
-  proof: Partial<Proof>;
+  /** The copy a daemon that is still at work says it runs from; null: it doesn't say. */
+  runningFrom: string | null;
+  /** A second name of a folder, and the folder it is: what `same` knows. */
+  spelled: Record<string, string>;
+  /** What the proof answers: every time, or each time it is asked (the last one stands). */
+  proof: Partial<Proof> | Partial<Proof>[];
   settleMs: number | null;
   stopMs: number | null;
 }
@@ -147,22 +181,29 @@ interface World {
   said: string[];
   /** What the proof was handed as removed, each time it was asked. */
   proved: string[][];
-  /** Every removal asked for, with its `alone` as it was given: only the folder, its
-   *  bin link left. */
-  removals: [what: string, alone: boolean | undefined][];
-  /** Every prefix whose link was looked for, and made again where it could be. */
+  /** Every removal asked for, the swap's own two folders among them. */
+  removals: string[];
+  /** Every prefix whose link was looked for, and made where it was not there. */
   relinked: string[];
-  there: Set<string>;
+  /** What the slot held at each thing done (null: nothing), and when npm came back. */
+  slot: [did: string, held: string | null][];
+  /** What the slot held at the first moment anything else could run after each move. */
+  after: (string | null)[];
+  /** The folders that are there, and what each is. */
+  disk: Map<string, string>;
   clock: number;
-  done: Done;
 }
 
-async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
+const inside = (p: string, root: string): boolean => p === root || p.startsWith(root + path.sep);
+
+/** A stand-in computer, and everything a run does to it written down. */
+function start(sim: Partial<Sim> = {}): { w: World; d: Doing } {
   const s: Sim = {
     there: [],
     fetch: null,
     install: null,
     partial: false,
+    cut: null,
     unmovable: {},
     stuck: {},
     bins: {},
@@ -170,26 +211,33 @@ async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
     status: [null],
     health: SAYS,
     use: { state: "current", version: "2.0.0", said: "This computer is up to date." },
-    serviceDir: null,
+    runningFrom: null,
+    spelled: {},
     proof: {},
     settleMs: null,
     stopMs: null,
     ...sim,
   };
   const answers = [...s.status];
-  const w: Omit<World, "done"> = {
+  const proofs = Array.isArray(s.proof) ? [...s.proof] : [s.proof];
+  let ids = 0;
+  const w: World = {
     all: [],
     did: [],
     said: [],
     proved: [],
     removals: [],
     relinked: [],
-    there: new Set(s.there),
+    slot: [],
+    after: [],
+    disk: new Map(s.there.map((p) => [p, WAS])),
     clock: 0,
   };
+  const held = (): string | null => w.disk.get(SLOT) ?? null;
   const did = (x: string): void => {
     w.did.push(x);
     w.all.push(x);
+    w.slot.push([x, held()]);
   };
   const d: Doing = {
     say: (l) => {
@@ -203,17 +251,28 @@ async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
     },
     install: async (prefix, version) => {
       did(`install ${version} in ${prefix}`);
-      if (!s.install || s.partial) w.there.add(SLOT);
+      if (!s.install || s.partial) w.disk.set(prefix, NPMS);
+      // A signal: npm had started, and nothing after it runs.
+      if (s.cut) throw new Error(s.cut);
+      // npm takes its time, and other things run meanwhile.
+      await Promise.resolve();
+      if (!s.install) w.disk.set(path.join(prefix, "lib", "node_modules", "sessionpipe"), FRESH);
+      w.slot.push(["npm is back", held()]);
       return s.install;
     },
-    exists: (p) => w.there.has(p),
+    exists: (p) => w.disk.has(p),
     rename: (from, to) => {
       did(`rename ${from} -> ${to}`);
+      // Whatever is waiting to run gets its turn only when the run next lets go.
+      queueMicrotask(() => w.after.push(held()));
       if (s.unmovable[from]) throw new Error(s.unmovable[from]);
-      w.there.delete(from);
-      w.there.add(to);
+      for (const [p, what] of [...w.disk])
+        if (inside(p, from)) {
+          w.disk.delete(p);
+          w.disk.set(to + p.slice(from.length), what);
+        }
     },
-    id: () => "a1b2c3d4",
+    id: () => IDS[ids++ % IDS.length] as string,
     status: async () => {
       did("status");
       return answers.length > 1 ? (answers.shift() as Status | null) : (answers[0] ?? null);
@@ -228,18 +287,21 @@ async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
     },
     seed: (sessions) => did(`seed ${sessions.join(",")}`),
     stop: (pid) => did(`stop ${pid}`),
-    unserve: () => did("unserve"),
     use: async (version, serve) => {
       did(`use ${version}${serve ? ", the service too" : ""}`);
       return s.use;
     },
-    serviceDir: () => s.serviceDir,
-    remove: async (what, alone) => {
-      did(`remove ${what}${alone ? ", the folder only" : ""}`);
-      w.removals.push([what, alone]);
+    runningFrom: async () => {
+      did("running from?");
+      return s.runningFrom;
+    },
+    same: (a, b) => (s.spelled[a] ?? a) === (s.spelled[b] ?? b),
+    remove: async (what) => {
+      did(`remove ${what}`);
+      w.removals.push(what);
       if (s.stuck[what]) throw new Error(s.stuck[what]);
-      w.there.delete(what);
-      return [what, ...(alone ? [] : (s.bins[what] ?? []))];
+      for (const p of [...w.disk.keys()]) if (inside(p, what)) w.disk.delete(p);
+      return [what, ...(s.bins[what] ?? [])];
     },
     relink: (prefix) => {
       did(`relink ${prefix}`);
@@ -249,7 +311,8 @@ async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
     prove: async (removed) => {
       did("prove");
       w.proved.push([...removed]);
-      return { runs: "2.0.0", onPath: [BIN], first: true, named: [], ...s.proof };
+      const answer = proofs.length > 1 ? proofs.shift() : proofs[0];
+      return { runs: "2.0.0", typed: true, onPath: [BIN], named: [], ...answer };
     },
     sleep: async (ms) => {
       w.clock += ms;
@@ -258,11 +321,46 @@ async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World> {
     ...(s.settleMs === null ? {} : { settleMs: s.settleMs }),
     ...(s.stopMs === null ? {} : { stopMs: s.stopMs }),
   };
+  return { w, d };
+}
+
+async function carry(p: Plan, sim: Partial<Sim> = {}): Promise<World & { done: Done }> {
+  const { w, d } = start(sim);
   const done = await carryOut(p, d);
-  return { ...w, done };
+  return Object.assign(w, { done });
 }
 
 const count = (w: World, what: string): number => w.did.filter((x) => x === what).length;
+/** The folders that are there afterwards, in a fixed order. */
+const folders = (w: World): string[] => [...w.disk.keys()].sort();
+const sorted = (...list: string[]): string[] => [...list].sort();
+/** The removals a plan's own steps asked for: not the swap's tidying of its two folders. */
+const taken = (w: World): string[] => w.removals.filter((x) => x !== STAGE && x !== ASIDE);
+
+/** What a fresh install does where it goes well: over a copy that is there, and into an
+ *  empty slot. */
+const SWAP = [
+  `install 2.0.0 in ${STAGE}`,
+  `rename ${SLOT} -> ${ASIDE}`,
+  `rename ${STAGED} -> ${SLOT}`,
+  `remove ${STAGE}`,
+  `remove ${ASIDE}`,
+  `relink ${PREFIX}`,
+];
+const INTO = [`install 2.0.0 in ${STAGE}`, `rename ${STAGED} -> ${SLOT}`, `remove ${STAGE}`, `relink ${PREFIX}`];
+const INSTALLED = "ok: installed fresh in ~/.local, and it runs";
+const REPLACED = `${INSTALLED} (what was there is gone)`;
+/** The two lines of the check at the end, where all is as it should be. */
+const RUNS = "ok: the copy in ~/.local runs: `--version` says 2.0.0";
+const TYPED = `ok: typing \`sessionpipe\` starts it: ${tilde(BIN)}`;
+const NOT_TYPED = (starts?: string): string =>
+  `Typing \`sessionpipe\` does not start the copy in ~/.local${starts ? ` (it starts ${starts})` : ""}`;
+const UNFIT = (printed: string): string =>
+  `the copy in ~/.local doesn't run as it should (\`--version\` printed ${printed})`;
+/** What ours.ts says of a folder it could empty only in part. */
+const IN_PART = (what: string): string =>
+  `${what} could only be removed in part (EACCES: permission denied, rmdir '${path.join(what, "dist")}'): what is left of it no longer runs, and the next run takes it`;
+
 const ONE: Done = {
   state: "one",
   said: "This computer has one sessionpipe: 2.0.0, in ~/.local. Pairings and settings are as they were.",
@@ -277,11 +375,9 @@ const LEFT = (still: string, next = "sessionpipe reinstall", warn: string[] = []
   still,
   next,
 });
-const SUDO = "sudo npm uninstall -g --prefix /usr/local sessionpipe";
-const TYPING = (file: string): string => `Typing \`sessionpipe\` still starts ${file}, not the fresh copy.`;
 
 describe("a plan carried out", () => {
-  it("fetches, installs over what was there, moves the hooks and the service, removes the rest, and proves it: in that order", async () => {
+  it("M1: fetches, installs beside what was there and swaps it in, moves the hooks and the service, proves the copy before the first removal, removes the rest, and proves it again: in that order", async () => {
     const w = await carry(
       plan([fetch(), install(true), use(), remove(LINK), remove(LEFTOVER), remove(OLD), remove(NPX), prove()]),
       { there: [SLOT, LEFTOVER, OLD, NPX], bins: { [OLD]: [OLD_BIN] } },
@@ -289,11 +385,18 @@ describe("a plan carried out", () => {
     expect(w.all).toEqual([
       "fetch 2.0.0",
       "ok: sessionpipe 2.0.0 downloaded",
+      // npm installs beside the slot; the two folders change places; what the swap made
+      // beside the slot goes; the link that starts the copy is seen to be there.
+      `install 2.0.0 in ${STAGE}`,
       `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
+      `rename ${STAGED} -> ${SLOT}`,
+      `remove ${STAGE}`,
       `remove ${ASIDE}`,
-      "ok: installed fresh in ~/.local, and it runs (what was there is gone)",
+      `relink ${PREFIX}`,
+      REPLACED,
       "use 2.0.0, the service too",
+      // Before anything else is removed: the copy in the home runs, and typing starts it.
+      "prove",
       // Each removal is said in the words of its row on the plan; the copy that had a
       // link says the link went with it.
       `remove ${LINK}`,
@@ -305,44 +408,51 @@ describe("a plan carried out", () => {
       `remove ${NPX}`,
       "ok: removed 2.0.0 in ~/.npm/_npx/0a1b2c3d",
       "prove",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
       "ok: nothing here names a removed copy any more",
     ]);
     expect(w.done).toEqual(ONE);
-    // The proof is handed what the removals said is gone, links too; the folder that was
-    // moved aside was the home's own, and is no removed copy to look for.
-    expect(w.proved).toEqual([[LINK, LEFTOVER, OLD, OLD_BIN, NPX]]);
-    expect([...w.there]).toEqual([SLOT]);
+    // The first proof is handed nothing: nothing is removed yet. The second is handed what
+    // the removals said is gone, links too; the two folders of the swap were the home's
+    // own, and are no removed copy to look for.
+    expect(w.proved).toEqual([[], [LINK, LEFTOVER, OLD, OLD_BIN, NPX]]);
+    expect(folders(w)).toEqual([SLOT]);
+    expect(w.disk.get(SLOT)).toBe(FRESH);
     expect(w.clock).toBe(0);
-    // Every removal was of the whole of a copy, its link with it: none of the folder only.
-    // And no link was made again: that is for a folder put back after an install that failed.
-    expect(w.removals).toEqual([
-      [ASIDE, undefined],
-      [LINK, undefined],
-      [LEFTOVER, undefined],
-      [OLD, undefined],
-      [NPX, undefined],
-    ]);
-    expect(w.relinked).toEqual([]);
+    expect(w.removals).toEqual([STAGE, ASIDE, LINK, LEFTOVER, OLD, NPX]);
+    expect(w.relinked).toEqual([PREFIX]);
   });
 
-  it("a plan with nothing to remove says nothing of removed copies", async () => {
+  it("a plan with nothing to remove proves once, at the end, and says nothing of removed copies", async () => {
     const w = await carry(plan([fetch(), install(), use(false), prove()]));
     expect(w.all).toEqual([
       "fetch 2.0.0",
       "ok: sessionpipe 2.0.0 downloaded",
-      `install 2.0.0 in ${PREFIX}`,
-      "ok: installed fresh in ~/.local, and it runs",
+      ...INTO,
+      INSTALLED,
       "use 2.0.0",
       "prove",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
     ]);
     expect(w.done).toEqual(ONE);
     expect(w.proved).toEqual([[]]);
-    expect(w.removals).toEqual([]);
-    expect(w.relinked).toEqual([]);
+    expect(taken(w)).toEqual([]);
+  });
+
+  it("M3: a home copy that stays as it is (whole, the newest, not this user's to write): nothing is fetched or installed, and the last line says why", async () => {
+    const stays = "2.0.0 in ~/.local as it is: whole, the newest, and not yours to write";
+    const w = await carry(plan([use(), remove(OLD), prove()], { stays }), { there: [SLOT, OLD] });
+    expect(w.did).toEqual(["use 2.0.0, the service too", "prove", `remove ${OLD}`, "prove"]);
+    expect(w.done).toEqual({
+      state: "one",
+      said: "This computer has one sessionpipe: 2.0.0, in ~/.local (not installed again: it is whole, the newest, and not yours to write). Pairings and settings are as they were.",
+      warn: [],
+    });
+    // The copy in the home was never touched.
+    expect(w.disk.get(SLOT)).toBe(WAS);
+    expect(w.slot.every(([, held]) => held === WAS)).toBe(true);
   });
 });
 
@@ -358,7 +468,7 @@ describe("the download", () => {
       next: "sessionpipe reinstall",
     });
     expect(w.all).toEqual(["fetch 2.0.0"]);
-    expect([...w.there]).toEqual([SLOT, OLD]);
+    expect(folders(w)).toEqual(sorted(SLOT, OLD));
   });
 
   it("one that is downloaded is said by its release, in a line of its own", async () => {
@@ -368,209 +478,309 @@ describe("the download", () => {
   });
 });
 
-describe("the fresh install", () => {
-  it("into an empty slot nothing is moved and nothing is removed", async () => {
-    const w = await carry(plan([install()]));
-    expect(w.all).toEqual([`install 2.0.0 in ${PREFIX}`, "ok: installed fresh in ~/.local, and it runs"]);
-    expect(w.done).toEqual(ONE);
+describe("the fresh install: beside the slot, then two moves", () => {
+  const WHY = "npm install: npm error code EINTEGRITY";
+  const failed = (error: string, next = "sessionpipe reinstall"): Done => ({
+    state: "failed",
+    error: `sessionpipe 2.0.0 couldn't be installed in ~/.local: ${error}`,
+    next,
   });
 
-  it("what is in the slot is moved aside beside it, and goes only once the fresh copy runs", async () => {
+  it("L1: npm installs beside the copy that is there: the slot holds that copy while npm works, and is empty for no moment in which anything else can run", async () => {
     const w = await carry(plan([install(true)]), { there: [SLOT] });
-    expect(w.did).toEqual([`rename ${SLOT} -> ${ASIDE}`, `install 2.0.0 in ${PREFIX}`, `remove ${ASIDE}`]);
-    // Beside the slot, under the name npm itself gives a folder it moved out of the way.
-    expect(path.dirname(ASIDE)).toBe(path.dirname(SLOT));
-    expect(path.basename(ASIDE)).toMatch(/^\.sessionpipe-[A-Za-z0-9]{8}$/);
-    expect(w.said).toEqual(["ok: installed fresh in ~/.local, and it runs (what was there is gone)"]);
-    expect([...w.there]).toEqual([SLOT]);
-    // The old folder goes whole, and the link npm has just written is not looked for again.
-    expect(w.removals).toEqual([[ASIDE, undefined]]);
-    expect(w.relinked).toEqual([]);
-  });
-
-  it("an old folder that can't be removed afterwards is the next run's to find: the install worked", async () => {
-    const w = await carry(plan([install(true), use(), prove()]), {
-      there: [SLOT],
-      stuck: { [ASIDE]: "EBUSY: resource busy or locked" },
-    });
-    expect(w.did).toEqual([
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `remove ${ASIDE}`,
-      "use 2.0.0, the service too",
-      "prove",
+    expect(w.did).toEqual(SWAP);
+    // What the slot held at each thing done. While npm worked, and when it came back, the
+    // copy that was there; the one thing done with the slot empty is the move that fills
+    // it, straight after the move that emptied it.
+    expect(w.slot).toEqual([
+      [`install 2.0.0 in ${STAGE}`, WAS],
+      ["npm is back", WAS],
+      [`rename ${SLOT} -> ${ASIDE}`, WAS],
+      [`rename ${STAGED} -> ${SLOT}`, null],
+      [`remove ${STAGE}`, FRESH],
+      [`remove ${ASIDE}`, FRESH],
+      [`relink ${PREFIX}`, FRESH],
     ]);
+    // Between the two moves the run does not let go: whatever was waiting to run after the
+    // first of them finds the fresh copy in the slot already.
+    expect(w.after).toEqual([FRESH, FRESH]);
+    expect(w.said).toEqual([REPLACED]);
+    expect(folders(w)).toEqual([SLOT]);
+    expect(w.disk.get(SLOT)).toBe(FRESH);
     expect(w.done).toEqual(ONE);
-    expect([...w.there].sort()).toEqual([ASIDE, SLOT].sort());
   });
 
-  it("npm failing into an empty slot: what it left is removed, and nothing else was changed", async () => {
-    const steps = [fetch(), install(), use(), remove(OLD), prove()];
-    const failed: Done = {
-      state: "failed",
-      error:
-        "sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: npm error code EINTEGRITY. Nothing else was changed",
-      next: "sessionpipe reinstall",
-    };
-    // npm left half a copy in the slot.
-    const half = await carry(plan(steps), {
-      there: [OLD],
-      install: "npm install: npm error code EINTEGRITY",
-      partial: true,
-    });
-    expect(half.done).toEqual(failed);
-    // Only the folder: a link in the home's bin folder is not npm's leftover to take with it.
-    expect(half.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${PREFIX}`, `remove ${SLOT}, the folder only`]);
-    expect(half.removals).toEqual([[SLOT, true]]);
-    expect([...half.there]).toEqual([OLD]);
+  it("L1: the folder npm installs into and the name the old copy steps aside under are two names, both beside the slot, both as npm names a folder it moved away", () => {
+    expect(STAGE).not.toBe(ASIDE);
+    for (const beside of [STAGE, ASIDE]) {
+      expect(path.dirname(beside)).toBe(path.dirname(SLOT));
+      expect(path.basename(beside)).toMatch(LEFT_BEHIND);
+    }
+    // npm lays its own prefix out in the first: the copy is where a prefix keeps one.
+    expect(STAGED).toBe(slotOf(STAGE));
+  });
+
+  it("L1: into an empty slot: one move, nothing put aside, and only npm's folder to tidy", async () => {
+    const w = await carry(plan([install()]));
+    expect(w.all).toEqual([...INTO, INSTALLED]);
+    expect(w.done).toEqual(ONE);
+    expect(w.removals).toEqual([STAGE]);
+    expect(folders(w)).toEqual([SLOT]);
+    expect(w.disk.get(SLOT)).toBe(FRESH);
+    // A copy that turns up in the slot only after the plan was made is put aside all the
+    // same: what is there is looked at when npm is back, not taken from the plan.
+    const late = await carry(plan([install()]), { there: [SLOT] });
+    expect(late.did).toEqual(SWAP);
+    expect(late.said).toEqual([INSTALLED]);
+  });
+
+  it("L1: npm failing has touched nothing: no move was made, the slot holds the copy that was there, and what npm left beside it is removed", async () => {
+    const steps = [fetch(), install(true), use(), remove(OLD), prove()];
+    // npm left its folder beside the slot.
+    const half = await carry(plan(steps), { there: [SLOT, OLD], install: WHY, partial: true });
+    expect(half.done).toEqual(failed(`${WHY}. Nothing was changed`));
+    expect(half.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${STAGE}`, `remove ${STAGE}`]);
     // npm left nothing: there is nothing to remove.
-    const none = await carry(plan(steps), { there: [OLD], install: "npm install: npm error code EINTEGRITY" });
-    expect(none.done).toEqual(failed);
-    expect(none.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${PREFIX}`]);
-    // Either way it stops there: the hooks, the service and the other copies are as they were.
-    expect(none.said).toEqual(["ok: sessionpipe 2.0.0 downloaded"]);
-    expect([...none.there]).toEqual([OLD]);
-    // Nothing was moved aside, so there is no folder back in its place to have a link for.
-    expect(half.relinked).toEqual([]);
-    expect(none.relinked).toEqual([]);
+    const none = await carry(plan(steps), { there: [SLOT, OLD], install: WHY });
+    expect(none.done).toEqual(half.done);
+    expect(none.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${STAGE}`]);
+    for (const w of [half, none]) {
+      // It stops there: the hooks, the service and the other copies are as they were.
+      expect(w.said).toEqual(["ok: sessionpipe 2.0.0 downloaded"]);
+      expect(folders(w)).toEqual(sorted(SLOT, OLD));
+      // The slot held the copy that was there at every moment, and holds it still. No
+      // folder was moved, so there is no link to look for.
+      expect(w.slot.map(([, held]) => held)).toEqual(w.slot.map(() => WAS));
+      expect(w.did.filter((x) => x.startsWith("rename"))).toEqual([]);
+      expect(w.relinked).toEqual([]);
+    }
+    // The same words where nothing was in the slot: nothing is in it now.
+    const empty = await carry(plan([install()]), { install: WHY, partial: true });
+    expect(empty.done).toEqual(half.done);
+    expect(folders(empty)).toEqual([]);
+    // A copy npm unpacked whole that then says nothing of itself is such a failure too.
+    const mute = `npm finished, but the copy in ${STAGE} says nothing, not 2.0.0`;
+    const unfit = await carry(plan(steps), { there: [SLOT, OLD], install: mute, partial: true });
+    expect(unfit.done).toEqual(failed(`${mute}. Nothing was changed`));
+    expect(unfit.disk.get(SLOT)).toBe(WAS);
   });
 
-  it("npm failing over a copy: what it left is removed, the old folder is moved back, and its link is seen to be there", async () => {
-    const failed: Done = {
-      state: "failed",
-      error:
-        "sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: it installed, and the copy on disk says nothing. What was there is back in its place",
-      next: "sessionpipe reinstall",
-    };
-    const why = "npm install: it installed, and the copy on disk says nothing";
-    const half = await carry(plan([install(true), use(), prove()]), { there: [SLOT], install: why, partial: true });
-    expect(half.done).toEqual(failed);
-    // What npm left goes as a folder only: the link stays for the folder that comes back.
-    expect(half.did).toEqual([
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `remove ${SLOT}, the folder only`,
-      `rename ${ASIDE} -> ${SLOT}`,
-      `relink ${PREFIX}`,
-    ]);
-    expect(half.removals).toEqual([[SLOT, true]]);
-    expect(half.relinked).toEqual([PREFIX]);
-    expect([...half.there]).toEqual([SLOT]);
-    expect(half.said).toEqual([]);
-    const none = await carry(plan([install(true), use(), prove()]), { there: [SLOT], install: why });
-    expect(none.done).toEqual(failed);
-    expect(none.did).toEqual([
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `rename ${ASIDE} -> ${SLOT}`,
-      `relink ${PREFIX}`,
-    ]);
-    expect(none.removals).toEqual([]);
-    expect([...none.there]).toEqual([SLOT]);
-  });
-
-  it("the old folder is back and the link that starts it is not: the sentence says so", async () => {
-    // npm took the link with what it left, and it could not be made again.
-    const w = await carry(plan([fetch(), install(true), use(), remove(OLD), prove()]), {
-      there: [SLOT, OLD],
-      install: "npm install: npm error code ENOSPC",
-      partial: true,
-      relink: false,
-    });
-    expect(w.done).toEqual({
-      state: "failed",
-      error:
-        "sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: npm error code ENOSPC. What was there is back in its place, but the link that starts it is gone",
-      next: "sessionpipe reinstall",
-    });
-    // The link is looked for only after the folder is back, and once.
-    expect(w.did).toEqual([
-      "fetch 2.0.0",
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `remove ${SLOT}, the folder only`,
-      `rename ${ASIDE} -> ${SLOT}`,
-      `relink ${PREFIX}`,
-    ]);
-    // It stops there all the same: the hooks, the service and the other copy are as they were.
-    expect([...w.there].sort()).toEqual([OLD, SLOT].sort());
-    expect(w.said).toEqual(["ok: sessionpipe 2.0.0 downloaded"]);
-  });
-
-  it("an old folder that can't be put back is kept beside the slot, and the sentence says where", async () => {
-    const kept = `it is kept beside it, as ${tilde(ASIDE)}`;
-    // The move back fails.
-    const back = await carry(plan([install(true), use()]), {
+  it("L1: what npm left beside the slot and can't be removed is said, never passed over; the failure is the same", async () => {
+    const w = await carry(plan([install(true), use()]), {
       there: [SLOT],
-      install: "npm install: ENOSPC",
-      unmovable: { [ASIDE]: "EPERM: operation not permitted, rename" },
-    });
-    expect(back.done).toEqual({
-      state: "failed",
-      error: `sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: ENOSPC; and what was there could not be put back (EPERM: operation not permitted, rename): ${kept}`,
-      next: "sessionpipe reinstall",
-    });
-    // No folder is back in the slot, so no link is made for one.
-    expect(back.did).toEqual([
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `rename ${ASIDE} -> ${SLOT}`,
-    ]);
-    expect(back.relinked).toEqual([]);
-    expect([...back.there]).toEqual([ASIDE]);
-    // What npm left in the slot can't be removed, so the old folder has nowhere to go back to.
-    const full = await carry(plan([install(true), use()]), {
-      there: [SLOT],
-      install: "npm install: ENOSPC",
+      install: WHY,
       partial: true,
-      stuck: { [SLOT]: "it holds src, which no published sessionpipe has (a checkout or a build?)" },
+      stuck: { [STAGE]: "EACCES: permission denied, rmdir" },
     });
-    expect(full.done).toEqual({
-      state: "failed",
-      error: `sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: ENOSPC; and what was there could not be put back (it holds src, which no published sessionpipe has (a checkout or a build?)): ${kept}`,
-      next: "sessionpipe reinstall",
-    });
-    expect(full.did).toEqual([
-      `rename ${SLOT} -> ${ASIDE}`,
-      `install 2.0.0 in ${PREFIX}`,
-      `remove ${SLOT}, the folder only`,
+    expect(w.all).toEqual([
+      `install 2.0.0 in ${STAGE}`,
+      `remove ${STAGE}`,
+      `warn: ${tilde(STAGE)} could not be removed (EACCES: permission denied, rmdir): the next run takes it`,
     ]);
-    expect(full.relinked).toEqual([]);
-    expect([...full.there].sort()).toEqual([ASIDE, SLOT].sort());
+    expect(w.done).toEqual(failed(`${WHY}. Nothing was changed`));
+    expect(folders(w)).toEqual(sorted(SLOT, STAGE));
+    expect(w.disk.get(SLOT)).toBe(WAS);
   });
 
-  it("what npm left in an empty slot can't be removed: it says that, and names no folder kept beside it", async () => {
-    const w = await carry(plan([install(), use()]), {
-      install: "npm install: ENOSPC",
-      partial: true,
-      stuck: { [SLOT]: "EACCES: permission denied, rmdir" },
-    });
-    expect(w.done).toEqual({
-      state: "failed",
-      error:
-        "sessionpipe 2.0.0 couldn't be installed in ~/.local: npm install: ENOSPC; and what npm left there could not be removed (EACCES: permission denied, rmdir)",
-      next: "sessionpipe reinstall",
-    });
-    // Nothing was moved aside, so no such folder is there to speak of.
-    expect(w.done.state === "failed" && w.done.error).not.toContain(".sessionpipe-");
-    expect(w.did).toEqual([`install 2.0.0 in ${PREFIX}`, `remove ${SLOT}, the folder only`]);
-    expect(w.there.has(ASIDE)).toBe(false);
+  it("L1: a run cut off while npm works has moved nothing: the slot holds the copy that was there, and what npm had made is a leftover for the next run", async () => {
+    const { w, d } = start({ there: [SLOT, OLD], cut: "SIGINT" });
+    await expect(carryOut(plan([fetch(), install(true), use(), remove(OLD), prove()]), d)).rejects.toThrow("SIGINT");
+    // Nothing after npm was started: no move, no removal, no link, no hooks, no proof.
+    expect(w.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${STAGE}`]);
+    expect(w.disk.get(SLOT)).toBe(WAS);
+    expect(w.disk.get(OLD)).toBe(WAS);
+    expect(folders(w)).toEqual(sorted(SLOT, OLD, STAGE));
+    expect(path.basename(STAGE)).toMatch(LEFT_BEHIND);
   });
 
-  it("what is there can't be moved out of the way: npm is never run", async () => {
+  it("L2: what is there can't be moved out of the way: nothing was changed, npm's folder is tidied, and the command named is one that still runs", async () => {
     const w = await carry(plan([fetch(), install(true), use(), remove(OLD), prove()]), {
       there: [SLOT, OLD],
       unmovable: { [SLOT]: "EACCES: permission denied, rename" },
     });
-    expect(w.done).toEqual({
-      state: "failed",
-      error:
-        "sessionpipe 2.0.0 couldn't be installed in ~/.local: what is there now couldn't be moved out of the way (EACCES: permission denied, rename). Nothing was changed",
-      next: "sessionpipe reinstall",
-    });
-    expect(w.did).toEqual(["fetch 2.0.0", `rename ${SLOT} -> ${ASIDE}`]);
-    expect([...w.there]).toEqual([SLOT, OLD]);
+    expect(w.done).toEqual(
+      failed(
+        "what is there now couldn't be moved out of the way (EACCES: permission denied, rename). Nothing was changed",
+      ),
+    );
+    expect(w.did).toEqual([
+      "fetch 2.0.0",
+      `install 2.0.0 in ${STAGE}`,
+      `rename ${SLOT} -> ${ASIDE}`,
+      `remove ${STAGE}`,
+    ]);
+    expect(folders(w)).toEqual(sorted(SLOT, OLD));
+    expect(w.disk.get(SLOT)).toBe(WAS);
     expect(w.relinked).toEqual([]);
+    // Where npm's folder can't be removed either, that is said too.
+    const stuck = await carry(plan([install(true)]), {
+      there: [SLOT],
+      unmovable: { [SLOT]: "EACCES: permission denied, rename" },
+      stuck: { [STAGE]: "EBUSY: resource busy or locked" },
+    });
+    expect(stuck.said).toEqual([
+      `warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked): the next run takes it`,
+    ]);
+    expect(stuck.done).toEqual(w.done);
+  });
+
+  it("L2: the fresh copy can't be moved in: what was there is moved back by the same move the other way round, and the command named still runs", async () => {
+    const w = await carry(plan([fetch(), install(true), use(), remove(OLD), prove()]), {
+      there: [SLOT, OLD],
+      unmovable: { [STAGED]: "EXDEV: cross-device link not permitted, rename" },
+    });
+    expect(w.done).toEqual(
+      failed(
+        "the fresh copy couldn't be put in its place (EXDEV: cross-device link not permitted, rename). What was there is back where it was",
+      ),
+    );
+    expect(w.did).toEqual([
+      "fetch 2.0.0",
+      `install 2.0.0 in ${STAGE}`,
+      `rename ${SLOT} -> ${ASIDE}`,
+      `rename ${STAGED} -> ${SLOT}`,
+      // The way back is one move: nothing is removed to make room for it.
+      `rename ${ASIDE} -> ${SLOT}`,
+      `remove ${STAGE}`,
+    ]);
+    expect(folders(w)).toEqual(sorted(SLOT, OLD));
+    expect(w.disk.get(SLOT)).toBe(WAS);
+    // The link that starts the copy was never touched: there is none to make again.
+    expect(w.relinked).toEqual([]);
+    // Nothing else could run while the slot was empty: the three moves are one after the other.
+    expect(w.after).toEqual([WAS, WAS, WAS]);
+    expect(w.said).toEqual(["ok: sessionpipe 2.0.0 downloaded"]);
+    // Into a slot that was empty there is nothing to move back, and nothing else was changed.
+    const empty = await carry(plan([install()]), {
+      unmovable: { [STAGED]: "EXDEV: cross-device link not permitted, rename" },
+    });
+    expect(empty.done).toEqual(
+      failed(
+        "the fresh copy couldn't be put in its place (EXDEV: cross-device link not permitted, rename). Nothing else was changed",
+      ),
+    );
+    expect(empty.did).toEqual([`install 2.0.0 in ${STAGE}`, `rename ${STAGED} -> ${SLOT}`, `remove ${STAGE}`]);
+    expect(folders(empty)).toEqual([]);
+  });
+
+  it("L2: the fresh copy can't be moved in and what was there can't be moved back: the slot is empty, so the command named is the one that needs no working copy, and the sentence says where the old copy is, and the fresh one", async () => {
+    const w = await carry(plan([fetch(), install(true), use(), remove(OLD), prove()]), {
+      there: [SLOT, OLD],
+      unmovable: {
+        [STAGED]: "EXDEV: cross-device link not permitted, rename",
+        [ASIDE]: "EPERM: operation not permitted, rename",
+      },
+    });
+    expect(w.done).toEqual(
+      failed(
+        // Both folders it leaves beside the slot are named: the old copy, and the folder npm
+        // installed the fresh one into. (That one was left there with no word of it: the
+        // one failure that was not said.)
+        `the fresh copy couldn't be put in its place (EXDEV: cross-device link not permitted, rename), and what was there could not be put back (EPERM: operation not permitted, rename): it is beside its place, as ${tilde(ASIDE)}, and the fresh copy as ${tilde(STAGE)}`,
+        BY_NPX,
+      ),
+    );
+    expect(ASIDE).not.toBe(STAGE);
+    expect(w.done.state === "failed" && w.done.next).not.toBe("sessionpipe reinstall");
+    expect(w.did).toEqual([
+      "fetch 2.0.0",
+      `install 2.0.0 in ${STAGE}`,
+      `rename ${SLOT} -> ${ASIDE}`,
+      `rename ${STAGED} -> ${SLOT}`,
+      `rename ${ASIDE} -> ${SLOT}`,
+    ]);
+    // The old copy is where the sentence says, whole, and so is the fresh one: nothing
+    // was tidied away that a person might put in place by hand, and nothing else was touched.
+    expect(w.disk.has(SLOT)).toBe(false);
+    expect(w.disk.get(ASIDE)).toBe(WAS);
+    expect(w.disk.has(STAGED)).toBe(true);
+    expect(w.disk.get(OLD)).toBe(WAS);
+    expect(w.relinked).toEqual([]);
+  });
+
+  it("L2: the fresh copy is in its place and the link that starts it can't be made: the command named is the one that needs no working copy", async () => {
+    const w = await carry(plan([fetch(), install(true), use(), remove(OLD), prove()]), {
+      there: [SLOT, OLD],
+      relink: false,
+    });
+    expect(w.done).toEqual(
+      failed("the fresh copy is in its place, and the link that starts it couldn't be made", BY_NPX),
+    );
+    // The link is looked for once the copy is in its place and the swap is tidied, and once.
+    expect(w.did).toEqual(["fetch 2.0.0", ...SWAP]);
+    expect(w.disk.get(SLOT)).toBe(FRESH);
+    // It stops there: the hooks, the service and the other copy are as they were.
+    expect(w.disk.get(OLD)).toBe(WAS);
+    expect(w.said).toEqual(["ok: sessionpipe 2.0.0 downloaded"]);
+    // The same into a slot that was empty.
+    const empty = await carry(plan([install()]), { relink: false });
+    expect(empty.done).toEqual(w.done);
+    expect(empty.did).toEqual(INTO);
+  });
+
+  it("L2: however the install fails, `sessionpipe reinstall` is named only where the slot holds what it held before; anywhere else it is the npx line", async () => {
+    const ways: Partial<Sim>[] = [
+      { install: WHY },
+      { install: WHY, partial: true },
+      { install: WHY, partial: true, stuck: { [STAGE]: "EBUSY" } },
+      { unmovable: { [SLOT]: "EACCES" } },
+      { unmovable: { [STAGED]: "EXDEV" } },
+      { unmovable: { [STAGED]: "EXDEV" }, stuck: { [STAGE]: "EBUSY" } },
+      { unmovable: { [STAGED]: "EXDEV", [ASIDE]: "EPERM" } },
+      { relink: false },
+      { relink: false, stuck: { [ASIDE]: "EBUSY", [STAGE]: "EBUSY" } },
+    ];
+    const next: string[] = [];
+    for (const way of ways)
+      for (const there of [[SLOT], []]) {
+        const w = await carry(plan([install(there.length > 0), use(), prove()]), { ...way, there });
+        // A slot that was empty has no copy to be unable to move away: that way is none there.
+        if (w.done.state !== "failed") {
+          expect(way.unmovable?.[SLOT] && !there.length).toBeTruthy();
+          continue;
+        }
+        next.push(w.done.next);
+        if (w.done.next === "sessionpipe reinstall")
+          expect(w.disk.get(SLOT) ?? null, w.done.error).toBe(there.length ? WAS : null);
+        else expect(w.done.next).toBe(BY_NPX);
+        // Nothing after the install was done.
+        expect(w.did.filter((x) => /^(use|prove)/.test(x))).toEqual([]);
+      }
+    // Both kinds of ending were met.
+    expect(new Set(next)).toEqual(new Set(["sessionpipe reinstall", BY_NPX]));
+  });
+
+  it("L6: a folder of the swap that can't be tidied afterwards is said in yellow and is the next run's to take: the install worked", async () => {
+    const steps = [install(true), use(), prove()];
+    const old = await carry(plan(steps), { there: [SLOT], stuck: { [ASIDE]: IN_PART(ASIDE) } });
+    expect(old.all).toEqual([
+      ...SWAP.slice(0, 5),
+      `warn: ${tilde(ASIDE)} could not be removed (${IN_PART(ASIDE)}): the next run takes it`,
+      `relink ${PREFIX}`,
+      REPLACED,
+      "use 2.0.0, the service too",
+      "prove",
+      RUNS,
+      TYPED,
+    ]);
+    expect(old.done).toEqual(ONE);
+    expect(folders(old)).toEqual(sorted(SLOT, ASIDE));
+    expect(old.disk.get(SLOT)).toBe(FRESH);
+    // npm's own folder: the same, and the old copy still goes.
+    const stage = await carry(plan(steps), { there: [SLOT], stuck: { [STAGE]: "EBUSY: resource busy or locked" } });
+    expect(stage.said[0]).toBe(
+      `warn: ${tilde(STAGE)} could not be removed (EBUSY: resource busy or locked): the next run takes it`,
+    );
+    expect(stage.did.slice(0, SWAP.length)).toEqual(SWAP);
+    expect(stage.done).toEqual(ONE);
+    expect(folders(stage)).toEqual(sorted(SLOT, STAGE));
+    // Both: a line each.
+    const both = await carry(plan(steps), { there: [SLOT], stuck: { [STAGE]: "EBUSY", [ASIDE]: "EPERM" } });
+    expect(both.said.filter((l) => l.startsWith("warn: "))).toEqual([
+      `warn: ${tilde(STAGE)} could not be removed (EBUSY): the next run takes it`,
+      `warn: ${tilde(ASIDE)} could not be removed (EPERM): the next run takes it`,
+    ]);
+    expect(both.done).toEqual(ONE);
   });
 });
 
@@ -590,8 +800,8 @@ describe("a daemon someone started by hand", () => {
     // 25 seconds by default, asked twice a second; the counter is the only clock.
     expect(w.clock).toBe(25_000);
     expect(count(w, "status")).toBe(51);
-    expect(w.did.filter((x) => x !== "status")).toEqual(["fetch 2.0.0", `install 2.0.0 in ${PREFIX}`]);
-    expect([...w.there].sort()).toEqual([OLD, SLOT].sort());
+    expect(w.did.filter((x) => x !== "status")).toEqual(["fetch 2.0.0", ...INTO]);
+    expect(folders(w)).toEqual(sorted(OLD, SLOT));
     // The wait is the caller's to shorten.
     const short = await carry(plan([stop(7)]), {
       status: [st({ pid: 7, busy: "a headless agent run" })],
@@ -605,20 +815,14 @@ describe("a daemon someone started by hand", () => {
   it("gone by the time it is asked: there is nothing to stop, and the rest goes on", async () => {
     const w = await carry(plan([stop(), use(), prove()]), { status: [null] });
     expect(w.did).toEqual(["status", "use 2.0.0, the service too", "prove"]);
-    expect(w.said).toEqual([
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
-    ]);
+    expect(w.said).toEqual([RUNS, TYPED]);
     expect(w.done).toEqual(ONE);
     expect(w.clock).toBe(0);
   });
 
   it("another process answers by now (it was started again, or the service's own took the socket): nothing is stopped, and no signal goes to the number the plan saw", async () => {
     const nothingStopped = ["status", "use 2.0.0, the service too", "prove"];
-    const went = [
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
-    ];
+    const went = [RUNS, TYPED];
     // Free, and from before 0.15 with someone mid-turn: not asked to finish, nothing
     // written down for it, not signalled, and not said to be stopped.
     const other = await carry(plan([stop(), use(), prove()]), {
@@ -668,8 +872,8 @@ describe("a daemon someone started by hand", () => {
       "ok: the daemon someone started by hand (pid 41) is stopped",
       "use 2.0.0, the service too",
       "prove",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
     ]);
     expect(atOnce.clock).toBe(0);
     expect(atOnce.done).toEqual(ONE);
@@ -712,8 +916,8 @@ describe("a daemon someone started by hand", () => {
       "ok: the daemon someone started by hand (pid 41) is stopped",
       "use 2.0.0, the service too",
       "prove",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
     ]);
     // Two looks while it was busy, one while it was stopping.
     expect(w.clock).toBe(1500);
@@ -763,22 +967,13 @@ describe("a daemon someone started by hand", () => {
   });
 });
 
-describe("a service file nothing needs", () => {
-  it("is removed before the hooks are written, and the line says so", async () => {
-    const w = await carry(plan([fetch(), install(), unserve(), use(false), prove()]));
-    expect(w.all.slice(3, 7)).toEqual([
-      "ok: installed fresh in ~/.local, and it runs",
-      "unserve",
-      "ok: the service file nothing here needs is removed",
-      "use 2.0.0",
-    ]);
-    expect(w.done).toEqual(ONE);
-  });
-});
-
 describe("the hooks and the service onto the fresh copy", () => {
-  const BUSY_SAID =
+  /** `update`'s two sentences of a service that is still at work. */
+  const BY_ITSELF =
     "The background service is busy: a headless agent run. It restarts by itself onto sessionpipe 2.0.0 when that is done: nothing more to type.";
+  const ONCE_MORE =
+    "The background service is busy: a headless agent run. Moving it onto this copy now would cut that short; when it is done, run `sessionpipe update` once more.";
+  const busy = (said: string): Outcome => ({ state: "waiting", version: "2.0.0", said });
 
   it("update's own steps are run for the release that was installed, with or without a service to move", async () => {
     expect((await carry(plan([use(true)], { target: "2.1.0" }))).did).toEqual(["use 2.1.0, the service too"]);
@@ -800,8 +995,8 @@ describe("the hooks and the service onto the fresh copy", () => {
       error: "the background service was restarted and doesn't answer",
       next: "sessionpipe reinstall",
     });
-    expect(w.did).toEqual(["fetch 2.0.0", `install 2.0.0 in ${PREFIX}`, "use 2.0.0, the service too"]);
-    expect(w.there.has(OLD)).toBe(true);
+    expect(w.did).toEqual(["fetch 2.0.0", ...INTO, "use 2.0.0, the service too"]);
+    expect(w.disk.has(OLD)).toBe(true);
     // Any other next step is theirs to name.
     const other = await carry(plan(steps), {
       use: { state: "failed", error: "the hooks couldn't be written", next: "sessionpipe doctor" },
@@ -813,100 +1008,131 @@ describe("the hooks and the service onto the fresh copy", () => {
     });
   });
 
-  it("a busy service that runs the fresh copy restarts by itself: everything else is removed, and nothing is proven yet", async () => {
+  it("a busy service that runs the copy in the home restarts by itself: that copy is proven, everything else is removed, and the check at the end is the next run's", async () => {
     const w = await carry(plan([fetch(), install(true), use(), remove(LEFTOVER), remove(OLD), prove()]), {
       there: [SLOT, LEFTOVER, OLD],
-      use: { state: "waiting", version: "2.0.0", said: BUSY_SAID },
-      serviceDir: SLOT,
+      use: busy(BY_ITSELF),
+      runningFrom: SLOT,
     });
     // The sentence is update's own: no copy waits for it.
-    expect(w.done).toEqual({ state: "waiting", said: BUSY_SAID });
-    expect(w.did.slice(4)).toEqual(["use 2.0.0, the service too", `remove ${LEFTOVER}`, `remove ${OLD}`]);
-    expect(count(w, "prove")).toBe(0);
-    expect([...w.there]).toEqual([SLOT]);
+    expect(w.done).toEqual({ state: "waiting", said: BY_ITSELF });
+    expect(w.did.slice(1 + SWAP.length)).toEqual([
+      "use 2.0.0, the service too",
+      // Which copy it runs from is asked once, when it is found to be still at work.
+      "running from?",
+      "prove",
+      `remove ${LEFTOVER}`,
+      `remove ${OLD}`,
+    ]);
+    expect(w.proved).toEqual([[]]);
+    expect(folders(w)).toEqual([SLOT]);
   });
 
-  it("a busy service that runs another copy keeps that copy: the rest goes, and it says to run once more", async () => {
+  it("L9: a daemon still at work that doesn't say which copy it runs from: no copy is removed, and the last line says so", async () => {
+    const steps = [fetch(), install(), use(), remove(LINK), remove(LEFTOVER), remove(OLD), remove(NPX), prove()];
+    for (const said of [BY_ITSELF, ONCE_MORE]) {
+      const w = await carry(plan(steps), { there: [LEFTOVER, OLD, NPX], use: busy(said), runningFrom: null });
+      expect(w.done).toEqual({
+        state: "waiting",
+        said: "The background service is busy: a headless agent run. It doesn't say which copy it runs from, so no copy was removed. When that is done, run `sessionpipe reinstall` once more.",
+      });
+      // Not one removal of the plan's was asked for, a link that leads nowhere included,
+      // and nothing was proven for one.
+      expect(taken(w)).toEqual([]);
+      expect(w.did.slice(1 + INTO.length)).toEqual(["use 2.0.0, the service too", "running from?"]);
+      expect(folders(w)).toEqual(sorted(LEFTOVER, OLD, NPX, SLOT));
+      expect(w.said.some((l) => l.includes("removed"))).toBe(false);
+    }
+    // With nothing to remove there is no copy to speak of: update's sentence stands.
+    const none = await carry(plan([use(), prove()]), { use: busy(BY_ITSELF), runningFrom: null });
+    expect(none.done).toEqual({ state: "waiting", said: BY_ITSELF });
+  });
+
+  it("L9: it runs from a copy that is to go, named another way than the plan names it: that copy stays, the rest goes, and it says to run once more", async () => {
+    // The daemon names its copy through a folder that is a link to the one the look found.
+    const ALIAS = path.join(HOME, "node", "lib", "node_modules", "sessionpipe");
     const w = await carry(plan([fetch(), install(), use(), remove(LEFTOVER), remove(OLD), remove(NPX), prove()]), {
       there: [LEFTOVER, OLD, NPX],
-      use: {
-        state: "waiting",
-        version: "2.0.0",
-        said: "The background service is busy: a headless agent run. Moving it onto this copy now would cut that short; when it is done, run `sessionpipe update` once more.",
-      },
-      // The service file may spell the same folder another way.
-      serviceDir: path.join(OLD, "dist", ".."),
+      use: busy(ONCE_MORE),
+      runningFrom: ALIAS,
+      spelled: { [ALIAS]: OLD },
     });
+    expect(ALIAS).not.toBe(OLD);
     expect(w.done).toEqual({
       state: "waiting",
-      said: `The background service is busy: a headless agent run. It still runs from ${tilde(path.join(OLD, "dist", ".."))}, which stays until that is done. Then run \`sessionpipe reinstall\` once more: it moves the service and removes that last copy.`,
+      said: `The background service is busy: a headless agent run. It still runs from ${tilde(ALIAS)}, which stays until that is done. Then run \`sessionpipe reinstall\` once more: it moves the service and removes that last copy.`,
     });
-    expect(w.did.slice(2)).toEqual(["use 2.0.0, the service too", `remove ${LEFTOVER}`, `remove ${NPX}`]);
+    expect(w.did.slice(1 + INTO.length)).toEqual([
+      "use 2.0.0, the service too",
+      "running from?",
+      "prove",
+      `remove ${LEFTOVER}`,
+      `remove ${NPX}`,
+    ]);
+    expect(taken(w)).toEqual([LEFTOVER, NPX]);
     expect(w.said.slice(2)).toEqual([
       "ok: removed a leftover folder in ~/.nvm/versions/node/v22.1.0",
       "ok: removed 2.0.0 in ~/.npm/_npx/0a1b2c3d",
     ]);
-    expect(count(w, "prove")).toBe(0);
-    expect([...w.there].sort()).toEqual([OLD, SLOT].sort());
+    // The check at the end is the next run's: only the proof before the removals was taken.
+    expect(w.proved).toEqual([[]]);
+    expect(folders(w)).toEqual(sorted(OLD, SLOT));
+    // By the very name the plan has for it: the same.
+    const named = await carry(plan([use(), remove(OLD), remove(NPX), prove()]), {
+      there: [OLD, NPX],
+      use: busy(ONCE_MORE),
+      runningFrom: OLD,
+    });
+    expect(taken(named)).toEqual([NPX]);
+    expect(named.done.state === "waiting" && named.done.said).toContain(`It still runs from ${tilde(OLD)}, which`);
   });
 
-  it("a busy service whose file names no copy: update's sentence stands, and every removal is made", async () => {
-    const w = await carry(plan([use(), remove(OLD), prove()]), {
-      there: [OLD],
-      use: { state: "waiting", version: "2.0.0", said: BUSY_SAID },
-      serviceDir: null,
-    });
-    expect(w.done).toEqual({ state: "waiting", said: BUSY_SAID });
-    expect(w.did).toEqual(["use 2.0.0, the service too", `remove ${OLD}`]);
+  it("L9: it runs from a copy no step removes: every removal is made, and the sentence is update's own", async () => {
+    const steps = [use(), remove(OLD), remove(NPX), prove()];
+    const w = await carry(plan(steps), { there: [OLD, NPX], use: busy(BY_ITSELF), runningFrom: SLOT });
+    expect(w.done).toEqual({ state: "waiting", said: BY_ITSELF });
+    expect(w.did).toEqual(["use 2.0.0, the service too", "running from?", "prove", `remove ${OLD}`, `remove ${NPX}`]);
+    expect(folders(w)).toEqual([]);
   });
 
   it('the command update names for "once more" is this one, wherever its sentence ends up: update would leave the other copies', async () => {
-    const once =
-      "The background service is busy: a headless agent run. Moving it onto this copy now would cut that short; when it is done, run `sessionpipe update` once more.";
-    // Returned as it is (the service's file names no copy that goes): the command is this one.
+    // Returned as it is (the daemon runs a copy no step removes): the command is this one.
     const asIs = await carry(plan([use(), remove(OLD), prove()]), {
       there: [OLD],
-      use: { state: "waiting", version: "2.0.0", said: once },
-      serviceDir: null,
+      use: busy(ONCE_MORE),
+      runningFrom: SLOT,
     });
     expect(asIs.done).toEqual({
       state: "waiting",
       said: "The background service is busy: a headless agent run. Moving it onto this copy now would cut that short; when it is done, run `sessionpipe reinstall` once more.",
     });
-    // The same where the service runs a copy that is left alone (no step removes it).
-    const kept = await carry(plan([use(), remove(OLD), prove()]), {
-      there: [OLD],
-      use: { state: "waiting", version: "2.0.0", said: once },
-      serviceDir: NPX,
-    });
-    expect(kept.done).toEqual(asIs.done);
     // Every time it is named, not only the first.
     const twice = await carry(plan([use()]), {
-      use: {
-        state: "waiting",
-        version: "2.0.0",
-        said: "`sessionpipe update` can't move it yet. When it is done, run `sessionpipe update` once more.",
-      },
+      use: busy("`sessionpipe update` can't move it yet. When it is done, run `sessionpipe update` once more."),
     });
     expect(twice.done).toEqual({
       state: "waiting",
       said: "`sessionpipe reinstall` can't move it yet. When it is done, run `sessionpipe reinstall` once more.",
     });
-    // And where only its first sentence is kept, with this command's own after it.
+    // And where only its first sentence is kept, with this command's own after it: for a
+    // copy that stays, and for a daemon that names none.
+    const said =
+      "When the background service is done, run `sessionpipe update` once more. It is busy: a headless agent run.";
     const first = await carry(plan([use(), remove(OLD), prove()]), {
       there: [OLD],
-      use: {
-        state: "waiting",
-        version: "2.0.0",
-        said: "When the background service is done, run `sessionpipe update` once more. It is busy: a headless agent run.",
-      },
-      serviceDir: OLD,
+      use: busy(said),
+      runningFrom: OLD,
     });
     expect(first.done).toEqual({
       state: "waiting",
       said: `When the background service is done, run \`sessionpipe reinstall\` once more. It still runs from ${tilde(OLD)}, which stays until that is done. Then run \`sessionpipe reinstall\` once more: it moves the service and removes that last copy.`,
     });
-    for (const w of [asIs, kept, twice, first])
+    const unnamed = await carry(plan([use(), remove(OLD), prove()]), { there: [OLD], use: busy(said) });
+    expect(unnamed.done).toEqual({
+      state: "waiting",
+      said: "When the background service is done, run `sessionpipe reinstall` once more. It doesn't say which copy it runs from, so no copy was removed. When that is done, run `sessionpipe reinstall` once more.",
+    });
+    for (const w of [asIs, twice, first, unnamed])
       expect(w.done.state === "waiting" && w.done.said).not.toContain("sessionpipe update");
   });
 
@@ -916,6 +1142,107 @@ describe("the hooks and the service onto the fresh copy", () => {
       use: { state: "current", version: "2.0.0", said: "This computer is up to date.", warn },
     });
     expect(w.done).toEqual({ ...ONE, warn: [warn] });
+    // A service that moved at once is not asked which copy it runs from.
+    expect(count(w, "running from?")).toBe(0);
+  });
+});
+
+describe("the proof before the first removal", () => {
+  const steps = [fetch(), install(true), use(), remove(LINK), remove(LEFTOVER), remove(OLD), remove(NPX), prove()];
+  const computer = { there: [SLOT, LEFTOVER, OLD, NPX] };
+
+  it("M1: the copy in the home doesn't run: the run ends there, no other copy was removed, and the command named needs no working copy", async () => {
+    for (const [runs, printed] of [
+      [null, "nothing"],
+      ["1.0.0", "1.0.0"],
+    ] as const) {
+      const w = await carry(plan(steps), { ...computer, proof: { runs } });
+      expect(w.done).toEqual({
+        state: "failed",
+        error: `${UNFIT(printed)}: no other copy was removed`,
+        next: BY_NPX,
+      });
+      // Asked once, handed nothing, and it is the last thing done.
+      expect(w.proved).toEqual([[]]);
+      expect(w.did.at(-1)).toBe("prove");
+      expect(taken(w)).toEqual([]);
+      expect(folders(w)).toEqual(sorted(SLOT, LEFTOVER, OLD, NPX));
+      expect(w.said.some((l) => l.includes("removed"))).toBe(false);
+    }
+  });
+
+  it("M1: typing `sessionpipe` doesn't start the copy in the home: the run ends there, no other copy was removed, and it names what typing starts", async () => {
+    const other = await carry(plan(steps), { ...computer, proof: { typed: false, onPath: [OLD_BIN, BIN] } });
+    expect(other.done).toEqual({
+      state: "failed",
+      error: `${NOT_TYPED(tilde(OLD_BIN))}: no other copy was removed`,
+      next: "sessionpipe doctor",
+    });
+    // Nothing on PATH at all: there is no file to name.
+    const none = await carry(plan(steps), { ...computer, proof: { typed: false, onPath: [] } });
+    expect(none.done).toEqual({
+      state: "failed",
+      error: `${NOT_TYPED()}: no other copy was removed`,
+      next: "sessionpipe doctor",
+    });
+    for (const w of [other, none]) {
+      expect(w.proved).toEqual([[]]);
+      expect(taken(w)).toEqual([]);
+      expect(folders(w)).toEqual(sorted(SLOT, LEFTOVER, OLD, NPX));
+    }
+    // A copy that doesn't run is the first thing said, whatever typing starts.
+    const both = await carry(plan(steps), { ...computer, proof: { runs: null, typed: false, onPath: [OLD_BIN] } });
+    expect(both.done).toEqual({
+      state: "failed",
+      error: `${UNFIT("nothing")}: no other copy was removed`,
+      next: BY_NPX,
+    });
+    expect(taken(both)).toEqual([]);
+  });
+
+  it("M1: it is asked once, before the first removal and not before each; a plan that removes nothing asks only at the end", async () => {
+    const w = await carry(plan(steps), computer);
+    const after = w.did.slice(w.did.indexOf("use 2.0.0, the service too") + 1);
+    expect(after).toEqual(["prove", `remove ${LINK}`, `remove ${LEFTOVER}`, `remove ${OLD}`, `remove ${NPX}`, "prove"]);
+    expect(w.proved).toEqual([[], [LINK, LEFTOVER, OLD, NPX]]);
+    // A link that leads nowhere is a removal as any other: the proof comes before it too.
+    const link = await carry(plan([use(), remove(LINK)]));
+    expect(link.did).toEqual(["use 2.0.0, the service too", "prove", `remove ${LINK}`]);
+    // No removal: nothing to prove before one.
+    const none = await carry(plan([fetch(), install(true), use(), prove()]), { there: [SLOT] });
+    expect(none.proved).toEqual([[]]);
+    expect(none.did.at(-1)).toBe("prove");
+    expect((await carry(plan([fetch(), install(true), use()]), { there: [SLOT] })).proved).toEqual([]);
+  });
+
+  it("M1: a removal that is passed over (a daemon still at work in that copy) asks nothing; the first one that is made does", async () => {
+    const waiting: Outcome = { state: "waiting", version: "2.0.0", said: "The service is busy. More." };
+    const passed = await carry(plan([use(), remove(OLD), prove()]), {
+      there: [OLD],
+      use: waiting,
+      runningFrom: OLD,
+    });
+    expect(passed.did).toEqual(["use 2.0.0, the service too", "running from?"]);
+    expect(passed.proved).toEqual([]);
+    const second = await carry(plan([use(), remove(OLD), remove(NPX), prove()]), {
+      there: [OLD, NPX],
+      use: waiting,
+      runningFrom: OLD,
+    });
+    expect(second.did).toEqual(["use 2.0.0, the service too", "running from?", "prove", `remove ${NPX}`]);
+    // And where that proof fails, the copy that was to go stays as well.
+    const unfit = await carry(plan([use(), remove(OLD), remove(NPX), prove()]), {
+      there: [OLD, NPX],
+      use: waiting,
+      runningFrom: OLD,
+      proof: { runs: null },
+    });
+    expect(unfit.done).toEqual({
+      state: "failed",
+      error: `${UNFIT("nothing")}: no other copy was removed`,
+      next: BY_NPX,
+    });
+    expect(folders(unfit)).toEqual(sorted(OLD, NPX));
   });
 });
 
@@ -925,8 +1252,8 @@ describe("the removals", () => {
       (await carry(plan([remove(p, row)]), { there: [p], bins: { [p]: bins } })).said;
     // A copy with npm's link beside it: both went, and the line says so.
     expect(await said(OLD, [OLD_BIN])).toEqual(["ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0, with its link"]);
-    // Windows writes three shims for one copy: still "its link", once.
-    expect(await said(OLD, [OLD_BIN, `${OLD_BIN}.cmd`, `${OLD_BIN}.ps1`])).toEqual([
+    // Whatever more than the folder went: still "its link", once.
+    expect(await said(OLD, [OLD_BIN, path.join(NVM, "bin", "sessionpipe-2")])).toEqual([
       "ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0, with its link",
     ]);
     // A copy that had none, npm's leftover, a cache entry: the folder is all that went.
@@ -944,6 +1271,20 @@ describe("the removals", () => {
     ]);
   });
 
+  it("a removal is asked for by the folder alone: what goes with it is the removal's own to know", async () => {
+    const calls: unknown[][] = [];
+    const { d } = start({ there: [OLD] });
+    const spied: Doing = {
+      ...d,
+      remove: (...args) => {
+        calls.push(args);
+        return d.remove(...args);
+      },
+    };
+    await carryOut(plan([install(true), remove(OLD)]), spied);
+    expect(calls).toEqual([[STAGE], [OLD]]);
+  });
+
   it("a copy that can't be removed stays and is said in yellow; the rest still goes, and what is left names the one that stayed", async () => {
     const why = `${OLD} was left alone: it holds src, which no published sessionpipe has (a checkout or a build?)`;
     const w = await carry(plan([use(), remove(LEFTOVER), remove(OLD), remove(NPX), prove()]), {
@@ -952,6 +1293,7 @@ describe("the removals", () => {
     });
     expect(w.all).toEqual([
       "use 2.0.0, the service too",
+      "prove",
       `remove ${LEFTOVER}`,
       "ok: removed a leftover folder in ~/.nvm/versions/node/v22.1.0",
       `remove ${OLD}`,
@@ -959,12 +1301,12 @@ describe("the removals", () => {
       `remove ${NPX}`,
       "ok: removed 2.0.0 in ~/.npm/_npx/0a1b2c3d",
       "prove",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
       "ok: nothing here names a removed copy any more",
     ]);
     // What stayed was not removed, so nothing is looked for under its name.
-    expect(w.proved).toEqual([[LEFTOVER, NPX]]);
+    expect(w.proved).toEqual([[], [LEFTOVER, NPX]]);
     // No failure: the fresh copy is in use, and that is said first. What is left is its
     // own sentence, the folder as a person reads it, with why it stayed.
     expect(w.done).toEqual({
@@ -974,7 +1316,26 @@ describe("the removals", () => {
       still: `One other copy is still there: ${tilde(OLD)} (${why}).`,
       next: "sessionpipe reinstall",
     });
-    expect([...w.there]).toEqual([OLD]);
+    expect(folders(w)).toEqual([OLD]);
+  });
+
+  it("L6: a copy that could only be removed in part is said in yellow, counted as still there, and the next step is this command once more", async () => {
+    const w = await carry(plan([use(), remove(OLD), remove(NPX), prove()]), {
+      there: [OLD, NPX],
+      bins: { [OLD]: [OLD_BIN] },
+      stuck: { [OLD]: IN_PART(OLD) },
+    });
+    expect(w.said).toEqual([
+      `warn: ${tilde(OLD)} could not be removed: ${IN_PART(OLD)}`,
+      "ok: removed 2.0.0 in ~/.npm/_npx/0a1b2c3d",
+      RUNS,
+      TYPED,
+      "ok: nothing here names a removed copy any more",
+    ]);
+    // Neither the folder nor its link is answered as gone.
+    expect(w.proved).toEqual([[], [NPX]]);
+    expect(w.done).toEqual(LEFT(`One other copy is still there: ${tilde(OLD)} (${IN_PART(OLD)}).`));
+    expect(w.done.state === "left" && w.done.next).toBe("sessionpipe reinstall");
   });
 
   it("several that stay are counted, each with its reason", async () => {
@@ -991,126 +1352,93 @@ describe("the removals", () => {
     expect(w.said).toEqual([
       `warn: ${tilde(OLD)} could not be removed: EACCES: permission denied`,
       `warn: ${tilde(NPX)} could not be removed: EBUSY: resource busy or locked`,
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
     ]);
+    // The proof before the first removal was taken once, though that removal failed.
+    expect(w.proved).toEqual([[], []]);
   });
 });
 
-describe("the proof", () => {
-  it("the fresh copy printing another version, or nothing, fails with the way in that needs no working copy", async () => {
-    const steps = [fetch(), install(), use(), remove(OLD), prove()];
-    const other = await carry(plan(steps), { there: [OLD], proof: { runs: "1.0.0" } });
-    expect(other.done).toEqual({
-      state: "failed",
-      error: "the fresh copy in ~/.local doesn't run as it should (`--version` printed 1.0.0)",
-      next: "npx -y sessionpipe@latest reinstall",
-    });
-    expect(other.said.at(-1)).toBe("ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0");
-    const silent = await carry(plan(steps), { there: [OLD], proof: { runs: null } });
-    expect(silent.done).toEqual({
-      state: "failed",
-      error: "the fresh copy in ~/.local doesn't run as it should (`--version` printed nothing)",
-      next: "npx -y sessionpipe@latest reinstall",
-    });
+describe("the proof at the end", () => {
+  it("the copy printing another version, or nothing, fails with the way in that needs no working copy", async () => {
+    // With nothing to remove this is the one proof there is.
+    const steps = [fetch(), install(), use(), prove()];
+    const other = await carry(plan(steps), { proof: { runs: "1.0.0" } });
+    expect(other.done).toEqual({ state: "failed", error: UNFIT("1.0.0"), next: BY_NPX });
+    const silent = await carry(plan(steps), { proof: { runs: null } });
+    expect(silent.done).toEqual({ state: "failed", error: UNFIT("nothing"), next: BY_NPX });
     // Whatever a shell finds: a copy that doesn't run is the one thing said.
-    const found = await carry(plan(steps), { there: [OLD], proof: { runs: null, onPath: [BIN], first: true } });
+    const found = await carry(plan(steps), { proof: { runs: null, typed: true, onPath: [BIN] } });
     expect(found.done).toEqual(silent.done);
-    expect(found.said.at(-1)).toBe("ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0");
+    expect(found.said.at(-1)).toBe(INSTALLED);
+    // It ran before the removals and doesn't after them: the same, and nothing is said of
+    // copies that were not removed, for by then they were.
+    const after = await carry(plan([use(), remove(OLD), prove()]), {
+      there: [OLD],
+      proof: [{}, { runs: null }],
+    });
+    expect(after.done).toEqual(silent.done);
+    expect(after.said).toEqual(["ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0"]);
   });
 
-  it("a shell that finds this copy and nothing else: said in green, with the file it finds", async () => {
-    const w = await carry(plan([use(), prove()]), { proof: { onPath: [BIN], first: true } });
-    expect(w.said).toEqual([
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
-    ]);
+  it("typing starts this copy and a shell finds nothing else: said in green, with the file it finds", async () => {
+    const w = await carry(plan([use(), prove()]), { proof: { onPath: [BIN], typed: true } });
+    expect(w.said).toEqual([RUNS, TYPED]);
     expect(w.done).toEqual(ONE);
+    // Where no file is named there is none to say.
+    const bare = await carry(plan([use(), prove()]), { proof: { onPath: [], typed: true } });
+    expect(bare.said).toEqual([RUNS, "ok: typing `sessionpipe` starts it"]);
+    expect(bare.done).toEqual(ONE);
   });
 
-  it("a shell that finds several, this copy first: said as it is, with what is behind it in its order, and no warning", async () => {
-    const several = await carry(plan([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN, LINK], first: true } });
+  it("typing starts this copy and a shell finds more behind it: said as it is, in their order, and no warning", async () => {
+    const several = await carry(plan([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN, LINK] } });
     // What is behind it starts nothing a person types: nothing to look at, so no warning.
     expect(several.done).toEqual(ONE);
-    // Not "finds one": that line is only for one. And not the fresh copy's own file again.
+    // Not the copy's own file again: only what is behind it.
     expect(several.said).toEqual([
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `info: a shell finds this copy first; behind it: ${tilde(OLD_BIN)}, ${LINK}`,
+      RUNS,
+      `info: typing \`sessionpipe\` starts it; behind it on PATH: ${tilde(OLD_BIN)}, ${LINK}`,
     ]);
     // One behind it, a folder under the home said as a person reads it.
-    const two = await carry(plan([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN], first: true } });
+    const two = await carry(plan([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN] } });
     expect(two.done).toEqual(ONE);
-    expect(two.said.at(-1)).toBe(`info: a shell finds this copy first; behind it: ${tilde(OLD_BIN)}`);
+    expect(two.said.at(-1)).toBe(`info: typing \`sessionpipe\` starts it; behind it on PATH: ${tilde(OLD_BIN)}`);
     expect(tilde(OLD_BIN).startsWith("~")).toBe(true);
-    // Whatever the plan expected to be first: with the fresh copy first, that is all there is to say.
-    const expected = await carry(plan([use(), prove()], { first: LINK }), {
-      proof: { onPath: [BIN, LINK], first: true },
-    });
-    expect(expected.done).toEqual(ONE);
-    expect(expected.said.at(-1)).toBe(`info: a shell finds this copy first; behind it: ${LINK}`);
+    // What typing starts is the look's to say, not the order of the files: a file first on
+    // PATH that is no link of npm's (a version manager's shim) may be what starts this copy.
+    const shim = path.join(HOME, ".asdf", "shims", "sessionpipe");
+    const through = await carry(plan([use(), prove()]), { proof: { onPath: [shim, BIN], typed: true } });
+    expect(through.done).toEqual(ONE);
+    expect(through.said.at(-1)).toBe(`info: typing \`sessionpipe\` starts it; behind it on PATH: ${tilde(BIN)}`);
   });
 
-  it("what a shell finds first is not this copy: what a person types is still the other one, and that is the warning", async () => {
+  it("typing does not start this copy: that is the warning, with what it starts, and neither line about typing is said", async () => {
     // Several, another first.
-    const behind = await carry(plan([use(), prove()]), { proof: { onPath: [OLD_BIN, BIN], first: false } });
-    expect(behind.done).toEqual({
-      ...ONE,
-      warn: [`Typing \`sessionpipe\` still starts ${tilde(OLD_BIN)}, not the fresh copy.`],
-    });
-    // Neither line about what a shell finds is said: the warning is.
-    expect(behind.said).toEqual(["ok: the fresh copy runs: `--version` says 2.0.0"]);
-    // One only, and it is not this copy: never "a shell finds one sessionpipe".
-    const other = await carry(plan([use(), prove()]), { proof: { onPath: [LINK], first: false } });
-    expect(other.done).toEqual({ ...ONE, warn: [TYPING(LINK)] });
-    expect(other.said).toEqual(["ok: the fresh copy runs: `--version` says 2.0.0"]);
-  });
-
-  it("what the plan saw coming is said by its own note, and not a second time: only another file is news", async () => {
-    const found = { proof: { onPath: [LINK, BIN], first: false } };
-    const still = TYPING(LINK);
-    const fresh = ["ok: the fresh copy runs: `--version` says 2.0.0"];
-    // The plan named no such file: the proof is the first to say it.
-    const unseen = await carry(plan([use(), prove()], { first: null }), found);
-    expect(unseen.done).toEqual({ ...ONE, warn: [still] });
-    // The plan named this very file, and its note says so on the last line: nothing is
-    // added, and with nothing else to say there is no warning at all.
-    const seen = await carry(plan([use(), prove()], { first: LINK }), found);
-    expect(seen.done).toEqual(ONE);
-    expect(seen.said).toEqual(fresh);
-    // The same file under another spelling, on either side, is the same file.
-    const dotted = [path.dirname(LINK), ".", path.basename(LINK)].join(path.sep);
-    const around = [path.dirname(LINK), "..", path.basename(path.dirname(LINK)), path.basename(LINK)].join(path.sep);
-    expect(dotted).not.toBe(LINK);
-    expect((await carry(plan([use(), prove()], { first: dotted }), found)).done).toEqual(ONE);
-    expect(
-      (await carry(plan([use(), prove()], { first: LINK }), { proof: { onPath: [around, BIN], first: false } })).done,
-    ).toEqual(ONE);
-    // The plan named another file than the one a shell finds now: the warning names what
-    // the proof found, not what the plan expected.
-    const other = await carry(plan([use(), prove()], { first: OLD_BIN }), found);
-    expect(other.done).toEqual({ ...ONE, warn: [still] });
-    // What else there is to say is said all the same.
-    const plist = path.join(HOME, "Library", "LaunchAgents", "org.sessionpipe.control.plist");
-    const more = await carry(plan([use(), remove(OLD), prove()], { first: LINK }), {
+    const behind = await carry(plan([use(), prove()]), { proof: { onPath: [OLD_BIN, BIN], typed: false } });
+    expect(behind.done).toEqual({ ...ONE, warn: [`${NOT_TYPED(tilde(OLD_BIN))}.`] });
+    expect(behind.said).toEqual([RUNS]);
+    // One only, and it is not this copy.
+    const other = await carry(plan([use(), prove()]), { proof: { onPath: [LINK], typed: false } });
+    expect(other.done).toEqual({ ...ONE, warn: [`${NOT_TYPED(LINK)}.`] });
+    expect(other.said).toEqual([RUNS]);
+    // A shell finds none: there is no file to name.
+    const none = await carry(plan([use(), prove()]), { proof: { onPath: [], typed: false } });
+    expect(none.done).toEqual({ ...ONE, warn: [`${NOT_TYPED()}.`] });
+    expect(none.said).toEqual([RUNS]);
+    // It is a warning at the end only: the same answer before the first removal ends the run.
+    const earlier = await carry(plan([use(), remove(OLD), prove()]), {
       there: [OLD],
-      use: { state: "current", version: "2.0.0", said: "", warn: "A receiver hasn't answered." },
-      proof: { ...found.proof, named: [{ file: plist, path: OLD }] },
+      proof: { onPath: [LINK], typed: false },
     });
-    expect(more.done).toEqual({
-      ...ONE,
-      warn: ["A receiver hasn't answered.", `${tilde(plist)} still names ${tilde(OLD)}, which was removed.`],
+    expect(earlier.done.state).toBe("failed");
+    // Typed before the removals, and not after them: the warning, beside what was done.
+    const later = await carry(plan([use(), remove(OLD), prove()]), {
+      there: [OLD],
+      proof: [{}, { onPath: [LINK], typed: false }],
     });
-    // A plan that expected another file first, and a shell that finds the fresh copy:
-    // nothing of what is typed is said here.
-    const better = await carry(plan([use(), prove()], { first: LINK }));
-    expect(better.done).toEqual(ONE);
-    expect(better.said).toEqual([...fresh, `ok: a shell finds one sessionpipe: ${tilde(BIN)}`]);
-  });
-
-  it("a shell that finds none is said by neither line: the plan's own note says the folder is not on PATH", async () => {
-    const none = await carry(plan([use(), prove()]), { proof: { onPath: [], first: false } });
-    expect(none.done).toEqual(ONE);
-    expect(none.said).toEqual(["ok: the fresh copy runs: `--version` says 2.0.0"]);
+    expect(later.done).toEqual({ ...ONE, warn: [`${NOT_TYPED(LINK)}.`] });
   });
 
   it("a file that still names a removed copy is a warning, and then nothing says it is clean", async () => {
@@ -1133,13 +1461,9 @@ describe("the proof", () => {
         `${tilde(settings)} still names ${tilde(OLD_BIN)}, which was removed.`,
       ],
     });
-    expect(w.said).toEqual([
-      "ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0, with its link",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
-    ]);
+    expect(w.said).toEqual(["ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0, with its link", RUNS, TYPED]);
     // With update's own warning, and several on PATH: every warning is kept, in the order
-    // found; what is behind the fresh copy on PATH is a line of the run, and no warning.
+    // found; what is behind this copy on PATH is a line of the run, and no warning.
     const all = await carry(plan([use(), remove(OLD), prove()]), {
       there: [OLD],
       use: { state: "current", version: "2.0.0", said: "", warn: "A receiver hasn't answered." },
@@ -1151,23 +1475,24 @@ describe("the proof", () => {
     });
     expect(all.said).toEqual([
       "ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `info: a shell finds this copy first; behind it: ${LINK}`,
+      RUNS,
+      `info: typing \`sessionpipe\` starts it; behind it on PATH: ${LINK}`,
     ]);
-    // And with another copy typed still: that warning comes before what still names a removed copy.
+    // And with another copy typed by the end: that warning comes before what still names
+    // a removed copy.
     const typed = await carry(plan([use(), remove(OLD), prove()]), {
       there: [OLD],
-      proof: { onPath: [LINK, BIN], first: false, named: [{ file: plist, path: OLD }] },
+      proof: [{}, { onPath: [LINK, BIN], typed: false, named: [{ file: plist, path: OLD }] }],
     });
     expect(typed.done).toEqual({
       ...ONE,
-      warn: [TYPING(LINK), `${tilde(plist)} still names ${tilde(OLD)}, which was removed.`],
+      warn: [`${NOT_TYPED(LINK)}.`, `${tilde(plist)} still names ${tilde(OLD)}, which was removed.`],
     });
   });
 });
 
 describe("what is left: the fresh copy is in use, and a copy that should have gone is still there", () => {
-  it("a published copy this user can't remove means the job isn't done: what works is said first, then what is left, and its own line is the next step", async () => {
+  it("L10: a published copy this user can't remove means the job isn't done: what works is said first, then what is left, and its own line is the next step", async () => {
     const w = await carry(plan([use(), remove(OLD), prove()], { left: [left()] }), { there: [OLD] });
     expect(w.done).toEqual({
       state: "left",
@@ -1176,41 +1501,42 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
       warn: [],
       // The copy by its release and its folder; the command is not said twice, only that it needs sudo.
       still: "One other copy is still there: 1.0.0 in /usr/local (needs sudo).",
+      // The plan's own line for it, word for word: the folder and its own link, and not npm.
       next: SUDO,
     });
     // Everything it could do was done first, and said as ever.
-    expect(w.did).toEqual(["use 2.0.0, the service too", `remove ${OLD}`, "prove"]);
+    expect(w.did).toEqual(["use 2.0.0, the service too", "prove", `remove ${OLD}`, "prove"]);
     expect(w.said).toEqual([
       "ok: removed 1.0.0 in ~/.nvm/versions/node/v22.1.0",
-      "ok: the fresh copy runs: `--version` says 2.0.0",
-      `ok: a shell finds one sessionpipe: ${tilde(BIN)}`,
+      RUNS,
+      TYPED,
       "ok: nothing here names a removed copy any more",
     ]);
-    // It is named as a person reads it; its whole path is the plan's to keep, and no step's.
+    // In the two sentences it is named as a person reads it; its whole path is in the line
+    // to paste, and is no step's to touch.
     const done = w.done as Extract<Done, { state: "left" }>;
-    for (const sentence of [done.said, done.still, done.next]) expect(sentence).not.toContain(left().path);
+    for (const sentence of [done.said, done.still]) expect(sentence).not.toContain(left().path);
     expect(w.did.join("\n")).not.toContain(left().path);
     // It is no failure: a failure has no "what works" to say.
     expect(w.done.state).not.toBe("failed");
   });
 
-  it("a copy with no line of its own says why it stays; a broken one is named as that", async () => {
+  it("a copy with no line of its own says why it stays; one that names no release is named as that", async () => {
     const still = async (...l: Left[]) => {
       const done = (await carry(plan([prove()], { left: l }))).done;
       return done.state === "left" ? [done.still, done.next] : done;
     };
-    // Windows, or npm's own leftover: no sudo line, so the reason is said.
     expect(await still(left({ line: null }))).toEqual([
       "One other copy is still there: 1.0.0 in /usr/local (you may not write where it is).",
       "sessionpipe reinstall",
     ]);
-    // A copy that says no release.
+    // A leftover folder names no release.
     expect(await still(left({ version: null }))).toEqual([
       "One other copy is still there: a broken copy in /usr/local (needs sudo).",
       SUDO,
     ]);
-    expect(await still(left({ version: null, line: null, where: "C:\\Program Files\\nodejs" }))).toEqual([
-      "One other copy is still there: a broken copy in C:\\Program Files\\nodejs (you may not write where it is).",
+    expect(await still(left({ version: null, line: null, where: "/opt/node" }))).toEqual([
+      "One other copy is still there: a broken copy in /opt/node (you may not write where it is).",
       "sessionpipe reinstall",
     ]);
     // What is no install of it is not a copy this command would have removed: it is not
@@ -1222,22 +1548,19 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
     ]);
   });
 
-  it("several are chained into one line, in order; one with no line of its own adds none", async () => {
-    const opt = left({
-      where: "/opt/node",
-      path: slotOf(path.join(path.sep, "opt", "node")),
-      line: "sudo npm uninstall -g --prefix /opt/node sessionpipe",
-    });
+  it("L10: several are chained into one line, in order; one with no line of its own adds none", async () => {
+    const OPT = "sudo rm -r /opt/node/lib/node_modules/sessionpipe /opt/node/bin/sessionpipe";
+    const opt = left({ where: "/opt/node", path: slotOf(path.join(path.sep, "opt", "node")), line: OPT });
     const cache = left({
-      where: "the npx cache (/root/.npm/_npx/0a1b)",
+      where: "/root/.npm/_npx/0a1b",
       path: path.join(path.sep, "root", ".npm", "_npx", "0a1b", "node_modules", "sessionpipe"),
       line: null,
     });
     const w = await carry(plan([prove()], { left: [left(), cache, opt, left({ ours: false, line: null })] }));
     expect(w.done).toEqual(
       LEFT(
-        "3 other copies are still there: 1.0.0 in /usr/local (needs sudo); 1.0.0 in the npx cache (/root/.npm/_npx/0a1b) (you may not write where it is); 1.0.0 in /opt/node (needs sudo).",
-        "sudo npm uninstall -g --prefix /usr/local sessionpipe && sudo npm uninstall -g --prefix /opt/node sessionpipe",
+        "3 other copies are still there: 1.0.0 in /usr/local (needs sudo); 1.0.0 in /root/.npm/_npx/0a1b (you may not write where it is); 1.0.0 in /opt/node (needs sudo).",
+        `${SUDO} && ${OPT}`,
       ),
     );
     // Two of them: counted as two, joined once.
@@ -1245,12 +1568,12 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
     expect(two.done).toEqual(
       LEFT(
         "2 other copies are still there: 1.0.0 in /opt/node (needs sudo); 1.0.0 in /usr/local (needs sudo).",
-        "sudo npm uninstall -g --prefix /opt/node sessionpipe && sudo npm uninstall -g --prefix /usr/local sessionpipe",
+        `${OPT} && ${SUDO}`,
       ),
     );
   });
 
-  it("with no line for any of them (Windows, a cache entry, a removal that failed) the next step is this command again", async () => {
+  it("L10: with no line for any of them (a removal that failed) the next step is this command again; a line there is, is the one to run", async () => {
     const w = await carry(plan([remove(OLD), prove()], { left: [left({ line: null })] }), {
       there: [OLD],
       stuck: { [OLD]: "EBUSY: resource busy or locked" },
@@ -1274,7 +1597,8 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
       ),
     );
     // Two lines and a removal that failed: the two lines, joined; the third adds nothing to run.
-    const opt = left({ where: "/opt/node", line: "sudo npm uninstall -g --prefix /opt/node sessionpipe" });
+    const OPT = "sudo rm -r /opt/node/lib/node_modules/sessionpipe";
+    const opt = left({ where: "/opt/node", line: OPT });
     const three = await carry(plan([remove(NPX), prove()], { left: [left(), opt] }), {
       there: [NPX],
       stuck: { [NPX]: "EPERM: operation not permitted" },
@@ -1282,36 +1606,31 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
     expect(three.done).toEqual(
       LEFT(
         `3 other copies are still there: 1.0.0 in /usr/local (needs sudo); 1.0.0 in /opt/node (needs sudo); ${tilde(NPX)} (EPERM: operation not permitted).`,
-        `${SUDO} && sudo npm uninstall -g --prefix /opt/node sessionpipe`,
+        `${SUDO} && ${OPT}`,
       ),
     );
   });
 
-  it("a copy that stays, and what a shell finds first is not the fresh copy: a warning beside what is left, unless the plan's own note says it", async () => {
+  it("a copy that stays, and typing doesn't start the copy in the home by the end: a warning beside what is left", async () => {
     const still = "One other copy is still there: 1.0.0 in /usr/local (needs sudo).";
-    const behind = { proof: { onPath: [OLD_BIN, BIN], first: false } };
-    // The plan named no file, or another one: the run is the first to say it.
-    for (const first of [null, LINK]) {
-      const w = await carry(plan([use(), prove()], { left: [left()], first }), behind);
-      expect(w.done).toEqual(LEFT(still, SUDO, [TYPING(tilde(OLD_BIN))]));
-    }
-    // The plan saw this very file coming: its note is said with the rest, and not twice.
-    const seen = await carry(plan([use(), prove()], { left: [left()], first: OLD_BIN }), behind);
-    expect(seen.done).toEqual(LEFT(still, SUDO));
+    const w = await carry(plan([use(), prove()], { left: [left()] }), {
+      proof: { onPath: [OLD_BIN, BIN], typed: false },
+    });
+    expect(w.done).toEqual(LEFT(still, SUDO, [`${NOT_TYPED(tilde(OLD_BIN))}.`]));
     // The same after a removal that threw; the path is said as a person reads it.
     const threw = await carry(plan([remove(NPX), prove()]), {
       there: [NPX],
       stuck: { [NPX]: "EBUSY: resource busy or locked" },
-      proof: { onPath: [OLD_BIN], first: false },
+      proof: [{}, { onPath: [OLD_BIN], typed: false }],
     });
     expect(threw.done).toEqual(
       LEFT(`One other copy is still there: ${tilde(NPX)} (EBUSY: resource busy or locked).`, "sessionpipe reinstall", [
-        TYPING(tilde(OLD_BIN)),
+        `${NOT_TYPED(tilde(OLD_BIN))}.`,
       ]),
     );
     expect(tilde(OLD_BIN).startsWith("~")).toBe(true);
     // What is typed is never part of the sentence about what is left.
-    for (const w of [seen, threw]) expect(w.done.state === "left" && w.done.still).not.toContain("Typing");
+    for (const x of [w, threw]) expect(x.done.state === "left" && x.done.still).not.toContain("Typing");
   });
 
   it("what else there is to say is said beside it: update's warning, a file that still names a removed copy", async () => {
@@ -1319,32 +1638,37 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
     const w = await carry(plan([use(), remove(OLD), prove()], { left: [left()] }), {
       there: [OLD],
       use: { state: "current", version: "2.0.0", said: "", warn: "A receiver hasn't answered." },
-      proof: { onPath: [LINK, BIN], first: false, named: [{ file: plist, path: OLD }] },
+      proof: [{}, { onPath: [LINK, BIN], typed: false, named: [{ file: plist, path: OLD }] }],
     });
     expect(w.done).toEqual(
       LEFT("One other copy is still there: 1.0.0 in /usr/local (needs sudo).", SUDO, [
         "A receiver hasn't answered.",
-        TYPING(LINK),
+        `${NOT_TYPED(LINK)}.`,
         `${tilde(plist)} still names ${tilde(OLD)}, which was removed.`,
       ]),
     );
   });
 
-  it("a copy that stays says nothing of what is typed where the fresh copy is first, nothing is on PATH, or nothing was proven", async () => {
+  it("a copy that stays says nothing of what is typed where typing starts the copy in the home, or nothing was proven", async () => {
     const stays = LEFT("One other copy is still there: 1.0.0 in /usr/local (needs sudo).", SUDO);
-    const stay = (steps: Step[], first: string | null = null) => plan(steps, { left: [left()], first });
-    // The fresh copy is what a shell finds: alone, or first of several (the copy that
-    // stays is then behind it, and the run's own line says so).
+    const stay = (steps: Step[]) => plan(steps, { left: [left()] });
+    // Typing starts it: alone on PATH, or first of several (the copy that stays is then
+    // behind it, and the run's own line says so).
     expect((await carry(stay([use(), prove()]))).done).toEqual(stays);
-    const several = await carry(stay([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN], first: true } });
+    const several = await carry(stay([use(), prove()]), { proof: { onPath: [BIN, OLD_BIN] } });
     expect(several.done).toEqual(stays);
-    expect(several.said.at(-1)).toBe(`info: a shell finds this copy first; behind it: ${tilde(OLD_BIN)}`);
-    // A shell finds none.
-    expect((await carry(stay([use(), prove()]), { proof: { onPath: [], first: false } })).done).toEqual(stays);
-    // No proof was asked for: what the plan expected is the plan's to say, not the run's.
-    const unproven = await carry(stay([use()], LINK));
+    expect(several.said.at(-1)).toBe(`info: typing \`sessionpipe\` starts it; behind it on PATH: ${tilde(OLD_BIN)}`);
+    // No proof was asked for: there is nothing of the run's to say.
+    const unproven = await carry(stay([use()]));
     expect(unproven.done).toEqual(stays);
     expect(count(unproven, "prove")).toBe(0);
+  });
+
+  it("a home copy that was not installed again, and another that needs sudo: what is left is said, not that there is one", async () => {
+    const w = await carry(plan([use(), prove()], { left: [left()], stays: "2.0.0 in ~/.local as it is" }), {
+      there: [SLOT],
+    });
+    expect(w.done).toEqual(LEFT("One other copy is still there: 1.0.0 in /usr/local (needs sudo).", SUDO));
   });
 
   it("a service still at work comes first: what is left is the next run's to say", async () => {
@@ -1354,6 +1678,7 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
       there: [OLD],
       stuck: { [OLD]: "EBUSY: resource busy or locked" },
       use: { state: "waiting", version: "2.0.0", said },
+      runningFrom: SLOT,
     });
     expect(w.done).toEqual({ state: "waiting", said });
   });
@@ -1380,7 +1705,7 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
       proof: { onPath: [BIN, LINK] },
     });
     expect(two.done).toEqual(ONE);
-    expect(two.said.at(-1)).toBe(`info: a shell finds this copy first; behind it: ${LINK}`);
+    expect(two.said.at(-1)).toBe(`info: typing \`sessionpipe\` starts it; behind it on PATH: ${LINK}`);
     // Beside a copy of ours that stays, they are still not counted, and their line is not the next step.
     const mixed = await carry(plan([use(), prove()], { left: [checkout, volta, left()] }));
     expect(mixed.done).toEqual(LEFT("One other copy is still there: 1.0.0 in /usr/local (needs sudo).", SUDO));
@@ -1388,20 +1713,191 @@ describe("what is left: the fresh copy is in use, and a copy that should have go
 });
 
 describe("the steps a plan may hold", () => {
-  it("each kind is carried out by its own effect and by no other", async () => {
+  it("each kind is carried out by its own effect and by no other; none removes a service file", async () => {
     const each: Record<Kind, [Step, string[]]> = {
       fetch: [fetch(), ["fetch 2.0.0"]],
-      install: [install(), [`install 2.0.0 in ${PREFIX}`]],
+      install: [install(), INTO],
       stop: [stop(), ["status"]],
-      unserve: [unserve(), ["unserve"]],
       use: [use(), ["use 2.0.0, the service too"]],
-      remove: [remove(OLD), [`remove ${OLD}`]],
+      // A removal brings the proof that comes before the first of them.
+      remove: [remove(OLD), ["prove", `remove ${OLD}`]],
       prove: [prove(), ["prove"]],
     };
     for (const [step, did] of Object.values(each)) expect((await carry(plan([step]))).did).toEqual(did);
+    expect(Object.keys(each).sort()).toEqual(["fetch", "install", "prove", "remove", "stop", "use"]);
+    // A service file nothing needs is left where it is: no plan holds a step that takes
+    // one away, and a run is handed nothing that could.
+    // @ts-expect-error no such step
+    const unserve: Step = { ...base, do: "unserve" };
+    expect(unserve.do in each).toBe(false);
+    // @ts-expect-error no such way
+    const way: keyof Doing = "unserve";
+    expect(way in start().d).toBe(false);
     // No step at all: nothing is done, and the sentence is still the plan's.
     const none = await carry(plan([]));
     expect(none.all).toEqual([]);
     expect(none.done).toEqual(ONE);
   });
 });
+
+// The one test with a disk in it. A fresh install leaves two folders beside the slot for
+// ours.ts to take: npm's own prefix (its copy moved out, its link leading nowhere) and
+// the old copy under the name it stepped aside as. run.ts only asks; whether the proof
+// knows those two shapes is ours.ts's, and a run that asks for what the proof refuses
+// would leave a folder behind every time. So here the moves and the removal are the real
+// ones, in a folder of this test's own that nothing outside of may be proven in.
+// Not on Windows, where this command does not run (nor where a path is not written as the
+// disk under it reads one).
+describe.skipIf(process.platform === "win32" || path.sep !== "/")(
+  "the swap, with the real proof and the real removal",
+  () => {
+    const TEXT = path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js");
+    /** A published copy of a release, as npm unpacks one. */
+    const unpack = (dir: string, version: string): void => {
+      mkdirSync(path.join(dir, "dist"), { recursive: true });
+      writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "sessionpipe", version }));
+      writeFileSync(path.join(dir, "dist", "cli.js"), `// ${version}\n`);
+      for (const f of ["README.md", "LICENSE", "NOTICE"]) writeFileSync(path.join(dir, f), "");
+    };
+    /** A prefix as npm lays one out for the package: the copy, and the link that starts it. */
+    const lay = (prefix: string, version: string): void => {
+      unpack(slotOf(prefix), version);
+      mkdirSync(path.join(prefix, "bin"), { recursive: true });
+      symlinkSync(TEXT, path.join(prefix, "bin", "sessionpipe"));
+    };
+    const versionAt = (dir: string): string =>
+      (JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")) as { version: string }).version;
+
+    /** A computer in a folder: a prefix (with a copy of `was` in it, or none), and a run
+     *  whose moves and removals are real. `npm`: what the stand-in for npm does in the
+     *  prefix it is handed, and what it answers. */
+    async function swap(was: string | null, npm: (stage: string) => string | null) {
+      const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sp-reinstall-run-")));
+      try {
+        const prefix = path.join(root, "home", ".local");
+        const modules = path.join(prefix, "lib", "node_modules");
+        const slot = slotOf(prefix);
+        const link = path.join(prefix, "bin", "sessionpipe");
+        mkdirSync(modules, { recursive: true });
+        if (was) lay(prefix, was);
+        const { w, d } = start();
+        // Only what is inside this test's folder may be proven, and the copy in the slot never.
+        const proving = { reach: root, prefixes: [prefix], npx: null, keep: [slot] };
+        const done = await carryOut(
+          plan([{ ...base, do: "install", version: "2.0.0", prefix, dir: slot, replaces: !!was, say: "" }]),
+          {
+            ...d,
+            install: async (stage) => npm(stage),
+            exists: existsSync,
+            rename: renameSync,
+            same,
+            remove: async (what) => {
+              if (!inside(what, root)) throw new Error(`${what} is outside this test's folder`);
+              return removeOurs(what, proving);
+            },
+            // As the command does it: npm's own link, made where it is not there.
+            relink: () => {
+              if (!binTarget(link)) {
+                mkdirSync(path.dirname(link), { recursive: true });
+                symlinkSync(TEXT, link);
+              }
+              const to = binTarget(link);
+              return to !== null && same(to, slot);
+            },
+          },
+        );
+        return {
+          done,
+          said: w.said,
+          beside: readdirSync(modules).sort(),
+          slot: existsSync(slot) ? versionAt(slot) : null,
+          // What the link in the home's bin folder really leads to now.
+          starts: existsSync(link) ? path.relative(prefix, realpathSync(link)) : null,
+        };
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+    const CLI = path.join("lib", "node_modules", "sessionpipe", "dist", "cli.js");
+
+    it("L1: over a copy: npm's prefix and the old copy are both taken, nothing is left beside the slot, and the home's link was never touched", async () => {
+      const r = await swap("1.0.0", (stage) => {
+        lay(stage, "2.0.0");
+        return null;
+      });
+      expect(r.said).toEqual(["ok: installed fresh in ~/.local, and it runs (what was there is gone)"]);
+      expect(r.done.state).toBe("one");
+      expect(r.beside).toEqual(["sessionpipe"]);
+      expect(r.slot).toBe("2.0.0");
+      // The link npm made in the home long ago leads to the fresh copy: the tidying, which
+      // comes before the link is looked for, took neither it nor anything through it.
+      expect(r.starts).toBe(CLI);
+    });
+
+    it("L1: npm's hidden lock file beside the copy it unpacked is no reason to leave its prefix", async () => {
+      const r = await swap("1.0.0", (stage) => {
+        lay(stage, "2.0.0");
+        writeFileSync(path.join(stage, "lib", "node_modules", ".package-lock.json"), "{}");
+        return null;
+      });
+      expect(r.said).toEqual(["ok: installed fresh in ~/.local, and it runs (what was there is gone)"]);
+      expect(r.beside).toEqual(["sessionpipe"]);
+    });
+
+    it("L1: npm failing, whatever it had unpacked by then: its prefix is taken, and the copy that was there is as it was", async () => {
+      // Stopped half-way: a folder with part of the copy in it, and no link yet.
+      const half = await swap("1.0.0", (stage) => {
+        mkdirSync(path.join(slotOf(stage), "dist"), { recursive: true });
+        writeFileSync(path.join(slotOf(stage), "dist", "cli.js"), "");
+        return "npm install: npm error code ENOSPC";
+      });
+      // Unpacked whole, and then it says nothing of itself.
+      const mute = await swap("1.0.0", (stage) => {
+        lay(stage, "2.0.0");
+        return "npm finished, but the copy says nothing, not 2.0.0";
+      });
+      // It made its prefix and nothing in it.
+      const bare = await swap("1.0.0", (stage) => {
+        mkdirSync(stage);
+        return "npm install: npm error code E404";
+      });
+      for (const r of [half, mute, bare]) {
+        expect(r.done.state === "failed" && r.done.next).toBe("sessionpipe reinstall");
+        expect(r.said).toEqual([]);
+        expect(r.beside).toEqual(["sessionpipe"]);
+        expect(r.slot).toBe("1.0.0");
+        expect(r.starts).toBe(CLI);
+      }
+    });
+
+    it("L1: into a prefix with no copy: npm's prefix is taken, and the copy is in its place", async () => {
+      const r = await swap(null, (stage) => {
+        lay(stage, "2.0.0");
+        return null;
+      });
+      expect(r.said).toEqual(["ok: installed fresh in ~/.local, and it runs"]);
+      expect(r.done.state).toBe("one");
+      expect(r.beside).toEqual(["sessionpipe"]);
+      expect(r.slot).toBe("2.0.0");
+      // The link is made only after the tidying, and leads to the copy in the slot.
+      expect(r.starts).toBe(CLI);
+    });
+
+    it("L6: what npm's prefix holds beside what npm puts there is not this command's to take: it stays, and that is said", async () => {
+      const r = await swap("1.0.0", (stage) => {
+        lay(stage, "2.0.0");
+        writeFileSync(path.join(stage, "notes.txt"), "someone's");
+        return null;
+      });
+      expect(r.said).toHaveLength(2);
+      expect(r.said[0]).toMatch(
+        /^warn: .*\.sessionpipe-a1b2c3d4 could not be removed \(.* was left alone: it holds .*, which no published sessionpipe has \(a checkout or a build\?\)\): the next run takes it$/,
+      );
+      expect(r.said[1]).toBe("ok: installed fresh in ~/.local, and it runs (what was there is gone)");
+      // The swap itself was made, and the old copy is gone.
+      expect(r.beside).toEqual([".sessionpipe-a1b2c3d4", "sessionpipe"]);
+      expect(r.slot).toBe("2.0.0");
+      expect(r.starts).toBe(CLI);
+    });
+  },
+);

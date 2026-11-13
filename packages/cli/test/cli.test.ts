@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -55,7 +56,9 @@ function run(args: string[], guarded = true) {
 }
 
 beforeAll(() => {
-  tmp = mkdtempSync(path.join(os.tmpdir(), "sp-cli-"));
+  // By its real name (macOS reaches its temp folder through a link): `status` and
+  // `doctor` name a folder under this home, and say it as `~/…`.
+  tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sp-cli-")));
   const state = path.join(tmp, "state");
   const config = path.join(tmp, "config", "config.json");
   job = path.join(state, "jobs", "pending.json");
@@ -280,6 +283,14 @@ describe("status", () => {
       expect(report[key], key).toEqual(doctor[key]);
     expect(report.control).toEqual({ running: false, receivers: [] });
     expect(doctor.warnings).toContain("the control daemon is not running or not responding; polling is stopped");
+    // No copy of sessionpipe is installed in this home: none is listed, and nothing is said
+    // of copies or of PATH (where a fresh one would go is `reinstall`'s to decide). On
+    // Windows doctor does not look for copies at all (`reinstall` does not run there yet):
+    // the same answer, by another way.
+    expect(doctor.copies).toEqual([]);
+    expect(
+      doctor.warnings.filter((w: string) => /\bPATH\b|copies of sessionpipe|sessionpipe reinstall/.test(w)),
+    ).toEqual([]);
     doctor.sinks.forEach(({ token: _token, ...sink }: Record<string, unknown>, i: number) => {
       const { pending_sessions: _pending, ...actual } = report.sinks[i];
       expect(actual).toEqual(sink);
@@ -297,6 +308,7 @@ describe("status", () => {
     const rows = [
       `! ${launcher ? 4 : 3} things need attention`,
       "",
+      // No copy is installed in this fixture, so nothing is said of copies or of PATH.
       `  ✗ This computer  lab-box (sessionpipe ${version}), background service: not running${launcher ? ", hooks: have no launcher to run" : ""}`,
       // Codex is here and was never hooked: that only informs, so it is left to doctor.
       `  ! Agents         claude-code: not hooked · ~${path.sep}.claude${path.sep}settings.json, gemini-cli: not hooked · ~${path.sep}.gemini${path.sep}settings.json`,
