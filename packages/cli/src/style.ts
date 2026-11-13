@@ -248,8 +248,13 @@ export function failure(ui: Ui, message: string, next: string): string {
   const what = clean(message);
   if (!ui.tty) return `sessionpipe: ${what}\n`;
   const said = fold(ui, `${tint(ui, "red", tint(ui, "bold", "error"))}  `, what);
-  return `${said.join("\n")}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n`;
+  return `${said.join("\n")}\n${tryLine(ui, next)}\n`;
 }
+
+/** The one command to run next, on a line of its own so it can be copied whole: never
+ *  folded, whatever its length. */
+export const tryLine = (ui: Ui, next: string): string =>
+  `${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}`;
 
 /** A length of time, in the two units a person reads: "12 s", "3 min", "2 h", "5 days". */
 export function span(ms: number): string {

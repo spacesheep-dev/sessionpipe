@@ -1254,11 +1254,13 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it sh
       still: `One other copy is still there: 1.0.0 in ${under} (${under} can't be written).`,
       next,
     });
-    expect(stays.lines.slice(-2)).toEqual(["✓ sessionpipe 9.9.9 is installed in ~/.local and in use.", `! ${short}`]);
-    expect(stays.err).toHaveBeenCalledWith(
-      `sessionpipe: One other copy is still there: 1.0.0 in ~/.nvm/lib (~/.nvm/lib can't be written). Next: ${next}\n`,
-    );
-    expect(String(stays.err.mock.calls[0]?.[0])).toContain(`'${under}'`);
+    expect(stays.lines.slice(-4)).toEqual([
+      "✓ sessionpipe 9.9.9 is installed in ~/.local and in use.",
+      `! ${short}`,
+      "! One other copy is still there: 1.0.0 in ~/.nvm/lib (~/.nvm/lib can't be written).",
+      `try    ${next}`,
+    ]);
+    expect(stays.lines.at(-1)).toContain(`'${under}'`);
     process.exitCode = undefined;
     // At a terminal it is shortened before it is folded: no line of it is cut short for
     // a path it no longer shows.
@@ -1365,25 +1367,98 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: how a run 
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("a copy that is still there: what works is said first, then it stops with what is left and the one line to run", async () => {
+  it("a copy that is still there: what works in green, what is left in yellow, then the one line to run; exit 1, and no error", async () => {
     const r = await ends(LEFT);
-    expect(r.lines.slice(-2)).toEqual(["", `✓ ${LEFT.said}`]);
-    // The job is not done: what is left is the error, and its line the next step.
-    expect(r.err).toHaveBeenCalledWith(`sessionpipe: ${LEFT.still.slice(0, -1)}. Next: ${SUDO}\n`);
-    expect(r.exit).toHaveBeenCalledWith(1);
-    // The line to run is nowhere on the screen before it.
-    expect(r.lines.filter((l) => l.includes(SUDO))).toEqual([]);
-    // At a terminal: what works in green, and the refusal as any other.
-    const term = await ends(LEFT, { tty: true, errTty: true, columns: 200 });
-    expect(term.lines.slice(-2)).toEqual(["", green(`✓ ${LEFT.said}`)]);
-    expect(bare([String(term.err.mock.calls[0]?.[0])])).toEqual([
-      `error  ${LEFT.still.slice(0, -1)}\ntry    ${SUDO}\n`,
+    expect(r.lines.slice(-4)).toEqual([
+      "",
+      "✓ sessionpipe 9.9.9 is installed in ~/.local and in use. Pairings and settings are as they were.",
+      "! One other copy is still there: 1.0.0 in /usr/local (needs sudo).",
+      // The command alone on its line, under the words above it, so it can be copied whole.
+      "try    sudo npm uninstall -g --prefix /usr/local sessionpipe",
     ]);
-    // What else there is to say comes before it, a yellow line each: warnings, then notes.
+    // The job is not done, and a script can tell: 1, not the 0 of one copy nor the 3 of a
+    // service that finishes by itself. But nothing failed: no error line, and the command
+    // set the exit code itself where a failure would have ended the process.
+    expect(process.exitCode).toBe(1);
+    expect(r.exit).not.toHaveBeenCalled();
+    expect(r.err).not.toHaveBeenCalled();
+    // The line to run is printed once, and nowhere on the plan's screen before it.
+    expect(r.lines.filter((l) => l.includes(SUDO))).toEqual([`try    ${SUDO}`]);
+    expect(r.lines.filter((l) => l.startsWith("try"))).toHaveLength(1);
+    process.exitCode = undefined;
+    // At a terminal: green, yellow, and the line as a failure sets one (dim, then the command in its colour).
+    const term = await ends(LEFT, { tty: true, columns: 200 });
+    expect(term.lines.slice(-4)).toEqual([
+      "",
+      green(`✓ ${LEFT.said}`),
+      yellow(`! ${LEFT.still}`),
+      `${ESC}[2mtry${ESC}[22m    ${ESC}[36m${SUDO}${ESC}[39m`,
+    ]);
+    expect(process.exitCode).toBe(1);
+    expect(term.err).not.toHaveBeenCalled();
+    expect(term.exit).not.toHaveBeenCalled();
+  });
+
+  it("a copy that is still there, and more to say: each warning and each note on its yellow line, what is left last, over its line", async () => {
     const off = two({ onPath: [], homes: [home0({ pathAt: null })] });
-    const more = await ends({ ...LEFT, warn: ["A receiver hasn't answered."] }, {}, off);
-    expect(more.lines.slice(-4)).toEqual(["", `✓ ${LEFT.said}`, "! A receiver hasn't answered.", `! ${NOT_ON_PATH}`]);
-    expect(more.exit).toHaveBeenCalledWith(1);
+    const warned: Done = {
+      ...LEFT,
+      warn: [
+        `Typing \`sessionpipe\` still starts ${path.join(home, "bin", "sessionpipe")}, not the fresh copy.`,
+        "A receiver hasn't answered.",
+      ],
+    };
+    const r = await ends(warned, {}, off);
+    expect(r.lines.slice(-7)).toEqual([
+      "",
+      `✓ ${LEFT.said}`,
+      "! Typing `sessionpipe` still starts ~/bin/sessionpipe, not the fresh copy.",
+      "! A receiver hasn't answered.",
+      `! ${NOT_ON_PATH}`,
+      `! ${LEFT.still}`,
+      `try    ${SUDO}`,
+    ]);
+    expect(process.exitCode).toBe(1);
+    expect(r.err).not.toHaveBeenCalled();
+    expect(r.exit).not.toHaveBeenCalled();
+    process.exitCode = undefined;
+    // Several copies, each with a line: the lines joined into one, never folded, though it
+    // is longer than the terminal is wide; the sentence above it folds as any other.
+    const chained = `${SUDO} && sudo npm uninstall -g --prefix /opt/node sessionpipe`;
+    const several: Done = {
+      ...LEFT,
+      still:
+        "3 other copies are still there: 1.0.0 in /usr/local (needs sudo); 1.0.0 in /opt/node (needs sudo); ~/.nvm/versions/node/v22.1.0/lib/node_modules/sessionpipe (EBUSY: resource busy or locked).",
+      next: chained,
+    };
+    expect(chained.length).toBeGreaterThan(100);
+    for (const columns of [80, 120]) {
+      const term = await ends(several, { tty: true, columns });
+      const lines = bare(term.lines);
+      expect(lines.at(-1)).toBe(`try    ${chained}`);
+      expect(term.lines.at(-1)).toBe(`${ESC}[2mtry${ESC}[22m    ${ESC}[36m${chained}${ESC}[39m`);
+      const said = lines.slice(lines.lastIndexOf("") + 1, -1);
+      for (const l of said) expect(l.length).toBeLessThanOrEqual(Math.min(columns - 1, 100));
+      // One green sentence and one yellow one, each folded under its own words.
+      expect(said.filter((l) => l.startsWith("✓ "))).toHaveLength(1);
+      expect(said.filter((l) => l.startsWith("! "))).toHaveLength(1);
+      expect(said.length).toBe(columns === 80 ? 6 : 3);
+      for (const l of said) expect(l).toMatch(/^(✓ |! | {2})\S/);
+      expect(said.join(" ").replace(/\s+/g, " ")).toBe(`✓ ${LEFT.said} ! ${several.still}`);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = undefined;
+    }
+    // With no line for what is left, the command is this one again.
+    const again = await ends({
+      ...LEFT,
+      still: "One other copy is still there: ~/old (EBUSY).",
+      next: "sessionpipe reinstall",
+    });
+    expect(again.lines.slice(-2)).toEqual([
+      "! One other copy is still there: ~/old (EBUSY).",
+      "try    sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
   });
 
   it("the background service finishes by itself: said in yellow, exit 3", async () => {

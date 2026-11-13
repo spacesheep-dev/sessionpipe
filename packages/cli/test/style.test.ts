@@ -18,6 +18,7 @@ import {
   span,
   table,
   tint,
+  tryLine,
   type Ui,
 } from "../src/style.js";
 
@@ -261,6 +262,50 @@ describe("fixes and failure", () => {
     expect(said.startsWith(`${ESC}[31m${ESC}[1merror${ESC}[22m${ESC}[39m  one two`)).toBe(true);
     expect(plain(said).split("\n")[1]?.startsWith("       ")).toBe(true);
     expect(said).toContain(`${ESC}[36msessionpipe --help${ESC}[39m`);
+  });
+
+  it("tryLine: the one command to run next, on a line of its own: the word dim, the command in its colour", () => {
+    expect(tryLine(mono(), "sessionpipe reinstall")).toBe("try    sessionpipe reinstall");
+    expect(tryLine(PLAIN, "sessionpipe reinstall")).toBe("try    sessionpipe reinstall");
+    expect(tryLine(tty(), "sessionpipe reinstall")).toBe(
+      `${ESC}[2mtry${ESC}[22m    ${ESC}[36msessionpipe reinstall${ESC}[39m`,
+    );
+    // The command starts under the words of the error above it, as a failure sets the two.
+    expect(cols("error  ")).toBe(cols("try    "));
+    // It is the last line of a failure at a terminal, and no part of one anywhere else.
+    for (const u of [mono(), tty()])
+      expect(failure(u, "fetch failed", "sessionpipe sink --help").split("\n").slice(-2)).toEqual([
+        tryLine(u, "sessionpipe sink --help"),
+        "",
+      ]);
+    expect(failure(PLAIN, "fetch failed", "sessionpipe sink --help")).not.toContain("try");
+  });
+
+  it("tryLine: a command is never folded, whatever its length, so it can be copied whole", () => {
+    const sudo = "sudo npm uninstall -g --prefix '/opt/my node' sessionpipe";
+    const chained = [sudo, sudo.replace("my node", "another node"), sudo.replace("my node", "a third")].join(" && ");
+    expect(cols(chained)).toBeGreaterThan(100);
+    for (const u of [tty(40), tty(80), tty(120), mono(40), PLAIN]) {
+      const line = tryLine(u, chained);
+      expect(line).not.toContain("\n");
+      expect(plain(line)).toBe(`try    ${chained}`);
+    }
+    // The message above it folds to the same terminal; the command still does not.
+    const said = failure(mono(60), "one two three four five six seven eight nine ten eleven twelve", chained).split(
+      "\n",
+    );
+    expect(said.at(-2)).toBe(`try    ${chained}`);
+    expect(said.length).toBeGreaterThan(3);
+    for (const l of said.slice(0, -2)) expect(cols(l)).toBeLessThan(60);
+  });
+
+  it("tryLine: what a terminal would act on is taken out of the command, as out of any text", () => {
+    expect(tryLine(mono(), `sessionpipe${ESC}[2J update`)).toBe("try    sessionpipe update");
+    // A line break in it would start a line of its own: it is a space.
+    expect(tryLine(mono(), "sessionpipe\nupdate")).toBe("try    sessionpipe update");
+    expect(tryLine(tty(), `${ESC}[31msessionpipe update`)).toBe(
+      `${ESC}[2mtry${ESC}[22m    ${ESC}[36msessionpipe update${ESC}[39m`,
+    );
   });
 });
 
