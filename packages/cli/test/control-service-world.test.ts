@@ -23,7 +23,15 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { elsewhere, noService, SERVICE_LABEL, SERVICE_UNIT, serviceLook, serviceNames } from "../src/control/health.js";
+import {
+  elsewhere,
+  noService,
+  reach,
+  SERVICE_LABEL,
+  SERVICE_UNIT,
+  serviceLook,
+  serviceNames,
+} from "../src/control/health.js";
 import {
   BY_HAND,
   installService,
@@ -127,6 +135,28 @@ describe("whose service it is", () => {
     expect(serviceNames({})).toBeNull();
   });
 
+  it.runIf(posix)("which folders are its to look at and remove from: all, its own home, or none", () => {
+    account(home);
+    // Its files in this account's usual place: this computer is its to look at.
+    expect(reach({})).toBe(true);
+    // Its files somewhere else, in this account's real home: a copy here is this
+    // computer's, not this world's, and none of them is its to touch.
+    expect(reach({ SESSIONPIPE_STATE: path.join(tmp, "x") })).toBeNull();
+    expect(reach({ XDG_CONFIG_HOME: path.join(tmp, "x") })).toBeNull();
+    // A world with a home of its own: that home, and nothing outside it.
+    const other = path.join(tmp, "other-home");
+    vi.mocked(os.homedir).mockReturnValue(other);
+    expect(reach({})).toBe(other);
+    expect(reach({ SESSIONPIPE_STATE: path.join(tmp, "x") })).toBe(other);
+    // With nothing said, the process's own environment: the test's sandbox, a world apart.
+    expect(reach()).toBe(other);
+    // That home being the account's real one by another name is still the real one.
+    mkdirSync(path.join(tmp, "elsewhere"));
+    symlinkSync(home, path.join(tmp, "elsewhere", "link"));
+    vi.mocked(os.homedir).mockReturnValue(path.join(tmp, "elsewhere", "link"));
+    expect(reach({ SESSIONPIPE_STATE: path.join(tmp, "x") })).toBeNull();
+  });
+
   it.runIf(posix)("a home reached through a link is the same home, once its folders are there", () => {
     const alias = path.join(tmp, "alias");
     symlinkSync(home, alias);
@@ -219,6 +249,7 @@ describe.runIf(posix)("a look at the service", () => {
       installed: false,
       loaded: false,
       argv: null,
+      pid: null,
     });
     expect(asked.every((a) => a.startsWith("launchctl print "))).toBe(true);
     expect(asked.map((a) => a.split(" ")[2]?.split("/")[0])).toEqual(["gui", "user"]);
@@ -241,6 +272,8 @@ describe.runIf(posix)("a look at the service", () => {
       installed: false,
       loaded: true,
       argv: null,
+      // "active" is no process id: none is named.
+      pid: null,
     });
     // Not active: systemd says so, and answers for itself.
     expect(

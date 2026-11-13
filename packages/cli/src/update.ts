@@ -205,8 +205,18 @@ export type InstallResult =
     }
   | { ok: false; ms: number; error: string; stage: "prefix" | "npm" | "verify" };
 
+/** npm's last words, without the line that only says where its own log is. */
 const lastLine = (r: ExecResult): string =>
-  (r.error || r.stderr.trim().split("\n").filter(Boolean).slice(-2).join(" ") || `exit ${r.code}`).slice(0, 300);
+  (
+    r.error ||
+    r.stderr
+      .trim()
+      .split("\n")
+      .filter((l) => l && !/A complete log of this run can be found in/.test(l))
+      .slice(-2)
+      .join(" ") ||
+    `exit ${r.code}`
+  ).slice(0, 300);
 
 /** The version of the copy on disk (which may not be the one running). */
 export async function installedVersion(o: {
@@ -223,22 +233,44 @@ export async function installedVersion(o: {
   return r.code === 0 && parseVersion(v) ? v : null;
 }
 
+/** One npm command about sessionpipe in a prefix, run by this node with each word its own
+ *  argument: why it failed, or null. `sessionpipe reinstall` fetches a release into npm's
+ *  cache with it (`cache add`), and has npm take a copy out (`uninstall`). */
+export async function npmDo(
+  words: string[],
+  o: Pick<InstallOptions, "node" | "env" | "exec" | "platform">,
+): Promise<string | null> {
+  const r = await (o.exec ?? execCapture)([...npmArgv(o.node, o.platform ?? process.platform), ...words], {
+    env: withNode(o),
+    timeoutMs: 5 * 60_000,
+  });
+  return r.code === 0 ? null : lastLine(r);
+}
+
 /** `npm install -g sessionpipe@<version>` into the prefix the copy in `distDir` came
- *  from, then check the copy on disk says that version. Lifecycle scripts are off:
- *  sessionpipe has none, and an unattended install runs nothing it fetched. */
+ *  from, then check the copy on disk says that version. */
 async function npmInstall(
   version: string,
   o: InstallOptions,
 ): Promise<{ ok: true } | { ok: false; error: string; stage: "prefix" | "npm" | "verify" }> {
-  const platform = o.platform ?? process.platform;
+  const prefix = globalPrefix(o.distDir, o.platform ?? process.platform);
+  if (!prefix) return { ok: false, stage: "prefix", error: "this copy isn't a global npm install" };
+  return installInto(prefix, version, o);
+}
+
+/** The same into a prefix by its name: the one way a copy is installed, for an update and
+ *  for `sessionpipe reinstall` (whose slot is empty, with no bin link to tell the prefix
+ *  by). Lifecycle scripts are off: sessionpipe has none, and an unattended install runs
+ *  nothing it fetched. */
+export async function installInto(
+  prefix: string,
+  version: string,
+  o: InstallOptions,
+): Promise<{ ok: true } | { ok: false; error: string; stage: "npm" | "verify" }> {
   const exec = o.exec ?? execCapture;
   const env = withNode(o);
-  const prefix = globalPrefix(o.distDir, platform);
-  if (!prefix) return { ok: false, stage: "prefix", error: "this copy isn't a global npm install" };
-  const npm = npmArgv(o.node, platform);
-  const r = await exec(
+  const why = await npmDo(
     [
-      ...npm,
       "install",
       "--global",
       "--prefix",
@@ -248,9 +280,9 @@ async function npmInstall(
       "--no-fund",
       `sessionpipe@${version}`,
     ],
-    { env, timeoutMs: 5 * 60_000 },
+    o,
   );
-  if (r.code !== 0) return { ok: false, stage: "npm", error: `npm install: ${lastLine(r)}` };
+  if (why) return { ok: false, stage: "npm", error: `npm install: ${why}` };
   const now = await installedVersion({ node: o.node, distDir: o.distDir, env, exec });
   if (now !== version)
     return {
