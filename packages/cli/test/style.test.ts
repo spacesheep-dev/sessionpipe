@@ -287,6 +287,29 @@ describe("fixes and failure", () => {
       expect(failure(PLAIN, "fetch failed", "sessionpipe sink --help", mild)).not.toContain("try");
   });
 
+  it("N2: a failure that names no command is its words and nothing under them: no `try` line at a terminal, of either kind, folded or not; in a pipe the one line", () => {
+    // Some refusals have no command that leads out (the one that was named led back to
+    // the same refusal). Then none is named: an empty line to try is no line.
+    for (const mild of [false, true]) {
+      const mark = mild ? "!      " : "error  ";
+      expect(failure(mono(), "it can't tell which copy that file starts", "", mild)).toBe(
+        `${mark}it can't tell which copy that file starts\n`,
+      );
+      for (const u of [mono(), tty(), mono(40), tty(40)]) {
+        const long = "one two three four five six seven eight nine ten eleven twelve";
+        const said = failure(u, long, "", mild);
+        expect(plain(said)).not.toMatch(/^try\b/m);
+        expect(said.endsWith("\n")).toBe(true);
+        expect(said.endsWith("\n\n")).toBe(false);
+        // The words are the same lines as with a command under them, less that one line.
+        expect(said).toBe(
+          failure(u, long, "sessionpipe --help", mild).split("\n").slice(0, -2).join("\n").concat("\n"),
+        );
+      }
+      expect(failure(PLAIN, "it can't tell", "", mild)).toBe("sessionpipe: it can't tell\n");
+    }
+  });
+
   it("the line to try: a command is never folded, whatever its length, so it can be copied whole", () => {
     const sudo = "sudo rm -r '/opt/my node/lib/node_modules/sessionpipe' '/opt/my node/bin/sessionpipe'";
     const chained = [sudo, sudo.replaceAll("my node", "another node"), sudo.replaceAll("my node", "a third")].join(
