@@ -27,6 +27,8 @@ export interface AcpAgent {
   /** The CLI's name on PATH. */
   bin: string;
   args: string[];
+  /** The agent's own `_meta` for `session/new` and `session/load`, where it has one. */
+  meta?: Record<string, unknown>;
 }
 
 /** The agents the daemon can drive, with the launch line the registry publishes. */
@@ -72,6 +74,17 @@ export const ACP_AGENTS: readonly AcpAgent[] = [
   { harness: "corust-agent", registry: "corust-agent", label: "Corust Agent", bin: "corust-agent-acp", args: [] },
   { harness: "cortex-code", registry: "cortex-code", label: "Cortex Code", bin: "cortex", args: ["acp", "serve"] },
   { harness: "kimchi", registry: "kimchi", label: "Kimchi", bin: "kimchi", args: ["--mode", "acp"] },
+  // Not in the registry (2026-11-13): the launch line is fx's own manual's
+  // (fx.sh/docs/using-fx/acp). An ACP session of fx's leaves out the MCP servers in the
+  // person's ~/.fx/mcp.json unless the client asks for them; measured on fx 0.0.16.
+  {
+    harness: "fx",
+    registry: "fx",
+    label: "fx",
+    bin: "fx",
+    args: ["acp"],
+    meta: { fx: { profileMcpServers: true } },
+  },
 ];
 
 export const ACP_HARNESSES: readonly string[] = ACP_AGENTS.map((a) => a.harness);
@@ -88,7 +101,7 @@ export function findAcpAgent(
   env: NodeJS.ProcessEnv = process.env,
   home = os.homedir(),
   nodeDir = path.dirname(process.execPath),
-): { bin: string; args: string[] } | null {
+): { bin: string; args: string[]; meta?: Record<string, unknown> } | null {
   const a = acpAgent(harness);
   if (!a) return null;
   const bin = findBinary({
@@ -103,7 +116,7 @@ export function findAcpAgent(
       "/usr/local/bin",
     ],
   });
-  return bin ? { bin, args: a.args } : null;
+  return bin ? { bin, args: a.args, ...(a.meta ? { meta: a.meta } : {}) } : null;
 }
 
 /** The ACP agents installed here, by harness name, for the daemon's hello. */
@@ -170,6 +183,8 @@ export interface AcpHeld {
 export interface AcpOptions {
   bin: string;
   args: string[];
+  /** Sent as `_meta` when the session is opened (AcpAgent.meta). */
+  meta?: Record<string, unknown>;
   cwd: string;
   mode: Mode;
   label: string;
@@ -377,6 +392,7 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
   };
 
   const open = o.openTimeoutMs ?? 60_000;
+  const meta = o.meta ? { _meta: o.meta } : {};
 
   function held(session: string): AcpHeld {
     let busy = false;
@@ -472,10 +488,10 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
           close();
           return { unsupported: `${label} can't reopen a session once it has been closed (no session/load)` };
         }
-        await request("session/load", { sessionId: o.load, cwd: o.cwd, mcpServers: [] }, open);
+        await request("session/load", { sessionId: o.load, cwd: o.cwd, mcpServers: [], ...meta }, open);
         return { held: held(o.load) };
       }
-      const res = obj(await request("session/new", { cwd: o.cwd, mcpServers: [] }, open));
+      const res = obj(await request("session/new", { cwd: o.cwd, mcpServers: [], ...meta }, open));
       const session = str(res?.sessionId);
       if (!session) throw new Error(`${label} opened a session without naming it`);
       return { held: held(session) };
