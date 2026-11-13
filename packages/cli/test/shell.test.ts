@@ -119,4 +119,28 @@ describe("a refusal", () => {
     expect(r.message).toBe("npm can't write the prefix");
     expect(r.next).toBe("sessionpipe update");
   });
+
+  it("L10: by itself it is neither in line nor mild; the caller says that its message leaves the command out, and that it is only what is left to do", () => {
+    const plain = new Refusal("npm can't write the prefix", "sessionpipe update");
+    expect([plain.inLine, plain.mild]).toEqual([false, false]);
+    // In line alone: the one line a pipe gets ends with the command; it is still an error.
+    const inLine = new Refusal("npm can't write the prefix", "sessionpipe update", true);
+    expect([inLine.inLine, inLine.mild]).toEqual([true, false]);
+    // What `reinstall` ends with where a copy is still there: the job done as far as it
+    // goes, and one line left for the person.
+    const left = new Refusal(
+      "One other copy is still there: 0.9.0 in /usr/local (needs sudo)",
+      "sudo rm -r /x",
+      true,
+      true,
+    );
+    expect(left).toBeInstanceOf(Error);
+    expect([left.message, left.next, left.inLine, left.mild]).toEqual([
+      "One other copy is still there: 0.9.0 in /usr/local (needs sudo)",
+      "sudo rm -r /x",
+      true,
+      true,
+    ]);
+    expect([new Refusal("m", "n", false, true).inLine, new Refusal("m", "n", false, true).mild]).toEqual([false, true]);
+  });
 });

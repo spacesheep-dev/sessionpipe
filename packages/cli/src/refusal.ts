@@ -5,11 +5,15 @@
 export class Refusal extends Error {
   /** `inLine`: the message doesn't name the command itself. Where a failure is the one
    *  line a pipe gets, the command is then said at the end of it, so a script, an ssh
-   *  session or an agent reads what to run next as a person at a terminal does. */
+   *  session or an agent reads what to run next as a person at a terminal does.
+   *  `mild`: the command did what it could and this is what is left for the person: at
+   *  a terminal it is said under `!`, not `error`. The exit code and the one line a pipe
+   *  gets are those of any refusal. */
   constructor(
     message: string,
     readonly next: string,
     readonly inLine = false,
+    readonly mild = false,
   ) {
     super(message);
   }

@@ -214,6 +214,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
         makeUi({ isTTY: io.errTty, columns: io.columns, noColor }),
         e instanceof Refusal && e.inLine && piped ? `${e.message}. Next: ${e.next}` : (e as Error).message,
         e instanceof Refusal ? e.next : `sessionpipe ${about ? `${about} ` : ""}--help`,
+        e instanceof Refusal && e.mild,
       ),
     );
     io.exit(1);
