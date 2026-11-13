@@ -1,25 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 // What `sessionpipe reinstall` may remove, said once, and the one function that removes.
-// Nothing else in this folder deletes anything (a test reads the sources to hold that).
+// Nothing else in this folder deletes anything, and nothing here is handed to npm or to a
+// shell to delete (a test reads the sources to hold that).
 //
 // Ours to remove is only what is provably a published sessionpipe package:
 //
 //   a folder   a real folder, never a link, named `node_modules/sessionpipe`, or one npm
 //              left behind from an install that was cut off (`.sessionpipe-XXXXXXXX`,
-//              which is also the name this command gives the folder it moves aside);
-//              in a global slot (`<prefix>/lib/node_modules`, on Windows
-//              `<prefix>\node_modules` of a prefix that was looked in as one) or in an
-//              npx cache entry (`_npx/<id>/node_modules`); holding nothing a published
-//              package doesn't; and, where its package.json can be read, named sessionpipe.
-//   its link   the bin link npm made for it: a link whose text leads into that folder
-//              (on Windows the shims npm wrote, which name it). It goes with its folder.
-//              By itself a link is ours only when the folder it leads to is gone;
-//              nothing is ever removed through one.
+//              which is also the name of the folder this command has npm install into
+//              before it swaps the copy in); in the global folder of a prefix that was
+//              looked in as one (`<prefix>/lib/node_modules`: a folder of that shape
+//              anywhere else is a project's) or in an entry of the npx cache that was
+//              looked in; holding nothing a published package doesn't; and with a
+//              package.json that says it is sessionpipe, of some release.
+//   its link   the bin link npm made for it: a link whose text leads into that folder.
+//              It goes with its folder. By itself a link is ours only when the folder
+//              it leads to is gone; nothing is ever removed through one.
 //
 // So a checkout, a build, a folder someone linked, a project's own dependency and a file
-// that only has the name are all refused, with the reason in words.
-import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+// that only has the name are all refused, with the reason in words. A folder is the same
+// folder by whatever name it is reached (its device and inode), and the copy a run has
+// just put in place is refused whatever else holds.
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import path from "node:path";
+import { parseVersion } from "@sessionpipe/core/version";
+import { clean } from "../style.js";
 
 /** Which folders this sessionpipe may call this computer's: everything (`true`), only
  *  what lies inside one folder (a world of its own: a test, an agent's sandbox), or
@@ -27,33 +42,41 @@ import path from "node:path";
 export type Reach = true | string | null;
 
 export interface Proving {
-  platform: NodeJS.Platform;
   reach: Reach;
-  /** Windows: the prefixes that were looked in as npm's global ones. A global slot there
-   *  has the shape of any project's `node_modules`, so only these count. */
+  /** The prefixes that were looked in as npm's global ones. A global slot is the
+   *  `lib/node_modules` of one of these: by its shape alone it could be any project's. */
   prefixes: readonly string[];
+  /** The npx cache that was looked in (`<npm's cache>/_npx`); null for none. */
+  npx: string | null;
+  /** Folders that are never removed: the copy this run put in place. */
+  keep?: readonly string[];
 }
 
-/** Every entry a published sessionpipe has at its top. */
-const PUBLISHED: ReadonlySet<string> = new Set(["package.json", "dist", "README.md", "LICENSE", "NOTICE"]);
-/** What npm calls a folder it has moved out of the way, and what this command calls one. */
+/** Every entry a published sessionpipe has at its top; the manifest is the last to go. */
+const REST = ["dist", "README.md", "LICENSE", "NOTICE"] as const;
+const PUBLISHED: ReadonlySet<string> = new Set(["package.json", ...REST]);
+/** What npm calls a folder it has moved out of the way, and what this command calls the
+ *  folder it has npm install into. */
 export const ASIDE = /^\.sessionpipe-[A-Za-z0-9]{8}$/;
-/** The names npm gives the command in a prefix on Windows. */
-export const SHIMS = ["sessionpipe", "sessionpipe.cmd", "sessionpipe.ps1"] as const;
-/** How npm's shim names the cli.js it runs, from where the shim sits: in a prefix, the
- *  package under it; in a `.bin`, the package beside it. */
-const NAMES_IT = /node_modules[\\/]sessionpipe[\\/]dist[\\/]cli\.js/;
-const NAMES_IT_BESIDE = /\.\.[\\/]sessionpipe[\\/]dist[\\/]cli\.js/;
 
 export const within = (root: string, p: string): boolean => {
   const rel = path.relative(root, p);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 };
 const inReach = (o: Proving, p: string): boolean => o.reach === true || (o.reach !== null && within(o.reach, p));
-const same = (a: string, b: string, o: Proving): boolean =>
-  o.platform === "win32"
-    ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
-    : path.resolve(a) === path.resolve(b);
+
+/** One folder, by whatever name: the same device and inode (a home reached through a
+ *  link, another case on a disk that ignores it, a volume mounted twice). What is not
+ *  there is the same only by its name. */
+export function same(a: string, b: string): boolean {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  try {
+    const [x, y] = [statSync(a), statSync(b)];
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
+}
 
 /** A path by the real name of the folder it is in (a folder on the way to it may be a
  *  link to somewhere else); null when that folder can't be read. */
@@ -67,40 +90,32 @@ const really = (p: string): string | null => {
 
 export type Slot = "global" | "npx";
 /** What a path is: a folder that is ours (and in which kind of slot), a bin link that is
- *  ours, or neither, with why. */
-export type Proof = { is: "folder"; slot: Slot; aside: boolean } | { is: "link" } | { is: "not"; why: string };
+ *  ours, or neither, with why. `staging`: a folder npm was told to install into. */
+export type Proof =
+  | { is: "folder"; slot: Slot; aside: boolean; staging: boolean }
+  | { is: "link" }
+  | { is: "not"; why: string };
 
 const not = (why: string): Proof => ({ is: "not", why });
 
-/** The slot a package folder sits in by its path alone; null for any other place. */
+/** The slot a package folder sits in; null for any other place. */
 export function slotOf(dir: string, o: Proving): Slot | null {
   const modules = path.dirname(dir);
   if (path.basename(modules) !== "node_modules") return null;
   const above = path.dirname(modules);
-  if (path.basename(path.dirname(above)) === "_npx") return "npx";
-  if (o.platform === "win32") return o.prefixes.some((p) => same(p, above, o)) ? "global" : null;
-  return path.basename(above) === "lib" ? "global" : null;
+  if (o.npx !== null && same(path.dirname(above), o.npx)) return "npx";
+  return path.basename(above) === "lib" && o.prefixes.some((p) => same(p, path.dirname(above))) ? "global" : null;
 }
 
 /** The npm prefix a global package folder belongs to. */
-export const prefixOfSlot = (dir: string, platform: NodeJS.Platform): string =>
-  platform === "win32" ? path.dirname(path.dirname(dir)) : path.dirname(path.dirname(path.dirname(dir)));
+export const prefixOfSlot = (dir: string): string => path.dirname(path.dirname(path.dirname(dir)));
 
-/** Is this bin link (or, on Windows, shim) npm's own for the package folder it names?
- *  The folder it leads to, read from the link itself and never followed; null when it is
- *  anything else (a script someone wrote, a link to somewhere that is no sessionpipe). */
-export function binTarget(file: string, platform: NodeJS.Platform): string | null {
+/** Is this bin link npm's own for the package folder it names? The folder it leads to,
+ *  read from the link itself and never followed; null when it is anything else (a script
+ *  someone wrote, a link to somewhere that is no sessionpipe). */
+export function binTarget(file: string): string | null {
   try {
-    const st = lstatSync(file);
-    if (platform === "win32") {
-      if (!st.isFile() || !SHIMS.includes(path.basename(file).toLowerCase() as (typeof SHIMS)[number])) return null;
-      const dir = path.dirname(file);
-      // npm's shim sits in the prefix itself, or in a `.bin` beside the package.
-      const beside = path.basename(dir) === ".bin";
-      if (!(beside ? NAMES_IT_BESIDE : NAMES_IT).test(readFileSync(file, "utf8"))) return null;
-      return path.join(beside ? path.dirname(dir) : path.join(dir, "node_modules"), "sessionpipe");
-    }
-    if (!st.isSymbolicLink() || path.basename(file) !== "sessionpipe") return null;
+    if (!lstatSync(file).isSymbolicLink() || path.basename(file) !== "sessionpipe") return null;
     // A relative link leads from the folder it is really in, by whatever name (a link to
     // that folder) the file was reached.
     const to = path.resolve(realpathSync(path.dirname(file)), readlinkSync(file));
@@ -116,19 +131,49 @@ export function binsOf(dir: string, o: Proving): string[] {
   const modules = path.dirname(dir);
   const slot = slotOf(dir, o);
   const at =
-    slot === "npx"
-      ? [path.join(modules, ".bin")]
-      : slot === "global"
-        ? [o.platform === "win32" ? path.dirname(modules) : path.join(prefixOfSlot(dir, o.platform), "bin")]
-        : [];
-  return at
-    .flatMap((d) => (o.platform === "win32" ? SHIMS : (["sessionpipe"] as const)).map((n) => path.join(d, n)))
-    .filter((f) => {
-      const to = binTarget(f, o.platform);
-      const at = really(f);
-      // In reach by its name and by where it really is.
-      return inReach(o, f) && at !== null && inReach(o, at) && to !== null && same(to, dir, o);
-    });
+    slot === "npx" ? path.join(modules, ".bin") : slot === "global" ? path.join(prefixOfSlot(dir), "bin") : null;
+  if (!at) return [];
+  const file = path.join(at, "sessionpipe");
+  const to = binTarget(file);
+  const real = really(file);
+  // In reach by its name and by where it really is.
+  return inReach(o, file) && real !== null && inReach(o, real) && to !== null && same(to, dir) ? [file] : [];
+}
+
+/** The entries of a real folder (never a link to one); null for anything else. */
+const entries = (dir: string): string[] | null => {
+  try {
+    return lstatSync(dir).isDirectory() ? readdirSync(dir) : null;
+  } catch {
+    return null;
+  }
+};
+const only = (dir: string, names: readonly string[]): boolean => entries(dir)?.every((e) => names.includes(e)) ?? false;
+
+/** The entry of a folder that no published sessionpipe has; null where it holds nothing
+ *  but those; undefined where it is no real folder that can be read. */
+const extra = (dir: string): string | null | undefined => {
+  const all = entries(dir);
+  return all === null ? undefined : (all.find((e) => !PUBLISHED.has(e)) ?? null);
+};
+
+/** A folder this command had npm install into, as npm lays a prefix out for one package:
+ *  `lib/node_modules/sessionpipe` (while it is still there), npm's own list beside it,
+ *  and `bin/sessionpipe`. Nothing else, each a real folder, and no link on the way. */
+function staged(dir: string): boolean {
+  const modules = path.join(dir, "lib", "node_modules");
+  const copy = path.join(modules, "sessionpipe");
+  const link = path.join(dir, "bin", "sessionpipe");
+  const holds = (d: string, names: readonly string[]): boolean => gone(d) || only(d, names);
+  return (
+    only(dir, ["lib", "bin"]) &&
+    holds(path.join(dir, "bin"), ["sessionpipe"]) &&
+    (gone(link) || binTarget(link) !== null) &&
+    holds(path.join(dir, "lib"), ["node_modules"]) &&
+    holds(modules, ["sessionpipe", ".package-lock.json"]) &&
+    // What npm unpacked there is the release it was asked for, whatever that holds.
+    (gone(copy) || entries(copy) !== null)
+  );
 }
 
 /** The proof, in one place. */
@@ -151,7 +196,7 @@ export function prove(asked: string, o: Proving): Proof {
   if (!inReach(o, real)) return not("it is outside the folders this sessionpipe keeps its own files in");
   if (!st.isDirectory()) {
     // A bin link is ours when it names a sessionpipe slot that is ours or is gone.
-    const to = binTarget(what, o.platform);
+    const to = binTarget(what);
     if (!to)
       return not(
         st.isSymbolicLink()
@@ -163,6 +208,8 @@ export function prove(asked: string, o: Proving): Proof {
     // away alone would leave a copy nobody can type.
     return gone(to) ? { is: "link" } : not("it is the link of a copy that is there");
   }
+  // The copy this run put in place, by whatever name it is asked for.
+  if (o.keep?.some((k) => same(k, what))) return not("it is the copy this run put in place");
   const aside = ASIDE.test(base);
   if (base !== "sessionpipe" && !aside) return not("it is not a folder named node_modules/sessionpipe");
   const slot = slotOf(what, o);
@@ -171,21 +218,28 @@ export function prove(asked: string, o: Proving): Proof {
   // Where it really is must be the same kind of slot: through a linked folder it may be
   // a project's own dependency.
   if (slotOf(real, o) !== slot) return not("the node_modules folder it is in is a link to somewhere else");
-  let entries: string[];
+  // A prefix has no package.json beside its node_modules: a project has.
+  // (By the name it was asked for and by where it really is.)
+  if (slot === "global" && [what, real].some((x) => !gone(path.join(path.dirname(path.dirname(x)), "package.json"))))
+    return not("the node_modules folder it is in is a project's own (a package.json is beside it)");
+  if (aside && staged(what)) return { is: "folder", slot, aside, staging: true };
+  const more = extra(what);
+  if (more === undefined) return not("it can't be read");
+  if (more !== null) return not(`it holds ${clean(more)}, which no published sessionpipe has (a checkout or a build?)`);
+  // Nothing in it: what is left of a copy that could only be removed in part. Taking an
+  // empty folder away loses nothing.
+  if (entries(what)?.length === 0) return { is: "folder", slot, aside, staging: false };
+  let manifest: { name?: unknown; version?: unknown };
   try {
-    entries = readdirSync(what);
+    manifest = JSON.parse(readFileSync(path.join(what, "package.json"), "utf8")) as typeof manifest;
   } catch {
-    return not("it can't be read");
+    return not("it has no package.json that can be read (an install that was cut off?)");
   }
-  const extra = entries.find((e) => !PUBLISHED.has(e));
-  if (extra) return not(`it holds ${extra}, which no published sessionpipe has (a checkout or a build?)`);
-  try {
-    const name = (JSON.parse(readFileSync(path.join(what, "package.json"), "utf8")) as { name?: unknown }).name;
-    if (name !== "sessionpipe") return not(`its package.json says it is ${JSON.stringify(name)}, not sessionpipe`);
-  } catch {
-    // None, or cut off half-way: an install that broke. Still npm's slot for sessionpipe.
-  }
-  return { is: "folder", slot, aside };
+  if (manifest.name !== "sessionpipe")
+    return not(`its package.json says it is ${clean(JSON.stringify(manifest.name) ?? "nothing")}, not sessionpipe`);
+  if (typeof manifest.version !== "string" || !parseVersion(manifest.version))
+    return not("its package.json names no release of sessionpipe");
+  return { is: "folder", slot, aside, staging: false };
 }
 
 const gone = (p: string): boolean => {
@@ -207,19 +261,14 @@ export class NotOurs extends Error {
   }
 }
 
-/** Remove one thing that is ours: a package folder with its own bin links, or a bin link
- *  whose folder is gone. The proof comes first and again before each deletion. A global
- *  install is first handed to npm (`npm`, when given), which keeps its own books; what
- *  is still there afterwards is taken away here. Answers what is gone; throws `NotOurs`
- *  for anything else, having removed nothing. */
-export async function remove(
-  asked: string,
-  o: Proving & {
-    npm?: (prefix: string) => Promise<unknown>;
-    /** Only the folder: its bin link stays, and npm (which would take it) is not asked. */
-    alone?: boolean;
-  },
-): Promise<string[]> {
+/** Remove one thing that is ours: a package folder with its own bin link, or a bin link
+ *  whose folder is gone. The proof comes first; nothing but this function deletes, and
+ *  npm is not asked to (it takes whatever is at a prefix's command path, its own link or
+ *  not). A folder is emptied with its package.json last, so one that could only be
+ *  removed in part is still provably ours for the run that comes back to it: that is
+ *  said, never passed over. Answers what is gone; throws `NotOurs` for anything else,
+ *  having removed nothing. */
+export function remove(asked: string, o: Proving): string[] {
   // What is proven is what is removed: the path by its one spelling, for both.
   const what = path.resolve(asked);
   const p = prove(what, o);
@@ -228,16 +277,20 @@ export async function remove(
     unlinkSync(what);
     return [what];
   }
-  const bins = o.alone ? [] : binsOf(what, o);
-  if (o.npm && !o.alone && p.slot === "global" && !p.aside) await o.npm(prefixOfSlot(what, o.platform)).catch(() => {});
-  // Whatever npm left (or all of it, where npm was not asked), proven again first.
-  if (prove(what, o).is === "folder") rmSync(what, { recursive: true });
-  // Still there: npm left something in it that is not a published sessionpipe's, and
-  // the second proof refused it. Said, never answered as gone, and its link stays with it.
-  if (!gone(what)) throw new NotOurs(what, "after npm ran it was no longer provably a published sessionpipe");
-  // And each link: it goes only while it is still this folder's own.
-  const still = binsOf(what, o);
-  for (const b of bins) if (still.includes(b)) unlinkSync(b);
-  // What is gone: a link that is another copy's by now is there, and is not answered.
-  return [what, ...bins.filter(gone)];
+  const bins = binsOf(what, o);
+  try {
+    if (p.staging) rmSync(what, { recursive: true });
+    else {
+      for (const e of REST) rmSync(path.join(what, e), { recursive: true, force: true });
+      rmSync(path.join(what, "package.json"), { force: true });
+      rmdirSync(what);
+    }
+  } catch (e) {
+    throw new Error(
+      `${what} could only be removed in part (${(e as Error).message}): what is left of it no longer runs, and the next run takes it`,
+    );
+  }
+  // Its own link, which leads nowhere now.
+  for (const b of bins) unlinkSync(b);
+  return [what, ...bins];
 }

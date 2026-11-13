@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -61,10 +62,11 @@ import {
   reach,
   serviceLog,
   serviceLook,
+  serviceSeen,
   type Trouble,
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
-import { placeService, uninstallService } from "./control/pair.js";
+import { placeService } from "./control/pair.js";
 import {
   controlFile,
   controlState,
@@ -84,9 +86,9 @@ import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
 import { Refusal } from "./refusal.js";
 import { type Inventory, look, spelled } from "./reinstall/find.js";
-import { binTarget, remove } from "./reinstall/ours.js";
+import { binTarget, remove, same } from "./reinstall/ours.js";
 import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
-import { type Facts, idle, plan, slotIn } from "./reinstall/plan.js";
+import { type Facts, idle, plan, slotIn, twins, typing } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
@@ -115,7 +117,6 @@ import {
   span,
   table,
   tint,
-  tryLine,
   type Ui,
 } from "./style.js";
 import {
@@ -1199,20 +1200,30 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   // this command, a service launchd or systemd should be running and isn't.
   const apart: string[] = [];
   let down = false;
+  // Two daemons: launchd or systemd has the service, and the daemon that answers is not
+  // its process: someone started one by hand, and it holds the socket the service needs.
+  // `sessionpipe reinstall` stops it and lets the service take over.
+  const two = !!live && look?.loaded === true && twins(look, { pid: live.pid, byHand: await byHand() });
   if (live) {
     // A service from before it said its version is an old one.
     const runs = live.version ?? "an older release";
     const other = runs !== VERSION;
     const where = theirs ? tilde(prefixOf(theirs) ?? theirs) : "";
     computer.rows.push({
-      mark: other ? "warn" : theirs ? "info" : "ok",
+      mark: other || two ? "warn" : theirs ? "info" : "ok",
       label: "background service",
-      value: other
-        ? `running sessionpipe ${runs}${theirs ? ` from another copy, in ${where}` : `, and this command is ${VERSION}`}`
-        : theirs
-          ? `running, from another copy kept at this version, in ${where}`
-          : `running${live.busy ? ` · busy with ${live.busy}` : ""}`,
+      value: two
+        ? `a daemon someone started by hand (pid ${live.pid}) answers, and holds the socket the service needs`
+        : other
+          ? `running sessionpipe ${runs}${theirs ? ` from another copy, in ${where}` : `, and this command is ${VERSION}`}`
+          : theirs
+            ? `running, from another copy kept at this version, in ${where}`
+            : `running${live.busy ? ` · busy with ${live.busy}` : ""}`,
     });
+    if (two)
+      warnings.push(
+        `a daemon started by hand (pid ${live.pid}) holds the socket the background service needs; \`sessionpipe reinstall\` stops it and lets the service take over`,
+      );
     if (other) apart.push(`the background service runs ${runs}${theirs ? ` from another copy (in ${where})` : ""}`);
   } else if (wanted) {
     const loaded = look?.loaded === true;
@@ -1302,48 +1313,62 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
         });
     }
   }
-  // Every copy of sessionpipe on this computer (reinstall/find.ts). More than one, a
-  // broken one, or a link to one that is gone, is what `sessionpipe reinstall` puts right:
-  // it also does what `update` does, so where both apply it is the one command named.
-  // The service manager is asked nothing more for it: the look above is the one taken.
-  const around = copies({
-    npmPrefix: null,
-    runs: deep ? versionRun : (cli) => versionAt(path.dirname(cli)),
-    service: look,
-  });
+  // Every copy of sessionpipe on this computer (reinstall/find.ts), read and never run.
+  // More than one, one that is not whole, or a link to one that is gone, is what
+  // `sessionpipe reinstall` puts right: it also does what `update` does, so where both
+  // apply it is the one command named. The service manager is asked nothing more for it:
+  // the look above is the one taken. Not on Windows, where `reinstall` does not run yet.
+  const around = process.platform === "win32" ? null : copies({ npmPrefix: null, service: look });
   // An npx cache entry nothing uses is a cache, not a second copy (plan.ts `idle`).
-  const installs = around.copies.filter((c) => c.slot && !idle(c));
-  const collide = installs.length > 1 || around.dangling.length > 0 || installs.some((c) => c.wrong);
-  report.copies = installs.map((c) => ({ dir: c.dir, version: c.version, runs: c.runs, uses: c.uses }));
-  if (collide) {
+  const installs = (around?.copies ?? []).filter((c) => c.slot && !idle(c));
+  const dangling = around?.dangling ?? [];
+  const collide = installs.length > 1 || dangling.length > 0 || installs.some((c) => c.wrong);
+  // What typing `sessionpipe` starts, where that is known to be no installed copy a shell
+  // finds: a finding with nothing to type, said as `reinstall` says it, so the two never
+  // disagree about which computer is all good.
+  const astray = around ? typing(around, shown) : null;
+  report.copies = installs.map((c) => ({ dir: c.dir, version: c.version, whole: !c.wrong, uses: c.uses }));
+  const named = (c: (typeof installs)[number], where: string): string =>
+    `${c.aside ? "a leftover" : c.version} in ${where}`;
+  if (collide || astray)
     computer.rows.push({
       mark: "warn",
       label: "copies",
       value: [
-        ...installs.map(
-          (c) => `${c.aside ? "a leftover" : (c.version ?? "a broken copy")} in ${c.where} (${c.wrong ?? usedBy(c)})`,
-        ),
-        ...around.dangling.map((f) => `${tilde(f)}, a link to one that is gone`),
+        ...(collide
+          ? [
+              ...installs.map((c) => `${named(c, c.where)} (${c.wrong ?? usedBy(c)})`),
+              ...dangling.map((f) => `${shown(f)}, a link to one that is gone`),
+            ]
+          : []),
+        ...(astray ? [astray] : []),
       ].join("; "),
     });
-    // For a program: how many there are; or, of one (or none), what is not whole about it.
+  // Nothing to type for it, and still not all good: it is said among what is to fix.
+  if (astray) {
+    warnings.push(astray);
+    todo.push({ order: 3, say: astray });
+  }
+  // For a program: how many there are; or, of one (or none), what is not whole about it.
+  if (collide)
     warnings.push(
       `${
         installs.length > 1
-          ? `${installs.length} copies of sessionpipe are on this computer (${installs.map((c) => `${c.version ?? "broken"} in ${c.dir}`).join("; ")})`
+          ? `${installs.length} copies of sessionpipe are on this computer (${installs.map((c) => named(c, c.dir)).join("; ")})`
           : `the copy of sessionpipe on this computer is not whole (${[
-              ...installs.filter((c) => c.wrong).map((c) => `${c.version ?? "broken"} in ${c.dir}: ${c.wrong}`),
-              ...around.dangling.map((f) => `${f} is a link to one that is gone`),
+              ...installs.filter((c) => c.wrong).map((c) => `${named(c, c.dir)}: ${c.wrong}`),
+              ...dangling.map((f) => `${f} is a link to one that is gone`),
             ].join("; ")})`
       }; \`sessionpipe reinstall\` leaves one clean copy`,
     );
-  }
-  if (down || apart.length || collide)
+  if (down || apart.length || collide || two)
     todo.push({
       order: 1,
       // Which release runs where is in the rows above: with copies to clear away the fix
       // is said by their number alone.
       say: `${down ? "The background service isn't running, so no message reaches this computer. " : ""}${
+        two ? "A daemon someone started by hand holds the socket the background service needs. " : ""
+      }${
         collide
           ? installs.length > 1
             ? `${installs.length} copies of sessionpipe are on this computer, and one is enough. `
@@ -1352,7 +1377,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
             ? `This command is sessionpipe ${VERSION}, and ${apart.join(", and ")}. `
             : ""
       }One command puts it right:`,
-      run: collide ? "sessionpipe reinstall" : "sessionpipe update",
+      run: collide || two ? "sessionpipe reinstall" : "sessionpipe update",
     });
   const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
   if (w)
@@ -2123,6 +2148,14 @@ function closing(said: string, yellow: boolean): void {
  *  is about to put it right. */
 const finding = (problem: string): string => problem.split(/; run `|\. `sessionpipe install`/)[0] as string;
 
+/** A daemon's own word on who started it: someone by hand (true), a service manager or
+ *  a supervisor (false); null where it doesn't say (one from before 0.15) or doesn't
+ *  answer in time. */
+async function byHand(): Promise<boolean | null> {
+  const copy = (await askHealth(socketPath(state), 5000))?.copy;
+  return copy ? copy.via === null : null;
+}
+
 /** What `--version` prints when a copy's cli.js is run by this node; null when it prints
  *  no version (it is broken, or is not there). */
 function versionRun(cli: string): string | null {
@@ -2131,27 +2164,36 @@ function versionRun(cli: string): string | null {
   return r.status === 0 && /^\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(v) ? v : null;
 }
 
+/** A path as a person reads it, with nothing in it a terminal acts on: a folder's name
+ *  is a word from the disk. */
+const shown = (p: string): string => {
+  // The look spells a folder by where it really is: a home that is a link reads `~` too.
+  const real = spelled(os.homedir());
+  return clean(tilde(p === real || p.startsWith(`${real}${path.sep}`) ? `${os.homedir()}${p.slice(real.length)}` : p));
+};
+
 /** The look `reinstall` and `doctor` take at every copy of sessionpipe on this computer
- *  (reinstall/find.ts). `runs`: how a copy is asked for its version. `service`: what the
- *  service manager said, where it was asked (doctor asks it only when something here
- *  needs the service). */
+ *  (reinstall/find.ts). It reads, and runs nothing it finds: `runs` is how the one copy
+ *  that typing starts may be asked for its version, and only `reinstall` hands it in.
+ *  `service`: what is known of the service, where it was looked at (doctor looks only
+ *  when something here needs the service). */
 function copies(o: {
   npmPrefix: string | null;
-  runs: (cli: string) => string | null;
-  service: ReturnType<typeof serviceLook>;
+  runs?: (cli: string) => string | null;
+  service: ReturnType<typeof serviceSeen>;
 }): Inventory {
   return look({
-    platform: process.platform,
     env: process.env,
     home: os.homedir(),
     reach: reach(),
     execPath: process.execPath,
     distDir,
+    started: process.argv[1] ?? "",
     npmPrefix: o.npmPrefix,
     serviceCli: (o.service?.installed && o.service.argv?.[1]) || null,
-    hooksVersion: usesLauncher() ? launcherState(VERSION).version : null,
-    version: o.runs,
-    tilde,
+    hooksVersion: launcherState(VERSION).version,
+    ...(o.runs ? { runs: o.runs } : {}),
+    tilde: shown,
   });
 }
 
@@ -2170,6 +2212,14 @@ async function reinstall(): Promise<void> {
     process.exitCode = 2;
     return out("usage: sessionpipe reinstall [--dry-run] [--yes]");
   }
+  // It removes folders, and on Windows that has never run: one folder has many names
+  // there (case, short names, drive letters). Until it has, it does nothing there.
+  if (process.platform === "win32")
+    throw new Refusal(
+      "`sessionpipe reinstall` does not run on Windows yet: it removes folders, and that is not proven there. Nothing was changed. This brings this computer up to date",
+      "sessionpipe update",
+      true,
+    );
   // What says whether this computer needs the service and which agents are hooked must
   // be readable before anything is decided from it.
   assertConfigWritable();
@@ -2180,17 +2230,25 @@ async function reinstall(): Promise<void> {
       true,
     );
   const node = process.execPath;
-  const platform = process.platform;
   const cfg = readConfig();
   const harnesses = enabledHarnesses(cfg.harnesses);
+  // A service file is read even where its manager can't be asked (a `su -` shell): the
+  // copy it names is in use. But the service can't be moved from such a shell, and a
+  // repair that leaves it on a copy it then removes is none.
+  const seen = serviceSeen();
+  if (seen?.installed && !seen.manager)
+    throw new Refusal(
+      `the background service's file is there (${shown(seen.file as string)}), and ${
+        process.platform === "darwin" ? "launchd" : "systemd"
+      } can't be asked from this shell, so the service could not be moved. Nothing was changed. Run this from a terminal you opened on this computer yourself`,
+      "sessionpipe reinstall",
+      true,
+    );
+  const service = seen?.manager ? seen : null;
   const asked = await execCapture([...npmArgv(node), "prefix", "-g"], { env: process.env, timeoutMs: 20_000 });
-  const service = serviceLook();
-  const inv = copies({
-    npmPrefix: asked.code === 0 ? asked.stdout.trim() || null : null,
-    runs: versionRun,
-    service,
-  });
-  const launcher = usesLauncher() ? launcherState(VERSION) : null;
+  const npmPrefix = asked.code === 0 ? asked.stdout.trim() || null : null;
+  const inv = copies({ npmPrefix, runs: versionRun, service });
+  const launcher = launcherState(VERSION);
   const hc = hookCommand();
   const hooked = ADAPTERS.filter((a) => harnesses.includes(a.name));
   const live = await serviceStatus();
@@ -2206,30 +2264,32 @@ async function reinstall(): Promise<void> {
   // a word, before the line is folded. Inside the quotes of a command it stays whole (a
   // shell leaves `~` in quotes as it is), and so does a longer path that only has the
   // home's in it.
-  const under = `${os.homedir()}${path.sep}`;
-  const short = (s: string): string =>
+  const tilded = (s: string, under: string): string =>
     s.split(under).reduce((done, rest) => `${done}${/(?:^|[\s(])$/.test(done) ? `~${path.sep}` : under}${rest}`);
+  // The home by its own name and by where it really is (the look's spelling).
+  const short = (s: string): string =>
+    clean([...new Set([os.homedir(), spelled(os.homedir())])].reduce((t, h) => tilded(t, `${h}${path.sep}`), s));
   const facts: Facts = {
     latest,
     npm: asked.code === 0,
     harnesses,
     hooks: {
-      version: launcher?.version ?? null,
+      version: launcher.version,
       wrong: [
         // Another release having written them is no fault of theirs: the table says which.
         // Where no agent is hooked there are no hooks to be wrong.
-        ...((harnesses.length ? launcher?.problems : [])
-          ?.filter((p) => !p.startsWith("the hooks run sessionpipe "))
-          .map((p) => short(finding(p))) ?? []),
+        ...(harnesses.length ? launcher.problems : [])
+          .filter((p) => !p.startsWith("the hooks run sessionpipe "))
+          .map((p) => short(finding(p))),
         ...hooked.flatMap((a) =>
           a
             .installed(hc, process.env, { lean: isLean(cfg) })
             .filter((r) => r.state !== "current")
-            .map((r) => `${a.name}: ${HOOK_WORD[r.state]} (${tilde(r.file)})`),
+            .map((r) => `${a.name}: ${HOOK_WORD[r.state]} (${shown(r.file)})`),
         ),
       ],
     },
-    hookFiles: [...(launcher ? [launcher.file] : []), ...hooked.flatMap((a) => a.configFiles())],
+    hookFiles: [launcher.file, ...hooked.flatMap((a) => a.configFiles())],
     wanted: serviceWanted(),
     service: service?.installed
       ? {
@@ -2241,24 +2301,26 @@ async function reinstall(): Promise<void> {
           cliOk: !!service.argv?.[1] && existsSync(service.argv[1]),
         }
       : null,
-    staleSocket: !live && platform !== "win32" && existsSync(socketPath(state)),
-    daemon: live ? { pid: live.pid, version: live.version } : null,
+    staleSocket: !live && existsSync(socketPath(state)),
+    daemon: live ? { pid: live.pid, version: live.version, byHand: await byHand() } : null,
     apart: away
       ? {
-          said: `This sessionpipe keeps its files in ${tilde(away.now)}, not in this computer's usual place (${tilde(away.usual)})`,
-          line:
-            platform === "win32"
-              ? "sessionpipe reinstall"
-              : "env -u SESSIONPIPE_STATE -u SESSIONPIPE_CONFIG sessionpipe reinstall",
+          said: `This sessionpipe keeps its files in ${shown(away.now)}, not in this computer's usual place (${shown(away.usual)})`,
+          // Without what moved them: every variable that does and is set, so the line
+          // can't bring the same refusal back; and the label, which names the service of
+          // the sessionpipe that keeps its files there, not this computer's usual one.
+          line: `env ${APART.filter((v) => process.env[v] !== undefined)
+            .map((v) => `-u ${v}`)
+            .join(" ")} sessionpipe reinstall`,
         }
       : null,
   };
   // The plan and the page say a path in a sentence as a person reads it (`~/…`); what a
   // step touches and a command to paste keep the whole path.
-  const p = plan(inv, facts, tilde);
+  const p = plan(inv, facts, shown);
   // A look that may reach nothing found nothing: "no copy" is not said of a computer
   // that was not looked at, only why (the plan's refusal).
-  if (inv.reach !== null) for (const l of found(ui, inv, facts, tilde)) say(l);
+  if (inv.reach !== null) for (const l of found(ui, inv, facts, shown)) say(l);
   if (p.refuse) throw new Refusal(p.refuse.error, p.refuse.next, true);
   // What works is said first, in green; then what is left to say, a yellow line each.
   const ending = (works: string, more: string[]): void => {
@@ -2291,22 +2353,24 @@ async function reinstall(): Promise<void> {
     say("");
   }
   const home = (p.home as NonNullable<typeof p.home>).prefix;
-  const slot = slotIn(home, platform);
+  const slot = slotIn(home);
   const dist = path.join(slot, "dist");
   const sock = socketPath(state);
-  const proving = { platform, reach: inv.reach, prefixes: inv.prefixes };
-  // Does npm's link at this path lead to this package folder? No link there is a no: an
-  // empty path is not compared, for it would be the folder this command was run in.
+  // The copy in the home is never removed, by whatever name it is asked for.
+  const proving = { reach: inv.reach, prefixes: inv.prefixes, npx: inv.npx, keep: [slot] };
+  // Does npm's link at this path lead to this package folder? No link there is a no.
   const leads = (file: string, to: string): boolean => {
-    const dir = binTarget(file, platform);
-    return dir !== null && samePath(dir, to);
+    const dir = binTarget(file);
+    return dir !== null && same(dir, to);
   };
   const done = await carryOut(p, {
     say: (step) => out(`  ${SIGN[step.mark]} ${short(step.text)}`),
-    tilde,
+    tilde: shown,
     fetch: (v) => npmDo(["cache", "add", `sessionpipe@${v}`], { node }),
-    install: async (prefix, v) => {
-      const r = await installInto(prefix, v, { node, distDir: dist, harnesses: [] });
+    // npm installs into a prefix of its own beside the slot, and the copy is asked for its
+    // version there: the only sessionpipe this command runs but itself.
+    install: async (stage, v) => {
+      const r = await installInto(stage, v, { node, distDir: path.join(slotIn(stage), "dist"), harnesses: [] });
       return r.ok ? null : r.error;
     },
     exists: existsSync,
@@ -2326,7 +2390,6 @@ async function reinstall(): Promise<void> {
         process.kill(pid, "SIGTERM");
       } catch {}
     },
-    unserve: () => uninstallService(),
     use: (version, serve) =>
       bringCurrent(
         {
@@ -2346,34 +2409,27 @@ async function reinstall(): Promise<void> {
         },
         { installed: true },
       ),
-    serviceDir: () => {
-      const cli = serviceLook()?.argv?.[1];
-      return cli ? spelled(path.dirname(path.dirname(cli))) : null;
+    // The copy a daemon runs from: its own word (0.15 and later), else the service file's.
+    runningFrom: async () => {
+      const cli = (await askHealth(sock, 5000))?.copy?.cli ?? serviceSeen()?.argv?.[1];
+      return cli ? path.dirname(path.dirname(cli)) : null;
     },
-    remove: (what, alone) =>
-      remove(what, {
-        ...proving,
-        ...(alone ? { alone } : {}),
-        npm: async (prefix) => {
-          const why = await npmDo(["uninstall", "--global", "--prefix", prefix, "sessionpipe"], { node });
-          if (why) throw new Error(why);
-        },
-      }),
+    same,
+    remove: async (what) => remove(what, proving),
     relink: (prefix) => {
-      const link =
-        platform === "win32" ? path.join(prefix, "sessionpipe.cmd") : path.join(prefix, "bin", "sessionpipe");
-      // npm's own link, made again where it is gone: the same words npm writes. A shim on
-      // Windows is npm's to write; there it is only looked for.
-      if (platform !== "win32" && !binTarget(link, platform))
+      const link = path.join(prefix, "bin", "sessionpipe");
+      // npm's own link, made where it is not there: the same words npm writes.
+      if (!binTarget(link))
         try {
+          mkdirSync(path.dirname(link), { recursive: true });
           symlinkSync(path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"), link);
         } catch {}
-      return leads(link, slotIn(prefix, platform));
+      return leads(link, slotIn(prefix));
     },
     prove: async (removed) => {
-      const served = serviceLook();
-      const now = copies({ npmPrefix: null, runs: versionRun, service: served });
-      const bin = platform === "win32" ? path.join(home, "sessionpipe.cmd") : path.join(home, "bin", "sessionpipe");
+      const served = serviceSeen();
+      // The same look as before the run, running nothing: what typing starts now.
+      const now = copies({ npmPrefix, service: served });
       const text = (file: string): string => {
         try {
           return readFileSync(file, "utf8");
@@ -2383,31 +2439,38 @@ async function reinstall(): Promise<void> {
       };
       const files = [served?.file, ...facts.hookFiles].filter((x): x is string => !!x);
       return {
-        // The fresh copy runs, through the link npm made for it.
-        runs: leads(bin, slot) ? versionRun(path.join(dist, "cli.js")) : null,
-        // What a shell finds, in its order: what a person types is the first of them.
+        // The copy in the home runs, through the link npm made for it.
+        runs: leads(path.join(home, "bin", "sessionpipe"), slot) ? versionRun(path.join(dist, "cli.js")) : null,
+        typed: now.typed !== null && same(now.typed, slot),
         onPath: now.onPath.map((e) => e.file),
-        first: !!now.onPath[0]?.dir && samePath(now.onPath[0].dir, slot),
         named: files.flatMap((file) => removed.filter((r) => text(file).includes(r)).map((r) => ({ file, path: r }))),
       };
     },
     sleep: (ms) => new Promise((ok) => setTimeout(ok, ms)),
     now: () => Date.now(),
   });
-  if (done.state === "failed") throw new Refusal(done.error, done.next, true);
+  if (done.state === "failed") throw new Refusal(short(done.error), done.next, true);
   if (done.state === "waiting") {
     process.exitCode = 3;
-    return lastLine(done.said, true);
+    return lastLine(short(done.said), true);
   }
-  const more = [...done.warn, ...p.notes].map(short);
-  if (done.state === "one") return ending(short(done.said), more);
+  ending(short(done.said), [...done.warn, ...p.notes].map(short));
   // A copy that is still there is no failure of this command's, and the job is not done:
-  // it is said last, over the one line for it, with an exit code a script can tell from
-  // "one copy".
-  ending(short(done.said), [...more, short(done.still)]);
-  say(tryLine(ui, done.next));
-  process.exitCode = 1;
+  // it ends as every refusal does (exit 1, the one line to run, one line in a pipe), said
+  // at a terminal as what is left to do, not as an error.
+  if (done.state === "left") throw new Refusal(short(done.still).replace(/\.$/, ""), done.next, true, true);
 }
+
+/** The variables that move where a sessionpipe keeps its files, or name its service. */
+const APART = [
+  "SESSIONPIPE_STATE",
+  "SESSIONPIPE_CONFIG",
+  "SESSIONPIPE_DATA",
+  "SESSIONPIPE_SERVICE_LABEL",
+  "XDG_STATE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+] as const;
 
 /** `sessionpipe titles [on|off]`: whether the worker asks a harness's own service for a
  *  session's name (config.json `remote_titles`, off by default). For Claude Code that is

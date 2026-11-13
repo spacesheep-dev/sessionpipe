@@ -3,11 +3,14 @@
 // to do: only what a step's result means for the ones after it. Everything that touches
 // the computer comes in as a dependency, and the only deletion is ours.ts's.
 //
-// The order is what keeps a computer working if this stops half-way: the release is
-// fetched before anything is touched; the fresh copy is installed and seen to run, with
-// what was there put back if it doesn't; the hooks and the service are moved onto it by
-// `update`'s own steps (current.ts); only then is anything else removed, the copy this
-// command runs from last. A run that stopped anywhere is finished by running it again.
+// The order is what keeps a computer working if this stops anywhere: the release is
+// fetched before anything is touched; npm installs it BESIDE the copy that is there, it is
+// seen to run, and only then do the two change places, by two renames (so the slot is
+// never empty while npm works, and an install that fails, or is cut off, has touched
+// nothing); the hooks and the service are moved onto it by `update`'s own steps
+// (current.ts); then it is proven that typing `sessionpipe` starts this copy, and only
+// after that is anything else removed, the copy this command runs from last. A run that
+// stopped anywhere is finished by running it again.
 import path from "node:path";
 import type { Status } from "../control/daemon.js";
 import type { Health } from "../control/local.js";
@@ -26,12 +29,13 @@ export type Done =
   | { state: "failed"; error: string; next: string };
 
 export interface Proof {
-  /** What `--version` printed when the fresh copy was run; null: nothing. */
+  /** What `--version` printed when the copy in the home was run through its own link;
+   *  null: nothing, or no link of npm's leads to it. */
   runs: string | null;
-  /** Every `sessionpipe` a shell finds now, first first, and whether the first is the
-   *  fresh copy. */
+  /** Typing `sessionpipe` starts that copy: the same look as the one before the run. */
+  typed: boolean;
+  /** Every `sessionpipe` a shell finds now, first first. */
   onPath: string[];
-  first: boolean;
   /** A file that still names a path that was removed. */
   named: { file: string; path: string }[];
 }
@@ -42,12 +46,12 @@ export interface Doing {
   tilde: (p: string) => string;
   /** Fetch the release into npm's own cache; why it couldn't be, or null. */
   fetch: (version: string) => Promise<string | null>;
-  /** `npm install` of the release into a prefix whose slot is empty, and a look that it
-   *  runs; why it didn't, or null. */
+  /** `npm install` of the release into a prefix of its own beside the slot, and a look
+   *  that it runs there; why it didn't, or null. */
   install: (prefix: string, version: string) => Promise<string | null>;
   exists: (p: string) => boolean;
   rename: (from: string, to: string) => void;
-  /** Eight characters for the name of the folder moved aside. */
+  /** Eight characters for the name of a folder beside the slot. */
   id: () => string;
   status: () => Promise<Status | null>;
   health: () => Promise<Health | null>;
@@ -55,17 +59,18 @@ export interface Doing {
   seed: (sessions: string[]) => void;
   /** Ask a daemon to stop, by the signal it stops cleanly on. */
   stop: (pid: number) => void;
-  /** Remove the service file nothing needs. */
-  unserve: () => void;
-  /** `update`'s own steps from the fresh copy: hooks, service, the wait for receivers. */
+  /** `update`'s own steps from the copy in the home: hooks, service, the wait for receivers. */
   use: (version: string, serve: boolean) => Promise<Outcome>;
-  /** The package folder the service file names now. */
-  serviceDir: () => string | null;
-  /** ours.ts `remove`: what is gone. Throws for what is not ours. `alone`: the folder
-   *  only, its bin link left. */
-  remove: (what: string, alone?: boolean) => Promise<string[]>;
-  /** See that the link that starts the copy in a prefix is there, making it where it can
-   *  be made; false when it is not there afterwards. */
+  /** The package folder the daemon that is still at work runs from; null where it can't
+   *  be told (one from before 0.15 that someone runs by hand names no copy). */
+  runningFrom: () => Promise<string | null>;
+  /** One folder, by whatever name. */
+  same: (a: string, b: string) => boolean;
+  /** ours.ts `remove`: what is gone. Throws for what is not ours, and for a folder it
+   *  could only remove in part. */
+  remove: (what: string) => Promise<string[]>;
+  /** See that npm's link to the copy in a prefix is there, making it where it is not;
+   *  false when it is not there afterwards. */
   relink: (prefix: string) => boolean;
   prove: (removed: string[]) => Promise<Proof>;
   sleep: (ms: number) => Promise<void>;
@@ -85,47 +90,67 @@ async function until<T>(d: Doing, ms: number, ask: () => Promise<T>, done: (v: T
   }
 }
 
-/** The fresh install: what is in the slot is moved aside under a name npm itself uses
- *  for such a folder, npm installs into the empty slot, the copy is seen to run, and the
- *  folder moved aside is removed. If the install fails, what npm left is removed and the
- *  folder is moved back. */
-async function fresh(s: Extract<Step, { do: "install" }>, d: Doing): Promise<string | null> {
-  const aside = path.join(path.dirname(s.dir), `.sessionpipe-${d.id()}`);
-  const moved = d.exists(s.dir);
+/** The way in when the command itself may no longer run. */
+const NPX = "npx -y sessionpipe@latest reinstall";
+
+/** The fresh install. npm installs the release into a prefix of its own beside the slot
+ *  (a folder named as npm names one it has moved aside, which the proof knows) and it is
+ *  seen to run there. Then two renames: what is in the slot steps aside, the fresh copy
+ *  steps in. Until then nothing of the copy that is there was touched, so an install that
+ *  fails, or a run that is cut off while npm works, leaves this computer as it was; and
+ *  the way back from the second rename is the first one, the other way round. What it
+ *  made beside the slot is removed at the end, and said where it can't be. */
+async function fresh(s: Extract<Step, { do: "install" }>, d: Doing): Promise<{ error: string; next: string } | null> {
+  const modules = path.dirname(s.dir);
+  const stage = path.join(modules, `.sessionpipe-${d.id()}`);
+  const old = path.join(modules, `.sessionpipe-${d.id()}`);
   const said = (e: unknown) => (e as Error).message;
+  /** What this made beside the slot goes; one that stays is the next run's, and is said. */
+  const tidy = async (...made: string[]) => {
+    for (const x of made)
+      await d
+        .remove(x)
+        .catch((e) =>
+          d.say({ mark: "warn", text: `${d.tilde(x)} could not be removed (${said(e)}): the next run takes it` }),
+        );
+  };
+  const why = await d.install(stage, s.version);
+  if (why) {
+    if (d.exists(stage)) await tidy(stage);
+    return { error: `${why}. Nothing was changed`, next: "sessionpipe reinstall" };
+  }
+  const there = d.exists(s.dir);
   try {
-    if (moved) d.rename(s.dir, aside);
+    if (there) d.rename(s.dir, old);
   } catch (e) {
-    return `what is there now couldn't be moved out of the way (${said(e)}). Nothing was changed`;
+    await tidy(stage);
+    return {
+      error: `what is there now couldn't be moved out of the way (${said(e)}). Nothing was changed`,
+      next: "sessionpipe reinstall",
+    };
   }
-  const why = await d.install(s.prefix, s.version);
-  if (!why) {
-    // The old folder goes only now, with the fresh copy seen to run. One that can't be
-    // removed is found, and taken away, by the next run.
-    if (moved) await d.remove(aside).catch(() => {});
-    return null;
-  }
-  let linked = true;
   try {
-    // What npm left goes, and only that: the link stays for the folder that comes back.
-    if (d.exists(s.dir)) await d.remove(s.dir, true);
-    if (moved) {
-      d.rename(aside, s.dir);
-      linked = d.relink(s.prefix);
+    d.rename(path.join(stage, "lib", "node_modules", "sessionpipe"), s.dir);
+  } catch (e) {
+    try {
+      if (there) d.rename(old, s.dir);
+    } catch (back) {
+      // The slot is empty: the command may not start. The way in that still works is named.
+      return {
+        error: `the fresh copy couldn't be put in its place (${said(e)}), and what was there could not be put back (${said(back)}): it is beside its place, as ${d.tilde(old)}, and the fresh copy as ${d.tilde(stage)}`,
+        next: NPX,
+      };
     }
-  } catch (e) {
-    // Only a folder that was moved aside is kept there: into an empty slot there is none.
-    return moved
-      ? `${why}; and what was there could not be put back (${said(e)}): it is kept beside it, as ${d.tilde(aside)}`
-      : `${why}; and what npm left there could not be removed (${said(e)})`;
+    await tidy(stage);
+    return {
+      error: `the fresh copy couldn't be put in its place (${said(e)}). ${there ? "What was there is back where it was" : "Nothing else was changed"}`,
+      next: "sessionpipe reinstall",
+    };
   }
-  return `${why}. ${
-    !moved
-      ? "Nothing else was changed"
-      : linked
-        ? "What was there is back in its place"
-        : "What was there is back in its place, but the link that starts it is gone"
-  }`;
+  await tidy(stage, ...(there ? [old] : []));
+  return d.relink(s.prefix)
+    ? null
+    : { error: "the fresh copy is in its place, and the link that starts it couldn't be made", next: NPX };
 }
 
 export async function carryOut(p: Plan, d: Doing): Promise<Done> {
@@ -134,6 +159,14 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
   const removed: string[] = [];
   const stayed: { what: string; why: string }[] = [];
   const warn: string[] = [];
+  /** The proof before the first removal was taken, and held. */
+  let proven = false;
+  const unfit = (proof: Proof): string =>
+    `the copy in ${home} doesn't run as it should (\`--version\` printed ${proof.runs ?? "nothing"})`;
+  const untyped = (proof: Proof): string =>
+    `Typing \`sessionpipe\` does not start the copy in ${home}${
+      proof.onPath.length ? ` (it starts ${d.tilde(proof.onPath[0] as string)})` : ""
+    }`;
   /** The service is still at work: what `update` said of it, and the copy it runs from. */
   let waiting: { said: string; from: string | null } | null = null;
   for (const s of p.steps) {
@@ -146,9 +179,8 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
         );
       d.say({ mark: "ok", text: `sessionpipe ${s.version} downloaded` });
     } else if (s.do === "install") {
-      const why = await fresh(s, d);
-      if (why)
-        return failed(`sessionpipe ${s.version} couldn't be installed in ${home}: ${why}`, "sessionpipe reinstall");
+      const bad = await fresh(s, d);
+      if (bad) return failed(`sessionpipe ${s.version} couldn't be installed in ${home}: ${bad.error}`, bad.next);
       d.say({
         mark: "ok",
         text: `installed fresh in ${home}, and it runs${s.replaces ? " (what was there is gone)" : ""}`,
@@ -180,9 +212,6 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
           );
         d.say({ mark: "ok", text: `the daemon someone started by hand (pid ${s.pid}) is stopped` });
       }
-    } else if (s.do === "unserve") {
-      d.unserve();
-      d.say({ mark: "ok", text: "the service file nothing here needs is removed" });
     } else if (s.do === "use") {
       const r = await d.use(target, s.serve);
       // `update`'s own next step for a service that didn't move is itself; here it is this.
@@ -191,11 +220,23 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       // And the command it names for "once more" is this one: `update` would leave the
       // other copies where they are.
       if (r.state === "waiting")
-        waiting = { said: r.said.split("sessionpipe update").join("sessionpipe reinstall"), from: d.serviceDir() };
+        waiting = {
+          said: r.said.split("sessionpipe update").join("sessionpipe reinstall"),
+          from: await d.runningFrom(),
+        };
       else if (r.warn) warn.push(r.warn);
     } else if (s.do === "remove") {
-      // The copy a service still at work runs from stays until it is done.
-      if (waiting?.from && path.resolve(waiting.from) === path.resolve(s.path)) continue;
+      // The copy a daemon still at work runs from stays until it is done; where it can't
+      // be told which copy that is, every copy stays.
+      if (waiting && (!waiting.from || d.same(waiting.from, s.path))) continue;
+      // Nothing is removed until this computer provably has its working copy: the one in
+      // the home runs through its own link, and typing `sessionpipe` starts it.
+      if (!proven) {
+        const proof = await d.prove([]);
+        if (proof.runs !== target) return failed(`${unfit(proof)}: no other copy was removed`, NPX);
+        if (!proof.typed) return failed(`${untyped(proof)}: no other copy was removed`, "sessionpipe doctor");
+        proven = true;
+      }
       try {
         const gone = await d.remove(s.path);
         removed.push(...gone);
@@ -207,40 +248,37 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
       }
     } else if (!waiting) {
       const proof = await d.prove(removed);
-      if (proof.runs !== target)
-        return failed(
-          `the fresh copy in ${home} doesn't run as it should (\`--version\` printed ${proof.runs ?? "nothing"})`,
-          "npx -y sessionpipe@latest reinstall",
-        );
-      d.say({ mark: "ok", text: `the fresh copy runs: \`--version\` says ${target}` });
-      // What a person types is what a shell finds first: said only when that is this copy.
-      // What is behind it on PATH is what was left alone, and starts nothing typed.
-      if (proof.first)
+      if (proof.runs !== target) return failed(unfit(proof), NPX);
+      d.say({ mark: "ok", text: `the copy in ${home} runs: \`--version\` says ${target}` });
+      // What a person types is what a shell finds first. What is behind it on PATH is what
+      // was left alone, and starts nothing typed.
+      if (!proof.typed) warn.push(`${untyped(proof)}.`);
+      else
         d.say(
-          proof.onPath.length === 1
-            ? { mark: "ok", text: `a shell finds one sessionpipe: ${d.tilde(proof.onPath[0] as string)}` }
+          proof.onPath.length < 2
+            ? {
+                mark: "ok",
+                text: `typing \`sessionpipe\` starts it${proof.onPath.length ? `: ${d.tilde(proof.onPath[0] as string)}` : ""}`,
+              }
             : {
                 mark: "info",
-                text: `a shell finds this copy first; behind it: ${proof.onPath.slice(1).map(d.tilde).join(", ")}`,
+                text: `typing \`sessionpipe\` starts it; behind it on PATH: ${proof.onPath.slice(1).map(d.tilde).join(", ")}`,
               },
         );
-      // The plan's own note says it already where this is the file it saw coming.
-      else if (proof.onPath.length && (!p.first || path.resolve(p.first) !== path.resolve(proof.onPath[0] as string)))
-        warn.push(`Typing \`sessionpipe\` still starts ${d.tilde(proof.onPath[0] as string)}, not the fresh copy.`);
       for (const n of proof.named) warn.push(`${d.tilde(n.file)} still names ${d.tilde(n.path)}, which was removed.`);
       if (!proof.named.length && removed.length)
         d.say({ mark: "ok", text: "nothing here names a removed copy any more" });
     }
   }
   if (waiting) {
-    const where =
-      waiting.from &&
-      p.steps.some((s) => s.do === "remove" && path.resolve(s.path) === path.resolve(waiting.from as string));
+    const kept = p.steps.some((x) => x.do === "remove" && (!waiting.from || d.same(waiting.from, x.path)));
     return {
       state: "waiting",
-      said: where
-        ? `${waiting.said.split(". ")[0]}. It still runs from ${d.tilde(waiting.from as string)}, which stays until that is done. Then run \`sessionpipe reinstall\` once more: it moves the service and removes that last copy.`
-        : waiting.said,
+      said: !kept
+        ? waiting.said
+        : waiting.from
+          ? `${waiting.said.split(". ")[0]}. It still runs from ${d.tilde(waiting.from)}, which stays until that is done. Then run \`sessionpipe reinstall\` once more: it moves the service and removes that last copy.`
+          : `${waiting.said.split(". ")[0]}. It doesn't say which copy it runs from, so no copy was removed. When that is done, run \`sessionpipe reinstall\` once more.`,
     };
   }
   // A published copy that is still there means the job is not done. What works is said
@@ -265,7 +303,9 @@ export async function carryOut(p: Plan, d: Doing): Promise<Done> {
     };
   return {
     state: "one",
-    said: `This computer has one sessionpipe: ${target}, in ${home}. Pairings and settings are as they were.`,
+    said: `This computer has one sessionpipe: ${target}, in ${home}${
+      p.stays ? " (not installed again: it is whole, the newest, and not yours to write)" : ""
+    }. Pairings and settings are as they were.`,
     warn,
   };
 }

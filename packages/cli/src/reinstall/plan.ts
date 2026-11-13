@@ -3,10 +3,15 @@
 // else: no file is read here and nothing is run, so every state a computer can be in is
 // a test with no computer. `--dry-run` prints this plan; a real run carries out the same
 // one (run.ts). Each step names what it touches, and what the plan's row says of it.
+//
+// Two things hold for every plan. The one copy lives where the copy lives that typing
+// `sessionpipe` starts: it is never answered with a second copy somewhere else. And a run
+// either ends with typing `sessionpipe` starting a whole copy of the release it names, or
+// it changes nothing: where that can't be promised, the plan is a refusal before any step.
 import path from "node:path";
 import { isNewer } from "@sessionpipe/core/version";
 import { shq } from "../shell.js";
-import type { Copy, Inventory } from "./find.js";
+import type { Copy, Home, Inventory } from "./find.js";
 
 /** What was found beside the copies. */
 export interface Facts {
@@ -35,8 +40,9 @@ export interface Facts {
   } | null;
   /** A socket file with no daemon behind it. */
   staleSocket: boolean;
-  /** The daemon that answers on the socket. */
-  daemon: { pid: number; version: string } | null;
+  /** The daemon that answers on the socket. `byHand`: its own word on who started it
+   *  (someone, and no service manager); null where it doesn't say (one from before 0.15). */
+  daemon: { pid: number; version: string; byHand: boolean | null } | null;
   /** This sessionpipe keeps its files somewhere other than this computer's usual place:
    *  the sentence that says so, and how to run this without that. */
   apart: { said: string; line: string } | null;
@@ -50,10 +56,9 @@ export type Step = { touches: string[] } & (
   | { do: "fetch"; version: string }
   | { do: "install"; version: string; prefix: string; dir: string; replaces: boolean; say: string }
   | { do: "stop"; pid: number; say: string }
-  | { do: "unserve"; file: string; say: string }
-  /** `serve`: there is a service file or a running daemon to move onto the fresh copy.
-   *  Without either there is nothing this command can start: the hooks alone are written.
-   *  `say` is null where there is nothing to switch: no agent hooked, nothing running. */
+  /** `serve`: there is a service file or a running daemon to move onto the copy. Without
+   *  either there is nothing this command can start: the hooks alone are written. `say`
+   *  is null where there is nothing to switch: no agent hooked, nothing running. */
   | { do: "use"; serve: boolean; say: string | null }
   | { do: "remove"; path: string; say: string }
   | { do: "prove" }
@@ -77,35 +82,63 @@ export interface Plan {
   nothing: string | null;
   /** It won't act: what stands in the way, and the one command to run. */
   refuse: { error: string; next: string } | null;
-  /** The release that is installed, and where. */
+  /** The release the one copy is, and where it lives. */
   target: string | null;
-  home: Inventory["homes"][number] | null;
+  home: Home | null;
+  /** The home's copy is not installed again: it is whole and the newest, where this user
+   *  may not write. The words of its row. Null: it is installed fresh. */
+  stays: string | null;
   steps: Step[];
   /** What keeps a run safe, under the rows: a line each. */
   safety: string[];
   left: Left[];
   /** Said beside the plan, and again when it is done: what is not this command's to repair. */
   notes: string[];
-  /** The file a shell still finds first once this is done, where that is not the fresh
-   *  copy (a checkout's link, a script of someone's): typing `sessionpipe` starts that
-   *  one. The note that says so is built from it. Null: the fresh copy, or nothing. */
-  first: string | null;
 }
 
-const is = (a: string | null | undefined, b: string): boolean => !!a && path.resolve(a) === path.resolve(b);
 /** The package folder a prefix holds sessionpipe in. */
-export const slotIn = (prefix: string, platform: NodeJS.Platform): string =>
-  platform === "win32"
-    ? path.join(prefix, "node_modules", "sessionpipe")
-    : path.join(prefix, "lib", "node_modules", "sessionpipe");
+export const slotIn = (prefix: string): string => path.join(prefix, "lib", "node_modules", "sessionpipe");
+
+/** Two daemons: a service manager has the service, and the daemon that answers is one
+ *  someone started by hand, which holds the socket the service needs. Never where the
+ *  manager names the answering process as its own. Otherwise the daemon's own word
+ *  decides; one that doesn't say (from before 0.15) is told by its process being another
+ *  than the one the manager names, and where the manager names none, nothing is told.
+ *  `reinstall` and `doctor` both go by this, so they agree on it. */
+export const twins = (
+  service: { pid: number | null } | null,
+  daemon: { pid: number; byHand: boolean | null } | null,
+): boolean => !!service && !!daemon && service.pid !== daemon.pid && (daemon.byHand ?? service.pid !== null);
 
 /** An npx cache entry that nothing uses but, at most, this very command: a cache, not a
  *  copy to repair (`npx -y sessionpipe@latest reinstall` runs from one). */
 export const idle = (c: Copy): boolean => c.slot === "npx" && !c.uses.some((u) => u !== "this");
 
-/** A copy in a row: its release and its folder. What is wrong with it is in the table. */
-const named = (c: Copy): string =>
-  c.aside ? `a leftover folder in ${c.where}` : `${c.version ?? "the broken copy"} in ${c.where}`;
+/** A copy in a row: its release and its folder. A copy that is ours names its release
+ *  (the proof asks for it); what names none is a folder left behind: npm's or this
+ *  command's own, or what is left of a copy that was emptied. What is wrong with a copy
+ *  is in the table. */
+const named = (c: Copy): string => (c.aside ? `a leftover folder in ${c.where}` : `${c.version} in ${c.where}`);
+
+/** What typing `sessionpipe` starts, where that is known not to be an installed copy a
+ *  shell finds: the sentence that says so; null where it is one, or can't be told. It is
+ *  no fault of a copy, and not this command's to mend: `reinstall` and `doctor` both say
+ *  it, and neither calls such a computer all good. */
+export function typing(inv: Inventory, show: (p: string) => string = (p) => p): string | null {
+  const typed = inv.copies.find((c) => c.dir === inv.typed);
+  if (inv.typed)
+    return typed?.slot === "global"
+      ? null
+      : `Typing \`sessionpipe\` starts ${typed?.where ?? show(inv.typed)}, which is no installed copy of it.`;
+  // Nothing is typed. With a copy installed, that is a finding where no installed copy's
+  // command folder is one a shell looks in. (With none installed there is nothing to say
+  // of a computer: where a fresh one would go is `reinstall`'s to decide when it acts.)
+  const installed = inv.unsure ? [] : inv.copies.filter((c) => c.slot === "global" && !c.aside);
+  const off = installed.find((c) => !c.onPath);
+  return off && !installed.some((c) => c.onPath)
+    ? `${show(path.join(off.prefix as string, "bin"))} is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`
+    : null;
+}
 
 /** `show`: how a path is said in a sentence for a person (the caller's `~/…`). It is
  *  used in prose only: what a step touches, and a command to paste, keep the whole path. */
@@ -115,34 +148,28 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
     refuse: null,
     target: null,
     home: null,
+    stays: null,
     steps: [],
     safety: [],
     left: [],
     notes: [],
-    first: null,
   };
+  const stop = (error: string, next: string): Plan => ({ ...none, refuse: { error, next } });
   if (f.apart && inv.reach === null)
-    return {
-      ...none,
-      refuse: {
-        error: `${f.apart.said}, so it leaves this computer's copies alone. Nothing was changed`,
-        next: f.apart.line,
-      },
-    };
-  const home = inv.homes[0] ?? null;
-  const at = home ? slotIn(home.prefix, inv.platform) : null;
+    return stop(`${f.apart.said}, so it leaves this computer's copies alone. Nothing was changed`, f.apart.line);
+  const home = inv.home;
   const ours = inv.copies.filter((c) => c.slot);
-  const left: Left[] = inv.copies
-    .filter((c) => !c.slot)
-    .map((c) => ({
-      where: c.where,
-      path: c.dir,
-      version: c.version,
-      why: c.not as string,
-      line: c.keeper,
-      ours: false,
-    }));
-  left.push(
+  const left: Left[] = [
+    ...inv.copies
+      .filter((c) => !c.slot)
+      .map((c) => ({
+        where: c.where,
+        path: c.dir,
+        version: c.version,
+        why: c.not as string,
+        line: c.keeper,
+        ours: false,
+      })),
     ...inv.strangers.map((s) => ({
       where: show(s.file),
       path: s.file,
@@ -151,97 +178,80 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
       line: null,
       ours: false,
     })),
-  );
-  const notes: string[] = [];
-  let first: string | null = null;
-  if (home) {
-    if (home.pathAt === null)
-      notes.push(`${show(home.bin)} is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`);
-    // What a shell finds first, once every copy this command removes is gone and the fresh
-    // one has its link: the first on PATH of what stays and of the home's own bin folder.
-    // Where that is not the fresh copy, typing `sessionpipe` still starts something else.
-    // (What stays IN the home's own bin folder is found there in place of the fresh copy.)
-    const goes = (dir: string | null) => !!dir && !inv.copies.some((c) => is(c.dir, dir) && (!c.slot || !c.writable));
-    const inFront = inv.onPath.find(
-      (e) => !is(e.dir, at as string) && !goes(e.dir) && (home.pathAt === null || e.at <= home.pathAt),
-    );
-    if (inFront) {
-      first = inFront.file;
-      // Why it stays is on its own row, under "Left alone".
-      notes.push(`Typing \`sessionpipe\` starts ${show(first)}, not the copy in ${home.shown}.`);
-    }
-  }
-  if (f.wanted && !f.service && !f.daemon)
-    notes.push(
-      "The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
-    );
+  ];
+  const astray = typing(inv, show);
+  // A service file, and nothing that needs the service nor any daemon answering. It is
+  // not this command's to remove: what says that nothing needs it is a file of settings,
+  // and those may be another sessionpipe's.
+  const idleService = !!f.service && !f.wanted && !f.daemon;
+  const notes = [
+    ...(astray ? [astray] : []),
+    ...(f.wanted && !f.service && !f.daemon
+      ? ["The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does."]
+      : []),
+  ];
+  // What can't be known, said beside a computer that is otherwise fine. It is no finding:
+  // a file first on PATH that npm did not make may well be the shim that starts this copy.
+  const unknown = [
+    ...(inv.unsure
+      ? [
+          `Typing \`sessionpipe\` starts ${show(inv.unsure)}, which is no link of npm's: which copy it starts can't be told from here.`,
+        ]
+      : []),
+  ];
 
-  const stop = (error: string, next: string): Plan => ({ ...none, left, notes, first, refuse: { error, next } });
-  // --- what is not ours sits where the fresh copy's link goes: nothing is done at all ------
-  // npm refuses to put its link over a file it didn't make (EEXIST: it installs nothing),
-  // and what is not provably ours is never moved by this command. Another home is no
-  // answer: the copy would land where nobody types it.
-  if (home?.blocked)
-    return stop(
-      `${show(home.blocked)} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again`,
-      `${inv.platform === "win32" ? "move" : "mv"} ${shq(home.blocked, inv.platform)} ${shq(`${home.blocked}.old`, inv.platform)}`,
-    );
-
-  // --- one clean copy, in use everywhere: nothing to repair -------------------------------
-  // An npx cache entry nothing uses is not a second copy: it is what npx ran this from.
+  // --- one whole copy of the newest release, in use everywhere: nothing to repair -----------
+  // Wherever it lives, and whoever may write there. An npx cache entry nothing uses is not
+  // a second copy: it is what npx ran this from.
   const live = ours.filter((c) => !idle(c));
   const one = live.length === 1 ? (live[0] as Copy) : null;
   const known = "version" in f.latest ? f.latest.version : null;
   const target = known ?? one?.version ?? null;
   const hooksFine = !f.harnesses.length || (f.hooks.version === target && !f.hooks.wrong.length);
-  const serviceFine = f.service
-    ? f.wanted &&
-      f.service.loaded &&
-      f.service.nodeOk &&
-      !!one?.uses.includes("service") &&
-      f.daemon?.version === target &&
-      (f.service.pid === null || f.service.pid === f.daemon.pid)
-    : !f.daemon || f.daemon.version === target;
-  // Nothing wrong with it: it runs, and its link is there to start it.
+  const serviceFine =
+    idleService ||
+    (f.service
+      ? f.wanted &&
+        f.service.loaded &&
+        f.service.nodeOk &&
+        !!one?.uses.includes("service") &&
+        f.daemon?.version === target &&
+        !twins(f.service, f.daemon)
+      : !f.daemon || f.daemon.version === target);
   if (
-    one &&
-    is(at, one.dir) &&
+    one?.slot === "global" &&
     !one.wrong &&
     one.version === target &&
     !inv.dangling.length &&
     hooksFine &&
     serviceFine
   ) {
-    // What stays beside it is listed, so "Found 2 copies" above is no contradiction: an
-    // npx cache entry nothing uses is npm's own cache.
-    const beside: Left[] = ours.filter(idle).map((c) => ({
-      where: c.where,
-      path: c.dir,
-      version: c.version,
-      why: "npm's cache of what npx ran",
-      line: null,
-      ours: false,
-    }));
-    const said = [
-      ...notes,
-      ...(known
-        ? []
-        : [
-            `npm couldn't be asked whether ${one.version} is the newest release: ${(f.latest as { error: string }).error}.`,
-          ]),
-    ];
+    if (!known)
+      unknown.push(
+        `npm couldn't be asked whether ${one.version} is the newest release: ${(f.latest as { error: string }).error}.`,
+      );
     return {
       ...none,
       target,
       home,
-      left: [...left, ...beside],
-      notes: said,
-      first,
-      // "Nothing to repair" only where there is nothing more to say: not while what a
-      // person types is something else, which is not this command's to move.
-      nothing: said.length
+      // What stays beside it is listed: an npx cache entry nothing uses is npm's own cache.
+      left: [
+        ...left,
+        ...ours.filter(idle).map((c) => ({
+          where: c.where,
+          path: c.dir,
+          version: c.version,
+          why: "npm's cache of what npx ran",
+          line: null,
+          ours: false,
+        })),
+      ],
+      notes: [...notes, ...unknown],
+      // "Nothing to repair" wherever nothing was found that is not as it should be: the
+      // same computers `doctor` calls all good. What can't be known is said beside it.
+      nothing: notes.length
         ? `One sessionpipe on this computer: ${one.version}${known ? ", the newest release" : ""}.`
-        : `Nothing to repair: one sessionpipe, ${one.version}, the newest release.`,
+        : `Nothing to repair: one sessionpipe, ${one.version}${known ? ", the newest release" : ""}.`,
     };
   }
 
@@ -266,59 +276,99 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
       `sessionpipe ${ahead} is on this computer, newer than npm's newest release (${known}): a reinstall would move it back. Nothing was changed`,
       "sessionpipe doctor",
     );
-  if (!home || !at)
+  // What typing starts must end up the one clean copy, or nothing is changed. A file first
+  // on PATH that is no link of npm's (a version manager's shim, a wrapper) starts a copy
+  // this command can't name unless it was started through it.
+  if (inv.unsure)
     return stop(
-      "no folder on this computer that you may write can hold a fresh copy. Nothing was changed",
-      "sessionpipe doctor",
+      `${show(inv.unsure)} is the first \`sessionpipe\` on your PATH and no link of npm's, and this command was not started through it: it can't tell which copy that file starts, so it can't tell where the one clean copy goes. Nothing was changed. Install it into the Node you use, then run it from there`,
+      `npm install -g sessionpipe@${known} && sessionpipe reinstall`,
     );
+  const typed = inv.copies.find((c) => c.dir === inv.typed);
+  // Not what someone else's tool keeps (Volta's copy): that is theirs to remove, not to move.
+  const inSlot = !typed?.keeper && inv.prefixes.some((p) => slotIn(p) === inv.typed);
+  /** The line that moves something out of the way, and writes over nothing. */
+  const aside = (file: string): string => `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")}`;
+  if (inv.typed && typed?.slot !== "global")
+    return stop(
+      `Typing \`sessionpipe\` starts ${typed?.where ?? show(inv.typed)}, which is no installed copy of it${
+        typed?.not ? ` (${typed.not})` : ""
+      }: this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed${
+        inSlot ? ". Move it aside, then run this again" : ""
+      }`,
+      // A folder where npm keeps the package (what an install that was cut off left, a
+      // build) is in the way of the one copy, and the person's to move: the line moves it,
+      // and deletes nothing. For anything else there is nothing of sessionpipe's to run:
+      // what the person's own PATH finds, in its order.
+      inSlot ? aside(inv.typed) : "which -a sessionpipe",
+    );
+  if (!home && inv.taken)
+    return stop(
+      `${show(inv.taken.dir)} is not provably sessionpipe's (${inv.taken.why}), and it is where the one copy goes. Nothing was changed. Move it aside, then run this again`,
+      aside(inv.taken.dir),
+    );
+  if (!home)
+    return stop(
+      "no folder on this computer can hold the one copy of sessionpipe. Nothing was changed",
+      // Not `doctor`, which would name this command: what the PATH finds, in its order.
+      "which -a sessionpipe",
+    );
+  const at = slotIn(home.prefix);
+  // npm refuses to put its link over a file it didn't make (EEXIST: it installs nothing),
+  // and what is not provably ours is never moved by this command.
+  if (home.blocked)
+    return stop(
+      `${show(home.blocked)} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again`,
+      aside(home.blocked),
+    );
+  if (!inv.typed && !home.onPath)
+    return stop(
+      `${show(home.bin)} is not on your PATH, so \`sessionpipe\` would not be found when you type it. Nothing was changed. Add it, then run this again`,
+      `export PATH=${shq(home.bin, "linux")}:"$PATH"`,
+    );
+  // A home this user may not write is never answered with a second copy somewhere else.
+  // Its copy stays where it is whole and the newest; where it is not, the one line that
+  // updates it in place comes first, and this command finishes the job after it.
+  // The copy that is there now; a folder left behind in its place is no copy.
+  const there = ours.find((c) => c.dir === at && !c.aside);
+  const sound = !!there && !there.wrong && there.version === known;
+  if (!home.writable && !sound)
+    return stop(
+      `${home.shown} ${
+        there
+          ? `holds ${inv.typed ? "the copy you type" : "the copy that is to stay"} (${there.version})`
+          : `is where \`sessionpipe\` goes (${home.why})`
+      }, and you may not write there. Nothing was changed. ${there ? "Update" : "Install"} it there, then run this again`,
+      `sudo npm install -g --prefix ${shq(home.prefix, "linux")} sessionpipe@${known}`,
+    );
+  const stays = home.writable ? null : `${known} in ${home.shown} as it is: whole, the newest, and not yours to write`;
 
   // --- the steps, in the order they are taken ------------------------------------------------
   const steps: Step[] = [];
-  const there = ours.find((c) => is(at, c.dir));
-  steps.push({
-    do: "fetch",
-    version: known,
-    touches: [],
-  });
-  steps.push({
-    do: "install",
-    version: known,
-    prefix: home.prefix,
-    dir: at,
-    replaces: !!there,
-    touches: [
-      at,
-      inv.platform === "win32"
-        ? path.join(home.prefix, "sessionpipe.cmd")
-        : path.join(home.prefix, "bin", "sessionpipe"),
-    ],
-    // Why this folder: the table's row for it says what uses the copy that is there;
-    // where none is, the reason is said here.
-    say: `${known}, the newest release, fresh in ${home.shown} (${
-      there ? `replaces ${there.version ?? "the broken copy"}` : home.why
-    })`,
-  });
-  // Two daemons: the one that answers is not the process the service manager runs. A
-  // manager that names no process (pid null) while a daemon answers is that state too,
-  // not a manager that can't tell: the service's own process exits 0 when it finds
-  // another daemon on the socket, so its service is loaded and runs nothing. (For
-  // "nothing to repair", above, no process named is read the other way: no reason to act.)
-  if (f.service && f.daemon && f.service.pid !== f.daemon.pid)
+  if (!stays)
+    steps.push(
+      { do: "fetch", version: known, touches: [] },
+      {
+        do: "install",
+        version: known,
+        prefix: home.prefix,
+        dir: at,
+        replaces: !!there,
+        touches: [at, path.join(home.bin, "sessionpipe")],
+        // Why this folder: the table's row for it says what uses the copy that is there;
+        // where none is, the reason is said here.
+        say: `${known}, the newest release, fresh in ${home.shown} (${there ? `replaces ${there.version}` : home.why})`,
+      },
+    );
+  // Two daemons: the one someone started by hand is stopped, and the service takes over.
+  if (f.daemon && twins(f.service, f.daemon))
     steps.push({
       do: "stop",
       pid: f.daemon.pid,
       touches: [],
       say: `the daemon started by hand (pid ${f.daemon.pid}), once it holds nothing`,
     });
-  const unserve = !!f.service && !f.wanted && !f.daemon;
-  if (f.service && unserve)
-    steps.push({
-      do: "unserve",
-      file: f.service.file,
-      touches: [f.service.file],
-      say: "the service file, which nothing here needs",
-    });
-  const serve = !!f.service && !unserve;
+  const serve = !!f.service && !idleService;
   const moved = [
     ...(f.harnesses.length ? ["the hooks"] : []),
     ...(serve ? ["the background service"] : f.daemon ? ["the daemon that runs here"] : []),
@@ -330,12 +380,12 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
       ...(f.harnesses.length ? f.hookFiles : []),
       ...(serve ? [(f.service as NonNullable<Facts["service"]>).file] : []),
     ],
-    // What moves onto the fresh copy: the hooks where an agent is hooked, and what runs
-    // in the background where something does.
+    // What moves onto the copy: the hooks where an agent is hooked, and what runs in the
+    // background where something does.
     say: moved.length ? `${moved.join(" and ")} to it` : null,
   });
   // The home's own link is written again by the install; any other that leads nowhere goes.
-  for (const file of inv.dangling.filter((f) => !is(path.dirname(f), home.bin)))
+  for (const file of inv.dangling.filter((f) => path.dirname(f) !== home.bin))
     steps.push({
       do: "remove",
       path: file,
@@ -344,38 +394,33 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
     });
   // What is in nobody's use goes first; the copy this command runs from goes last.
   const rank = (c: Copy) => (c.uses.includes("this") ? 3 : c.uses.length ? 2 : c.aside ? 0 : 1);
-  for (const c of ours.filter((c) => !is(at, c.dir)).sort((a, b) => rank(a) - rank(b))) {
+  for (const c of ours.filter((c) => c.dir !== at).sort((a, b) => rank(a) - rank(b))) {
     if (!c.writable) {
       left.push({
         where: c.where,
         path: c.dir,
         version: c.version,
         why: "you may not write where it is",
-        line:
-          c.slot === "global" && !c.aside && inv.platform !== "win32"
-            ? `sudo npm uninstall -g --prefix ${shq(c.prefix as string, inv.platform)} sessionpipe`
-            : null,
+        // What this command would have removed, and nothing else: the folder and its own
+        // link. Not `npm uninstall`, which takes whatever is at the prefix's command path.
+        line: `sudo rm -r ${[c.dir, ...c.bins].map((x) => shq(x, "linux")).join(" ")}`,
         ours: true,
       });
       continue;
     }
-    steps.push({
-      do: "remove",
-      path: c.dir,
-      touches: [c.dir, ...c.bins],
-      say: named(c),
-    });
+    steps.push({ do: "remove", path: c.dir, touches: [c.dir, ...c.bins], say: named(c) });
   }
   steps.push({ do: "prove", touches: [] });
   return {
     ...none,
     target: known,
     home,
+    stays,
     steps,
-    // A failed install is undone either way: what npm left is removed, and what was
-    // there before is back in its place with its link.
+    // npm installs beside the copy that is there and the fresh one is seen to run before
+    // the two change places: a download or an install that fails has touched nothing.
     safety: [
-      `Nothing is touched until ${known} has downloaded. A failed install is undone.`,
+      ...(stays ? [] : [`Nothing is touched until ${known} has been downloaded and seen to run.`]),
       ...(serve
         ? ["The service keeps its environment and restarts once it holds nothing."]
         : f.daemon
@@ -383,7 +428,8 @@ export function plan(inv: Inventory, f: Facts, show: (p: string) => string = (p)
           : []),
     ],
     left,
-    notes,
-    first,
+    // What typing starts was either a refusal above or is what this run puts right: of
+    // the notes, only what it does not mend is said beside a plan.
+    notes: notes.filter((n) => n !== astray),
   };
 }

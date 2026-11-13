@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // The look `sessionpipe reinstall` takes at this computer before it decides anything:
-// every copy of sessionpipe it can find and what each is used by. It only reads.
+// every copy of sessionpipe it can find, what each is used by, what typing `sessionpipe`
+// starts, and where the one copy that is to stay lives. It reads, and runs nothing it
+// finds, with one exception that is the caller's to allow (`Looking.runs`).
 //
 // Where it looks: every `sessionpipe` on PATH (all of them, not the first); the copy the
 // service file names; the copy this command runs from; the global folder of every Node it
 // knows a place for (this one's, npm's own answer, ~/.local, Homebrew, /usr/local, nvm,
-// fnm, asdf, mise, nodenv, n, Volta, the installer's own Node; on Windows %AppData%\npm,
-// Program Files and nvm-windows); and the npx cache.
-import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+// fnm, asdf, mise, nodenv, n, Volta, the installer's own Node) and of a PATH folder whose
+// own npm link leads into it; and the npx cache.
+import { accessSync, constants, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { parseVersion } from "@sessionpipe/core/version";
 import {
   ASIDE,
   binsOf,
@@ -17,8 +20,8 @@ import {
   prefixOfSlot,
   prove,
   type Reach,
-  SHIMS,
   type Slot,
+  same,
   within,
 } from "./ours.js";
 
@@ -27,82 +30,115 @@ export type Use = "typed" | "service" | "hooks" | "this";
 export interface Copy {
   /** The package folder. */
   dir: string;
-  /** Where it is, for a person: its npm prefix, or which cache. */
+  /** Where it is, for a person: its npm prefix, its cache entry, or the folder itself
+   *  where it is no install. */
   where: string;
-  /** Its npm prefix, for a global install. */
+  /** The npm prefix of a copy that is a global install. */
   prefix: string | null;
   /** Ours to remove, and in which kind of slot; null where it is not, with why in `not`. */
   slot: Slot | null;
   not: string | null;
-  /** npm's own leftover from an install that was cut off (or ours, from a run that was). */
+  /** A folder left behind: npm's own from an install that was cut off, this command's
+   *  from a run that was, or an empty folder of the name (what is left of a copy that
+   *  could only be emptied). It names no release. */
   aside: boolean;
-  /** What its package.json says; null when that can't be read. */
+  /** The release its package.json names; null when it names none. */
   version: string | null;
-  /** `--version` from it printed that version. */
-  runs: boolean;
-  /** What is wrong with it, in a few words; null when nothing. */
+  /** What is wrong with it, in a few words; null when nothing is, as far as a look tells. */
   wrong: string | null;
   /** Its own bin links. */
   bins: string[];
   uses: Use[];
+  /** A global install whose command folder (`<prefix>/bin`) a shell looks in. */
+  onPath: boolean;
   /** This user may write where it is. */
   writable: boolean;
   /** Someone else's tool keeps it, and takes it away with this command. */
   keeper: string | null;
 }
 
+/** Where the one copy lives, or is to live. */
+export interface Home {
+  prefix: string;
+  /** The prefix as a person reads it, and why it is this one. */
+  shown: string;
+  why: string;
+  /** The folder its command is in, and whether a shell looks there. */
+  bin: string;
+  onPath: boolean;
+  /** A file that sits where npm puts the command and is not npm's own link to the copy in
+   *  this prefix (a script, a link to somewhere else): npm will not put its link over it,
+   *  and it is not this command's to move. Null: nothing is. */
+  blocked: string | null;
+  /** This user may write its package folder and its command. */
+  writable: boolean;
+}
+
 export interface Inventory {
-  platform: NodeJS.Platform;
   reach: Reach;
   copies: Copy[];
   /** Bin links that lead to a sessionpipe that is gone. */
   dangling: string[];
-  /** Files named sessionpipe on PATH that are no install of it: left, and said. */
+  /** Files named sessionpipe on PATH that lead to no folder at all: left, and said. */
   strangers: { file: string; why: string }[];
   /** Every `sessionpipe` a shell would find, first first, as the package folder each leads
-   *  to (null: a file that is no link to one). `at`: which folder of PATH it is in, counted
-   *  from the first. npx's own entry for the run it started is not among them. */
-  onPath: { file: string; dir: string | null; at: number }[];
-  /** Where the fresh copy may go, best first; `shown` is the prefix as a person reads it.
-   *  `bin`: the folder its command goes in (on Windows the prefix itself). `pathAt`: which
-   *  folder of PATH that is, counted as `onPath` counts; null when it is not on PATH.
-   *  `blocked`: a file that sits where npm puts the command there and is not npm's own
-   *  link to the copy in this prefix (a script, a link to somewhere else): npm will not
-   *  put its link over it, and it is not this command's to move. Null: nothing is. */
-  homes: { prefix: string; shown: string; why: string; bin: string; pathAt: number | null; blocked: string | null }[];
-  /** The global prefixes that were looked in. */
+   *  to (null: a file that leads to none). npx's own entry for the run it started is not
+   *  among them. */
+  onPath: { file: string; dir: string | null }[];
+  /** The package folder typing `sessionpipe` starts. It is the one the first of `onPath`
+   *  that starts anything leads to; where that first one is a file that leads to no folder
+   *  (a version manager's shim, a wrapper) and this command runs from an installed copy,
+   *  it is that copy: the file is what started it. Null: nothing is typed, or it can't be
+   *  told (`unsure`). */
+  typed: string | null;
+  /** Such a file, where this command was not started from an installed copy (npx, a
+   *  checkout): which copy it starts can't be told without running it. */
+  unsure: string | null;
+  /** Where the copy that typing starts lives; with nothing typed, the place a shell would
+   *  find a fresh one. Never chosen by who may write it. Null: no such place, or what is
+   *  typed is no install of ours. */
+  home: Home | null;
+  /** With no home: a folder that sits where a prefix keeps the package and is not
+   *  provably sessionpipe's (what an install that was cut off left, a build), and why. It
+   *  is in the way of the one copy, and the person's to move. Null: nothing is. */
+  taken: { dir: string; why: string } | null;
+  /** The global prefixes, and the npx cache, that were looked in. */
   prefixes: string[];
+  npx: string;
 }
 
 export interface Looking {
-  platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
   /** The home folder in effect. */
   home: string;
   reach: Reach;
-  /** The node running this, and this copy's dist folder. */
+  /** The node running this, this copy's dist folder, and the file it was started as
+   *  (`process.argv[1]`: npm's link to it, or its cli.js by its path). */
   execPath: string;
   distDir: string;
+  started: string;
   /** npm's own global prefix (`npm prefix -g`); null when npm can't be asked. */
   npmPrefix: string | null;
   /** The cli.js the service file names; null when there is no service file. */
   serviceCli: string | null;
   /** The version the hooks' own files were written by; null when there are none. */
   hooksVersion: string | null;
-  /** What `--version` prints when this cli.js is run; null when it doesn't run. */
-  version: (cli: string) => string | null;
+  /** What `--version` prints when a cli.js is run; null when it doesn't run. Asked of one
+   *  copy at most: the one typing starts, where that is a folder the proof accepts and is
+   *  not the copy already running (a cli.js that was cut short can't be told from disk).
+   *  Left out, nothing is run at all. */
+  runs?: (cli: string) => string | null;
   /** How a path is shown to a person. */
   tilde: (p: string) => string;
 }
 
-/** One spelling for one place: the real path of a folder that is there, or of the nearest
- *  folder above one that isn't. Every path in an inventory is spelled this way, so the
- *  plan can compare them as they are. */
+/** The real path of a folder that is there, in the case the disk keeps it in, or of the
+ *  nearest folder above one that isn't. */
 export function spelled(p: string): string {
   const abs = path.resolve(p);
   for (let d = abs; ; d = path.dirname(d)) {
     try {
-      return path.join(realpathSync(d), path.relative(d, abs));
+      return path.join(realpathSync.native(d), path.relative(d, abs));
     } catch {
       if (path.dirname(d) === d) return abs;
     }
@@ -119,54 +155,39 @@ const subdirs = (dir: string): string[] => {
   }
 };
 
-/** Every folder that may be some Node's global prefix on this computer. */
+/** Volta keeps each global package in a folder of its own, and its command in a shim. */
+const volta = (o: Looking): string =>
+  path.join(o.env.VOLTA_HOME || path.join(o.home, ".volta"), "tools", "image", "packages", "sessionpipe");
+
+/** Every folder known to be some Node's global prefix on this computer. */
 export function prefixesOf(o: Looking): string[] {
   const e = o.env;
   const h = o.home;
-  const all: (string | undefined | null)[] =
-    o.platform === "win32"
-      ? [
-          e.APPDATA && path.join(e.APPDATA, "npm"),
-          path.dirname(o.execPath),
-          o.npmPrefix,
-          e.npm_config_prefix,
-          e.ProgramFiles && path.join(e.ProgramFiles, "nodejs"),
-          ...(e.NVM_HOME ? subdirs(e.NVM_HOME) : []),
-        ]
-      : [
-          path.dirname(path.dirname(o.execPath)),
-          o.npmPrefix,
-          e.npm_config_prefix,
-          e.N_PREFIX,
-          path.join(h, ".local"),
-          path.join(h, ".npm-global"),
-          "/usr/local",
-          "/usr",
-          "/opt/homebrew",
-          "/home/linuxbrew/.linuxbrew",
-          ...subdirs(path.join(e.NVM_DIR || path.join(h, ".nvm"), "versions", "node")),
-          ...subdirs(path.join(e.FNM_DIR || path.join(h, ".local", "share", "fnm"), "node-versions")).map((d) =>
-            path.join(d, "installation"),
-          ),
-          ...subdirs(path.join(e.ASDF_DATA_DIR || path.join(h, ".asdf"), "installs", "nodejs")),
-          ...subdirs(path.join(h, ".local", "share", "mise", "installs", "node")),
-          ...subdirs(path.join(h, ".nodenv", "versions")),
-          // The one-line installer's own Node.
-          ...subdirs(path.join(h, ".local", "share")).filter((d) => path.basename(d).startsWith("node-v")),
-          volta(o),
-        ];
-  const reach = o.reach === true || o.reach === null ? o.reach : spelled(o.reach);
-  return [...new Set(all.filter((p): p is string => !!p).map(spelled))].filter(
-    (p) => reach === true || (reach !== null && within(reach, p)),
-  );
+  return [
+    path.dirname(path.dirname(o.execPath)),
+    o.npmPrefix,
+    e.npm_config_prefix,
+    e.N_PREFIX,
+    path.join(h, ".local"),
+    path.join(h, ".npm-global"),
+    "/usr/local",
+    "/usr",
+    "/opt/homebrew",
+    "/home/linuxbrew/.linuxbrew",
+    ...subdirs(path.join(e.NVM_DIR || path.join(h, ".nvm"), "versions", "node")),
+    ...subdirs(path.join(e.FNM_DIR || path.join(h, ".local", "share", "fnm"), "node-versions")).map((d) =>
+      path.join(d, "installation"),
+    ),
+    ...subdirs(path.join(e.ASDF_DATA_DIR || path.join(h, ".asdf"), "installs", "nodejs")),
+    ...subdirs(path.join(h, ".local", "share", "mise", "installs", "node")),
+    ...subdirs(path.join(h, ".nodenv", "versions")),
+    // The one-line installer's own Node.
+    ...subdirs(path.join(h, ".local", "share")).filter((d) => path.basename(d).startsWith("node-v")),
+    volta(o),
+  ].filter((p): p is string => !!p);
 }
 
-/** Volta keeps each global package in a folder of its own, and its command in a shim. */
-const volta = (o: Looking): string =>
-  spelled(path.join(o.env.VOLTA_HOME || path.join(o.home, ".volta"), "tools", "image", "packages", "sessionpipe"));
-
-const modulesOf = (prefix: string, platform: NodeJS.Platform): string =>
-  platform === "win32" ? path.join(prefix, "node_modules") : path.join(prefix, "lib", "node_modules");
+const modulesOf = (prefix: string): string => path.join(prefix, "lib", "node_modules");
 
 /** May this user write a folder, or make it where it isn't there yet? */
 export function canWrite(dir: string): boolean {
@@ -180,93 +201,159 @@ export function canWrite(dir: string): boolean {
   }
 }
 
+/** Something has this name, a link that leads nowhere included. */
+const isThere = (p: string): boolean => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The package folder a `…/dist/cli.js` is in; null for any other file. */
+const packageOf = (cli: string | null): string | null =>
+  cli && path.basename(cli) === "cli.js" && path.basename(path.dirname(cli)) === "dist"
+    ? path.dirname(path.dirname(cli))
+    : null;
+
 export function look(o: Looking): Inventory {
-  const prefixes = prefixesOf(o);
-  const reach = o.reach === true || o.reach === null ? o.reach : spelled(o.reach);
-  const proving: Proving = { platform: o.platform, reach, prefixes };
-  const inReach = (p: string) => reach === true || (reach !== null && within(reach, spelled(p)));
+  // One spelling for one folder, for the whole look: the plan compares the paths of an
+  // inventory as they are, so a folder reached by two names (another case on a disk that
+  // ignores it, a link, a volume mounted twice) must come out as one. A folder that is
+  // there is known by its device and inode, and spelled by its own name under the one
+  // spelling of the folder it is really in (so what is inside a folder with two names has
+  // one name too); one that isn't there, by the folder above it. The home folder is
+  // spelled first: it is how a person reads the rest.
+  const names = new Map<string, string>();
+  const one = (p: string): string => {
+    const abs = path.resolve(p);
+    let st: ReturnType<typeof statSync>;
+    try {
+      st = statSync(abs);
+    } catch {
+      const up = path.dirname(abs);
+      return up === abs ? abs : path.join(one(up), path.basename(abs));
+    }
+    const key = `${st.dev}:${st.ino}`;
+    const had = names.get(key);
+    if (had !== undefined) return had;
+    const real = spelled(abs);
+    const up = path.dirname(real);
+    const name = up === real ? real : path.join(one(up), path.basename(real));
+    names.set(key, name);
+    return name;
+  };
+  one(o.home);
+  const uniq = (list: string[]): string[] => [...new Set(list)];
+  const reach = o.reach === true || o.reach === null ? o.reach : one(o.reach);
+  const inReach = (p: string) => reach === true || (reach !== null && within(reach, p));
+
+  // PATH, each folder once: a folder named twice (/bin and /usr/bin, a home reached through
+  // a link) is looked in once, and a link in it is read from where it really is.
+  const pathDirs = uniq((o.env.PATH ?? "").split(path.delimiter).filter(Boolean).map(one));
+  // A prefix is a folder that was looked in as one: the places a Node keeps its global
+  // packages, and a PATH folder whose own npm link leads into the `lib` beside it. A
+  // `lib/node_modules` anywhere else is some project's.
+  const prefixes = uniq(
+    [
+      ...prefixesOf(o),
+      ...pathDirs.flatMap((dir) => {
+        const to = binTarget(path.join(dir, "sessionpipe"));
+        const prefix = path.dirname(dir);
+        return path.basename(dir) === "bin" && to && same(to, path.join(modulesOf(prefix), "sessionpipe"))
+          ? [prefix]
+          : [];
+      }),
+    ].map(one),
+  ).filter(inReach);
+  const cache = o.env.npm_config_cache || path.join(o.home, ".npm");
+  const npx = one(path.join(cache, "_npx"));
+  const proving: Proving = { reach, prefixes, npx };
 
   // --- every folder that may hold one ---------------------------------------------------
-  const dirs = new Map<string, string>();
-  const add = (dir: string | null) => {
-    if (dir && inReach(dir)) dirs.set(spelled(dir), spelled(dir));
+  const dirs = new Set<string>();
+  const add = (dir: string) => {
+    if (inReach(dir)) dirs.add(dir);
   };
-  const bin = o.platform === "win32" ? "sessionpipe.cmd" : "sessionpipe";
   const onPath: Inventory["onPath"] = [];
   const dangling: string[] = [];
   const strangers: Inventory["strangers"] = [];
-  // PATH, each folder by its one spelling: a folder named twice (/bin and /usr/bin, a
-  // home reached through a link) is looked in once, and a link in it is read from where
-  // it really is, which is where its `..` leads from.
-  const pathDirs = [...new Set((o.env.PATH ?? "").split(path.delimiter).filter(Boolean).map(spelled))];
-  /** The folder a prefix's command is in, by its one spelling: a `bin` that is a link to
-   *  a folder on PATH is that folder. */
-  const binOf = (prefix: string): string => spelled(o.platform === "win32" ? prefix : path.join(prefix, "bin"));
-  for (const [at, dir] of pathDirs.entries()) {
-    const file = path.join(dir, bin);
+  for (const dir of pathDirs) {
+    const file = path.join(dir, "sessionpipe");
     let linked: boolean;
     try {
       linked = lstatSync(file).isSymbolicLink();
     } catch {
       continue;
     }
-    if (!inReach(file)) continue;
-    const led = binTarget(file, o.platform);
-    const to = led && spelled(led);
-    // npx puts its own cache entry first on PATH for the one run it starts: nobody types
-    // that one, and a shell opened afterwards doesn't find it. The entry itself is found
-    // in the cache, below.
-    if (/[\\/]_npx[\\/][^\\/]+[\\/]node_modules[\\/]\.bin$/.test(dir)) continue;
-    onPath.push({ file, dir: to, at });
-    if (to && existsSync(to)) add(to);
-    else if (to) dangling.push(file);
-    else
-      strangers.push({
-        file,
-        why: linked
-          ? "a link that leads to no install of sessionpipe"
-          : "a file of that name that npm didn't put there",
-      });
+    // npm and npx put `node_modules/.bin` folders first on PATH for the one run they start
+    // (the cache entry's, the project's they were started in): nobody types those, and a
+    // shell opened afterwards doesn't find them. A cache entry itself is found in the
+    // cache, below. A `.bin` a person put on their own PATH is theirs, and is looked in.
+    if (!inReach(file) || (o.env.npm_command && /[\\/]node_modules[\\/]\.bin$/.test(dir))) continue;
+    const led = binTarget(file);
+    if (led) {
+      const to = one(led);
+      onPath.push({ file, dir: to });
+      if (isThere(to)) add(to);
+      else dangling.push(file);
+      continue;
+    }
+    // A link of someone's own to a `…/dist/cli.js`: the folder it starts is known without
+    // running it (a checkout, a build). Any other file says nothing of what it starts.
+    let folder: string | null = null;
+    try {
+      folder = linked ? packageOf(realpathSync(file)) : null;
+    } catch {}
+    onPath.push({ file, dir: folder && one(folder) });
+    if (folder) add(one(folder));
+    else strangers.push({ file, why: linked ? "a link to no install of sessionpipe" : "a file npm didn't put there" });
   }
   for (const p of prefixes) {
-    const modules = modulesOf(p, o.platform);
-    add(
-      existsSync(path.join(modules, "sessionpipe")) || isLink(path.join(modules, "sessionpipe"))
-        ? path.join(modules, "sessionpipe")
-        : null,
-    );
-    for (const d of subdirs(modules)) if (ASIDE.test(path.basename(d))) add(d);
+    const slot = path.join(modulesOf(p), "sessionpipe");
+    // By its one spelling: a slot that is a link to a folder is that folder.
+    if (isThere(slot)) add(one(slot));
+    for (const d of subdirs(modulesOf(p))) if (ASIDE.test(path.basename(d))) add(d);
     // A bin link in a prefix that is not on PATH, left with nothing behind it.
-    const link = path.join(binOf(p), bin);
-    const to = binTarget(link, o.platform);
-    if (to && !existsSync(to) && !dangling.includes(link) && inReach(link)) dangling.push(link);
+    const link = path.join(one(path.join(p, "bin")), "sessionpipe");
+    const to = binTarget(link);
+    if (to && !isThere(to) && !dangling.includes(link) && inReach(link)) dangling.push(link);
   }
-  const cache =
-    o.env.npm_config_cache ||
-    (o.platform === "win32" && o.env.LOCALAPPDATA
-      ? path.join(o.env.LOCALAPPDATA, "npm-cache")
-      : path.join(o.home, ".npm"));
-  for (const entry of subdirs(path.join(cache, "_npx"))) {
+  for (const entry of subdirs(npx)) {
     const d = path.join(entry, "node_modules", "sessionpipe");
-    if (existsSync(d)) add(d);
+    if (isThere(d)) add(one(d));
   }
-  // The package folder a `…/dist/cli.js` is in; anything else a service file may run is
-  // no copy of sessionpipe to speak of.
-  const packageOf = (cli: string | null): string | null =>
-    cli && path.basename(cli) === "cli.js" && path.basename(path.dirname(cli)) === "dist"
-      ? path.dirname(path.dirname(cli))
-      : null;
-  const mine = spelled(path.dirname(o.distDir));
+  const mine = one(path.dirname(o.distDir));
   add(mine);
   const served = packageOf(o.serviceCli);
-  if (served && existsSync(served)) add(served);
+  const serving = served && isThere(served) ? one(served) : null;
+  if (serving) add(serving);
+
+  // --- what typing starts ---------------------------------------------------------------
+  // The first on PATH that starts something: a link to a copy that is gone starts nothing,
+  // and a shell goes on to the next.
+  const first = onPath.find((e) => !e.dir || isThere(e.dir)) ?? null;
+  const installed = (dir: string): boolean => {
+    const p = prove(dir, proving);
+    return p.is === "folder" && p.slot === "global" && !p.aside;
+  };
+  // A file that leads to no folder says nothing of what it starts, with one exception: at
+  // the command path of a prefix that holds an installed copy it is no shim of anyone's,
+  // it sits where that copy's link was (`inWay`), and nothing is typed. Any other such
+  // file (a version manager's shim, a wrapper) is what started this command where this
+  // command was started as npm's link to an installed copy, which is how a shim starts
+  // one; started any other way (npx, a cli.js by its path) it can't be told.
+  const opaque = first && !first.dir ? first.file : null;
+  const under = opaque && path.basename(path.dirname(opaque)) === "bin" ? path.dirname(path.dirname(opaque)) : null;
+  const inWay = under && installed(path.join(modulesOf(under), "sessionpipe")) ? under : null;
+  const through = binTarget(o.started);
+  const shimmed = !!opaque && !inWay && installed(mine) && !!through && same(through, mine);
+  const typed = opaque ? (shimmed ? mine : null) : (first?.dir ?? null);
+  const unsure = opaque && !inWay && !shimmed ? opaque : null;
 
   // --- what each is ---------------------------------------------------------------------
-  // What a person types: the first on PATH that starts something. A link to a copy that
-  // is gone starts nothing, and a shell goes on to the next.
-  const typed = onPath.find((e) => !e.dir || existsSync(e.dir))?.dir ?? null;
-  const is = (a: string | null, b: string) => !!a && spelled(a) === spelled(b);
-  const copies: Copy[] = [...dirs.values()].map((dir) => {
+  const copies: Copy[] = [...dirs].map((dir) => {
     const proof = prove(dir, proving);
     const slot = proof.is === "folder" ? proof.slot : null;
     let version: string | null = null;
@@ -275,45 +362,52 @@ export function look(o: Looking): Inventory {
         name?: unknown;
         version?: unknown;
       };
-      if (j.name === "sessionpipe" && typeof j.version === "string") version = j.version;
+      if (j.name === "sessionpipe" && typeof j.version === "string" && parseVersion(j.version)) version = j.version;
     } catch {}
     const cli = path.join(dir, "dist", "cli.js");
-    const said = existsSync(cli) ? o.version(cli) : null;
-    const aside = ASIDE.test(path.basename(dir));
-    const global = slot === "global" || (!slot && path.basename(path.dirname(path.dirname(dir))) === "lib");
-    const prefix = global ? prefixOfSlot(dir, o.platform) : null;
-    const kept = is(prefixOfSlot(dir, o.platform), volta(o));
+    // Left behind: by its name, or ours with no release to name (the proof takes such a
+    // folder only when it is empty).
+    const aside = ASIDE.test(path.basename(dir)) || (slot !== null && version === null);
+    const prefix = slot === "global" ? prefixOfSlot(dir) : null;
+    const kept = same(prefixOfSlot(dir), volta(o));
     const bins = binsOf(dir, proving);
-    const uses: Use[] = [
-      ...(is(typed, dir) ? (["typed"] as const) : []),
-      ...(is(packageOf(o.serviceCli), dir) ? (["service"] as const) : []),
-      ...(is(mine, dir) ? (["this"] as const) : []),
-    ];
+    let whole = false;
+    try {
+      whole = statSync(cli).isFile();
+    } catch {}
+    // The one copy that is asked whether it runs: what typing starts, where that is a
+    // folder the proof accepts and not the copy running now.
+    const ran = whole && slot && !kept && dir === typed && dir !== mine && o.runs ? { said: o.runs(cli) } : null;
     return {
       dir,
-      // An npx cache entry by its own folder (`~/.npm/_npx/<id>` says what it is).
-      where: o.tilde(slot === "npx" ? path.dirname(path.dirname(dir)) : (prefix ?? dir)),
+      // An npx cache entry by its own folder (`~/.npm/_npx/<id>` says what it is); what is
+      // no install, by the folder itself.
+      where: o.tilde(slot === "npx" ? path.dirname(path.dirname(dir)) : slot === "global" ? prefixOfSlot(dir) : dir),
       prefix,
       slot: kept ? null : slot,
       not: kept ? "Volta keeps it" : proof.is === "not" ? proof.why : null,
       aside,
       version,
-      runs: said !== null && said === version,
       wrong: aside
         ? "left behind by an install that was cut off"
-        : !existsSync(cli)
+        : !whole
           ? "its dist/cli.js is missing (an install that was cut off?)"
-          : said === null
+          : ran && ran.said === null
             ? "it doesn't run: `--version` printed nothing"
-            : said !== version
-              ? `it says it is ${said}, and its package.json says ${version ?? "nothing"}`
+            : ran && ran.said !== version
+              ? `it says it is ${ran.said}, and its package.json says ${version}`
               : // Whole, and nothing can start it: npm's link to it was taken away or written
                 // over. (An npx cache entry is started by npx, by its path.)
                 slot === "global" && !bins.length
                 ? "npm's link to it is gone"
                 : null,
       bins,
-      uses,
+      uses: [
+        ...(dir === typed ? (["typed"] as const) : []),
+        ...(dir === serving ? (["service"] as const) : []),
+        ...(dir === mine ? (["this"] as const) : []),
+      ],
+      onPath: slot === "global" && pathDirs.includes(one(path.join(prefixOfSlot(dir), "bin"))),
       writable: canWrite(path.dirname(dir)),
       keeper: kept ? "volta uninstall sessionpipe" : null,
     };
@@ -326,67 +420,65 @@ export function look(o: Looking): Inventory {
     "hooks",
   );
 
-  // --- where the fresh one may go ---------------------------------------------------------
-  const homes: Inventory["homes"] = [];
-  const offer = (given: string | null | undefined, why: string) => {
-    const prefix = given ? spelled(given) : null;
-    if (!prefix || !inReach(prefix) || homes.some((x) => x.prefix === prefix)) return;
-    // Not Homebrew's versioned folder (gone at the next `brew upgrade node`), not Volta's,
-    // not a folder this user can't write, and not one whose slot holds what is not ours.
-    if (/[\\/]Cellar[\\/]node(?:@\d+)?[\\/]/.test(prefix) || is(prefix, volta(o))) return;
-    const slot = path.join(modulesOf(prefix, o.platform), "sessionpipe");
-    if (
-      !canWrite(modulesOf(prefix, o.platform)) ||
-      !canWrite(o.platform === "win32" ? prefix : path.join(prefix, "bin"))
-    )
-      return;
-    if ((existsSync(slot) || isLink(slot)) && prove(slot, proving).is !== "folder") return;
-    const at = pathDirs.indexOf(binOf(prefix));
-    // What is at the command's own path and is not npm's link to this prefix's copy.
-    const blocked = (o.platform === "win32" ? SHIMS : (["sessionpipe"] as const))
-      .map((name) => path.join(binOf(prefix), name))
-      .find((file) => isThere(file) && !is(binTarget(file, o.platform), slot));
-    homes.push({
+  // --- where the one copy lives -----------------------------------------------------------
+  let taken: Inventory["taken"] = null;
+  const homeAt = (given: string, why: string): Home | null => {
+    const prefix = one(given);
+    // Only a prefix that was looked in as one (a link someone made into a folder that is
+    // gone names no place to install into), and not one whose slot holds what is not ours.
+    // A place for a fresh copy is also not Homebrew's versioned folder (gone at the next
+    // `brew upgrade node`) nor Volta's; the folder of the copy that is typed is what it is.
+    if (!prefixes.includes(prefix)) return null;
+    if (!typed && (/[\\/]Cellar[\\/]node(?:@\d+)?[\\/]/.test(prefix) || same(prefix, volta(o)))) return null;
+    const slot = path.join(modulesOf(prefix), "sessionpipe");
+    const held = isThere(slot) ? prove(slot, proving) : null;
+    if (held?.is === "not") {
+      // What is there is not provably sessionpipe's, so it is not this command's to remove
+      // or to move: no home. It is kept in mind for the refusal, should no other place do.
+      taken ??= { dir: slot, why: held.why };
+      return null;
+    }
+    const bin = one(path.join(prefix, "bin"));
+    const file = path.join(bin, "sessionpipe");
+    const to = binTarget(file);
+    return {
       prefix,
       shown: o.tilde(prefix),
       why,
-      bin: binOf(prefix),
-      pathAt: at < 0 ? null : at,
-      blocked: blocked ?? null,
-    });
+      bin,
+      onPath: pathDirs.includes(bin),
+      blocked: isThere(file) && !(to && same(to, slot)) ? file : null,
+      writable: canWrite(modulesOf(prefix)) && canWrite(path.join(prefix, "bin")),
+    };
   };
+  // The home is where the copy lives that typing starts: never another place because that
+  // one can't be written. With nothing typed, it is a place a shell would find a fresh one.
   const by = (u: Use) => copies.find((c) => c.uses.includes(u) && c.slot === "global")?.prefix;
-  offer(by("typed"), "where the one you type is");
-  offer(by("this"), "where this command runs from");
-  offer(by("service"), "where the one the background service runs is");
-  // The copy typed may be where this user can't write: another copy's folder that is on
-  // PATH will do, before one that isn't.
-  for (const c of copies) if (c.slot === "global" && !c.aside) offer(c.prefix, "where another copy of it already is");
-  offer(o.npmPrefix, "npm's global folder");
-  offer(
-    o.platform === "win32" ? o.env.APPDATA && path.join(o.env.APPDATA, "npm") : path.join(o.home, ".local"),
-    "a folder of your own",
-  );
-  // A folder a shell finds `sessionpipe` in comes before one it doesn't, whatever else
-  // speaks for it: a fresh copy nobody can type is no repair.
-  homes.sort((a, b) => Number(b.pathAt !== null) - Number(a.pathAt !== null));
-  return { platform: o.platform, reach, copies, dangling, strangers, onPath, homes, prefixes };
+  const typedCopy = copies.find((c) => c.dir === typed);
+  const places: [string | null | undefined, string][] = typed
+    ? typedCopy?.slot === "global"
+      ? [[typedCopy.prefix, "where the one you type is"]]
+      : []
+    : unsure
+      ? []
+      : [
+          [inWay, "where the copy is whose link is gone"],
+          ...dangling.map((f): [string, string] => [
+            prefixOfSlot(binTarget(f) as string),
+            "where a link to it already is",
+          ]),
+          [by("this"), "where this command runs from"],
+          [by("service"), "where the one the background service runs is"],
+          ...copies
+            .filter((c) => c.slot === "global" && !c.aside)
+            .map((c): [string | null, string] => [c.prefix, "where another copy of it already is"]),
+          [o.npmPrefix, "npm's global folder"],
+          [path.join(o.home, ".local"), "a folder of your own"],
+        ];
+  const homes = places.flatMap(([p, why]) => {
+    const h = p ? homeAt(p, why) : null;
+    return h ? [h] : [];
+  });
+  const home = homes.find((h) => h.onPath) ?? homes[0] ?? null;
+  return { reach, copies, dangling, strangers, onPath, typed, unsure, home, taken: home ? null : taken, prefixes, npx };
 }
-
-/** Something has this name, a link that leads nowhere included. */
-const isThere = (p: string): boolean => {
-  try {
-    lstatSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const isLink = (p: string): boolean => {
-  try {
-    return lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
-};

