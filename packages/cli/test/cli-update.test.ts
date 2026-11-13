@@ -107,6 +107,10 @@ beforeEach(() => {
     FORCE_COLOR: undefined,
     NO_COLOR: undefined,
     npm_config_registry: undefined,
+    // This runner's own npmrc is no part of the home that is looked in: npm names it to
+    // all it starts (`npm test`, `npx vitest`), and doctor reads npm's prefix from the
+    // file named there.
+    npm_config_userconfig: undefined,
     NPM_CONFIG_REGISTRY: undefined,
   }))
     vi.stubEnv(k, v);
@@ -461,10 +465,18 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     installed: true,
     loaded: true,
     argv: [process.execPath, realpathSync(path.join(realDist, "cli.js")), "control", "run"],
+    // The process the manager runs for it is the daemon that answers (`status`'s pid).
+    pid: 7,
     ...o,
   });
   const fix = (text: string) => text.slice(text.indexOf("To fix"));
-  beforeEach(() => steadyHook());
+  beforeEach(() => {
+    steadyHook();
+    // A shell here looks where a copy's command would be: with no such folder on PATH,
+    // doctor says `sessionpipe` is not found when typed, which is another test's to say
+    // (cli-main.test.ts) and not what these are about.
+    vi.stubEnv("PATH", path.join(home, ".local", "bin"));
+  });
 
   it("one copy, one version: nothing to say", async () => {
     paired();
@@ -531,6 +543,132 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
       /^ {2}· background service {2,}running, from another copy kept at this version, in \/src\/checkout\/packages\/cli\/dist$/m,
     );
     expect(r.text).not.toContain("To fix");
+  });
+
+  /** A daemon (pid 7, this release) that answers `status`, and `health` as a test says:
+   *  with who started it (`via`: null for someone by hand), without that word (one from
+   *  before 0.15), or not at all (it closes the connection on a request it doesn't know). */
+  type Word = { via: "launchd" | "systemd" | "supervisor" | null } | "no word" | "no answer";
+  async function answering(release = VERSION): Promise<{ say: (w: Word) => void; asked: string[] }> {
+    const asked: string[] = [];
+    let word: Word = "no answer";
+    const replies = {
+      get status() {
+        asked.push("status");
+        return status(release);
+      },
+      get health() {
+        asked.push("health");
+        return word === "no answer"
+          ? undefined
+          : {
+              op: "health",
+              health: { accounts: [], ...(word === "no word" ? {} : { copy: { cli: "/x/cli.js", ...word } }) },
+            };
+      },
+    };
+    await daemon(replies);
+    return {
+      say: (w) => {
+        word = w;
+      },
+      asked,
+    };
+  }
+  const BY_HAND: Word = { via: null };
+  const BY_LAUNCHD: Word = { via: "launchd" };
+  /** Who launchd names for the service (the daemon that answers is pid 7), what the daemon
+   *  says of who started it, and whether that is two daemons. One definition, plan.ts
+   *  `twins`: `reinstall` goes by the same one, so the command doctor names does something. */
+  const TABLE: [string, number | null, Word, boolean][] = [
+    ["launchd names the daemon, which says launchd started it", 7, BY_LAUNCHD, false],
+    ["launchd names the daemon, which doesn't say", 7, "no word", false],
+    ["launchd names the daemon, which says it was started by hand", 7, BY_HAND, false],
+    ["launchd names another process, and the daemon says it was started by hand", 4242, BY_HAND, true],
+    ["launchd names another process, and the daemon says a supervisor started it", 4242, { via: "supervisor" }, false],
+    ["launchd names another process, and the daemon says systemd started it", 4242, { via: "systemd" }, false],
+    ["launchd names another process, and the daemon doesn't say", 4242, "no word", true],
+    ["launchd names another process, and the daemon doesn't answer that question", 4242, "no answer", true],
+    ["launchd names no process, and the daemon says it was started by hand", null, BY_HAND, true],
+    ["launchd names no process, and the daemon says launchd started it", null, BY_LAUNCHD, false],
+    ["launchd names no process, and the daemon doesn't say", null, "no word", false],
+    ["launchd names no process, and the daemon doesn't answer that question", null, "no answer", false],
+  ];
+
+  it.each(TABLE)("two daemons or one: %s", async (_said, pid, word, two) => {
+    paired();
+    const d = await answering();
+    d.say(word);
+    vi.mocked(serviceLook).mockReturnValue(service({ pid }));
+    const r = await run({}, "doctor");
+    const json = JSON.parse((await run({}, "doctor", "--json")).text) as { warnings: string[] };
+    const WARNING =
+      "a daemon started by hand (pid 7) holds the socket the background service needs; `sessionpipe reinstall` stops it and lets the service take over";
+    if (two) {
+      // A warning row, a warning for a program, and `reinstall` as the one command.
+      expect(r.text).toMatch(
+        /^ {2}! background service {2,}a daemon someone started by hand \(pid 7\) answers, and holds the socket the service needs$/m,
+      );
+      expect(r.text).not.toMatch(/background service {2,}running/);
+      expect(r.lines[0]).toBe("! 1 thing needs attention");
+      // One item, one sentence, and the command that stops that daemon: `update` would not.
+      expect(fix(r.text)).toContain(
+        "A daemon someone started by hand holds the socket the background service needs. One command puts it right:\n       sessionpipe reinstall",
+      );
+      expect(fix(r.text)).not.toContain("sessionpipe update");
+      expect(fix(r.text).match(/sessionpipe reinstall/g)).toHaveLength(1);
+      expect(process.exitCode).toBe(1);
+      expect(json.warnings).toContain(WARNING);
+    } else {
+      // The one daemon is the service's own, as far as anything says: nothing to say.
+      expect(r.text).toMatch(/^ {2}✓ background service {2,}running$/m);
+      expect(r.text).not.toContain("started by hand");
+      expect(r.text).not.toContain("sessionpipe reinstall");
+      expect(r.lines[0]).toBe("✓ All good");
+      expect(process.exitCode).toBeUndefined();
+      expect(json.warnings.filter((w) => /by hand|reinstall/.test(w))).toEqual([]);
+    }
+  });
+
+  it("two daemons, and the one that answers is another release: the row says whose it is, and the one command is still `reinstall`", async () => {
+    paired();
+    vi.mocked(serviceLook).mockReturnValue(service({ pid: 4242 }));
+    await daemon({ status: status("0.9.0") });
+    const r = await run({}, "doctor");
+    // Whose daemon it is comes first: which release it runs is said in the fix.
+    expect(r.text).toMatch(/^ {2}! background service {2,}a daemon someone started by hand \(pid 7\) answers/m);
+    expect(fix(r.text)).toContain(
+      `A daemon someone started by hand holds the socket the background service needs. This command is sessionpipe ${VERSION}, and the background service runs 0.9.0. One command puts it right:\n       sessionpipe reinstall`,
+    );
+    expect(fix(r.text)).not.toContain("sessionpipe update");
+  });
+
+  it("with a service launchd doesn't have loaded, or no manager to ask, there are no two: the daemon that answers is the one, and it is not asked who started it", async () => {
+    paired();
+    const d = await answering();
+    d.say(BY_HAND);
+    /** How often the daemon was asked `health` by one doctor. */
+    const healthAsks = async (): Promise<number> => {
+      d.asked.length = 0;
+      process.exitCode = undefined;
+      const r = await run({}, "doctor");
+      expect(r.text).toMatch(/^ {2}✓ background service {2,}running$/m);
+      expect(r.text).not.toContain("started by hand");
+      expect(r.text).not.toContain("sessionpipe reinstall");
+      expect(process.exitCode).toBeUndefined();
+      return d.asked.filter((op) => op === "health").length;
+    };
+    // A file launchd doesn't have loaded while a daemon answers that says it was started
+    // by hand: nothing holds a socket against a service that is not there to need it.
+    vi.mocked(serviceLook).mockReturnValue(service({ loaded: false, pid: null }));
+    const unloaded = await healthAsks();
+    // Nobody to ask (no manager from this shell).
+    vi.mocked(serviceLook).mockReturnValue(null);
+    expect(await healthAsks()).toBe(unloaded);
+    // Loaded, and launchd names the daemon that answers: one daemon, and it was asked who
+    // started it, once more than where there was no service for it to be in the way of.
+    vi.mocked(serviceLook).mockReturnValue(service({ pid: 7 }));
+    expect(await healthAsks()).toBe(unloaded + 1);
   });
 
   it("a service launchd should be running and isn't: `update` puts it back", async () => {

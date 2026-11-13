@@ -90,6 +90,9 @@ export interface CurrentDeps {
   /** What launchd or systemd has; null where this sessionpipe has no service to manage,
    *  or no manager that can be asked from here. */
   look: () => ServiceState | null;
+  /** The service file must be written again even where it names this copy and its
+   *  service answers: what is wrong with it (the node it names is gone). */
+  stale?: string | null;
   /** Why this sessionpipe has no service of its own to look at, in a sentence (it keeps
    *  its files somewhere other than this computer's usual place: health.ts `noService`);
    *  null where it has one, or where only a manager is missing. */
@@ -147,18 +150,21 @@ async function until<T>(d: CurrentDeps, ms: number, ask: () => Promise<T>, done:
   }
 }
 
-export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
+export async function bringCurrent(d: CurrentDeps, o: { installed?: boolean } = {}): Promise<Outcome> {
   // --- 1. the newest release, and this copy on it ---------------------------------------
   let target = d.version;
   let unasked: string | null = null;
-  try {
-    const latest = await d.latest();
-    if (isNewer(latest, d.version)) target = latest;
-    else d.say({ mark: "ok", text: `sessionpipe ${d.version} is the newest release` });
-  } catch (e) {
-    unasked = (e as Error).message;
-    d.say({ mark: "warn", text: `couldn't ask npm for the newest release: ${unasked}` });
-  }
+  // `installed`: the caller has just installed the newest release as this copy
+  // (`sessionpipe reinstall`), so npm is not asked again: the hooks and the service follow.
+  if (!o.installed)
+    try {
+      const latest = await d.latest();
+      if (isNewer(latest, d.version)) target = latest;
+      else d.say({ mark: "ok", text: `sessionpipe ${d.version} is the newest release` });
+    } catch (e) {
+      unasked = (e as Error).message;
+      d.say({ mark: "warn", text: `couldn't ask npm for the newest release: ${unasked}` });
+    }
   if (target !== d.version) {
     if (!d.prefix)
       return {
@@ -213,7 +219,7 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     if (!r.ok)
       return {
         state: "failed",
-        error: `sessionpipe ${target} couldn't be installed (${r.error}); this computer still runs ${d.version}`,
+        error: `sessionpipe ${target} couldn't be installed (${r.error}); this computer still runs ${d.version}. If it keeps failing, \`npx -y sessionpipe@latest reinstall\` installs a clean copy`,
         next: "sessionpipe update",
       };
     d.say({ mark: "ok", text: `sessionpipe ${target} installed (it was ${d.version})` });
@@ -254,7 +260,7 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
     // one on another copy, with what it knows of who is mid-turn written down first.
     const remembers = before ? !!(await d.health())?.copy : true;
     const older = !!before && before.version !== target && !remembers;
-    if (has ? theirs || !before || !asked || older : asked && !before) {
+    if (has ? theirs || !before || !asked || older || d.stale : asked && (!before || d.stale)) {
       // Give it a moment to finish what it holds; a turn of its own can take an hour.
       if (held) {
         d.say({ mark: "info", text: `the background service is busy (${held}): giving it a moment…` });
@@ -345,6 +351,7 @@ export async function bringCurrent(d: CurrentDeps): Promise<Outcome> {
               next: "sessionpipe control run",
             };
       const will = await d.restart();
+      if (will && held) d.say({ mark: "info", text: `the background service is busy (${held}): giving it a moment…` });
       if (will) running = await until(d, d.settleMs ?? 25_000, d.status, (s) => s?.version === target);
       if (running?.version !== target) {
         // It took the restart and waits for something: that ends by itself. What it

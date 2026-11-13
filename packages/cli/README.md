@@ -361,6 +361,104 @@ while `sessionpipe update off` reaches it (it re-reads the config every ten minu
 Set in your shell, it makes `sessionpipe update` there change nothing (above).
 The registry asked is npm's own, or the one `npm_config_registry` names.
 
+## Repair: `sessionpipe reinstall`
+
+One command for when the install itself is what is wrong: several copies on one
+computer, several versions that collide, an install that was cut off half-way, a copy
+whose link is gone, hooks or a service that still name a copy that is gone.
+
+```sh
+sessionpipe reinstall
+npx -y sessionpipe@latest reinstall     # when `sessionpipe` itself no longer runs
+```
+
+Whatever it finds, it leaves one clean copy of the newest release, in use everywhere,
+and removes the rest. Pairings, settings, keys and everything waiting to be sent are
+never touched. It does the whole job in the process you started, whichever copy that
+is, so the `npx` line works when nothing else does. It runs on macOS and Linux; on
+Windows it changes nothing and names `sessionpipe update`.
+
+It first shows what it found (every copy, its version, what uses it: you, the background
+service, the hooks, nothing) and what it will do, a row an action, and asks once. Enter
+goes ahead: the command was typed to do this, and npm can put back anything it removes.
+`--dry-run` only looks; `--yes` doesn't ask; in a pipe without `--yes` it does nothing
+and says so. To look, it reads: it runs no file it finds, but the one copy you type
+(`--version`), where that is a published copy and not the one already running.
+
+The one copy lives where the copy lives that typing `sessionpipe` starts. That folder is
+never chosen by who may write it, and a second copy is never put beside one that can't
+be written. One whole copy of the newest release that is what you type is "nothing to
+repair", wherever it lives. Then, in this order:
+
+1. The newest release is fetched from npm, installed beside the copy that is there, and
+   seen to run. Until then nothing is touched: a download or an install that fails, or a
+   run that is cut off, leaves this computer as it was.
+2. The two change places, by two renames.
+3. The hooks are written again from it, and the background service is moved onto it by
+   `update`'s rules: its environment kept, what it holds itself waited for, who is
+   mid-turn carried over. A daemon someone started by hand that holds the socket a
+   service needs is stopped once it holds nothing.
+4. It checks that the copy runs through its own link and that typing `sessionpipe`
+   starts it. Only then is anything else removed:
+5. every other copy, with its own link; the copy the command runs from last.
+6. It checks that nothing here names a copy that was removed.
+
+What it removes is only what is provably a published sessionpipe: a real folder, never a
+link, named `node_modules/sessionpipe`, in the global folder of a Node this computer has
+(a `lib/node_modules` anywhere else is a project's) or in an entry of npm's npx cache,
+holding nothing a published package doesn't, with a package.json that says it is
+sessionpipe; a folder npm left behind from an install that was cut off
+(`.sessionpipe-XXXXXXXX`); and the link npm made for it. It deletes these itself, the
+folder and its own link: npm is not asked to uninstall, since npm takes whatever sits at
+a prefix's command path. A git checkout, a build, a folder someone linked, a project's
+own dependency and a file that only has the name are left alone and named, with the
+reason. A folder is one folder by whatever name it is reached. Volta's copy is Volta's
+to remove. A copy in the npx cache that nothing uses is npm's own cache: it is no reason
+to act, and goes with the rest when there is one.
+
+Where it can't promise that typing `sessionpipe` ends up starting the one clean copy, it
+changes nothing and names the one line to run:
+
+- a file that is not sessionpipe's sits where the copy's link goes: the line that moves
+  it aside;
+- the copy you type is where you may not write, and is not whole or not the newest: the
+  `sudo npm install -g --prefix …` line that updates it where it is (after it,
+  `sessionpipe reinstall` does the rest and leaves that copy as it is);
+- the first `sessionpipe` on your PATH is a file npm did not make (a version manager's
+  shim, a wrapper) and the command was not started through it: it can't tell which copy
+  that file starts, and names no command, since none leads out by itself. Started through
+  such a file (a shim starts npm's own link), the copy it runs from is taken to be the
+  one you type: it is made the newest in place, and because that is taken and not read,
+  no other installed copy is removed and the last line says so;
+- what you type is not a copy npm installed (a checkout, a linked folder, the copy Volta
+  keeps) and a copy npm installed needs repair: it leaves what you type alone. (With no
+  npm copy here there is nothing to repair, and `doctor` says the same.)
+- a folder that is not provably sessionpipe's sits where npm keeps the package (what an
+  install that was cut off left, with no package.json to say what it is; a build): the
+  line that moves it aside;
+- the folder the command would go in is not on your PATH.
+
+A line that moves something aside goes on through `npx` in the same line, since
+`sessionpipe` may be nowhere to type once it has run. A copy it may not write is left,
+with the one line that removes exactly what it would have removed (`sudo rm -r <the
+folder> <its link>`). What a system drops into a folder by itself (`.DS_Store`,
+`Thumbs.db`, `desktop.ini`) says nothing about whose the folder is, and goes with it.
+
+Exit codes are `update`'s: `0` one copy (or nothing to repair); `3` the background
+service is still at work on something of its own (it restarts by itself when it runs
+the one copy; when it runs another copy, that copy stays until it is done, and the line
+says to run this once more); `1` it stopped, or a copy is still there, with the one
+command to run next; `2` a wrong argument. A run that stopped anywhere is finished by
+running it again.
+
+`sessionpipe doctor` names it where it is the answer: more than one copy, a copy that
+is not whole, or a link to one that is gone. It reads the copies and runs none.
+`sessionpipe update` stays the answer when there is one copy and it is not the newest.
+
+A sessionpipe that keeps its files somewhere other than this computer's usual place (a
+test, an agent's throwaway world) may only look at and remove copies inside its own
+home folder, and none at all when that home is your real one.
+
 ## Session names from claude.ai
 
 A session the Claude app starts on this machine gets its name from claude.ai, a few

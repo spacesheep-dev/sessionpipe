@@ -10,6 +10,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -39,6 +40,7 @@ import { moveControlSecrets } from "../src/control/store.js";
 import { HttpSink } from "../src/http-sink.js";
 import { installLauncher } from "../src/launcher.js";
 import { Refusal } from "../src/refusal.js";
+import { type Inventory, look } from "../src/reinstall/find.js";
 import { factsState, VERSION } from "../src/run.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
 import { bestStore, dropSinkSecrets, fileKept, moveSinkSecrets, sinkWithSecrets, storeLabel } from "../src/secrets.js";
@@ -103,6 +105,12 @@ vi.mock("../src/ask.js", async (original) => ({
   ...(await original<typeof import("../src/ask.js")>()),
   askMain: vi.fn(async () => 0),
 }));
+// The look `doctor` and `status` take at this home's copies of sessionpipe is the real
+// one, at real folders: what it was handed, and what it answered, can be read here.
+vi.mock("../src/reinstall/find.js", async (original) => {
+  const real = await original<typeof import("../src/reinstall/find.js")>();
+  return { ...real, look: vi.fn(real.look) };
+});
 
 // A harness config file the system refuses to let us write (read-only: EACCES, or
 // EPERM on Windows), faked at node:fs, since chmod means nothing on Windows or to root.
@@ -140,6 +148,15 @@ let config: string;
 let home: string;
 const servers: Server[] = [];
 const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+/** The disk the temp folders are on takes `A` and `a` for one name (APFS as shipped). */
+const IGNORES_CASE = (() => {
+  const made = mkdtempSync(path.join(os.tmpdir(), "sp-Case-"));
+  try {
+    return existsSync(path.join(path.dirname(made), path.basename(made).toLowerCase()));
+  } finally {
+    rmSync(made, { recursive: true, force: true });
+  }
+})();
 
 function put(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
@@ -177,9 +194,21 @@ function said(r: { lines: string[] }, title: string): string | undefined {
   const m = r.lines.map((l) => new RegExp(`^ {2}(.) ${quoted(title)} +(.*)$`).exec(l)).find(Boolean);
   return m ? `${m[1]} ${m[2]}` : undefined;
 }
-/** Doctor's "To fix", from its heading on. */
-const fixes = (r: { lines: string[] }): string[] =>
-  r.lines.includes("To fix") ? r.lines.slice(r.lines.indexOf("To fix")) : [];
+/** Doctor's last line wherever it has something to fix: the way back in when the command
+ *  itself is what broke. */
+const REPAIR =
+  "  If `sessionpipe` itself stops working, this repairs it from scratch: `npx -y sessionpipe@latest reinstall`";
+/** Doctor's "To fix", from its heading on, without that closing line: which is there,
+ *  after a blank, exactly when there is something to fix. */
+const fixes = (r: { lines: string[] }): string[] => {
+  if (!r.lines.includes("To fix")) {
+    expect(r.lines).not.toContain(REPAIR);
+    return [];
+  }
+  const all = r.lines.slice(r.lines.indexOf("To fix"));
+  expect(all.slice(-2)).toEqual(["", REPAIR]);
+  return all.slice(0, -2);
+};
 /** Doctor times the hook by this clock: each of its eight runs takes one millisecond. */
 function steadyHook(): void {
   let tick = 0n;
@@ -285,7 +314,9 @@ beforeEach(() => {
   for (const [k, v] of Object.entries({
     HOME: home,
     USERPROFILE: home,
-    PATH: "",
+    // Nothing on it but the folder a fresh copy's command would go to: with that folder
+    // not on PATH, `doctor` and `status` say so on every page (a test of its own, below).
+    PATH: path.join(home, ".local", "bin"),
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_STATE_HOME: path.join(home, ".local", "state"),
     XDG_DATA_HOME: path.join(home, ".local", "share"),
@@ -297,6 +328,10 @@ beforeEach(() => {
     SESSIONPIPE_STATE: state,
     SESSIONPIPE_DATA: path.join(tmp, "data"),
     SESSIONPIPE_SOCKET: path.join(tmp, "ctl.sock"),
+    // This runner's own npmrc is no part of the home that is looked in: npm names it to
+    // all it starts (`npm test`, `npx vitest`), and doctor reads npm's prefix from the
+    // file named there.
+    npm_config_userconfig: undefined,
     SESSIONPIPE_SECRETS: "file",
     SESSIONPIPE_CLAUDE: path.join(tmp, "no-claude"),
     SESSIONPIPE_NO_UPDATE_CHECK: undefined,
@@ -1497,7 +1532,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     expect(text).not.toContain("tok_secret");
     // The one thing to do: the sink that stopped, with the command alone on its line.
     expect(lines[0]).toBe("! 1 thing needs attention");
-    expect(lines.slice(-3)).toEqual([
+    expect(fixes({ lines })).toEqual([
       "To fix",
       "  1. kc stopped taking events (HTTP 401); they wait on this computer. See what it answers now:",
       "       sessionpipe sink test kc",
@@ -1583,7 +1618,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     );
     expect(down.text).toContain("  ! Claude Code ~/.claude-second  not signed in, as this shell sees it\n");
     expect(down.text).toMatch(/\n {2}! failed {3}installing 9\.9\.9 \d+ days ago: EACCES\n/);
-    expect(down.lines.slice(down.lines.indexOf("To fix"))).toEqual([
+    expect(fixes(down)).toEqual([
       "To fix",
       "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
       "       sessionpipe control run",
@@ -1682,7 +1717,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
         "",
       ].join("\n"),
     );
-    expect(lines.slice(lines.indexOf("To fix"))).toEqual([
+    expect(fixes({ lines })).toEqual([
       "To fix",
       "  1. The hooks have no launcher to run. Write them again from this copy:",
       "       sessionpipe install",
@@ -1735,7 +1770,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     );
     const page = await run("doctor");
     expect(page.text).toContain("\nAgents\n  ! claude-code  hooks out of date · ~/.claude/settings.json\n");
-    expect(page.lines.slice(-2)).toEqual([
+    expect(fixes(page).slice(-2)).toEqual([
       "  2. The hooks for claude-code are missing or out of date, so not every session is reported. Write them again:",
       "       sessionpipe install",
     ]);
@@ -1755,7 +1790,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     onPlatform("win32");
     const failed = await run("doctor");
     expect(failed.text).toContain("  ! hook speed          the hook could not be started\n");
-    expect(failed.lines.slice(-3)).toEqual([
+    expect(fixes(failed)).toEqual([
       "To fix",
       "  1. The hook that agents run could not be started from this copy. Write the hooks again:",
       "       sessionpipe install",
@@ -1774,6 +1809,633 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
     expect(j.hook_wall_ms).toBeNull();
     expect(j.timing).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("doctor and status: every copy of sessionpipe on this computer", () => {
+  /** Where a cli.js of this world leaves its mark if anything starts it: outside the home
+   *  that is looked in. */
+  const ran = () => path.join(tmp, "ran");
+  let marks = 0;
+  /** A package folder: what its package.json says it is, and a cli.js that tells on
+   *  whoever runs it. */
+  const pkg = (dir: string, version: string, name = "sessionpipe"): string => {
+    put(path.join(dir, "package.json"), { name, version });
+    put(
+      path.join(dir, "dist", "cli.js"),
+      `require("node:fs").writeFileSync(${JSON.stringify(path.join(ran(), `${++marks}`))}, process.argv.slice(2).join(" "));\n`,
+    );
+    return dir;
+  };
+  /** A published sessionpipe as npm installs one for every folder, with its bin link. */
+  const install = (prefix: string, version: string): string => {
+    const dir = pkg(path.join(prefix, "lib", "node_modules", "sessionpipe"), version);
+    mkdirSync(path.join(prefix, "bin"), { recursive: true });
+    symlinkSync(
+      path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"),
+      path.join(prefix, "bin", "sessionpipe"),
+    );
+    return dir;
+  };
+  /** A checkout of sessionpipe, and someone's own link to it in `~/bin`. */
+  const checkout = (): string => {
+    const dir = pkg(path.join(home, "src", "sessionpipe"), "1.1.0");
+    put(path.join(dir, "src", "cli.ts"), "");
+    mkdirSync(path.join(home, "bin"), { recursive: true });
+    symlinkSync(path.join(dir, "dist", "cli.js"), path.join(home, "bin", "sessionpipe"));
+    return dir;
+  };
+  const onPath = (...dirs: string[]) => vi.stubEnv("PATH", dirs.join(path.delimiter));
+  const json = async () => JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+  /** The warnings a program reads that are about copies, or about what typing starts. */
+  const about = (j: { warnings: string[] }): string[] =>
+    j.warnings.filter((w) => /copies of sessionpipe|copy of sessionpipe|Typing `sessionpipe`|on your PATH/.test(w));
+  const NOT_FOUND = (bin: string) =>
+    `${bin} is not on your PATH: add it, or \`sessionpipe\` is not found when you type it.`;
+
+  beforeEach(() => {
+    marks = 0;
+    mkdirSync(ran());
+    steadyHook();
+    // Where this runner keeps its own Node says nothing of the home that is looked in; nor
+    // does who started these tests (`npm test` and `npx vitest` say `npm_command` to all
+    // they start, and the look passes a `node_modules/.bin` over where that is said).
+    for (const k of [
+      "npm_config_cache",
+      "npm_config_prefix",
+      "npm_command",
+      "N_PREFIX",
+      "NVM_DIR",
+      "FNM_DIR",
+      "ASDF_DATA_DIR",
+      "VOLTA_HOME",
+    ])
+      vi.stubEnv(k, undefined as never);
+  });
+
+  it("looks in this home for real: one copy that is typed is nothing to say, a second is a thing to fix, one that is not whole is said as that", async () => {
+    const local = install(path.join(home, ".local"), "1.0.0");
+    expect((await run("status")).lines[0]).toBe("✓ All good");
+    const well = await run("doctor");
+    expect(well.lines[0]).toBe("✓ All good");
+    expect(well.text).not.toMatch(/^ {2}. copies /m);
+    // For a program: the one copy, whole, and what uses it; no word of how it answered.
+    const one = await json();
+    expect(one.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+    expect(about(one)).toEqual([]);
+
+    const other = install(path.join(home, ".npm-global"), "0.9.0");
+    const brief = await run("status");
+    expect(brief.lines[0]).toBe("! 1 thing needs attention");
+    expect(brief.text).toContain("copies: 1.0.0 in ~/.local (you type this); 0.9.0 in ~/.npm-global (nothing uses it)");
+    const d = await run("doctor");
+    expect(d.text).toMatch(
+      row("!", "copies", "1.0.0 in ~/.local (you type this); 0.9.0 in ~/.npm-global (nothing uses it)"),
+    );
+    expect(fixes(d)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const two = await json();
+    expect(two.copies).toEqual([
+      { dir: local, version: "1.0.0", whole: true, uses: ["typed"] },
+      { dir: other, version: "0.9.0", whole: true, uses: [] },
+    ]);
+    for (const c of two.copies) expect(c).not.toHaveProperty("runs");
+    expect(about(two)).toEqual([
+      `2 copies of sessionpipe are on this computer (1.0.0 in ${local}; 0.9.0 in ${other}); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+
+    // One copy again, and its cli.js is gone: not whole, read from the disk and said as that.
+    rmSync(path.join(home, ".npm-global"), { recursive: true });
+    rmSync(path.join(local, "dist", "cli.js"));
+    const broken = await run("doctor");
+    expect(broken.text).toMatch(
+      row("!", "copies", "1.0.0 in ~/.local (its dist/cli.js is missing (an install that was cut off?))"),
+    );
+    expect(fixes(broken)).toEqual([
+      "To fix",
+      "  1. The copy of sessionpipe on this computer is not whole. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    const j = await json();
+    expect(j.copies).toEqual([{ dir: local, version: "1.0.0", whole: false, uses: ["typed"] }]);
+    expect(about(j)).toEqual([
+      `the copy of sessionpipe on this computer is not whole (1.0.0 in ${local}: its dist/cli.js is missing (an install that was cut off?)); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+    // Nothing outside this test's home was looked at: the copy these tests run from is no row.
+    for (const seen of [one, two, j])
+      expect(seen.copies.every((c: { dir: string }) => c.dir.startsWith(`${home}${path.sep}`))).toBe(true);
+  });
+
+  it("a folder an install left behind, and a link to a copy that is gone: each is said, and one command puts it right", async () => {
+    const local = install(path.join(home, ".local"), "1.0.0");
+    // npm's own leftover beside the copy: the same package, under the name npm moves one aside by.
+    const aside = pkg(path.join(home, ".local", "lib", "node_modules", ".sessionpipe-a1B2c3D4"), "0.9.0");
+    const d = await run("doctor");
+    expect(d.text).toMatch(
+      row(
+        "!",
+        "copies",
+        "1.0.0 in ~/.local (you type this); a leftover in ~/.local (left behind by an install that was cut off)",
+      ),
+    );
+    expect(fixes(d)[1]).toBe(
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+    );
+    const two = await json();
+    expect(two.copies).toEqual([
+      { dir: local, version: "1.0.0", whole: true, uses: ["typed"] },
+      { dir: aside, version: "0.9.0", whole: false, uses: [] },
+    ]);
+    expect(about(two)).toEqual([
+      `2 copies of sessionpipe are on this computer (1.0.0 in ${local}; a leftover in ${aside}); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+    // The leftover alone, and the link of the copy that is gone: nothing is whole here.
+    rmSync(local, { recursive: true });
+    const link = path.join(home, ".local", "bin", "sessionpipe");
+    const gone = await run("doctor");
+    expect(gone.text).toMatch(
+      row(
+        "!",
+        "copies",
+        "a leftover in ~/.local (left behind by an install that was cut off); ~/.local/bin/sessionpipe, a link to one that is gone",
+      ),
+    );
+    expect(fixes(gone).slice(1)).toEqual([
+      "  1. The copy of sessionpipe on this computer is not whole. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(about(await json())).toEqual([
+      `the copy of sessionpipe on this computer is not whole (a leftover in ${aside}: left behind by an install that was cut off; ${link} is a link to one that is gone); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+    // The link alone: no copy to list, and still one thing to put right.
+    rmSync(aside, { recursive: true });
+    const bare = await json();
+    expect(bare.copies).toEqual([]);
+    expect(about(bare)).toEqual([
+      `the copy of sessionpipe on this computer is not whole (${link} is a link to one that is gone); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+    expect((await run("doctor")).text).toMatch(
+      row("!", "copies", "~/.local/bin/sessionpipe, a link to one that is gone"),
+    );
+  });
+
+  it("an npx cache entry nothing uses is npm's cache, not a second copy: nothing to say", async () => {
+    const local = install(path.join(home, ".local"), "1.0.0");
+    pkg(path.join(home, ".npm", "_npx", "0a1b2c3d4e5f", "node_modules", "sessionpipe"), "0.9.0");
+    const j = await json();
+    expect(j.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+    expect(about(j)).toEqual([]);
+    expect((await run("doctor")).text).not.toMatch(/^ {2}. copies /m);
+  });
+
+  it("M4: doctor and status run nothing they find: every copy is read, and no cli.js is started, whatever the proof says of its folder", async () => {
+    // The copy that is typed and that the proof accepts: the one `reinstall` may ask for
+    // its version, and doctor may not.
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const stray = install(path.join(home, ".npm-global"), "0.9.0");
+    // A folder of the name in a prefix that is looked in, whose package.json says it is
+    // another package; an npx cache entry; a checkout someone linked onto PATH.
+    const other = pkg(
+      path.join(home, ".nvm", "versions", "node", "v22.1.0", "lib", "node_modules", "sessionpipe"),
+      "3.0.0",
+      "left-pad",
+    );
+    const cached = pkg(path.join(home, ".npm", "_npx", "0a1b2c3d4e5f", "node_modules", "sessionpipe"), "0.8.0");
+    const linked = checkout();
+    onPath(path.join(home, ".local", "bin"), path.join(home, "bin"));
+    const found = [local, stray, other, cached, linked];
+    // The tell-tale is live: started by hand, a cli.js of this world leaves its mark.
+    const real = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    real.spawnSync(process.execPath, [path.join(stray, "dist", "cli.js"), "--version"]);
+    expect(readdirSync(ran())).toHaveLength(1);
+    expect(readFileSync(path.join(ran(), readdirSync(ran())[0] as string), "utf8")).toBe("--version");
+    rmSync(ran(), { recursive: true });
+    mkdirSync(ran());
+
+    const brief = await run("status");
+    const page = await run("doctor");
+    const j = await json();
+    // What it says, it read: each release is its package.json's.
+    const said = "1.0.0 in ~/.local (you type this); 0.9.0 in ~/.npm-global (nothing uses it)";
+    expect(brief.text).toContain(`copies: ${said}`);
+    expect(page.text).toMatch(row("!", "copies", said));
+    expect(j.copies).toEqual([
+      { dir: local, version: "1.0.0", whole: true, uses: ["typed"] },
+      { dir: stray, version: "0.9.0", whole: true, uses: [] },
+    ]);
+    // The look each of the three took was handed no way to run a copy.
+    expect(vi.mocked(look)).toHaveBeenCalledTimes(3);
+    for (const [o] of vi.mocked(look).mock.calls) {
+      expect(o).not.toHaveProperty("runs");
+      expect(o.npmPrefix).toBeNull();
+    }
+    // And it found every one of them: the folders that are no install are in what it answered.
+    const answered = vi.mocked(look).mock.results.at(-1)?.value as Inventory | undefined;
+    expect(answered?.copies.map((c) => c.dir).sort()).toEqual([...found].sort());
+    // Nothing was started but the hook doctor times: no `--version`, no file of any copy.
+    const started = [...vi.mocked(spawnSync).mock.calls, ...vi.mocked(execFileSync).mock.calls].map((c) =>
+      [c[0], ...((Array.isArray(c[1]) ? c[1] : []) as string[])].join(" "),
+    );
+    expect(started.some((s) => s.includes("hook.js"))).toBe(true);
+    expect(started.filter((s) => s.includes("--version") || found.some((dir) => s.includes(dir)))).toEqual([]);
+    expect(readdirSync(ran())).toEqual([]);
+  });
+
+  it("T2: npm's own prefix, where the person's npmrc sets one, is looked in by doctor as by reinstall: a second copy there whose command folder is off PATH is a thing to fix (it was 'All good', and reinstall then removed that copy)", async () => {
+    // The reviewer's computer: the copy that is typed is whole, and a second one sits in
+    // the prefix `~/.npmrc` names, a folder nothing else leads to. `reinstall` asks npm for
+    // its prefix and finds it; doctor asked nobody, and said all good.
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const prefix = path.join(home, "tools", "npm");
+    const second = install(prefix, "0.9.0");
+    const well = await run("doctor");
+    expect(well.lines[0]).toBe("✓ All good");
+    expect(vi.mocked(look).mock.calls.at(-1)?.[0].npmPrefix).toBeNull();
+    put(path.join(home, ".npmrc"), `registry=https://registry.npmjs.org/\nprefix=${prefix}\n`);
+    const d = await run("doctor");
+    expect(vi.mocked(look).mock.calls.at(-1)?.[0].npmPrefix).toBe(prefix);
+    expect(d.lines[0]).toBe("! 1 thing needs attention");
+    expect(d.text).toMatch(
+      row("!", "copies", "1.0.0 in ~/.local (you type this); 0.9.0 in ~/tools/npm (nothing uses it)"),
+    );
+    expect(fixes(d)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const j = await json();
+    expect(j.copies.map((c: { dir: string }) => c.dir)).toEqual([local, second]);
+    expect((await run("status")).lines[0]).toBe("! 1 thing needs attention");
+    // No npm was started to be asked, and no copy.
+    const started = [...vi.mocked(spawnSync).mock.calls, ...vi.mocked(execFileSync).mock.calls].map((c) =>
+      [c[0], ...((Array.isArray(c[1]) ? c[1] : []) as string[])].join(" "),
+    );
+    expect(started.filter((x) => /\bnpm\b|--version|prefix/.test(x))).toEqual([]);
+    expect(readdirSync(ran())).toEqual([]);
+  });
+
+  it("npmrc: the prefix doctor hands the look is the one the person's npmrc sets: the file npm names or `~/.npmrc`, its `prefix=` line, without its quotes, with `~` and the HOME variable as npm reads them; none where it sets none", async () => {
+    const asked = async (): Promise<string | null | undefined> => {
+      vi.mocked(look).mockClear();
+      await run("status");
+      expect(vi.mocked(look)).toHaveBeenCalledTimes(1);
+      return vi.mocked(look).mock.calls[0]?.[0].npmPrefix;
+    };
+    const rc = path.join(home, ".npmrc");
+    // No file: none. A folder where the file would be: none, and nothing is thrown.
+    expect(await asked()).toBeNull();
+    mkdirSync(rc);
+    expect(await asked()).toBeNull();
+    rmSync(rc, { recursive: true });
+    // (Folders of this test's own: the look is handed each, and reads there.)
+    const O = path.join(tmp, "opt");
+    for (const [text, prefix] of [
+      // Set outright, alone or among other lines, with or without spaces about the `=`.
+      [`prefix=${O}/npm\n`, `${O}/npm`],
+      [`registry=https://registry.npmjs.org/\nprefix = ${O}/npm  \nfund=false\n`, `${O}/npm`],
+      [`  prefix=${O}/npm`, `${O}/npm`],
+      // In quotes of either kind: the folder is what is between them.
+      [`prefix="${O}/my npm"\n`, `${O}/my npm`],
+      [`prefix='${O}/npm'\n`, `${O}/npm`],
+      // npm's own two ways to say the home folder; `~` only where it is the whole first part.
+      ["prefix=~/.npm-packages\n", path.join(home, ".npm-packages")],
+      ["prefix=~\n", home],
+      ["prefix=~\\tools\n", `${home}\\tools`],
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: npm's own spelling in an npmrc
+      ["prefix=${HOME}/.npm-global\n", path.join(home, ".npm-global")],
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: npm's own spelling in an npmrc
+      ['prefix="${HOME}/a/${HOME}"\n', `${home}/a/${home}`],
+      ["prefix=~other/npm\n", "~other/npm"],
+      [`prefix=${O}/~/npm\n`, `${O}/~/npm`],
+      // No line that sets it: another key that ends in the word, a line that is a comment,
+      // a file with nothing in it.
+      ["save-prefix=~\ntag-version-prefix=v\n", null],
+      [`# prefix=${O}/npm\n;prefix=${O}/npm\n`, null],
+      ["", null],
+      ["registry=https://registry.npmjs.org/\n", null],
+      // A `prefix=` with nothing after it names no folder (npm reads it as none set): it
+      // took the next line of the file for one. Nor do blanks alone; and the line after
+      // it is still read as its own.
+      ["prefix=\nfund=false\n", null],
+      ["prefix= \t\nfund=false\n", null],
+      [`prefix=\nprefix=${O}/npm\n`, `${O}/npm`],
+      [`\n\n\tprefix\t=\t${O}/npm\t\n`, `${O}/npm`],
+    ] as const) {
+      put(rc, text);
+      expect(await asked(), JSON.stringify(text)).toBe(prefix);
+    }
+    // The file npm itself names (`npm_config_userconfig`) is the one read, and then
+    // `~/.npmrc` is not; named and not there, none.
+    put(rc, `prefix=${O}/home\n`);
+    const other = path.join(tmp, "elsewhere", "npmrc");
+    put(other, `prefix=${O}/named\n`);
+    vi.stubEnv("npm_config_userconfig", other);
+    expect(await asked()).toBe(`${O}/named`);
+    put(other, "fund=false\n");
+    expect(await asked()).toBeNull();
+    vi.stubEnv("npm_config_userconfig", path.join(tmp, "elsewhere", "none"));
+    expect(await asked()).toBeNull();
+    // Named by an empty word, it is `~/.npmrc` again.
+    vi.stubEnv("npm_config_userconfig", "");
+    expect(await asked()).toBe(`${O}/home`);
+    // `reinstall` does not read it: it asks npm itself (cli-reinstall.test.ts).
+  });
+
+  it("M3, N4: what typing starts is said where npm did not install it: a checkout linked first on PATH is a row that only informs, no warning, nothing to fix, all good", async () => {
+    checkout();
+    onPath(path.join(home, "bin"), path.join(home, ".local", "bin"));
+    // `reinstall`'s own sentence for it (plan.ts `typedAs`), without its full stop.
+    const sentence =
+      "Typing `sessionpipe` starts ~/src/sessionpipe, which npm did not install (a checkout, a linked folder)";
+    const d = await run("doctor");
+    expect(d.text).toMatch(row("·", "copies", sentence));
+    expect(d.text.match(/^ {2}. copies /gm)).toHaveLength(1);
+    // It is what is so on a contributor's computer, and no finding: it was "1 thing needs
+    // attention" there for good, with nothing to type. It counts for nothing: all good,
+    // nothing to fix, `sessionpipe reinstall` is not named, and the exit code is left alone.
+    expect(d.lines[0]).toBe("✓ All good");
+    expect(fixes(d)).toEqual([]);
+    expect(d.text).not.toContain("sessionpipe reinstall");
+    expect(process.exitCode).toBeUndefined();
+    // `status` leaves out a row that only informs.
+    const brief = await run("status");
+    expect(brief.lines[0]).toBe("✓ All good");
+    expect(said(brief, "This computer")).not.toContain("copies");
+    // And a program is warned of nothing.
+    const j = await json();
+    expect(j.copies).toEqual([]);
+    expect(about(j)).toEqual([]);
+    expect(j.warnings.join("\n")).not.toContain("Typing");
+
+    // With two installed copies beside it the row is the finding's: the copies, then what
+    // is typed. And `sessionpipe reinstall` is not named as the way out: run there it
+    // leaves what is typed alone and refuses (these tests reported that doctor named it,
+    // and no longer said why it did nothing). One thing to fix, with no command, so the
+    // exit code is left alone.
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const other = install(path.join(home, ".npm-global"), "0.9.0");
+    const both = await run("doctor");
+    expect(both.text).toMatch(
+      row("!", "copies", `1.0.0 in ~/.local (nothing uses it); 0.9.0 in ~/.npm-global (nothing uses it); ${sentence}`),
+    );
+    expect(both.text.match(/^ {2}. copies /gm)).toHaveLength(1);
+    expect(both.lines[0]).toBe("! 1 thing needs attention");
+    expect(fixes(both)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. What you type is not a copy npm installed, so `sessionpipe reinstall` leaves it alone and can't put this right from here.",
+    ]);
+    expect(both.text).not.toMatch(/^ {7}sessionpipe reinstall$/m);
+    expect(process.exitCode).toBeUndefined();
+    expect(about(await json())).toEqual([
+      `2 copies of sessionpipe are on this computer (1.0.0 in ${local}; 0.9.0 in ${other}); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+  });
+
+  it("M3: a file first on PATH that is no link of npm's, and doctor not started through it: which copy it starts can't be told, so doctor has no finding: all good, as `reinstall` says nothing to repair", async () => {
+    // As asdf, nodenv or mise in shims mode lay it out: the shim first on PATH, the one
+    // healthy copy in the manager's own Node. These tests run from a checkout.
+    const prefix = path.join(home, ".asdf", "installs", "nodejs", "22.1.0");
+    const copy = install(prefix, "1.0.0");
+    const shim = path.join(home, ".asdf", "shims", "sessionpipe");
+    put(shim, '#!/bin/sh\nexec asdf exec sessionpipe "$@"\n');
+    chmodSync(shim, 0o755);
+    onPath(path.dirname(shim));
+    // The file may well be the shim that starts this very copy: nothing is KNOWN to be
+    // astray. Doctor says only what is known (a row and a thing to fix of "can't be told"
+    // made every asdf, nodenv and mise computer one that needs attention).
+    const d = await run("doctor");
+    expect(d.lines[0]).toBe("✓ All good");
+    expect(d.text).not.toMatch(/^ {2}. copies /m);
+    expect(d.text).not.toContain("can't be told");
+    expect(fixes(d)).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+    const brief = await run("status");
+    expect(brief.lines[0]).toBe("✓ All good");
+    expect(brief.text).not.toContain("copies");
+    const j = await json();
+    // The copy is whole and the only one: nothing is said of it, and nobody is known to type it.
+    expect(j.copies).toEqual([{ dir: copy, version: "1.0.0", whole: true, uses: [] }]);
+    expect(about(j)).toEqual([]);
+    expect(j.warnings.filter((w: string) => /shims|can't be told/.test(w))).toEqual([]);
+  });
+
+  it("M3: nothing is typed and the folder an installed copy's command is in is not on PATH: that copy's folder is named; with no copy installed there is nothing to say of PATH", async () => {
+    // No copy at all, and no folder on PATH where one would go: nothing to say of this
+    // computer. (Doctor named `~/.local/bin` here, the one place it knows without asking
+    // npm, and counted it as a thing to fix: for anyone who runs it through npx or from a
+    // checkout before installing, and of a folder `reinstall` might never install into.)
+    onPath(path.join(home, "elsewhere"));
+    const none = await run("doctor");
+    expect(none.lines[0]).toBe("✓ All good");
+    expect(none.text).not.toMatch(/^ {2}. copies /m);
+    expect(none.text).not.toContain("on your PATH");
+    expect(fixes(none)).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+    expect((await run("status")).text).not.toContain("copies");
+    const j = await json();
+    expect(j.copies).toEqual([]);
+    expect(about(j)).toEqual([]);
+    // With no PATH at all, the same.
+    onPath();
+    expect((await run("doctor")).lines[0]).toBe("✓ All good");
+    expect(about(await json())).toEqual([]);
+    onPath(path.join(home, "elsewhere"));
+    // One whole copy that no folder on PATH leads to: `sessionpipe` is not found, and its
+    // own folder is the one to add. A thing to fix, said once more under "To fix", with no
+    // command of sessionpipe's.
+    const stray = install(path.join(home, ".npm-global"), "1.0.0");
+    const off = await json();
+    expect(off.copies).toEqual([{ dir: stray, version: "1.0.0", whole: true, uses: [] }]);
+    expect(about(off)).toEqual([NOT_FOUND("~/.npm-global/bin")]);
+    const lost = await run("doctor");
+    expect(lost.text).toMatch(row("!", "copies", NOT_FOUND("~/.npm-global/bin")));
+    expect(lost.lines[0]).toBe("! 1 thing needs attention");
+    expect(fixes(lost)).toEqual(["To fix", `  1. ${NOT_FOUND("~/.npm-global/bin")}`]);
+    expect(process.exitCode).toBeUndefined();
+    expect(said(await run("status"), "This computer")).toMatch(
+      /^! .*, copies: ~\/\.npm-global\/bin is not on your PATH: /,
+    );
+    // The same where another folder of one's own IS on PATH, and empty: the copy is still
+    // not found, and it is the copy's folder that is named ("All good" was said here).
+    mkdirSync(path.join(home, ".local", "bin"), { recursive: true });
+    onPath(path.join(home, ".local", "bin"));
+    expect(about(await json())).toEqual([NOT_FOUND("~/.npm-global/bin")]);
+    expect((await run("doctor")).lines[0]).toBe("! 1 thing needs attention");
+    // Added, it is what typing starts: nothing to say.
+    onPath(path.join(home, "elsewhere"), path.join(home, ".npm-global", "bin"));
+    const on = await json();
+    expect(on.copies).toEqual([{ dir: stray, version: "1.0.0", whole: true, uses: ["typed"] }]);
+    expect(about(on)).toEqual([]);
+    expect((await run("doctor")).text).not.toMatch(/^ {2}. copies /m);
+  });
+
+  it("a home that is a link ($HOME names it by another spelling than the disk does): what doctor says of a folder under it reads `~` all the same", async () => {
+    // The look spells a folder by where it really is; `~` was written only for $HOME's
+    // own spelling, so the whole real path was printed in every row and sentence.
+    install(path.join(home, ".local"), "1.0.0");
+    install(path.join(home, ".npm-global"), "0.9.0");
+    const alias = path.join(tmp, "alias");
+    symlinkSync(home, alias);
+    vi.stubEnv("HOME", alias);
+    vi.stubEnv("USERPROFILE", alias);
+    onPath(path.join(home, "elsewhere"));
+    const d = await run("doctor");
+    expect(d.text).toMatch(
+      row(
+        "!",
+        "copies",
+        `1.0.0 in ~/.local (nothing uses it); 0.9.0 in ~/.npm-global (nothing uses it); ${NOT_FOUND("~/.local/bin")}`,
+      ),
+    );
+    expect(fixes(d).at(-1)).toBe(`  2. ${NOT_FOUND("~/.local/bin")}`);
+    const brief = said(await run("status"), "This computer");
+    expect(brief).toContain("copies: 1.0.0 in ~/.local (nothing uses it); 0.9.0 in ~/.npm-global (nothing uses it)");
+    expect(brief).not.toContain(home);
+    // A link that leads nowhere, named by its file: the same.
+    rmSync(path.join(home, ".npm-global", "lib"), { recursive: true });
+    expect((await run("doctor")).text).toMatch(/~\/\.npm-global\/bin\/sessionpipe, a link to one that is gone/);
+  });
+
+  it("M1: one healthy copy, and PATH names its folder by another spelling of this home (a link to it): one copy, nothing to say", async () => {
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const alias = path.join(tmp, "alias");
+    symlinkSync(home, alias);
+    onPath(path.join(alias, ".local", "bin"));
+    const j = await json();
+    expect(j.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+    expect(about(j)).toEqual([]);
+    const d = await run("doctor");
+    expect(d.lines[0]).toBe("✓ All good");
+    expect(d.text).not.toMatch(/^ {2}. copies /m);
+    expect(d.text).not.toContain("sessionpipe reinstall");
+    expect((await run("status")).lines[0]).toBe("✓ All good");
+    // Both spellings on PATH, in either order: still the one folder.
+    for (const dirs of [
+      [path.join(alias, ".local", "bin"), path.join(home, ".local", "bin")],
+      [path.join(home, ".local", "bin"), path.join(alias, ".local", "bin")],
+    ]) {
+      onPath(...dirs);
+      const twice = await json();
+      expect(twice.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+      expect(about(twice)).toEqual([]);
+    }
+    // And the other way round: this home is itself the link, and PATH names the real folder.
+    vi.stubEnv("HOME", alias);
+    onPath(path.join(home, ".local", "bin"));
+    const linked = await json();
+    expect(linked.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+    expect(about(linked)).toEqual([]);
+  });
+
+  it.skipIf(!IGNORES_CASE)(
+    "M1: one healthy copy, and PATH names its folder in another case on a disk that ignores case: one copy, nothing to say",
+    async () => {
+      const local = install(path.join(home, ".local"), "1.0.0");
+      onPath(path.join(home, ".Local", "bin"));
+      const j = await json();
+      expect(j.copies).toEqual([{ dir: local, version: "1.0.0", whole: true, uses: ["typed"] }]);
+      expect(about(j)).toEqual([]);
+      expect((await run("doctor")).text).not.toMatch(/^ {2}. copies /m);
+    },
+  );
+
+  it("L3: a folder's name is a word from the disk: what a terminal acts on is out of it before it is said, on the page and for a program", async () => {
+    // A link to a copy that is gone, in a folder someone named with a colour code and a
+    // clear-screen in it; and a checkout that is what typing starts, in one named with a
+    // line break that would start a line of its own.
+    const odd = path.join(home, `pre${ESC}[31mfix${ESC}[2J`);
+    mkdirSync(path.join(odd, "bin"), { recursive: true });
+    symlinkSync(
+      path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"),
+      path.join(odd, "bin", "sessionpipe"),
+    );
+    const source = pkg(path.join(home, `src${ESC}[32m\n✓ All good`, "sessionpipe"), "1.1.0");
+    put(path.join(source, "src", "cli.ts"), "");
+    mkdirSync(path.join(home, "bin"), { recursive: true });
+    symlinkSync(path.join(source, "dist", "cli.js"), path.join(home, "bin", "sessionpipe"));
+    onPath(path.join(home, "bin"), path.join(odd, "bin"));
+    // The checkout alone on PATH: what is typed is said on doctor's plain row.
+    onPath(path.join(home, "bin"));
+    const sentence =
+      "Typing `sessionpipe` starts ~/src ✓ All good/sessionpipe, which npm did not install (a checkout, a linked folder)";
+    const typed = await run("doctor");
+    expect(typed.text).not.toContain(ESC);
+    expect(typed.text).toMatch(row("·", "copies", sentence));
+    // With the link's folder on PATH too, the row is the finding's.
+    onPath(path.join(home, "bin"), path.join(odd, "bin"));
+    const piped = await run("doctor");
+    expect(piped.text).not.toContain(ESC);
+    expect(piped.text).toMatch(row("!", "copies", `~/prefix/bin/sessionpipe, a link to one that is gone; ${sentence}`));
+    for (const [dirs, verdict] of [
+      [[path.join(home, "bin")], "✓ All good"],
+      [[path.join(home, "bin"), path.join(odd, "bin")], "! 1 thing needs attention"],
+    ] as const) {
+      onPath(...dirs);
+      for (const where of [{ tty: true, columns: 100 }, { tty: true, columns: 40 }, {}]) {
+        const d = await runAt(where, "doctor", "--no-color");
+        expect(d.text).not.toContain(ESC);
+        // One verdict, and it is doctor's own: the folder's name starts no line of the page.
+        expect(d.lines[0]).toBe(verdict);
+        expect(d.lines.slice(1).filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
+        const s = await runAt(where, "status", "--no-color");
+        expect(s.text).not.toContain(ESC);
+        expect(s.lines[0]).toBe(verdict);
+        expect(s.lines.slice(1).filter((l) => /^\s*✓ All good/.test(l))).toEqual([]);
+      }
+      // For a program: a path is the disk's own name for it, written as JSON writes one,
+      // so nothing of it is left that a terminal printing those lines would act on. What
+      // is typed is no warning of its own.
+      const printed = (await run("doctor", "--json")).text;
+      expect(printed).not.toContain(ESC);
+      expect(about(JSON.parse(printed)).filter((w) => w.startsWith("Typing"))).toEqual([]);
+    }
+    process.exitCode = undefined;
+  });
+
+  it("Windows: doctor and status do not look for copies of sessionpipe there, whatever is on the disk", async () => {
+    // What is two copies and a checkout first on PATH anywhere else.
+    const local = install(path.join(home, ".local"), "1.0.0");
+    const other = install(path.join(home, ".npm-global"), "0.9.0");
+    checkout();
+    onPath(path.join(home, "bin"), path.join(home, ".local", "bin"));
+    for (const p of ["darwin", "linux"] as const) {
+      onPlatform(p);
+      const j = await json();
+      expect(j.copies.map((c: { dir: string }) => c.dir)).toEqual([local, other]);
+      expect(about(j)).toHaveLength(1);
+      const d = await run("doctor");
+      expect(d.text).toMatch(/^ {2}! copies /m);
+      expect(fixes(d)[1]).toMatch(/^ {2}1\. 2 copies of sessionpipe are on this computer/);
+      expect(said(await run("status"), "This computer")).toContain("copies: ");
+    }
+    expect(vi.mocked(look)).toHaveBeenCalledTimes(6);
+    vi.mocked(look).mockClear();
+    process.exitCode = undefined;
+
+    onPlatform("win32");
+    const j = await json();
+    expect(j.copies).toEqual([]);
+    expect(about(j)).toEqual([]);
+    expect(j.warnings.join("\n")).not.toContain("reinstall");
+    const d = await run("doctor");
+    expect(d.text).not.toMatch(/^ {2}. copies /m);
+    // Nothing to fix, so `reinstall` is named nowhere: not as a thing to do, and not as the
+    // way back in that a page with something to fix ends with.
+    expect(fixes(d)).toEqual([]);
+    expect(d.text).not.toContain("reinstall");
+    expect(d.lines[0]).toBe("✓ All good");
+    expect(process.exitCode).toBeUndefined();
+    expect(said(await run("status"), "This computer")).not.toContain("copies");
+    // It did not look: nothing was read to decide there is nothing to say.
+    expect(vi.mocked(look)).not.toHaveBeenCalled();
   });
 });
 
@@ -3636,7 +4298,129 @@ describe.skipIf(process.platform === "win32")("at a terminal", () => {
   });
 });
 
-// Last: this reloads the module graph, so the mocks and spies above are not its.
+describe("a refusal that is only what is left to do", () => {
+  const LEFT = "One other copy is still there: 0.9.0 in /usr/local (needs sudo)";
+  const NEXT = "sudo rm -r /usr/local/lib/node_modules/sessionpipe /usr/local/bin/sessionpipe";
+  const term = { errTty: true, columns: 200 };
+  /** One run of a command that ends by throwing `e`: what was written for errors, and the exit. */
+  async function thrown(where: { tty?: boolean; columns?: number; errTty?: boolean }, e: Error, ...flags: string[]) {
+    vi.mocked(controlMain).mockRejectedValueOnce(e);
+    const r = await runAt(where, "control", "pair", "r.example", ...flags);
+    expect(r.err).toHaveBeenCalledTimes(1);
+    expect(r.exit.mock.calls).toEqual([[1]]);
+    return String(r.err.mock.lastCall?.[0]);
+  }
+
+  it("L10: at a terminal it is said under a yellow `!` over the one line to try, and in a pipe it is the single line `sessionpipe: … Next: …`; exit 1 for both", async () => {
+    const mild = () => new Refusal(LEFT, NEXT, true, true);
+    expect(await thrown(term, mild())).toBe(
+      `${ESC}[33m${ESC}[1m!${ESC}[22m${ESC}[39m      ${LEFT}\n${ESC}[2mtry${ESC}[22m    ${ESC}[36m${NEXT}${ESC}[39m\n`,
+    );
+    expect(await thrown(term, mild(), "--no-color")).toBe(`!      ${LEFT}\ntry    ${NEXT}\n`);
+    // A narrow terminal folds what is left under its own first word; the line to try is whole.
+    expect(await thrown({ errTty: true, columns: 40 }, mild(), "--no-color")).toBe(
+      `!      One other copy is still there:\n       0.9.0 in /usr/local (needs sudo)\ntry    ${NEXT}\n`,
+    );
+    // Where errors go to no terminal (a pipe, a script, an agent) it is the one line any
+    // refusal is, the command at its end: whatever stdout is.
+    expect(await thrown({}, mild())).toBe(`sessionpipe: ${LEFT}. Next: ${NEXT}\n`);
+    expect(await thrown({ tty: true, columns: 80 }, mild())).toBe(`sessionpipe: ${LEFT}. Next: ${NEXT}\n`);
+    // Mild says how it is marked, and nothing of the line a pipe gets: one whose message
+    // names its own command is not given a second one.
+    expect(await thrown({}, new Refusal(LEFT, NEXT, false, true))).toBe(`sessionpipe: ${LEFT}\n`);
+    expect(await thrown(term, new Refusal(LEFT, NEXT, false, true), "--no-color")).toBe(
+      `!      ${LEFT}\ntry    ${NEXT}\n`,
+    );
+  });
+
+  it("L10: a refusal that is not mild is an error as it always was, and an error that is no refusal is never mild", async () => {
+    expect(await thrown(term, new Refusal(LEFT, NEXT, true))).toBe(
+      `${ESC}[31m${ESC}[1merror${ESC}[22m${ESC}[39m  ${LEFT}\n${ESC}[2mtry${ESC}[22m    ${ESC}[36m${NEXT}${ESC}[39m\n`,
+    );
+    expect(await thrown(term, new Refusal(LEFT, NEXT), "--no-color")).toBe(`error  ${LEFT}\ntry    ${NEXT}\n`);
+    expect(await thrown({}, new Refusal(LEFT, NEXT, true))).toBe(`sessionpipe: ${LEFT}. Next: ${NEXT}\n`);
+    expect(await thrown({}, new Refusal(LEFT, NEXT))).toBe(`sessionpipe: ${LEFT}\n`);
+    // Whatever an error from somewhere else carries: it is an error, and the help of what
+    // ran is the line to try.
+    const dressed = () => Object.assign(new Error(LEFT), { mild: true, inLine: true, next: NEXT });
+    expect(await thrown(term, dressed(), "--no-color")).toBe(
+      `error  ${LEFT}\ntry    sessionpipe control pair --help\n`,
+    );
+    expect(await thrown({}, dressed())).toBe(`sessionpipe: ${LEFT}\n`);
+  });
+});
+
+// From here on each test reloads the module graph, so the mocks and spies above are not its.
+describe.skipIf(process.platform === "win32")("doctor started from an installed copy", () => {
+  it("M3: a version manager's shim first on PATH, and doctor started through it from the one installed copy: that copy is what typing starts, and there is nothing to say", async () => {
+    steadyHook();
+    for (const k of [
+      "npm_config_cache",
+      "npm_config_prefix",
+      "npm_command",
+      "N_PREFIX",
+      "NVM_DIR",
+      "FNM_DIR",
+      "ASDF_DATA_DIR",
+      "VOLTA_HOME",
+    ])
+      vi.stubEnv(k, undefined as never);
+    // As asdf lays it out: only its shims are on PATH, and the copy is in its own Node.
+    const prefix = path.join(home, ".asdf", "installs", "nodejs", "22.1.0");
+    const copy = path.join(prefix, "lib", "node_modules", "sessionpipe");
+    put(path.join(copy, "package.json"), { name: "sessionpipe", version: "1.0.0" });
+    put(path.join(copy, "dist", "cli.js"), "");
+    mkdirSync(path.join(prefix, "bin"), { recursive: true });
+    symlinkSync(
+      path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"),
+      path.join(prefix, "bin", "sessionpipe"),
+    );
+    const shim = path.join(home, ".asdf", "shims", "sessionpipe");
+    put(shim, '#!/bin/sh\nexec asdf exec sessionpipe "$@"\n');
+    chmodSync(shim, 0o755);
+    vi.stubEnv("PATH", path.dirname(shim));
+    const about = (j: { warnings: string[] }): string[] =>
+      j.warnings.filter((w) => /cop(y|ies) of sessionpipe|Typing `sessionpipe`|on your PATH/.test(w));
+    // From a checkout, as every test above runs: it can't be told what the shim starts,
+    // so nobody is known to type the copy, and doctor has nothing to say of it.
+    const outside = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(outside.copies).toEqual([{ dir: copy, version: "1.0.0", whole: true, uses: [] }]);
+    expect(about(outside)).toEqual([]);
+    vi.resetModules();
+    dist.dir = path.join(copy, "dist");
+    const started = process.argv[1] as string;
+    try {
+      const installed: Cli = await import("../src/cli.js");
+      const at = async (...argv: string[]): Promise<string[]> => {
+        const lines: string[] = [];
+        await installed.main(argv, { out: (s = "") => void lines.push(s), err: vi.fn(), exit: vi.fn() });
+        return lines;
+      };
+      // From that copy, started as its cli.js by its path (`node …/dist/cli.js doctor`):
+      // the shim did not start it, so what the shim starts is still not known.
+      process.argv[1] = path.join(copy, "dist", "cli.js");
+      const byPath = JSON.parse((await at("doctor", "--json")).join("\n"));
+      expect(byPath.copies).toEqual([{ dir: copy, version: "1.0.0", whole: true, uses: ["this"] }]);
+      expect(about(byPath)).toEqual([]);
+      // Started as npm's own link to that copy, which is what a shim runs: the shim is
+      // what started this command, and this copy is what typing starts.
+      process.argv[1] = path.join(prefix, "bin", "sessionpipe");
+      const j = JSON.parse((await at("doctor", "--json")).join("\n"));
+      expect(j.copies).toEqual([{ dir: copy, version: "1.0.0", whole: true, uses: ["typed", "this"] }]);
+      expect(about(j)).toEqual([]);
+      for (const page of [await at("doctor"), await at("status")]) {
+        expect(page[0]).toBe("✓ All good");
+        expect(page.join("\n")).not.toContain("copies");
+        expect(page.join("\n")).not.toContain("sessionpipe reinstall");
+      }
+    } finally {
+      process.argv[1] = started;
+      dist.dir = realDist;
+    }
+  });
+});
+
+// Last of them: a copy that is where no copy should be.
 describe.skipIf(process.platform === "win32")("a copy under Homebrew's versioned node", () => {
   it("is warned about by doctor, with a hook path it can't resolve", async () => {
     vi.resetModules();

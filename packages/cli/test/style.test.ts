@@ -262,6 +262,142 @@ describe("fixes and failure", () => {
     expect(plain(said).split("\n")[1]?.startsWith("       ")).toBe(true);
     expect(said).toContain(`${ESC}[36msessionpipe --help${ESC}[39m`);
   });
+
+  /** The line to try: the last line of a failure at a terminal. */
+  const tried = (said: string): string => said.split("\n").at(-2) as string;
+
+  it("the line to try: the one command to run next, on a line of its own: the word dim, the command in its colour", () => {
+    expect(tried(failure(mono(), "fetch failed", "sessionpipe reinstall"))).toBe("try    sessionpipe reinstall");
+    expect(tried(failure(tty(), "fetch failed", "sessionpipe reinstall"))).toBe(
+      `${ESC}[2mtry${ESC}[22m    ${ESC}[36msessionpipe reinstall${ESC}[39m`,
+    );
+    // The command starts under the words of the error above it, as a failure sets the two.
+    expect(cols("error  ")).toBe(cols("try    "));
+    // It is the last line of a failure at a terminal, of either kind, and no part of one
+    // anywhere else.
+    for (const u of [mono(), tty()])
+      for (const mild of [false, true]) {
+        const said = failure(u, "fetch failed", "sessionpipe sink --help", mild).split("\n");
+        expect(said).toHaveLength(3);
+        expect(said[2]).toBe("");
+        expect(said[1]).toBe(tried(failure(u, "another thing", "sessionpipe sink --help")));
+        expect(plain(said[1] as string)).toBe("try    sessionpipe sink --help");
+      }
+    for (const mild of [false, true])
+      expect(failure(PLAIN, "fetch failed", "sessionpipe sink --help", mild)).not.toContain("try");
+  });
+
+  it("N2: a failure that names no command is its words and nothing under them: no `try` line at a terminal, of either kind, folded or not; in a pipe the one line", () => {
+    // Some refusals have no command that leads out (the one that was named led back to
+    // the same refusal). Then none is named: an empty line to try is no line.
+    for (const mild of [false, true]) {
+      const mark = mild ? "!      " : "error  ";
+      expect(failure(mono(), "it can't tell which copy that file starts", "", mild)).toBe(
+        `${mark}it can't tell which copy that file starts\n`,
+      );
+      for (const u of [mono(), tty(), mono(40), tty(40)]) {
+        const long = "one two three four five six seven eight nine ten eleven twelve";
+        const said = failure(u, long, "", mild);
+        expect(plain(said)).not.toMatch(/^try\b/m);
+        expect(said.endsWith("\n")).toBe(true);
+        expect(said.endsWith("\n\n")).toBe(false);
+        // The words are the same lines as with a command under them, less that one line.
+        expect(said).toBe(
+          failure(u, long, "sessionpipe --help", mild).split("\n").slice(0, -2).join("\n").concat("\n"),
+        );
+      }
+      expect(failure(PLAIN, "it can't tell", "", mild)).toBe("sessionpipe: it can't tell\n");
+    }
+  });
+
+  it("the line to try: a command is never folded, whatever its length, so it can be copied whole", () => {
+    const sudo = "sudo rm -r '/opt/my node/lib/node_modules/sessionpipe' '/opt/my node/bin/sessionpipe'";
+    const chained = [sudo, sudo.replaceAll("my node", "another node"), sudo.replaceAll("my node", "a third")].join(
+      " && ",
+    );
+    expect(cols(chained)).toBeGreaterThan(100);
+    for (const u of [tty(40), tty(80), tty(120), mono(40)])
+      for (const mild of [false, true]) {
+        const said = failure(u, "it stays", chained, mild).split("\n");
+        expect(said).toHaveLength(3);
+        expect(plain(said[1] as string)).toBe(`try    ${chained}`);
+      }
+    // The message above it folds to the same terminal; the command still does not.
+    for (const mild of [false, true]) {
+      const said = failure(
+        mono(60),
+        "one two three four five six seven eight nine ten eleven twelve",
+        chained,
+        mild,
+      ).split("\n");
+      expect(said.at(-2)).toBe(`try    ${chained}`);
+      expect(said.length).toBeGreaterThan(3);
+      for (const l of said.slice(0, -2)) expect(cols(l)).toBeLessThan(60);
+    }
+  });
+
+  it("the line to try: what a terminal would act on is taken out of the command, as out of any text", () => {
+    for (const mild of [false, true]) {
+      expect(tried(failure(mono(), "it failed", `sessionpipe${ESC}[2J update`, mild))).toBe(
+        "try    sessionpipe update",
+      );
+      // A line break in it would start a line of its own: it is a space.
+      const broken = failure(mono(), "it failed", "sessionpipe\nupdate", mild);
+      expect(broken.split("\n")).toHaveLength(3);
+      expect(tried(broken)).toBe("try    sessionpipe update");
+      expect(tried(failure(tty(), "it failed", `${ESC}[31msessionpipe update`, mild))).toBe(
+        `${ESC}[2mtry${ESC}[22m    ${ESC}[36msessionpipe update${ESC}[39m`,
+      );
+    }
+  });
+
+  const LEFT = "One other copy is still there: 0.9.0 in /usr/local (needs sudo)";
+  const SUDO = "sudo rm -r /usr/local/lib/node_modules/sessionpipe /usr/local/bin/sessionpipe";
+
+  it("L10: what is left for the person to do is said under a bold yellow `!`, not as an error: the same columns, the same line to try", () => {
+    expect(failure(mono(100), LEFT, SUDO, true)).toBe(`!      ${LEFT}\ntry    ${SUDO}\n`);
+    const coloured = failure(tty(100), LEFT, SUDO, true);
+    expect(coloured).toBe(
+      `${ESC}[33m${ESC}[1m!${ESC}[22m${ESC}[39m      ${LEFT}\n${ESC}[2mtry${ESC}[22m    ${ESC}[36m${SUDO}${ESC}[39m\n`,
+    );
+    // Nothing of it is red, and the word is not `error`; an error's own line is as it was.
+    expect(coloured).not.toContain(`${ESC}[31m`);
+    expect(plain(coloured)).not.toContain("error");
+    expect(failure(tty(100), LEFT, SUDO)).toBe(
+      `${ESC}[31m${ESC}[1merror${ESC}[22m${ESC}[39m  ${LEFT}\n${ESC}[2mtry${ESC}[22m    ${ESC}[36m${SUDO}${ESC}[39m\n`,
+    );
+    // Left out, it is an error: mild is what a caller says, never a default.
+    expect(failure(tty(100), LEFT, SUDO)).toBe(failure(tty(100), LEFT, SUDO, false));
+    // The mark and six spaces: the words start in the column an error's start in, which is
+    // the column the command starts in.
+    expect(cols("!      ")).toBe(cols("error  "));
+    expect(cols("!      ")).toBe(cols("try    "));
+    // And a long one folds under its own first word, line for line as an error does.
+    const long = "one two three four five six seven eight nine ten eleven twelve thirteen";
+    for (const u of [mono(40), tty(40)]) {
+      const mild = plain(failure(u, long, SUDO, true)).split("\n");
+      expect(mild[0]).toMatch(/^! {6}one two /);
+      expect(mild.length).toBeGreaterThan(3);
+      for (const l of mild.slice(1, -2)) expect(l).toMatch(/^ {7}\S/);
+      for (const l of mild.slice(0, -2)) expect(cols(l)).toBeLessThanOrEqual(u.width);
+      expect(mild.map((l, i) => (i ? l : l.replace(/^! {6}/, "error  ")))).toEqual(
+        plain(failure(u, long, SUDO)).split("\n"),
+      );
+    }
+    // What a terminal would act on is taken out of the words, as out of an error's.
+    expect(failure(mono(100), `still${ESC}[2J there\ntry    rm -rf ~`, SUDO, true)).toBe(
+      `!      still there try rm -rf ~\ntry    ${SUDO}\n`,
+    );
+  });
+
+  it("L10: in a pipe a mild failure is the one line every failure is: `sessionpipe: <message>`, and no line to try", () => {
+    expect(failure(PLAIN, LEFT, SUDO, true)).toBe(`sessionpipe: ${LEFT}\n`);
+    expect(failure(PLAIN, LEFT, SUDO, true)).toBe(failure(PLAIN, LEFT, SUDO));
+    // FORCE_COLOR changes nothing there, and a message of several lines is still one.
+    const piped = makeUi({ isTTY: false, env: { FORCE_COLOR: "1" } });
+    expect(failure(piped, "one is\nstill there", SUDO, true)).toBe("sessionpipe: one is still there\n");
+    expect(failure(piped, LEFT, SUDO, true)).not.toContain(ESC);
+  });
 });
 
 describe("clean: text that came from somewhere else", () => {

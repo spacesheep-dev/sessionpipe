@@ -244,11 +244,17 @@ export function fixes(ui: Ui, list: readonly Fix[]): string[] {
  *  Anywhere else it is the one line a failure has always been, `sessionpipe: <message>`:
  *  programs read it (the GUI shows the last line a failed `control pair` wrote, and the
  *  update keeps the last lines of a failed `install`). */
-export function failure(ui: Ui, message: string, next: string): string {
+export function failure(ui: Ui, message: string, next: string, mild = false): string {
   const what = clean(message);
   if (!ui.tty) return `sessionpipe: ${what}\n`;
-  const said = fold(ui, `${tint(ui, "red", tint(ui, "bold", "error"))}  `, what);
-  return `${said.join("\n")}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n`;
+  // `mild`: the command did its job and something is left for the person to do: said
+  // under the mark for that, not as an error. The line to run is the same.
+  const label = mild
+    ? `${tint(ui, "yellow", tint(ui, "bold", "!"))}      `
+    : `${tint(ui, "red", tint(ui, "bold", "error"))}  `;
+  // No command leads out of some refusals: then none is named, and the words are all.
+  const lines = fold(ui, label, what).join("\n");
+  return next ? `${lines}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n` : `${lines}\n`;
 }
 
 /** A length of time, in the two units a person reads: "12 s", "3 min", "2 h", "5 days". */

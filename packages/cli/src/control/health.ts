@@ -61,6 +61,18 @@ export function elsewhere(env: NodeJS.ProcessEnv = process.env): { now: string; 
   return i < 0 ? null : { now: now[i] as string, usual: usual[i] as string };
 }
 
+/** The folders this sessionpipe may call this computer's own, for what it looks at and
+ *  removes outside its state (`sessionpipe reinstall`): all of them where it keeps its
+ *  files in this account's usual place; where it keeps them somewhere else (a test, an
+ *  agent's throwaway world), only its own home folder, and nothing at all when that home
+ *  is this account's real one. So a world of its own is its `$HOME`, and a run in one can
+ *  never remove a copy of this computer's. */
+export function reach(env: NodeJS.ProcessEnv = process.env): true | string | null {
+  if (!elsewhere(env)) return true;
+  const home = os.homedir();
+  return samePlace(home, accountHome()) ? null : home;
+}
+
 /** The service's names, or null where this sessionpipe has none to look at or change.
  *  One that keeps its files somewhere other than this account's usual place (a test, an
  *  agent's throwaway world, a profile that sets SESSIONPIPE_CONFIG) says nothing about
@@ -84,19 +96,30 @@ export function noService(env: NodeJS.ProcessEnv = process.env): string | null {
   return `this sessionpipe keeps its files somewhere other than this computer's usual place (${where.now}, not ${where.usual}), so the usual background service is left alone`;
 }
 
+/** The service as its file on disk says it, and what launchd or systemd says of it where
+ *  that can be asked: `manager` is null where it can't (a `su -` or `sudo -u` shell with
+ *  no user manager to reach), and the file, with the copy it names, is read all the same.
+ *  Null where this sessionpipe has no service to look at. */
+export function serviceSeen(
+  o: { env?: NodeJS.ProcessEnv; exec?: Exec; platform?: NodeJS.Platform; home?: string } = {},
+): ServiceState | null {
+  const names = serviceNames(o.env);
+  return names
+    ? core.serviceState({
+        ...names,
+        ...(o.exec ? { exec: o.exec } : {}),
+        ...(o.platform ? { platform: o.platform } : {}),
+        ...(o.home ? { home: o.home } : {}),
+      })
+    : null;
+}
+
 /** Whether launchd or systemd has the service now; null where there is nothing to ask. */
 export function serviceLook(
   o: { env?: NodeJS.ProcessEnv; exec?: Exec; platform?: NodeJS.Platform; home?: string } = {},
 ): ServiceState | null {
-  const names = serviceNames(o.env);
-  if (!names) return null;
-  const st = core.serviceState({
-    ...names,
-    ...(o.exec ? { exec: o.exec } : {}),
-    ...(o.platform ? { platform: o.platform } : {}),
-    ...(o.home ? { home: o.home } : {}),
-  });
-  return st.manager ? st : null;
+  const st = serviceSeen(o);
+  return st?.manager ? st : null;
 }
 
 /** What the running service sees; null when none answers or it is too old to be asked

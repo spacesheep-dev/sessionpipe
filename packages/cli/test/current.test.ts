@@ -36,6 +36,7 @@ const service = (o: Partial<ServiceState> = {}): ServiceState => ({
   installed: true,
   loaded: true,
   argv: ["/usr/bin/node", `${MINE}/cli.js`, "control", "run"],
+  pid: null,
   ...o,
 });
 
@@ -59,7 +60,11 @@ interface Sim {
   clock: number;
 }
 
-function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; out: Promise<Outcome> } {
+function run(
+  sim: Partial<Sim>,
+  over: Partial<CurrentDeps> = {},
+  how?: { installed?: boolean },
+): { sim: Sim; out: Promise<Outcome> } {
   const s: Sim = {
     latest: "1.1.0",
     version: "1.0.0",
@@ -132,7 +137,7 @@ function run(sim: Partial<Sim>, over: Partial<CurrentDeps> = {}): { sim: Sim; ou
     say: (step) => s.said.push(step),
     ...over,
   };
-  return { sim: s, out: bringCurrent(deps) };
+  return { sim: s, out: how ? bringCurrent(deps, how) : bringCurrent(deps) };
 }
 const texts = (s: Sim): string[] => s.said.map((x) => `${x.mark}: ${x.text}`);
 
@@ -230,7 +235,9 @@ describe("the newest release, and this copy on it", () => {
     );
     expect(await out).toEqual({
       state: "failed",
-      error: "sessionpipe 1.1.0 couldn't be installed (npm install: ETARGET); this computer still runs 1.0.0",
+      // The way out when it keeps failing is named in the same sentence.
+      error:
+        "sessionpipe 1.1.0 couldn't be installed (npm install: ETARGET); this computer still runs 1.0.0. If it keeps failing, `npx -y sessionpipe@latest reinstall` installs a clean copy",
       next: "sessionpipe update",
     });
     expect(sim.restarts + sim.placed).toBe(0);
@@ -654,12 +661,31 @@ describe("the service, made to run this copy", () => {
 
 describe("the service that runs this copy already", () => {
   it("busy: it restarts itself when done", async () => {
-    const { out } = run({ status: [st("1.0.0", { busy: "a permission prompt waiting for an answer" })] });
+    const { sim, out } = run({ status: [st("1.0.0", { busy: "a permission prompt waiting for an answer" })] });
     expect(await out).toEqual({
       state: "waiting",
       version: "1.1.0",
       said: "The background service is busy: a permission prompt waiting for an answer. It restarts by itself onto sessionpipe 1.1.0 when that is done: nothing more to type.",
     });
+    // The wait that follows is said before it begins, with what the service holds.
+    expect(sim.restarts).toBe(1);
+    expect(texts(sim).at(-1)).toBe(
+      "info: the background service is busy (a permission prompt waiting for an answer): giving it a moment…",
+    );
+    expect(sim.clock).toBeGreaterThanOrEqual(25_000);
+  });
+
+  it("holding nothing, or refusing to restart: no wait is announced", async () => {
+    const moment = (s: Sim) => texts(s).filter((t) => t.includes("giving it a moment"));
+    // It restarts at once: there is nothing to wait for.
+    const free = run({ status: [st("1.0.0"), st("1.0.0"), st("1.1.0")] });
+    expect((await free.out).state).toBe("current");
+    expect(moment(free.sim)).toEqual([]);
+    // Busy, and it won't restart itself: no wait follows, so none is said.
+    const wont = run({ status: [st("1.0.0", { busy: "a headless agent run" })] }, { restart: async () => false });
+    expect((await wont.out).state).toBe("failed");
+    expect(moment(wont.sim)).toEqual([]);
+    expect(wont.sim.clock).toBe(0);
   });
 
   it("one from before 0.15 that a manager has is replaced at once, with who is mid-turn written down: its own rule would wait for ever on a busy computer", async () => {
@@ -887,5 +913,115 @@ describe("a last look", () => {
     );
     await out;
     expect(sim.clock).toBe(2000);
+  });
+});
+
+describe("after `sessionpipe reinstall` has installed the newest release as this copy", () => {
+  /** npm, which is not to be asked: it counts each time it is. */
+  const npm = () => {
+    const asked = { times: 0 };
+    return {
+      asked,
+      latest: async (): Promise<string> => {
+        asked.times++;
+        throw new Error("registry.npmjs.org can't be reached (ENOTFOUND)");
+      },
+    };
+  };
+
+  it("npm is asked nothing and nothing is said of the newest release: the hooks and the service follow", async () => {
+    const { asked, latest } = npm();
+    const { sim, out } = run(
+      { version: "1.1.0", hooks: "1.0.0", status: [st("1.0.0"), st("1.0.0"), st("1.1.0")] },
+      { latest },
+      { installed: true },
+    );
+    // Not "couldn't ask npm": it was not asked, and the last line is the green one.
+    expect(await out).toEqual({
+      state: "current",
+      version: "1.1.0",
+      said: "This computer is up to date: sessionpipe 1.1.0 runs the command, the hooks and the background service, which hears r.example.",
+    });
+    expect(asked.times).toBe(0);
+    // Nothing is installed here: the caller did that. The hooks are written, the service restarted.
+    expect(sim.installs).toEqual([]);
+    expect(sim.rearms).toBe(1);
+    expect(sim.restarts).toBe(1);
+    expect(texts(sim)).toEqual([
+      "ok: the hooks run sessionpipe 1.1.0 (claude-code)",
+      "ok: the background service restarted onto sessionpipe 1.1.0",
+    ]);
+    expect(texts(sim).join("\n")).not.toContain("newest release");
+  });
+
+  it("without it the same computer asks npm, and says what it answered or that it couldn't", async () => {
+    const { asked, latest } = npm();
+    const sim = { version: "1.1.0", hooks: "1.1.0", status: [st("1.1.0")] };
+    const { sim: unasked, out } = run(sim, { latest });
+    expect(await out).toMatchObject({ state: "failed", next: "sessionpipe update" });
+    expect(asked.times).toBe(1);
+    expect(texts(unasked)[0]).toBe(
+      "warn: couldn't ask npm for the newest release: registry.npmjs.org can't be reached (ENOTFOUND)",
+    );
+    // `installed: false` is the same as not saying it.
+    const said = run({ ...sim, latest: "1.1.0" }, {}, { installed: false });
+    await said.out;
+    expect(texts(said.sim)[0]).toBe("ok: sessionpipe 1.1.0 is the newest release");
+    const quiet = run({ ...sim, latest: "1.1.0" }, {}, {});
+    await quiet.out;
+    expect(texts(quiet.sim)[0]).toBe("ok: sessionpipe 1.1.0 is the newest release");
+  });
+});
+
+describe("a service file that names what is gone (`stale`)", () => {
+  // The service a manager has, on this copy and this release, answering: nothing to do.
+  const fine = { version: "1.1.0", latest: "1.1.0", hooks: "1.1.0", status: [st("1.1.0")] };
+
+  it("is written again though the manager has it, it names this copy and its service answers", async () => {
+    const left = run(fine);
+    expect((await left.out).state).toBe("current");
+    expect(left.sim.did).toEqual([]);
+    expect(texts(left.sim).at(-1)).toBe("ok: the background service runs sessionpipe 1.1.0");
+    // No reason, said as null or as nothing, is no reason.
+    const none = run(fine, { stale: null });
+    await none.out;
+    expect(none.sim.did).toEqual([]);
+
+    const { sim, out } = run(fine, { stale: "the node it names is gone" });
+    expect((await out).state).toBe("current");
+    // Asked to stop taking messages, then placed: the same steps as for one on another copy.
+    expect(sim.did).toEqual(["quiesce", "place"]);
+    expect(sim.restarts).toBe(0);
+    expect(texts(sim).at(-1)).toBe("ok: the background service was started again on this copy");
+  });
+
+  it("is written again where the manager doesn't have it and a daemon answers all the same", async () => {
+    const byHand = { ...fine, look: service({ loaded: false }) };
+    // Its file is there, launchd has nothing loaded, and someone's daemon answers on this
+    // release: left as it is.
+    const left = run(byHand);
+    expect((await left.out).state).toBe("current");
+    expect(left.sim.did).toEqual([]);
+
+    const { sim, out } = run(byHand, { stale: "the node it names is gone" });
+    expect((await out).state).toBe("current");
+    expect(sim.did).toEqual(["quiesce", "place"]);
+    // With no file there is no service anyone asked for: none is installed, stale or not.
+    const noFile = run({ ...fine, look: service({ installed: false, loaded: false, argv: null }) }, { stale: "gone" });
+    expect((await noFile.out).state).toBe("current");
+    expect(noFile.sim.did).toEqual([]);
+  });
+
+  it("one that is busy is not cut short for it", async () => {
+    const { sim, out } = run(
+      { ...fine, status: [st("1.1.0", { busy: "a headless agent run" })] },
+      { stale: "the node it names is gone", settleMs: 1000 },
+    );
+    expect(await out).toEqual({
+      state: "waiting",
+      version: "1.1.0",
+      said: "The background service is busy: a headless agent run. It restarts by itself onto sessionpipe 1.1.0 when that is done: nothing more to type.",
+    });
+    expect(sim.placed).toBe(0);
   });
 });
