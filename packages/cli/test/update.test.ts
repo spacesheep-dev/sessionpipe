@@ -38,10 +38,12 @@ import {
   execCapture,
   globalPrefix,
   installedVersion,
+  installInto,
   installVersion,
   isNewer,
   latestVersion,
   npmArgv,
+  npmDo,
   prefixOf,
   REGISTRY_LATEST,
   unwritable,
@@ -332,6 +334,232 @@ describe.runIf(posix)("the install's edges", () => {
       Object.defineProperty(process, "platform", real);
     }
   });
+});
+
+describe("one npm command, and an install into a prefix by its name", () => {
+  /** npm and the copy on disk stood in for: what each was run with, and what it answers. */
+  function standIn(answer: (argv: string[]) => Partial<ExecResult> = () => ({})) {
+    const calls: { argv: string[]; env: NodeJS.ProcessEnv; timeoutMs: number }[] = [];
+    const exec: Exec = async (argv, o) => {
+      calls.push({ argv, env: o.env, timeoutMs: o.timeoutMs });
+      return { code: 0, stdout: "", stderr: "", ...answer(argv) };
+    };
+    return { calls, exec };
+  }
+  /** A node with no npm beside it: npm is then the one on PATH, by its name. */
+  const lone = () => path.join(tmp, "lone", "bin", "node");
+  /** Where its log is: the line npm ends every failure with, which says nothing of why. */
+  const LOG =
+    "npm error A complete log of this run can be found in: /h/.npm/_logs/2026-11-12T10_00_00_000Z-debug-0.log";
+
+  it("npmDo: npm with each word its own argument, this node found first, five minutes to finish; null when it worked", async () => {
+    const { calls, exec } = standIn();
+    const node = lone();
+    expect(
+      await npmDo(["cache", "add", "sessionpipe@1.2.3"], {
+        node,
+        exec,
+        env: { PATH: "/usr/bin", HOME: "/h" },
+        platform: "linux",
+      }),
+    ).toBeNull();
+    expect(calls).toEqual([
+      {
+        argv: ["npm", "cache", "add", "sessionpipe@1.2.3"],
+        env: { HOME: "/h", PATH: [path.dirname(node), "/usr/bin"].join(path.delimiter) },
+        timeoutMs: 5 * 60_000,
+      },
+    ]);
+    // A prefix with a space in it is one word still: nothing here goes through a shell's parsing.
+    const spaced = path.join(tmp, "my node");
+    await npmDo(["uninstall", "--global", "--prefix", spaced, "sessionpipe"], {
+      node,
+      exec,
+      env: {},
+      platform: "win32",
+    });
+    expect(calls[1]).toEqual({
+      argv: ["npm.cmd", "uninstall", "--global", "--prefix", spaced, "sessionpipe"],
+      // With no PATH to add to, this node's folder is all of it.
+      env: { PATH: path.dirname(node) },
+      timeoutMs: 5 * 60_000,
+    });
+  });
+
+  it("npmDo: the npm beside this node is the one run, by this node; with no platform or environment said, this process's own", async () => {
+    const node = path.join(tmp, "nodes", "bin", "node");
+    const cli = path.join(tmp, "nodes", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    writeFileSync(cli, "");
+    const { calls, exec } = standIn();
+    await npmDo(["prefix", "-g"], { node, exec, env: {}, platform: "linux" });
+    expect(calls[0]?.argv).toEqual([node, cli, "prefix", "-g"]);
+    // The same layout is not where a Windows node keeps its npm: there it is `npm.cmd`.
+    await npmDo(["prefix", "-g"], { node, exec, env: {}, platform: "win32" });
+    expect(calls[1]?.argv).toEqual(["npm.cmd", "prefix", "-g"]);
+    await npmDo(["prefix", "-g"], { node, exec });
+    expect(calls[2]?.argv).toEqual([...npmArgv(node), "prefix", "-g"]);
+    expect(calls[2]?.env).toEqual({
+      ...process.env,
+      PATH: [path.dirname(node), process.env.PATH].filter(Boolean).join(path.delimiter),
+    });
+  });
+
+  it("npmDo: why npm failed is its last words, without the line that only says where its log is", async () => {
+    const failing = (r: Partial<ExecResult>) =>
+      npmDo(["cache", "add", "sessionpipe@9.9.9"], {
+        node: lone(),
+        env: {},
+        platform: "linux",
+        exec: standIn(() => ({ code: 1, ...r })).exec,
+      });
+    expect(
+      await failing({
+        stderr: `npm error code ETARGET\nnpm error notarget No matching version found for sessionpipe@9.9.9.\n${LOG}\n`,
+      }),
+    ).toBe("npm error code ETARGET npm error notarget No matching version found for sessionpipe@9.9.9.");
+    // Wherever that line is, and with blank lines between: the last two that say something.
+    expect(await failing({ stderr: `npm warn old lockfile\n${LOG}\n\nnpm error code E404\n\n` })).toBe(
+      "npm warn old lockfile npm error code E404",
+    );
+    expect(await failing({ stderr: `${LOG}\nnpm error code E404\n${LOG}\n` })).toBe("npm error code E404");
+    // With that line all npm said, its exit code is all there is to say.
+    expect(await failing({ code: 243, stderr: `${LOG}\n` })).toBe("exit 243");
+    expect(await failing({ code: 7, stderr: "" })).toBe("exit 7");
+    // npm that couldn't be started at all: what the system said of that.
+    expect(await failing({ code: null, error: "spawn npm ENOENT", stderr: "npm error unseen" })).toBe(
+      "spawn npm ENOENT",
+    );
+    // However much it said, a line of the page is what is kept.
+    expect(await failing({ stderr: "x".repeat(500) })).toBe("x".repeat(300));
+  });
+
+  it("installInto: npm installs into the prefix named, with scripts off, and the copy there is then asked what it is", async () => {
+    // `sessionpipe reinstall`'s case: the slot is empty and no bin link leads to it, so
+    // the dist folder says nothing of which prefix it is in.
+    const prefix = path.join(tmp, "home", ".local");
+    const dist = path.join(prefix, "lib", "node_modules", "sessionpipe", "dist");
+    expect(globalPrefix(dist)).toBeNull();
+    const { calls, exec } = standIn((argv) => (argv.includes("--version") ? { stdout: "0.6.0\n" } : {}));
+    const node = lone();
+    expect(
+      await installInto(prefix, "0.6.0", {
+        node,
+        distDir: dist,
+        // The hooks are not this function's to write: no third command is run for them.
+        harnesses: ["claude-code"],
+        exec,
+        env: { PATH: "/usr/bin" },
+        platform: "linux",
+      }),
+    ).toEqual({ ok: true });
+    const env = { PATH: [path.dirname(node), "/usr/bin"].join(path.delimiter) };
+    expect(calls).toEqual([
+      {
+        argv: [
+          "npm",
+          "install",
+          "--global",
+          "--prefix",
+          prefix,
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          "sessionpipe@0.6.0",
+        ],
+        env,
+        timeoutMs: 5 * 60_000,
+      },
+      { argv: [node, path.join(dist, "cli.js"), "--version"], env, timeoutMs: 30_000 },
+    ]);
+  });
+
+  it("installInto: npm failing is said as npm said it and the copy is not asked; a copy that says another version, or nothing, is not the one asked for", async () => {
+    const prefix = path.join(tmp, "home", ".local");
+    const o = {
+      node: lone(),
+      distDir: path.join(prefix, "lib", "node_modules", "sessionpipe", "dist"),
+      harnesses: [],
+      env: {},
+      platform: "linux" as const,
+    };
+    const refused = standIn((argv) =>
+      argv.includes("--global")
+        ? { code: 243, stderr: `npm error code EACCES\nnpm error syscall mkdir\n${LOG}\n` }
+        : { stdout: "0.6.0\n" },
+    );
+    expect(await installInto(prefix, "0.6.0", { ...o, exec: refused.exec })).toEqual({
+      ok: false,
+      stage: "npm",
+      error: "npm install: npm error code EACCES npm error syscall mkdir",
+    });
+    expect(refused.calls).toHaveLength(1);
+    const older = standIn((argv) => (argv.includes("--version") ? { stdout: "0.5.0\n" } : {}));
+    expect(await installInto(prefix, "0.6.0", { ...o, exec: older.exec })).toEqual({
+      ok: false,
+      stage: "verify",
+      error: `npm finished, but the copy in ${prefix} says 0.5.0, not 0.6.0`,
+    });
+    const silent = standIn((argv) => (argv.includes("--version") ? { code: 1, stderr: "SyntaxError" } : {}));
+    expect(await installInto(prefix, "0.6.0", { ...o, exec: silent.exec })).toEqual({
+      ok: false,
+      stage: "verify",
+      error: `npm finished, but the copy in ${prefix} says nothing, not 0.6.0`,
+    });
+  });
+
+  it.runIf(posix)(
+    "with nothing stood in for: this node runs the npm-cli.js beside it, which here is a file of the test's own",
+    async () => {
+      // A node folder in the temp dir: its `node` is this node, and the "npm" beside it
+      // only writes down the words it was run with. No real npm is run, and nothing
+      // outside the temp dir is touched.
+      const bin = path.join(tmp, "nodes", "bin");
+      const npm = path.join(tmp, "nodes", "lib", "node_modules", "npm");
+      const said = path.join(tmp, "npm-was-run-with.jsonl");
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(path.join(npm, "bin"), { recursive: true });
+      symlinkSync(process.execPath, path.join(bin, "node"));
+      writeFileSync(path.join(npm, "package.json"), '{"type":"commonjs"}');
+      writeFileSync(
+        path.join(npm, "bin", "npm-cli.js"),
+        `const words = process.argv.slice(2);
+require("node:fs").appendFileSync(${JSON.stringify(said)}, JSON.stringify(words) + "\\n");
+if (words[0] === "uninstall") {
+  process.stderr.write("npm error code EACCES\\n${LOG}\\n");
+  process.exit(1);
+}
+`,
+      );
+      const node = path.join(bin, "node");
+      const prefix = path.join(tmp, "prefix");
+      const dist = path.join(prefix, "lib", "node_modules", "sessionpipe", "dist");
+      expect(await npmDo(["cache", "add", "sessionpipe@0.6.0"], { node })).toBeNull();
+      expect(await npmDo(["uninstall", "--global", "--prefix", prefix, "sessionpipe"], { node })).toBe(
+        "npm error code EACCES",
+      );
+      // An install: the stand-in npm writes no copy, so the one that is asked its version
+      // is a file the test wrote where npm would have put it.
+      mkdirSync(dist, { recursive: true });
+      writeFileSync(path.join(dist, "cli.js"), 'console.log("0.6.0");\n');
+      expect(await installInto(prefix, "0.6.0", { node, distDir: dist, harnesses: [] })).toEqual({ ok: true });
+      expect(await installInto(prefix, "0.7.0", { node, distDir: dist, harnesses: [] })).toMatchObject({
+        ok: false,
+        stage: "verify",
+      });
+      expect(
+        readFileSync(said, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l)),
+      ).toEqual([
+        ["cache", "add", "sessionpipe@0.6.0"],
+        ["uninstall", "--global", "--prefix", prefix, "sessionpipe"],
+        ["install", "--global", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "sessionpipe@0.6.0"],
+        ["install", "--global", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "sessionpipe@0.7.0"],
+      ]);
+    },
+  );
 });
 
 describe("the clock", () => {

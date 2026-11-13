@@ -61,6 +61,18 @@ export function elsewhere(env: NodeJS.ProcessEnv = process.env): { now: string; 
   return i < 0 ? null : { now: now[i] as string, usual: usual[i] as string };
 }
 
+/** The folders this sessionpipe may call this computer's own, for what it looks at and
+ *  removes outside its state (`sessionpipe reinstall`): all of them where it keeps its
+ *  files in this account's usual place; where it keeps them somewhere else (a test, an
+ *  agent's throwaway world), only its own home folder, and nothing at all when that home
+ *  is this account's real one. So a world of its own is its `$HOME`, and a run in one can
+ *  never remove a copy of this computer's. */
+export function reach(env: NodeJS.ProcessEnv = process.env): true | string | null {
+  if (!elsewhere(env)) return true;
+  const home = os.homedir();
+  return samePlace(home, accountHome()) ? null : home;
+}
+
 /** The service's names, or null where this sessionpipe has none to look at or change.
  *  One that keeps its files somewhere other than this account's usual place (a test, an
  *  agent's throwaway world, a profile that sets SESSIONPIPE_CONFIG) says nothing about
