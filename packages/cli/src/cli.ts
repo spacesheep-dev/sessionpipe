@@ -88,7 +88,7 @@ import { Refusal } from "./refusal.js";
 import { type Inventory, look, spelled } from "./reinstall/find.js";
 import { binTarget, remove, same } from "./reinstall/ours.js";
 import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
-import { type Facts, idle, plan, slotIn, twins, typing } from "./reinstall/plan.js";
+import { type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
@@ -213,7 +213,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
     io.err(
       failure(
         makeUi({ isTTY: io.errTty, columns: io.columns, noColor }),
-        e instanceof Refusal && e.inLine && piped ? `${e.message}. Next: ${e.next}` : (e as Error).message,
+        e instanceof Refusal && e.inLine && e.next && piped ? `${e.message}. Next: ${e.next}` : (e as Error).message,
         e instanceof Refusal ? e.next : `sessionpipe ${about ? `${about} ` : ""}--help`,
         e instanceof Refusal && e.mild,
       ),
@@ -1318,7 +1318,9 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   // `sessionpipe reinstall` puts right: it also does what `update` does, so where both
   // apply it is the one command named. The service manager is asked nothing more for it:
   // the look above is the one taken. Not on Windows, where `reinstall` does not run yet.
-  const around = process.platform === "win32" ? null : copies({ npmPrefix: null, service: look });
+  // It looks where `reinstall` looks, npm's own prefix too: read from the person's npmrc,
+  // where a prefix that is not the Node's own is set, with no npm to start for it.
+  const around = process.platform === "win32" ? null : copies({ npmPrefix: npmrcPrefix(), service: look });
   // An npx cache entry nothing uses is a cache, not a second copy (plan.ts `idle`).
   const installs = (around?.copies ?? []).filter((c) => c.slot && !idle(c));
   const dangling = around?.dangling ?? [];
@@ -1330,6 +1332,10 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   report.copies = installs.map((c) => ({ dir: c.dir, version: c.version, whole: !c.wrong, uses: c.uses }));
   const named = (c: (typeof installs)[number], where: string): string =>
     `${c.aside ? "a leftover" : c.version} in ${where}`;
+  // What is typed is not a copy npm installed (a checkout, Volta's copy): nothing to fix,
+  // and said as what is so. It counts for nothing in the verdict.
+  const own = around ? typedAs(around, shown) : null;
+  if (own && !collide && !astray) computer.rows.push({ mark: "info", label: "copies", value: own.slice(0, -1) });
   if (collide || astray)
     computer.rows.push({
       mark: "warn",
@@ -1342,6 +1348,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
             ]
           : []),
         ...(astray ? [astray] : []),
+        ...(own ? [own.slice(0, -1)] : []),
       ].join("; "),
     });
   // Nothing to type for it, and still not all good: it is said among what is to fix.
@@ -1361,6 +1368,7 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
             ].join("; ")})`
       }; \`sessionpipe reinstall\` leaves one clean copy`,
     );
+  const blocked = !!own && (collide || two);
   if (down || apart.length || collide || two)
     todo.push({
       order: 1,
@@ -1376,8 +1384,14 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
           : apart.length
             ? `This command is sessionpipe ${VERSION}, and ${apart.join(", and ")}. `
             : ""
-      }One command puts it right:`,
-      run: collide || two ? "sessionpipe reinstall" : "sessionpipe update",
+      }${
+        // `reinstall` leaves what is typed alone where npm did not install it (a checkout,
+        // Volta's copy), and so refuses: it is not named as the way out there.
+        blocked
+          ? "What you type is not a copy npm installed, so `sessionpipe reinstall` leaves it alone and can't put this right from here."
+          : "One command puts it right:"
+      }`,
+      ...(blocked ? {} : { run: collide || two ? "sessionpipe reinstall" : "sessionpipe update" }),
     });
   const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
   if (w)
@@ -2172,6 +2186,22 @@ const shown = (p: string): string => {
   return clean(tilde(p === real || p.startsWith(`${real}${path.sep}`) ? `${os.homedir()}${p.slice(real.length)}` : p));
 };
 
+/** npm's global prefix as the person's own npmrc sets it (`prefix=…`); null where it sets
+ *  none. `doctor` reads it rather than start npm for it. */
+function npmrcPrefix(): string | null {
+  let text: string;
+  try {
+    text = readFileSync(process.env.npm_config_userconfig || path.join(os.homedir(), ".npmrc"), "utf8");
+  } catch {
+    return null;
+  }
+  // (Blanks on the line only: a `prefix=` with nothing after it names no folder.)
+  const said = /^[ \t]*prefix[ \t]*=[ \t]*(\S.*?)[ \t]*$/m.exec(text)?.[1]?.replace(/^(["'])(.*)\1$/, "$2");
+  if (!said) return null;
+  // npm's own two ways to say the home folder.
+  return said.replace(/^~(?=$|[\\/])/, os.homedir()).replace(/\$\{HOME\}/g, os.homedir());
+}
+
 /** The look `reinstall` and `doctor` take at every copy of sessionpipe on this computer
  *  (reinstall/find.ts). It reads, and runs nothing it finds: `runs` is how the one copy
  *  that typing starts may be asked for its version, and only `reinstall` hands it in.
@@ -2240,8 +2270,9 @@ async function reinstall(): Promise<void> {
     throw new Refusal(
       `the background service's file is there (${shown(seen.file as string)}), and ${
         process.platform === "darwin" ? "launchd" : "systemd"
-      } can't be asked from this shell, so the service could not be moved. Nothing was changed. Run this from a terminal you opened on this computer yourself`,
-      "sessionpipe reinstall",
+      } can't be asked from this shell (a \`su\` or \`sudo -u\` shell, or no session of yours on this computer), so the service could not be moved. Nothing was changed. Run \`sessionpipe reinstall\` from a terminal in your own session on this computer. Where there is none to open, the service can't run here at all: remove that file, then run it again. This says whether a shell reaches it`,
+      // Not this command again: from the same shell it would say the same.
+      process.platform === "darwin" ? "launchctl print gui/$(id -u)" : "systemctl --user status",
       true,
     );
   const service = seen?.manager ? seen : null;
@@ -2357,7 +2388,9 @@ async function reinstall(): Promise<void> {
   const dist = path.join(slot, "dist");
   const sock = socketPath(state);
   // The copy in the home is never removed, by whatever name it is asked for.
-  const proving = { reach: inv.reach, prefixes: inv.prefixes, npx: inv.npx, keep: [slot] };
+  // And the folders this run has npm install into are its own to remove again.
+  const made: string[] = [];
+  const proving = { reach: inv.reach, prefixes: inv.prefixes, npx: inv.npx, keep: [slot], made };
   // Does npm's link at this path lead to this package folder? No link there is a no.
   const leads = (file: string, to: string): boolean => {
     const dir = binTarget(file);
@@ -2370,6 +2403,7 @@ async function reinstall(): Promise<void> {
     // npm installs into a prefix of its own beside the slot, and the copy is asked for its
     // version there: the only sessionpipe this command runs but itself.
     install: async (stage, v) => {
+      made.push(stage);
       const r = await installInto(stage, v, { node, distDir: path.join(slotIn(stage), "dist"), harnesses: [] });
       return r.ok ? null : r.error;
     },

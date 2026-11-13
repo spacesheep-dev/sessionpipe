@@ -252,7 +252,9 @@ export function failure(ui: Ui, message: string, next: string, mild = false): st
   const label = mild
     ? `${tint(ui, "yellow", tint(ui, "bold", "!"))}      `
     : `${tint(ui, "red", tint(ui, "bold", "error"))}  `;
-  return `${fold(ui, label, what).join("\n")}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n`;
+  // No command leads out of some refusals: then none is named, and the words are all.
+  const lines = fold(ui, label, what).join("\n");
+  return next ? `${lines}\n${tint(ui, "dim", "try")}    ${tint(ui, "cyan", clean(next))}\n` : `${lines}\n`;
 }
 
 /** A length of time, in the two units a person reads: "12 s", "3 min", "2 h", "5 days". */

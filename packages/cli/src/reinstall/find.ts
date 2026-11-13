@@ -94,6 +94,12 @@ export interface Inventory {
   /** Such a file, where this command was not started from an installed copy (npx, a
    *  checkout): which copy it starts can't be told without running it. */
   unsure: string | null;
+  /** Such a file, where this command WAS started as npm's link to an installed copy: that
+   *  copy is taken to be what the file starts (`typed`), which is how a version manager's
+   *  shim works, and is not read from anywhere: a wrapper of the person's own may start
+   *  another copy. Where this is set, no installed copy is removed, and nothing is said of
+   *  what typing starts as if it were known. */
+  inferred: string | null;
   /** Where the copy that typing starts lives; with nothing typed, the place a shell would
    *  find a fresh one. Never chosen by who may write it. Null: no such place, or what is
    *  typed is no install of ours. */
@@ -480,5 +486,18 @@ export function look(o: Looking): Inventory {
     return h ? [h] : [];
   });
   const home = homes.find((h) => h.onPath) ?? homes[0] ?? null;
-  return { reach, copies, dangling, strangers, onPath, typed, unsure, home, taken: home ? null : taken, prefixes, npx };
+  return {
+    reach,
+    copies,
+    dangling,
+    strangers,
+    onPath,
+    typed,
+    unsure,
+    inferred: shimmed ? opaque : null,
+    home,
+    taken: home ? null : taken,
+    prefixes,
+    npx,
+  };
 }

@@ -621,6 +621,7 @@ describe.skipIf(win32)("look: where copies are found", () => {
       ],
       typed: slot(a),
       unsure: null,
+      inferred: null,
       home: place(a, TYPED, { onPath: true }),
       taken: null,
       prefixes: usual(a, b, c),
@@ -1603,6 +1604,9 @@ describe.skipIf(win32)("look: what typing `sessionpipe` starts, and where the on
       expect(inv.onPath).toEqual([{ file, dir: null }]);
       expect(inv.typed).toBe(slot(real));
       expect(inv.unsure).toBeNull();
+      // N1: that is TAKEN from how this command was started (which is how a shim starts
+      // one), and not read from the file: the look says so, by the file.
+      expect(inv.inferred).toBe(file);
       expect(inv.copies).toEqual([row(real, { uses: ["typed", "this"] })]);
       // Its own folder, though it is not on PATH and ~/.local/bin is: the shim finds it.
       expect(inv.home).toEqual(place(real, TYPED));
@@ -1612,6 +1616,51 @@ describe.skipIf(win32)("look: what typing `sessionpipe` starts, and where the on
       expect(look(looking({ env, distDir: path.join(slot(real), "dist"), started: named })).typed).toBe(slot(real));
     },
   );
+
+  it("N1: `inferred` is said only where what is typed was taken from how the command was started: never where npm's own link is what a shell finds, where nothing is typed, where it can't be told, or where the file sits in a copy's link place", () => {
+    // The reviewer's computer: a wrapper of the person's own first on PATH (it runs copy A),
+    // copy A in nvm's Node, copy B in ~/.local, and `~/.local/bin/sessionpipe reinstall`.
+    const a = node.nvm();
+    const b = path.join(home, ".local");
+    globalCopy(a, { version: "0.14.2" });
+    globalCopy(b);
+    mkdirSync(path.join(home, "bin"));
+    const wrapper = path.join(home, "bin", "sessionpipe");
+    writeFileSync(wrapper, `#!/bin/sh\nexec ${cliOf(a)} "$@"\n`);
+    const env = { PATH: PATH(path.join(home, "bin"), path.join(a, "bin"), path.join(b, "bin")) };
+    const fromB = look(looking({ env, distDir: path.join(slot(b), "dist"), started: binOf(b) }));
+    // B is "what is typed" only by that guess; the look says which file it guessed about.
+    expect(fromB).toMatchObject({ typed: slot(b), unsure: null, inferred: wrapper });
+    expect(fromB.copies.map((c) => [c.dir, c.uses])).toEqual([
+      [slot(a), []],
+      [slot(b), ["typed", "this"]],
+    ]);
+    // Started as A's link, the same guess, about A.
+    expect(look(looking({ env, distDir: path.join(slot(a), "dist"), started: binOf(a) }))).toMatchObject({
+      typed: slot(a),
+      inferred: wrapper,
+    });
+    // Not started as npm's link (its cli.js by its path, npx, a checkout): it can't be told.
+    expect(look(looking({ env, distDir: path.join(slot(b), "dist"), started: cliOf(b) }))).toMatchObject({
+      typed: null,
+      unsure: wrapper,
+      inferred: null,
+    });
+    // npm's own link first on PATH: what is typed is read from it.
+    const read = { PATH: PATH(path.join(b, "bin"), path.join(home, "bin")) };
+    expect(look(looking({ env: read, distDir: path.join(slot(b), "dist"), started: binOf(b) }))).toMatchObject({
+      typed: slot(b),
+      inferred: null,
+    });
+    // Nothing on PATH; and a file where a copy's own link was (no shim: nothing is typed).
+    expect(look(looking({ distDir: path.join(slot(b), "dist"), started: binOf(b) })).inferred).toBeNull();
+    rmSync(binOf(a));
+    writeFileSync(binOf(a), "#!/bin/sh\n");
+    const inWay = look(
+      looking({ env: { PATH: path.join(a, "bin") }, distDir: path.join(slot(b), "dist"), started: binOf(b) }),
+    );
+    expect(inWay).toMatchObject({ typed: null, unsure: null, inferred: null });
+  });
 
   it.each(SHIMS)(
     "M3: a shim first on PATH (%s), and this command not started as npm's link to an installed copy: which copy the shim starts can't be told, and no home is named",
@@ -2024,6 +2073,7 @@ describe.skipIf(win32)("look: only what is inside the reach folder", () => {
       onPath: [{ file: binOf(local), dir: slot(local) }],
       typed: slot(local),
       unsure: null,
+      inferred: null,
       home: place(local, TYPED, { onPath: true }),
       taken: null,
       prefixes: [
@@ -2055,6 +2105,7 @@ describe.skipIf(win32)("look: only what is inside the reach folder", () => {
       onPath: [],
       typed: null,
       unsure: null,
+      inferred: null,
       home: null,
       taken: null,
       prefixes: [],
@@ -2145,6 +2196,7 @@ describe.skipIf(win32)("look: one folder under two spellings is one folder", () 
       onPath: [{ file: binOf(local), dir: slot(local) }],
       typed: slot(local),
       unsure: null,
+      inferred: null,
       home: place(local, TYPED, { onPath: true }),
       taken: null,
       prefixes: [

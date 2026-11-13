@@ -13,7 +13,17 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Copy, Home, Inventory } from "../src/reinstall/find.js";
-import { type Facts, idle, plan as made, type Plan, type Step, slotIn, twins, typing } from "../src/reinstall/plan.js";
+import {
+  type Facts,
+  idle,
+  plan as made,
+  type Plan,
+  type Step,
+  slotIn,
+  twins,
+  typedAs,
+  typing,
+} from "../src/reinstall/plan.js";
 import { shq } from "../src/shell.js";
 import { AHEAD, healthy, NEWEST, world } from "./helpers/reinstall-worlds.js";
 
@@ -163,6 +173,7 @@ const inv = (over: Partial<Inventory> = {}): Inventory => ({
   onPath: [{ file: bin(LOCAL), dir: slotIn(LOCAL) }],
   typed: slotIn(LOCAL),
   unsure: null,
+  inferred: null,
   home: home(),
   taken: null,
   prefixes: [LOCAL],
@@ -208,7 +219,18 @@ const step = <K extends Step["do"]>(p: Plan, k: K): Extract<Step, { do: K }> =>
 /** What a repair of the one copy is, with nothing else to remove. */
 const REPAIR = ["fetch", "install", "use", "prove"];
 /** A plan that is nothing but its refusal: nothing is carried beside it. */
-const REFUSED = { nothing: null, target: null, home: null, stays: null, steps: [], safety: [], left: [], notes: [] };
+const REFUSED = {
+  nothing: null,
+  target: null,
+  home: null,
+  stays: null,
+  steps: [],
+  safety: [],
+  inferred: null,
+  kept: 0,
+  left: [],
+  notes: [],
+};
 /** The refusal of a plan that refuses, held to changing and saying nothing else. */
 const refused = (p: Plan): Plan["refuse"] => {
   expect(p).toEqual({ ...REFUSED, refuse: p.refuse });
@@ -241,7 +263,14 @@ const NOTHING_STARTS_IT =
 const UNSURE = (file: string) =>
   `Typing \`sessionpipe\` starts ${file}, which is no link of npm's: which copy it starts can't be told from here.`;
 /** And where it is a folder that is no installed copy. */
-const NO_INSTALL = (where: string) => `Typing \`sessionpipe\` starts ${where}, which is no installed copy of it.`;
+const NO_INSTALL = (where: string) =>
+  `Typing \`sessionpipe\` starts ${where}, which npm did not install (a checkout, a linked folder).`;
+/** And where it is the copy someone else's tool keeps. */
+const VOLTAS = (where: string) => `Typing \`sessionpipe\` starts the copy Volta keeps, in ${where}.`;
+/** What typing starts is nothing npm installed, and nothing npm installed is here. */
+const NONE_OF_NPMS = "Nothing to repair: no copy that npm installed is on this computer.";
+/** A line that moves what is in the way goes on through npx: by then `sessionpipe` may be nowhere to type. */
+const AGAIN = " && npx -y sessionpipe@latest reinstall";
 /** The first and the last step: neither has a row, so neither has words for one. */
 const FETCH: Step = { do: "fetch", version: NEW, touches: [] };
 const PROVE: Step = { do: "prove", touches: [] };
@@ -275,6 +304,8 @@ describe("nothing to repair", () => {
       stays: null,
       steps: [],
       safety: [],
+      inferred: null,
+      kept: 0,
       left: [],
       notes: [],
     });
@@ -477,8 +508,10 @@ describe("nothing to repair", () => {
     const after = plan(inv({ copies: [one(), checkout], onPath: [mine, theirs] }), facts());
     expect(after.nothing).toBe(NOTHING);
     expect(after.notes).toEqual([]);
-    // Before it, it is what typing `sessionpipe` starts: no step could change that, and
-    // the sentence no longer says "nothing to repair".
+    // N4: before it, it is what typing `sessionpipe` starts: a contributor's checkout, by
+    // their own doing. Nothing is wrong with that and no step could change it: it is
+    // still "nothing to repair", with what is so said beside it (it was a finding, and
+    // doctor counted it as a thing to fix on every contributor's computer).
     const before = plan(
       inv({
         copies: [checkedOut({ uses: ["typed"] }), one({ uses: ["service", "hooks", "this"] })],
@@ -488,10 +521,13 @@ describe("nothing to repair", () => {
       }),
       facts(),
     );
-    expect(before.nothing).toBe(ONE_COPY);
+    expect(before.nothing).toBe(NOTHING);
     expect(before.refuse).toBeNull();
     expect(before.steps).toEqual([]);
     expect(before.notes).toEqual([NO_INSTALL("~/code/sessionpipe")]);
+    expect(
+      typing(inv({ copies: [checkedOut({ uses: ["typed"] }), one({ uses: [] })], typed: checkout.dir })),
+    ).toBeNull();
     // With no home to speak of, none is answered.
     expect(before.home).toBeNull();
   });
@@ -567,6 +603,8 @@ describe("nothing to repair", () => {
       stays: null,
       steps: [],
       safety: [],
+      inferred: null,
+      kept: 0,
       left: [],
       notes: [
         "npm couldn't be asked whether 1.2.0 is the newest release: registry.npmjs.org can't be reached (ENOTFOUND).",
@@ -822,7 +860,7 @@ describe("it refuses, and changes nothing", () => {
 
   /** What it says of a file that is not npm's link, where npm's link goes. */
   const inTheWay = (file: string) =>
-    `${file} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. Move it aside, then run this again`;
+    `${file} is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. The line moves it aside and runs the repair again, through npx`;
   /** The one copy with a file where its link was, as the look answers it: nothing a person
    *  types starts it, nothing is unsure, and the home is that copy's prefix, blocked. */
   const blocked = (file: string, over: Partial<Inventory> = {}) =>
@@ -839,25 +877,34 @@ describe("it refuses, and changes nothing", () => {
     expect(refused(at(plain))).toEqual({
       error: inTheWay(plain),
       // `-n`: a `sessionpipe.old` that is there already is somebody's, and stays.
-      next: "mv -n /home/u/.local/bin/sessionpipe /home/u/.local/bin/sessionpipe.old",
+      next: "mv -n /home/u/.local/bin/sessionpipe /home/u/.local/bin/sessionpipe.old && npx -y sessionpipe@latest reinstall",
     });
     // A path a shell would split or act on is one word of the line, each time.
     const spaced = "/home/my name/.local/bin/sessionpipe";
     expect(refused(at(spaced))).toEqual({
       error: inTheWay(spaced),
-      next: "mv -n '/home/my name/.local/bin/sessionpipe' '/home/my name/.local/bin/sessionpipe.old'",
+      next: "mv -n '/home/my name/.local/bin/sessionpipe' '/home/my name/.local/bin/sessionpipe.old' && npx -y sessionpipe@latest reinstall",
     });
     expect(refused(at("/home/it's me/bin/sessionpipe"))?.next).toBe(
-      "mv -n '/home/it'\\''s me/bin/sessionpipe' '/home/it'\\''s me/bin/sessionpipe.old'",
+      "mv -n '/home/it'\\''s me/bin/sessionpipe' '/home/it'\\''s me/bin/sessionpipe.old' && npx -y sessionpipe@latest reinstall",
     );
     // The sentence names the file as the caller shows a path; the line to paste never does.
     const shown = plan(blocked(spaced), facts(), (p) => `<${p}>`);
     expect(shown.refuse).toEqual({
       error: inTheWay(`<${spaced}>`),
-      next: "mv -n '/home/my name/.local/bin/sessionpipe' '/home/my name/.local/bin/sessionpipe.old'",
+      next: "mv -n '/home/my name/.local/bin/sessionpipe' '/home/my name/.local/bin/sessionpipe.old' && npx -y sessionpipe@latest reinstall",
     });
     // Never the line that writes over what is there, on any refusal of the kind.
     for (const p of [at(plain), at(spaced), shown]) expect(p.refuse?.next).toMatch(/^mv -n \S/);
+    // N3: every such line goes on through npx. Once the file is moved, `sessionpipe` may
+    // be nowhere to type ("then run this again" could not be done), and the sentence says so.
+    for (const p of [at(plain), at(spaced), shown]) {
+      expect(
+        p.refuse?.next.endsWith(".old' && npx -y sessionpipe@latest reinstall") ||
+          p.refuse?.next.endsWith(`.old${AGAIN}`),
+      ).toBe(true);
+      expect(p.refuse?.error).toMatch(/The line moves it aside and runs the repair again, through npx$/);
+    }
   });
 
   it("it is refused whatever else there is to repair, and the file is never a step's to touch", () => {
@@ -865,7 +912,9 @@ describe("it refuses, and changes nothing", () => {
     const strangers = [{ file, why: "a file npm didn't put there" }];
     const carried = (p: Plan) => {
       expect(refused(p)?.error).toBe(inTheWay(file));
-      expect(refused(p)?.next).toBe(`mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")}`);
+      expect(refused(p)?.next).toBe(
+        `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")} && npx -y sessionpipe@latest reinstall`,
+      );
     };
     // The file is what a shell finds first: it is no shim, it sits where this copy's link
     // was. Nothing is typed and nothing is unsure, so the refusal is the one for the file.
@@ -905,7 +954,7 @@ describe("it refuses, and changes nothing", () => {
       const p = plan(blocked(file, { copies, strangers, onPath: [{ file, dir: null }] }), facts());
       expect(refused(p), how).toEqual({
         error: inTheWay(file),
-        next: `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")}`,
+        next: `mv -n ${shq(file, "linux")} ${shq(`${file}.old`, "linux")} && npx -y sessionpipe@latest reinstall`,
       });
       expect(p.refuse?.next, how).not.toMatch(/npm install/);
     }
@@ -916,7 +965,8 @@ describe("it refuses, and changes nothing", () => {
       untyped({ copies: [stuck, cached({ uses: ["this"] })], strangers, onPath: [{ file, dir: null }], unsure: file }),
       facts(),
     );
-    expect(asShim.refuse?.next).toBe("npm install -g sessionpipe@1.2.0 && sessionpipe reinstall");
+    expect(asShim.refuse?.next).toBe("");
+    expect(asShim.refuse?.error).toContain("this command can't tell which copy that file starts");
   });
 
   it("every refusal in its order: each is said before the ones after it, and none plans a step", () => {
@@ -932,7 +982,7 @@ describe("it refuses, and changes nothing", () => {
       {
         i: { unsure: shim },
         f: {},
-        next: "npm install -g sessionpipe@1.2.0 && sessionpipe reinstall",
+        next: "",
         says: /is the first `sessionpipe` on your PATH/,
       },
       {
@@ -946,7 +996,7 @@ describe("it refuses, and changes nothing", () => {
       {
         i: { home: home({ prefix: "/home/u/.local", blocked: file, onPath: false, writable: false }) },
         f: {},
-        next: "mv -n /home/u/.local/bin/sessionpipe /home/u/.local/bin/sessionpipe.old",
+        next: "mv -n /home/u/.local/bin/sessionpipe /home/u/.local/bin/sessionpipe.old && npx -y sessionpipe@latest reinstall",
         says: /is not sessionpipe's/,
       },
       {
@@ -1007,6 +1057,8 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
       stays: null,
       steps: [],
       safety: [],
+      inferred: null,
+      kept: 0,
       left: [],
       notes: [],
     });
@@ -1112,6 +1164,8 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
       ],
       // No download, so nothing is said to wait for one.
       safety: [SERVICE_RESTARTS],
+      inferred: null,
+      kept: 0,
       left: [],
       notes: [],
     });
@@ -1187,7 +1241,7 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
     expect(old.notes).toEqual([]);
   });
 
-  it("M3: a shim first on PATH, and this command not started through it: refused before any step where there is something to repair; with one whole copy it is nothing to repair, and what can't be told is a note", () => {
+  it("N2: a shim first on PATH, and this command not started through it: refused before any step where there is something to repair, with words and no command; with one whole copy it is nothing to repair, and what can't be told is a note", () => {
     const lost = (over: Partial<Inventory> = {}): Inventory =>
       shimmed({
         copies: [cached({ uses: ["this"] }), copy(asdf, { version: OLD, uses: ["service", "hooks"] })],
@@ -1197,20 +1251,18 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
         ...over,
       });
     const cant = (file: string) =>
-      `${file} is the first \`sessionpipe\` on your PATH and no link of npm's, and this command was not started through it: it can't tell which copy that file starts, so it can't tell where the one clean copy goes. Nothing was changed. Install it into the Node you use, then run it from there`;
-    expect(refused(plan(lost(), facts()))).toEqual({
-      error: cant(shim),
-      next: "npm install -g sessionpipe@1.2.0 && sessionpipe reinstall",
-    });
-    // The file is said as the caller shows a path; the release is npm's newest.
+      `${file} is the first \`sessionpipe\` on your PATH and no link of npm's: this command can't tell which copy that file starts, so it can't tell where the one clean copy goes. Nothing was changed. If the file is yours, point it at one copy or take it off your PATH (\`which -a sessionpipe\` shows what your PATH finds), then run this again`;
+    // N2: it names NO command. `npm install -g sessionpipe@<v> && sessionpipe reinstall`
+    // was named: it put one more copy on the computer, and typed through the same file the
+    // second half led back to this very refusal.
+    expect(refused(plan(lost(), facts()))).toEqual({ error: cant(shim), next: "" });
+    // The file is said as the caller shows a path, whatever the release.
     expect(refused(plan(lost(), facts({ latest: { version: "1.2.1" } }), (p) => `<${p}>`))).toEqual({
       error: cant(`<${shim}>`),
-      next: "npm install -g sessionpipe@1.2.1 && sessionpipe reinstall",
+      next: "",
     });
     // Whatever home the look could have named: none is used.
-    expect(refused(plan(lost({ home: home() }), facts()))?.next).toBe(
-      "npm install -g sessionpipe@1.2.0 && sessionpipe reinstall",
-    );
+    expect(refused(plan(lost({ home: home() }), facts()))?.next).toBe("");
     // One whole copy of the newest release there, and nothing else to repair: no step
     // would change anything, so it is not a refusal, and nothing was found that is not as
     // it should be (the file may well be the shim that starts this very copy): it is
@@ -1228,7 +1280,7 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
   it("M3: what is typed is no installed copy of it: left alone, and refused with the line that shows what PATH finds, never one that installs over it", () => {
     const stray = copy(BREW, { where: "/opt/homebrew", version: OLD });
     const sorry = (where: string, why: string) =>
-      `Typing \`sessionpipe\` starts ${where}, which is no installed copy of it${why}: this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed`;
+      `Typing \`sessionpipe\` starts ${where}, which npm did not install (a checkout, a linked folder)${why}. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed`;
     /** What is typed, a stray beside it, and no home: what is typed is no install of ours. */
     const typing = (typed: Copy, over: Partial<Inventory> = {}): Inventory =>
       inv({
@@ -1242,7 +1294,7 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
     // sessionpipe's is there to run. The line shows what the person's own PATH finds, in
     // its order (`sessionpipe doctor` named nothing that could be done).
     expect(refused(plan(typing(checkedOut()), facts()))).toEqual({
-      error: sorry("~/code/sessionpipe", ` (${NOT_PUBLISHED})`),
+      error: sorry("~/code/sessionpipe", `: ${NOT_PUBLISHED}`),
       next: "which -a sessionpipe",
     });
     // A build someone put where a prefix keeps a copy, as the look lists one (no prefix:
@@ -1255,13 +1307,13 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
       not: NOT_PUBLISHED,
     });
     expect(refused(plan(typing(build), facts()))).toEqual({
-      error: sorry("/opt/node/lib/node_modules/sessionpipe", ` (${NOT_PUBLISHED})`),
+      error: sorry("/opt/node/lib/node_modules/sessionpipe", `: ${NOT_PUBLISHED}`),
       next: "which -a sessionpipe",
     });
     // Whatever the copy says of a prefix, and whoever may write there: the same line.
     const theirs = copy("/opt/my node", { where: "/opt/my node/…", slot: null, not: "it holds src", writable: false });
     expect(refused(plan(typing(theirs), facts({ latest: { version: "1.2.1" } })))).toEqual({
-      error: sorry("/opt/my node/…", " (it holds src)"),
+      error: sorry("/opt/my node/…", ": it holds src"),
       next: "which -a sessionpipe",
     });
     // An npx cache entry someone linked to: ours to remove, and no installed copy. There
@@ -1338,9 +1390,115 @@ describe("M3: the one copy stays where it is typed, whoever may write there", ()
     );
     expect(refused(p)).toEqual({
       error:
-        "Typing `sessionpipe` starts ~/.volta/tools/image/packages/sessionpipe, which is no installed copy of it (Volta keeps it): this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed",
+        "Typing `sessionpipe` starts the copy Volta keeps, in ~/.volta/tools/image/packages/sessionpipe. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed",
       next: "which -a sessionpipe",
     });
+  });
+});
+
+describe("N1: what typing starts was taken from how the command was started, not read", () => {
+  // The reviewer's computer: `~/bin/sessionpipe` is the person's wrapper, first on PATH,
+  // and runs copy A (an older release, in nvm's Node). Copy B is in ~/.local. Run as
+  // `~/.local/bin/sessionpipe reinstall`, B was "what you type" (a shim starts a copy just
+  // so), A was removed "with its link", and typing `sessionpipe` then failed: exit 0.
+  const wrapper = path.join(HOME, "bin", "sessionpipe");
+  const a = copy(NVM, { where: "~/.nvm/versions/node/v22.1.0", version: OLD });
+  const b = one({ uses: ["typed", "this"] });
+  const guessed = (over: Partial<Inventory> = {}): Inventory =>
+    inv({
+      copies: [a, b],
+      strangers: [{ file: wrapper, why: "a file npm didn't put there" }],
+      onPath: [
+        { file: wrapper, dir: null },
+        { file: bin(NVM), dir: a.dir },
+        { file: bin(LOCAL), dir: b.dir },
+      ],
+      typed: b.dir,
+      inferred: wrapper,
+      prefixes: [LOCAL, NVM],
+      ...over,
+    });
+  const NOT_KNOWN = (file: string, kept: boolean) =>
+    `Typing \`sessionpipe\` starts ${file}, which is no link of npm's: which copy it starts is not known${kept ? ", so no other installed copy is removed" : ""}.`;
+
+  it("N1: no installed copy is removed: each stays, with why, and the plan says what is not known", () => {
+    const p = plan(guessed(), facts());
+    // The copy this command runs from is made the newest where it is, and that is all.
+    expect(does(p)).toEqual(REPAIR);
+    expect(p.steps.filter((s) => s.do === "remove")).toEqual([]);
+    expect(p.inferred).toBe(wrapper);
+    expect(p.kept).toBe(1);
+    expect(p.left).toEqual([
+      { where: wrapper, path: wrapper, version: null, why: "a file npm didn't put there", line: null, ours: false },
+      {
+        where: "~/.nvm/versions/node/v22.1.0",
+        path: a.dir,
+        version: OLD,
+        why: `${wrapper} may be what starts it`,
+        // Not a copy that is "still there" for want of sudo: nothing is to be run for it.
+        line: null,
+        ours: false,
+      },
+    ]);
+    expect(p.notes).toEqual([NOT_KNOWN(wrapper, true)]);
+    // The file is said as the caller shows a path, in the reason and in the note.
+    const shown = plan(guessed(), facts(), (x) => `<${x}>`);
+    expect(shown.left[1]?.why).toBe(`<${wrapper}> may be what starts it`);
+    expect(shown.notes).toEqual([NOT_KNOWN(`<${wrapper}>`, true)]);
+    expect(shown.inferred).toBe(wrapper);
+    // Several of them, writable or not, used by the service or the hooks: all stay, none
+    // with a sudo line.
+    const more = plan(
+      guessed({
+        copies: [a, b, copy(BREW, { where: "/opt/homebrew", version: OLD, writable: false, uses: ["service"] })],
+        prefixes: [LOCAL, NVM, BREW],
+      }),
+      facts(),
+    );
+    expect(more.kept).toBe(2);
+    expect(more.steps.filter((s) => s.do === "remove")).toEqual([]);
+    expect(
+      more.left.filter((l) => l.why.endsWith("may be what starts it")).map((l) => [l.path, l.line, l.ours]),
+    ).toEqual([
+      [a.dir, null, false],
+      [slotIn(BREW), null, false],
+    ]);
+  });
+
+  it("N1: what is no installed copy still goes: a leftover folder, an npx cache entry, a link that leads nowhere", () => {
+    const left = leftover(NVM, { where: "~/.nvm/versions/node/v22.1.0" });
+    const entry = cached({ uses: ["hooks"] });
+    const p = plan(guessed({ copies: [a, b, left, entry], dangling: [bin(BREW)] }), facts());
+    expect(does(p)).toEqual([
+      "fetch",
+      "install",
+      "use",
+      `remove ${bin(BREW)}`,
+      `remove ${left.dir}`,
+      `remove ${CACHED}`,
+      "prove",
+    ]);
+    expect(p.kept).toBe(1);
+    expect(p.left.map((l) => l.path)).toEqual([wrapper, a.dir]);
+    // With no installed copy beside the home's, none is kept, and the note says only what
+    // is not known.
+    const alone = plan(guessed({ copies: [{ ...b, version: OLD }, left] }), facts());
+    expect(does(alone)).toEqual(["fetch", "install", "use", `remove ${left.dir}`, "prove"]);
+    expect(alone.kept).toBe(0);
+    expect(alone.notes).toEqual([NOT_KNOWN(wrapper, false)]);
+    expect(alone.inferred).toBe(wrapper);
+  });
+
+  it("N1: with nothing to do there is no step, no note of it, and nothing kept: the one whole copy this command was started from is nothing to repair, as through any shim", () => {
+    const fine = plan(guessed({ copies: [one()] }), facts());
+    expect(fine.nothing).toBe(NOTHING);
+    expect(fine.notes).toEqual([]);
+    expect([fine.inferred, fine.kept]).toEqual([null, 0]);
+    // And where what is typed is read (npm's own link first on PATH), the same computer is
+    // repaired as ever: the other copy goes.
+    const read = plan(guessed({ inferred: null, strangers: [], onPath: [{ file: bin(LOCAL), dir: b.dir }] }), facts());
+    expect(does(read)).toEqual(["fetch", "install", "use", `remove ${a.dir}`, "prove"]);
+    expect([read.inferred, read.kept, read.notes]).toEqual([null, 0, []]);
   });
 });
 
@@ -1428,20 +1586,94 @@ describe("typing: what typing `sessionpipe` starts, where that is no installed c
     expect(typing(inv({ typed: null, unsure: shim, home: home() }))).toBeNull();
   });
 
-  it("a folder that is no installed copy: by the look's own word for it, or by its path where the look lists none", () => {
+  it("N4: what is typed is something npm did not install (a checkout, a linked folder, Volta's copy): no finding, so `typing` has no answer; `typedAs` says what is so, by the look's own word for the folder or by its path", () => {
     const checkout = checkedOut({ uses: ["typed"] });
     const at = inv({ copies: [checkout, one({ uses: [] })], typed: checkout.dir, home: null });
+    expect(typing(at)).toBeNull();
     // The look shortened the folder already: it is not shown a second time.
-    expect(typing(at)).toBe(NO_INSTALL("~/code/sessionpipe"));
-    expect(typing(at, show)).toBe(NO_INSTALL("~/code/sessionpipe"));
-    // An npx cache entry is ours and is no installed copy; so is a leftover folder.
-    expect(typing(inv({ copies: [cached({ uses: ["typed"] })], typed: CACHED, home: null }))).toBe(
-      NO_INSTALL("~/.npm/_npx/0a1b2c3d4e5f6a7b"),
-    );
+    expect(typedAs(at)).toBe(NO_INSTALL("~/code/sessionpipe"));
+    expect(typedAs(at, show)).toBe(NO_INSTALL("~/code/sessionpipe"));
+    // An npx cache entry someone linked to is ours and is no installed copy; so is a leftover.
+    const entry = inv({ copies: [cached({ uses: ["typed"] })], typed: CACHED, home: null });
+    expect(typing(entry)).toBeNull();
+    expect(typedAs(entry)).toBe(NO_INSTALL("~/.npm/_npx/0a1b2c3d4e5f6a7b"));
     // No copy on the list has that folder (it is outside what the look may reach).
     const outside = path.join(ROOT, "elsewhere", "sessionpipe");
-    expect(typing(inv({ typed: outside }))).toBe(NO_INSTALL(outside));
-    expect(typing(inv({ typed: outside }), show)).toBe(NO_INSTALL(`<${outside}>`));
+    expect(typedAs(inv({ typed: outside }))).toBe(NO_INSTALL(outside));
+    expect(typedAs(inv({ typed: outside }), show)).toBe(NO_INSTALL(`<${outside}>`));
+    // The copy someone else's tool keeps is said as that.
+    const volta = copy(path.join(HOME, ".volta", "tools", "image", "packages", "sessionpipe"), {
+      where: "~/.volta/tools/image/packages/sessionpipe",
+      slot: null,
+      not: "Volta keeps it",
+      keeper: "volta uninstall sessionpipe",
+      uses: ["typed"],
+    });
+    const kept = inv({ copies: [volta], typed: volta.dir, home: null });
+    expect(typedAs(kept, show)).toBe(VOLTAS("~/.volta/tools/image/packages/sessionpipe"));
+    expect(typing(kept)).toBeNull();
+    // An installed copy that is typed, nothing typed, and what can't be told: nothing to say.
+    expect(typedAs(inv())).toBeNull();
+    expect(typedAs(untyped())).toBeNull();
+    expect(typedAs(inv({ typed: null, unsure: shim, home: null }))).toBeNull();
+  });
+
+  it("N4: what is typed is not npm's and NO copy npm installed is here: 'Nothing to repair: no copy that npm installed is on this computer', with what is typed said beside it; with a copy of npm's here it is that copy the sentence is about", () => {
+    const checkout = checkedOut({ uses: ["typed", "this"] });
+    const mine = { file: path.join(HOME, "bin", "sessionpipe"), dir: checkout.dir };
+    const dev = (over: Partial<Inventory> = {}): Inventory =>
+      inv({ copies: [checkout], onPath: [mine], typed: checkout.dir, home: null, ...over });
+    // A contributor's computer: the checkout linked on PATH, nothing else. Whatever the
+    // hooks and the service are on (they are the checkout's), and whatever npm's newest is.
+    for (const f of [
+      facts(),
+      facts({
+        hooks: { version: "1.3.0-dev.1", wrong: [] },
+        daemon: { pid: 100, version: "1.3.0-dev.1", byHand: null },
+      }),
+      facts({ service: null, daemon: null, wanted: false, harnesses: [] }),
+      facts({ latest: { error: OFFLINE } }),
+      facts({ npm: false }),
+    ]) {
+      const p = plan(dev(), f);
+      expect(p.nothing).toBe(NONE_OF_NPMS);
+      expect(p.refuse).toBeNull();
+      expect(p.steps).toEqual([]);
+      expect(p.notes.filter((n) => n.startsWith("Typing"))).toEqual([NO_INSTALL("~/code/sessionpipe")]);
+    }
+    expect(plan(dev(), facts()).notes).toEqual([NO_INSTALL("~/code/sessionpipe")]);
+    // What is no install is still listed as left alone, and an idle npx entry is no copy.
+    const beside = plan(dev({ copies: [checkout, cached()] }), facts());
+    expect(beside.nothing).toBe(NONE_OF_NPMS);
+    expect(beside.left.map((l) => l.path)).toEqual([checkout.dir]);
+    // Volta's copy, typed through Volta's shim: the same, in its own words.
+    const volta = copy(path.join(HOME, ".volta", "tools", "image", "packages", "sessionpipe"), {
+      where: "~/.volta/tools/image/packages/sessionpipe",
+      prefix: null,
+      slot: null,
+      not: "Volta keeps it",
+      keeper: "volta uninstall sessionpipe",
+      version: OLD,
+      uses: ["typed", "this"],
+    });
+    const kept = plan(inv({ copies: [volta], typed: volta.dir, home: null }), facts());
+    expect(kept.nothing).toBe(NONE_OF_NPMS);
+    expect(kept.notes).toEqual([VOLTAS("~/.volta/tools/image/packages/sessionpipe")]);
+    // A copy npm installed IS here: an old one is something to repair (and what is typed
+    // is left alone, so it is refused); a link to a copy that is gone is, too.
+    expect(refused(plan(dev({ copies: [checkout, copy(BREW, { version: OLD })] }), facts()))?.next).toBe(
+      "which -a sessionpipe",
+    );
+    expect(refused(plan(dev({ dangling: [bin(BREW)] }), facts()))?.next).toBe("which -a sessionpipe");
+    // And one whole, newest copy of npm's beside the checkout: nothing to repair, of that copy.
+    const both = plan(dev({ copies: [checkout, one({ uses: ["service", "hooks"] })] }), facts());
+    expect(both.nothing).toBe(NOTHING);
+    expect(both.notes).toEqual([NO_INSTALL("~/code/sessionpipe")]);
+    // A finding beside it (nothing starts the service this computer wants) comes first and
+    // decides the sentence, as ever.
+    const unserved = plan(dev(), facts({ service: null, daemon: null }));
+    expect(unserved.nothing).toBe(NONE_OF_NPMS);
+    expect(unserved.notes).toEqual([NOTHING_STARTS_IT, NO_INSTALL("~/code/sessionpipe")]);
   });
 
   it("nothing typed: a finding where a copy IS installed and no installed copy's command folder is one a shell looks in; that copy's folder is the one named", () => {
@@ -1543,6 +1775,8 @@ describe("the steps, in the order they are taken", () => {
         PROVE,
       ],
       safety: [SAFE, SERVICE_RESTARTS],
+      inferred: null,
+      kept: 0,
       left: [
         { where: "~/code/sessionpipe", path: checkout.dir, version: NEW, why: NOT_PUBLISHED, line: null, ours: false },
         { where: SCRIPT, path: SCRIPT, version: null, why: "a file npm didn't put there", line: null, ours: false },
@@ -2311,30 +2545,44 @@ describe("idle: an npx cache entry nothing uses but this command is no copy to r
 });
 
 describe("what these tests found in the plan, as it answers now", () => {
-  it("'Nothing to repair' is said only of a copy that is what typing starts, or where that can't be told and a note says so: over computers made up from a seed", () => {
+  it("'Nothing to repair' is said only of a copy that is what typing starts; or where that can't be told, or is something npm did not install, and a note says so: over computers made up from a seed", () => {
     // The other way round from property (a): what "Nothing to repair" is said of. Where a
     // shim is first on PATH and this command was not started through it, which copy is
-    // typed can't be known: by design, with the note beside the sentence. There was one
+    // typed can't be known; where what is typed is a checkout or Volta's copy, that is the
+    // person's own doing: each by design, with the note beside the sentence. There was one
     // more shape, where nothing said anything: nothing typed, the one copy's own folder
     // off PATH, and the home another folder that is on PATH. None is left.
     const other: string[] = [];
-    let unknown = 0;
-    let typed = 0;
+    const seen = { typed: 0, unknown: 0, own: 0, none: 0 };
     for (let seed = 1; seed <= 2500; seed++) {
       const { inv: i, facts: f } = world(seed);
       const p = made(i, f);
       if (!p.nothing?.startsWith("Nothing to repair")) continue;
-      const it = i.copies.find((c) => c.slot && !idle(c)) as Copy;
-      if (it.dir === i.typed) typed++;
+      const it = i.copies.find((c) => c.slot && !idle(c));
+      const own = typedAs(i);
+      if (p.nothing === NONE_OF_NPMS) {
+        seen.none++;
+        if (it || i.dangling.length) other.push(`seed ${seed}: no copy of npm's, and one is here`);
+        if (!own || !p.notes.includes(own)) other.push(`seed ${seed}: no copy of npm's, and what is typed is not said`);
+        // Never of a folder where npm keeps the package (what a cut-off install left is in
+        // the way, and is refused), nor with two daemons to sort out.
+        if (i.prefixes.some((x) => slotIn(x) === i.typed)) other.push(`seed ${seed}: no copy of npm's, said of a slot`);
+        if (twins(f.service, f.daemon)) other.push(`seed ${seed}: no copy of npm's, said with two daemons`);
+      } else if (it?.dir === i.typed) seen.typed++;
       else if (i.unsure !== null) {
-        unknown++;
+        seen.unknown++;
         if (!p.notes.some((n) => n.includes(i.unsure as string) && n.includes("can't be told")))
           other.push(`seed ${seed}: unsure, and no note says so`);
-      } else other.push(`seed ${seed}: typed ${i.typed}, the copy in ${it.prefix}, the home ${i.home?.prefix}`);
+      } else if (own) {
+        seen.own++;
+        if (!p.notes.includes(own)) other.push(`seed ${seed}: what is typed is not npm's, and no note says so`);
+      } else other.push(`seed ${seed}: typed ${i.typed}, the copy in ${it?.prefix}, the home ${i.home?.prefix}`);
     }
     expect(other).toEqual([]);
-    expect(typed).toBeGreaterThan(100);
-    expect(unknown).toBeGreaterThan(10);
+    expect(seen.typed).toBeGreaterThan(100);
+    expect(seen.unknown).toBeGreaterThan(10);
+    expect(seen.own).toBeGreaterThan(0);
+    expect(seen.none).toBeGreaterThan(0);
   });
 
   it("a plan with steps does not repeat what typing starts: the run puts it right, and only what it does not mend is said beside the rows", () => {
@@ -2375,11 +2623,13 @@ describe("what these tests found in the plan, as it answers now", () => {
         uses: ["typed"],
         ...over,
       });
+    // (A stray copy of npm's is here too: something to repair.)
+    const stray = copy(BREW, { where: "/opt/homebrew", version: OLD, onPath: false });
     const at = (c: Copy, over: Partial<Inventory> = {}): Inventory =>
-      inv({ copies: [c, cached({ uses: ["this"] })], typed: c.dir, home: null, prefixes: [LOCAL], ...over });
-    const sorry = (why: string, end = ". Move it aside, then run this again") =>
-      `Typing \`sessionpipe\` starts ~/.local/lib/node_modules/sessionpipe, which is no installed copy of it (${why}): this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed${end}`;
-    const MOVE = `mv -n ${shq(slotIn(LOCAL), "linux")} ${shq(`${slotIn(LOCAL)}.old`, "linux")}`;
+      inv({ copies: [c, stray, cached({ uses: ["this"] })], typed: c.dir, home: null, prefixes: [LOCAL], ...over });
+    const sorry = (why: string, end = ". The line moves it aside and runs the repair again, through npx") =>
+      `Typing \`sessionpipe\` starts ~/.local/lib/node_modules/sessionpipe, which npm did not install (a checkout, a linked folder): ${why}. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed${end}`;
+    const MOVE = `mv -n ${shq(slotIn(LOCAL), "linux")} ${shq(`${slotIn(LOCAL)}.old`, "linux")} && npx -y sessionpipe@latest reinstall`;
     expect(refused(plan(at(cut()), facts()))).toEqual({
       error: sorry("it has no package.json that can be read (an install that was cut off?)"),
       next: MOVE,
@@ -2396,7 +2646,7 @@ describe("what these tests found in the plan, as it answers now", () => {
     const spaced = path.join(ROOT, "my node");
     const there = cut({ dir: slotIn(spaced) });
     expect(refused(plan(at(there, { prefixes: [spaced] }), facts()))?.next).toBe(
-      `mv -n ${shq(slotIn(spaced), "linux")} ${shq(`${slotIn(spaced)}.old`, "linux")}`,
+      `mv -n ${shq(slotIn(spaced), "linux")} ${shq(`${slotIn(spaced)}.old`, "linux")} && npx -y sessionpipe@latest reinstall`,
     );
     expect(shq(slotIn(spaced), "linux")).toMatch(/^'.* .*'$/);
     // Only for a looked-in prefix's own slot: the same folder where no prefix was looked in
@@ -2414,13 +2664,13 @@ describe("what these tests found in the plan, as it answers now", () => {
     const stray = copy(BREW, { where: "/opt/homebrew", version: OLD, uses: ["this"], onPath: false });
     const taken = untyped({ copies: [stray], home: null, taken: { dir, why }, prefixes: [LOCAL, BREW] });
     expect(refused(plan(taken, facts()))).toEqual({
-      error: `${dir} is not provably sessionpipe's (${why}), and it is where the one copy goes. Nothing was changed. Move it aside, then run this again`,
-      next: `mv -n ${shq(dir, "linux")} ${shq(`${dir}.old`, "linux")}`,
+      error: `${dir} is not provably sessionpipe's (${why}), and it is where the one copy goes. Nothing was changed. The line moves it aside and runs the repair again, through npx`,
+      next: `mv -n ${shq(dir, "linux")} ${shq(`${dir}.old`, "linux")} && npx -y sessionpipe@latest reinstall`,
     });
     // The folder is said as the caller shows a path; the line keeps it whole.
     const shown = plan(taken, facts(), (x) => `<${x}>`);
     expect(shown.refuse?.error).toMatch(
-      new RegExp(`^<${dir.replace(/[.\\/]/g, "\\$&")}> is not provably sessionpipe's`),
+      new RegExp(`^<${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}> is not provably sessionpipe's`),
     );
     expect(shown.refuse?.next).not.toContain("<");
     // No folder in the way, and no place: what PATH finds, as before.
@@ -2433,8 +2683,8 @@ describe("what these tests found in the plan, as it answers now", () => {
     expect(does(withHome)).toEqual(REPAIR);
     // It comes after what is typed being no install (which has its own line), and after `unsure`.
     const shim = path.join(HOME, ".asdf", "shims", "sessionpipe");
-    expect(refused(plan({ ...taken, unsure: shim }, facts()))?.next).toBe(
-      "npm install -g sessionpipe@1.2.0 && sessionpipe reinstall",
+    expect(refused(plan({ ...taken, unsure: shim }, facts()))?.error).toContain(
+      "this command can't tell which copy that file starts",
     );
   });
 
@@ -2579,9 +2829,79 @@ describe("what someone else's tool keeps is never told to be moved", () => {
     );
     expect(refused(p)).toEqual({
       error:
-        "Typing `sessionpipe` starts ~/.volta/tools/image/packages/sessionpipe, which is no installed copy of it (Volta keeps it): this command leaves it alone, so it can't put one clean copy in its place. Nothing was changed",
+        "Typing `sessionpipe` starts the copy Volta keeps, in ~/.volta/tools/image/packages/sessionpipe. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed",
       next: "which -a sessionpipe",
     });
+  });
+});
+
+describe("what these tests reported of 'no copy that npm installed is on this computer', as it is answered now", () => {
+  it("what a killed `npm install -g` left in the slot is what typing starts, and no copy of npm's is anywhere else: refused, and the one line moves that folder aside and goes on through npx (it said 'Nothing to repair')", () => {
+    // The sentence is for a contributor's checkout and for Volta's copy (N4). It was said
+    // wherever what is typed is no global install and no copy of ours (but an idle npx
+    // entry) is here: so also of the folder a cut-off install left in a looked-in prefix's
+    // own slot, which is the broken `sessionpipe` this command is run to repair (`npx -y
+    // sessionpipe@latest reinstall`): a dead end with exit 0. It is in the way of the one
+    // copy, alone on the computer as beside another.
+    const cut = copy(LOCAL, {
+      where: "~/.local/lib/node_modules/sessionpipe",
+      prefix: null,
+      slot: null,
+      not: "it has no package.json that can be read (an install that was cut off?)",
+      version: null,
+      uses: ["typed"],
+    });
+    const alone = inv({ copies: [cut, cached({ uses: ["this"] })], typed: cut.dir, home: null, prefixes: [LOCAL] });
+    const f = facts({ service: null, daemon: null, wanted: false, harnesses: [] });
+    const p = plan(alone, f);
+    expect(p.nothing).toBeNull();
+    expect(p.steps).toEqual([]);
+    expect(refused(p)).toEqual({
+      error:
+        "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which npm did not install (a checkout, a linked folder): it has no package.json that can be read (an install that was cut off?). This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed. The line moves it aside and runs the repair again, through npx",
+      next: `mv -n ${cut.dir} ${cut.dir}.old${AGAIN}`,
+    });
+    // The same folder in a prefix nobody looks in is a checkout like any other: nothing
+    // of npm's is here, and nothing is this command's to repair.
+    const elsewhere = plan({ ...alone, prefixes: [NVM] }, f);
+    expect(elsewhere.nothing).toBe(NONE_OF_NPMS);
+    expect(elsewhere.refuse).toBeNull();
+    expect(elsewhere.notes).toEqual([NO_INSTALL("~/.local/lib/node_modules/sessionpipe")]);
+    // Volta's copy sits in a prefix that is looked in, and is Volta's: not in the way.
+    const kept = plan(
+      inv({
+        copies: [{ ...cut, not: "Volta keeps it", keeper: "volta uninstall sessionpipe" }],
+        typed: cut.dir,
+        home: null,
+        prefixes: [LOCAL],
+      }),
+      f,
+    );
+    expect(kept.nothing).toBe(NONE_OF_NPMS);
+    expect(kept.notes).toEqual([VOLTAS("~/.local/lib/node_modules/sessionpipe")]);
+  });
+
+  it("two daemons on a computer where what is typed is a checkout and no copy of npm's is here: refused as what this command leaves alone (it said 'Nothing to repair' before it looked at the service)", () => {
+    // Two daemons are something to sort out, and this command can't from a checkout: it
+    // says so, changes nothing, and doctor names no command for it either (cli-main).
+    const checkout = checkedOut({ uses: ["typed", "service", "this"] });
+    const f = facts({ service: service({ pid: 100 }), daemon: { pid: 222, version: NEW, byHand: true } });
+    expect(twins(f.service, f.daemon)).toBe(true);
+    const typed = inv({ copies: [checkout], typed: checkout.dir, home: null });
+    const p = plan(typed, f);
+    expect(p.nothing).toBeNull();
+    expect(p.steps).toEqual([]);
+    expect(p.refuse?.error).toBe(
+      `${NO_INSTALL(checkout.where).slice(0, -1)}: ${checkout.not}. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed`,
+    );
+    expect(p.refuse?.next).toBe("which -a sessionpipe");
+    // One daemon, the service's own: nothing of npm's is here, and nothing to repair.
+    const one = plan(
+      typed,
+      facts({ service: service({ pid: 100 }), daemon: { pid: 100, version: NEW, byHand: false } }),
+    );
+    expect(one.nothing).toBe(NONE_OF_NPMS);
+    expect(one.refuse).toBeNull();
   });
 });
 
@@ -2907,6 +3227,7 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
     const { seen, count } = tally();
     let homeless = 0;
     let taken = 0;
+    let noneOfNpms = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
       const { inv: i, facts: f } = world(seed);
       const p = made(i, f);
@@ -2933,23 +3254,41 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
       count("a file where a copy's link was", inWay);
       count("a file where a copy's link was: refused with `mv -n`", inWay && !!p.refuse?.next.startsWith("mv -n"));
       if (astray && p.steps.length) no.push("what is typed is unsure or no installed copy, and it has steps");
-      // What is KNOWN to be astray is a finding: never "Nothing to repair", and `typing`
-      // (doctor's row) answers it. What can't be known is neither: `typing` is silent, and
-      // beside one whole copy it is "Nothing to repair" with the note that says so.
+      // N4: what is typed is something npm did not install (a checkout, Volta's copy). No
+      // finding: `typing` (doctor's finding) is silent, and wherever the plan has a
+      // sentence, `typedAs` is said beside it. With no copy of npm's here and no link that
+      // leads nowhere, that sentence is the one that says so, whatever else is so.
       const known = i.typed !== null && typed?.slot !== "global";
-      if (known && p.nothing?.startsWith("Nothing to repair"))
-        no.push("what is typed is no installed copy, and nothing is said");
-      if (known && typing(i) === null) no.push("what is typed is no installed copy, and typing() is silent");
+      const own = typedAs(i);
+      if ((own !== null) !== known) no.push("typedAs() answers, or not, against what is typed");
+      if (i.typed !== null && typing(i) !== null) no.push("something is typed, and typing() has a finding");
+      if (known && p.nothing !== null && !p.notes.includes(own as string))
+        no.push("what is typed is not npm's, and no note says so");
+      // (Never of what someone else's tool keeps: Volta's copy is Volta's to remove.)
+      const inSlot = !typed?.keeper && i.prefixes.some((x) => slotIn(x) === i.typed);
+      const both = twins(f.service, f.daemon);
+      if (known && !live(i).length && !i.dangling.length && !(f.apart && i.reach === null)) {
+        // But not where what is typed sits where npm keeps the package (what a cut-off
+        // install left is in the way), nor with two daemons to sort out: refused.
+        if (inSlot || both) {
+          if (p.nothing !== null || p.steps.length || !p.refuse)
+            no.push(`what is typed is in a slot, or two daemons, alone, and it says ${p.nothing}`);
+          count("alone, and in a prefix's own slot or with two daemons: refused", true);
+        } else {
+          if (p.nothing !== NONE_OF_NPMS || p.steps.length || p.refuse)
+            no.push(`what is typed is not npm's, none of npm's is here, and it says ${p.nothing ?? p.refuse?.error}`);
+          noneOfNpms++;
+        }
+      } else if (p.nothing === NONE_OF_NPMS) no.push("no copy of npm's is said, and one is here or nothing is typed");
       // The refusal for it names what PATH finds; or, where what is typed sits in a
       // looked-in prefix's own slot (what an install that was cut off left, a build), the
       // line that moves that folder aside. Never a line of npm's.
-      // (Never of what someone else's tool keeps: Volta's copy is Volta's to remove.)
-      const inSlot = !typed?.keeper && i.prefixes.some((x) => slotIn(x) === i.typed);
-      const move = (dir: string): string => `mv -n ${shq(dir, "linux")} ${shq(`${dir}.old`, "linux")}`;
+      const move = (dir: string): string =>
+        `mv -n ${shq(dir, "linux")} ${shq(`${dir}.old`, "linux")} && npx -y sessionpipe@latest reinstall`;
       if (known && p.refuse?.error.startsWith("Typing `sessionpipe` starts")) {
         const line = inSlot ? move(i.typed as string) : "which -a sessionpipe";
         if (p.refuse.next !== line) no.push(`what is typed is no installed copy, and the line is ${p.refuse.next}`);
-        if (p.refuse.error.endsWith(". Move it aside, then run this again") !== inSlot)
+        if (p.refuse.error.endsWith(". The line moves it aside and runs the repair again, through npx") !== inSlot)
           no.push("what is typed is no installed copy, and the sentence about moving it is wrong");
         count("refused: what is typed is in a prefix's slot and not ours: `mv -n` it", inSlot);
       }
@@ -2967,15 +3306,78 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
       // A folder left behind in the home's own slot is no copy that is there: the install
       // row gives the home's reason, and nothing says `null` of a release.
       if (/replaces null|\(null\)|null in /.test(JSON.stringify(p))) no.push("a release that is no release is said");
-      // "Nothing to repair" is said of the copy that is typed, or where that can't be told.
-      if (p.nothing?.startsWith("Nothing to repair") && live(i)[0]?.dir !== i.typed && i.unsure === null)
+      // "Nothing to repair" is said of the copy that is typed; or where that can't be told,
+      // or is something npm did not install (each with its note).
+      if (p.nothing?.startsWith("Nothing to repair") && live(i)[0]?.dir !== i.typed && i.unsure === null && !known)
         no.push("nothing to repair, and the one copy is not what is typed");
+      // N2: no refusal's line is `npm install …`, but the one that updates an unwritable
+      // home in place; and the refusal that can't tell what a file starts names no command.
+      if (
+        p.refuse &&
+        /\bnpm install\b/.test(p.refuse.next) &&
+        !p.refuse.next.startsWith("sudo npm install -g --prefix ")
+      )
+        no.push(`a refusal names ${p.refuse.next}`);
+      if (
+        p.refuse?.next.startsWith("sudo npm install -g --prefix ") &&
+        (i.home?.writable !== false ||
+          p.refuse.next !== `sudo npm install -g --prefix ${shq(i.home.prefix, "linux")} sessionpipe@${NEWEST}`)
+      )
+        no.push(`the sudo line is ${p.refuse.next}, and the home is ${i.home?.prefix}`);
+      if (p.refuse && i.unsure !== null && p.refuse.error.includes("is the first `sessionpipe` on your PATH")) {
+        if (p.refuse.next !== "") no.push(`it can't tell what a file starts, and names ${p.refuse.next}`);
+        count("refused: it can't tell what a file starts, and no command is named", true);
+      }
+      if (p.refuse && p.refuse.next === "" && !p.refuse.error.includes("is the first `sessionpipe` on your PATH"))
+        no.push("a refusal with no command that is not the one about a file");
+      // N3: a line that moves or removes what is typed, the file at the home's command
+      // path, or the folder in the way of the home, goes on through npx: once it has run,
+      // `sessionpipe` may be nowhere to type.
+      if (p.refuse && /^(mv|rm|sudo rm)\b/.test(p.refuse.next)) {
+        const touched = [i.typed, i.home?.blocked, i.taken?.dir, i.home ? slotIn(i.home.prefix) : null].filter(
+          (x): x is string => !!x,
+        );
+        if (!touched.some((x) => p.refuse?.next.includes(shq(x, "linux"))))
+          no.push(`a line moves what is none of these: ${p.refuse.next}`);
+        if (!p.refuse.next.endsWith(" && npx -y sessionpipe@latest reinstall"))
+          no.push(`a line moves it and stops there: ${p.refuse.next}`);
+        if (!p.refuse.error.endsWith("The line moves it aside and runs the repair again, through npx"))
+          no.push("a line moves it, and the sentence does not say what the line does");
+        count("refused: a line that moves what is in the way, and goes on through npx", true);
+      }
+      // N1: what is typed was taken, not read. No installed copy is removed: each stays,
+      // with why, and the plan says what is not known.
+      if (p.inferred !== (p.steps.length ? i.inferred : null)) no.push("the plan's `inferred` is not the look's");
+      if (p.steps.length && i.inferred) {
+        const installed = i.copies.filter((c) => c.slot === "global" && !c.aside);
+        for (const s of p.steps)
+          if (s.do === "remove" && installed.some((c) => c.dir === s.path))
+            no.push(`inferred, and it removes ${s.path}`);
+        const stayed = installed.filter((c) => c.dir !== slotIn(p.home?.prefix ?? ""));
+        if (p.kept !== stayed.length)
+          no.push(`inferred: ${stayed.length} installed copies beside the home's, and kept is ${p.kept}`);
+        for (const c of stayed) {
+          const l = p.left.find((x) => x.path === c.dir);
+          if (!l || l.ours || l.line !== null || l.why !== `${i.inferred} may be what starts it`)
+            no.push(`inferred, and ${c.dir} is left as ${JSON.stringify(l)}`);
+        }
+        const note = `Typing \`sessionpipe\` starts ${i.inferred}, which is no link of npm's: which copy it starts is not known${stayed.length ? ", so no other installed copy is removed" : ""}.`;
+        if (!p.notes.includes(note)) no.push("inferred, and the note that says what is not known is not there");
+        count("steps, with what is typed taken and not read", true);
+        count("that, with an installed copy kept for it", stayed.length > 0);
+        count(
+          "that, and a leftover, a cache entry or a link that leads nowhere still goes",
+          p.steps.some((s) => s.do === "remove"),
+        );
+      } else if (p.kept !== 0 || p.notes.some((n) => n.includes("is not known")))
+        no.push("not inferred, and something is kept or said for it");
       if (i.unsure !== null && typing(i) !== null) no.push("it can't be told what is typed, and typing() answers");
       if (i.unsure !== null && p.nothing !== null && !p.notes.some((n) => n.includes("can't be told from here")))
         no.push("it can't be told what is typed, and no note says so");
       // A sentence for a computer with no step is "Nothing to repair" exactly where
       // nothing was found: where `typing` is silent and the service, if wanted, is there.
-      if (p.nothing !== null) {
+      // (Where no copy of npm's is here at all, the sentence says that, whatever was found.)
+      if (p.nothing !== null && p.nothing !== NONE_OF_NPMS) {
         const finding = typing(i) !== null || (f.wanted && !f.service && !f.daemon);
         if (p.nothing.startsWith("Nothing to repair") === finding)
           no.push(`a computer with ${finding ? "a" : "no"} finding, and it says ${p.nothing}`);
@@ -2987,6 +3389,8 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
       // The source's one definition is the table said above; and with two daemons a
       // computer is never one with nothing to do.
       if (twins(f.service, f.daemon) !== two(f)) no.push("twins() is not the table");
+      // (Nor where no copy of npm's is here: these tests reported that it said "Nothing
+      // to repair" there over two daemons too.)
       if (two(f) && p.nothing !== null) no.push(`two daemons, and it says ${p.nothing}`);
       count("two daemons", two(f));
       count(
@@ -3061,12 +3465,17 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
           )
             no.push(`it removes ${s.path}`);
         }
-        // Every copy of ours but the home's goes, or is listed as left with its one line.
+        // Every copy of ours but the home's goes, or is listed as left with its one line
+        // (or, where what is typed was only taken, an installed copy with why and no line).
         for (const c of i.copies.filter((x) => x.slot && x.dir !== at)) {
           const gone = removes.some((s) => s.path === c.dir);
           const kept = p.left.find((l) => l.path === c.dir);
           if (gone === !!kept) no.push(`${c.dir} is ${gone ? "removed and left" : "neither removed nor left"}`);
-          if (kept && kept.line !== `sudo rm -r ${[c.dir, ...c.bins].map((x) => shq(x, "linux")).join(" ")}`)
+          const guessed = !!i.inferred && c.slot === "global" && !c.aside;
+          if (
+            kept &&
+            kept.line !== (guessed ? null : `sudo rm -r ${[c.dir, ...c.bins].map((x) => shq(x, "linux")).join(" ")}`)
+          )
             no.push(`the line for ${c.dir} is ${kept.line}`);
         }
         // The order: the download before the install, the copy put to use before anything
@@ -3139,14 +3548,7 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
       count("a world that may reach nothing", i.reach === null);
       count("npm out of reach", "error" in f.latest);
       count(`something newer than npm's newest (${AHEAD})`, !!p.refuse?.error.includes(AHEAD));
-      for (const next of [
-        "sudo npm install -g --prefix",
-        "npm install -g sessionpipe@",
-        "mv -n ",
-        "export PATH=",
-        "env -u ",
-        "which -a sessionpipe",
-      ])
+      for (const next of ["sudo npm install -g --prefix", "mv -n ", "export PATH=", "env -u ", "which -a sessionpipe"])
         count(`refused: ${next}`, !!p.refuse?.next.startsWith(next));
       // (Seldom: a folder of the user's own is nearly always a place.)
       if (p.refuse?.error.startsWith("no folder on this computer")) homeless++;
@@ -3156,6 +3558,8 @@ describe("over computers made up from a seed (helpers/reinstall-worlds.ts): what
     // No home: seldom, and in these computers always with a folder in the way (the plain
     // "no folder" is the hand-written tests' above).
     expect(taken).toBeGreaterThan(0);
+    // A checkout typed, outside every slot, one daemon at most, and nothing of npm's: seldom here too.
+    expect(noneOfNpms).toBeGreaterThan(0);
     expect(homeless).toBeGreaterThanOrEqual(0);
     expect(seen["a plan with steps"]).toBeGreaterThan(SEEDS / 5);
     expect(seen["a refusal"]).toBeGreaterThan(SEEDS / 5);
