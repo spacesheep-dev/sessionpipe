@@ -1163,6 +1163,13 @@ describe.runIf(WRITE)("write control vectors", () => {
         await signed(pk, day, commandStr({ reply_to: A })),
         { ok: false, code: "bad_fields" },
       );
+      // Last, so a new vector takes the next number and no other file moves.
+      hv(
+        "start-fx-harness",
+        "A new session of fx, an ACP agent the registry doesn't list (ADAPTERS.md names its launch line): its harness name verifies like any other row's.",
+        await signed(pk, day, commandStr({ kind: "start", session: "fx:0199c", cwd: "/tmp" })),
+        { ok: true, via: "grant", kind: "start" },
+      );
     }
 
     mkdirSync(dir, { recursive: true });
