@@ -460,8 +460,8 @@ describe.skipIf(process.platform === "win32")("doctor: the command, the service 
     file: "/h/Library/LaunchAgents/org.sessionpipe.control.plist",
     installed: true,
     loaded: true,
-    pid: null,
     argv: [process.execPath, realpathSync(path.join(realDist, "cli.js")), "control", "run"],
+    pid: null,
     ...o,
   });
   const fix = (text: string) => text.slice(text.indexOf("To fix"));

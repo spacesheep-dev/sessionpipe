@@ -177,9 +177,21 @@ function said(r: { lines: string[] }, title: string): string | undefined {
   const m = r.lines.map((l) => new RegExp(`^ {2}(.) ${quoted(title)} +(.*)$`).exec(l)).find(Boolean);
   return m ? `${m[1]} ${m[2]}` : undefined;
 }
-/** Doctor's "To fix", from its heading on. */
-const fixes = (r: { lines: string[] }): string[] =>
-  r.lines.includes("To fix") ? r.lines.slice(r.lines.indexOf("To fix")) : [];
+/** Doctor's last line wherever it has something to fix: the way back in when the command
+ *  itself is what broke. */
+const REPAIR =
+  "  If `sessionpipe` itself stops working, this repairs it from scratch: `npx -y sessionpipe@latest reinstall`";
+/** Doctor's "To fix", from its heading on, without that closing line: which is there,
+ *  after a blank, exactly when there is something to fix. */
+const fixes = (r: { lines: string[] }): string[] => {
+  if (!r.lines.includes("To fix")) {
+    expect(r.lines).not.toContain(REPAIR);
+    return [];
+  }
+  const all = r.lines.slice(r.lines.indexOf("To fix"));
+  expect(all.slice(-2)).toEqual(["", REPAIR]);
+  return all.slice(0, -2);
+};
 /** Doctor times the hook by this clock: each of its eight runs takes one millisecond. */
 function steadyHook(): void {
   let tick = 0n;
@@ -1497,7 +1509,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     expect(text).not.toContain("tok_secret");
     // The one thing to do: the sink that stopped, with the command alone on its line.
     expect(lines[0]).toBe("! 1 thing needs attention");
-    expect(lines.slice(-3)).toEqual([
+    expect(fixes({ lines })).toEqual([
       "To fix",
       "  1. kc stopped taking events (HTTP 401); they wait on this computer. See what it answers now:",
       "       sessionpipe sink test kc",
@@ -1583,7 +1595,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     );
     expect(down.text).toContain("  ! Claude Code ~/.claude-second  not signed in, as this shell sees it\n");
     expect(down.text).toMatch(/\n {2}! failed {3}installing 9\.9\.9 \d+ days ago: EACCES\n/);
-    expect(down.lines.slice(down.lines.indexOf("To fix"))).toEqual([
+    expect(fixes(down)).toEqual([
       "To fix",
       "  1. The background service isn't running, so no message reaches this computer. Start it, and leave it running:",
       "       sessionpipe control run",
@@ -1682,7 +1694,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
         "",
       ].join("\n"),
     );
-    expect(lines.slice(lines.indexOf("To fix"))).toEqual([
+    expect(fixes({ lines })).toEqual([
       "To fix",
       "  1. The hooks have no launcher to run. Write them again from this copy:",
       "       sessionpipe install",
@@ -1735,7 +1747,7 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     );
     const page = await run("doctor");
     expect(page.text).toContain("\nAgents\n  ! claude-code  hooks out of date · ~/.claude/settings.json\n");
-    expect(page.lines.slice(-2)).toEqual([
+    expect(fixes(page).slice(-2)).toEqual([
       "  2. The hooks for claude-code are missing or out of date, so not every session is reported. Write them again:",
       "       sessionpipe install",
     ]);
@@ -1749,13 +1761,78 @@ describe.skipIf(process.platform === "win32")("doctor", () => {
     expect(await warned()).toMatch(/points at an old node or script path/);
   });
 
+  it("looks for every copy of sessionpipe in this home for real: one is nothing to say, a second is a thing to fix", async () => {
+    /** A published sessionpipe as npm installs one for every folder, with its bin link. */
+    const install = (prefix: string, version: string): string => {
+      const dir = path.join(prefix, "lib", "node_modules", "sessionpipe");
+      put(path.join(dir, "package.json"), { name: "sessionpipe", version });
+      put(path.join(dir, "dist", "cli.js"), "");
+      mkdirSync(path.join(prefix, "bin"), { recursive: true });
+      symlinkSync(
+        path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"),
+        path.join(prefix, "bin", "sessionpipe"),
+      );
+      return dir;
+    };
+    const local = install(path.join(home, ".local"), "1.0.0");
+    vi.stubEnv("PATH", path.join(home, ".local", "bin"));
+    // `status` reads each copy's package.json, and starts nothing.
+    expect((await run("status")).lines[0]).toBe("✓ All good");
+    const other = install(path.join(home, ".npm-global"), "0.9.0");
+    const brief = await run("status");
+    expect(brief.lines[0]).toBe("! 1 thing needs attention");
+    expect(brief.text).toContain(
+      "copies: 1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.npm-global (nothing uses it)",
+    );
+    expect(vi.mocked(spawnSync).mock.calls.some((c) => (c[1] as string[]).includes("--version"))).toBe(false);
+    // `doctor` runs each to ask its version: here each prints what its package.json says.
+    vi.mocked(spawnSync).mockImplementation(((_cmd: string, argv: string[]) =>
+      argv[1] === "--version"
+        ? {
+            status: 0,
+            stdout: `${JSON.parse(readFileSync(path.join(argv[0] as string, "..", "..", "package.json"), "utf8")).version}\n`,
+            stderr: "",
+          }
+        : { status: argv.some((a) => a.endsWith("hook.js")) ? 0 : 1, stdout: "", stderr: "" }) as never);
+    steadyHook();
+    const d = await run("doctor");
+    expect(d.text).toMatch(
+      row("!", "copies", "1.0.0 in ~/.local (you type this one); 0.9.0 in ~/.npm-global (nothing uses it)"),
+    );
+    expect(fixes(d)).toEqual([
+      "To fix",
+      "  1. 2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:",
+      "       sessionpipe reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(j.copies).toEqual([
+      { dir: local, version: "1.0.0", runs: true, uses: ["typed"] },
+      { dir: other, version: "0.9.0", runs: true, uses: [] },
+    ]);
+    // A copy that doesn't answer is a broken one, said as that.
+    vi.mocked(spawnSync).mockImplementation(((_cmd: string, argv: string[]) => ({
+      status: argv.some((a) => a.endsWith("hook.js")) ? 0 : 1,
+      stdout: "",
+      stderr: "",
+    })) as never);
+    rmSync(path.join(home, ".npm-global"), { recursive: true });
+    const broken = await run("doctor");
+    expect(broken.text).toMatch(row("!", "copies", "1.0.0 in ~/.local (it doesn't run: `--version` printed nothing)"));
+    expect(fixes(broken)[1]).toBe(
+      "  1. The copy of sessionpipe on this computer is not whole. One command puts it right:",
+    );
+    // Nothing outside this test's home was looked at: the copy these tests run from is no row.
+    expect(j.copies.every((c: { dir: string }) => c.dir.startsWith(home))).toBe(true);
+  });
+
   it("a hook that can't be spawned, or fails: no wall clock; the in-process timing survives a bad line", async () => {
     vi.mocked(spawnSync).mockReturnValue({ status: 1, stdout: "", stderr: "" } as never);
     put(path.join(state, "timing.jsonl"), "garbage\n");
     onPlatform("win32");
     const failed = await run("doctor");
     expect(failed.text).toContain("  ! hook speed          the hook could not be started\n");
-    expect(failed.lines.slice(-3)).toEqual([
+    expect(fixes(failed)).toEqual([
       "To fix",
       "  1. The hook that agents run could not be started from this copy. Write the hooks again:",
       "       sessionpipe install",
