@@ -425,16 +425,24 @@ changes nothing and names the one line to run:
   `sudo npm install -g --prefix …` line that updates it where it is (after it,
   `sessionpipe reinstall` does the rest and leaves that copy as it is);
 - the first `sessionpipe` on your PATH is a file npm did not make (a version manager's
-  shim, a wrapper) and the command was started through `npx`: it can't tell which copy
-  that file starts. Started by typing `sessionpipe`, the copy it runs from is the one;
-- what you type is no installed copy (a checkout, a linked folder): it leaves it alone;
+  shim, a wrapper) and the command was not started through it: it can't tell which copy
+  that file starts, and names no command, since none leads out by itself. Started through
+  such a file (a shim starts npm's own link), the copy it runs from is taken to be the
+  one you type: it is made the newest in place, and because that is taken and not read,
+  no other installed copy is removed and the last line says so;
+- what you type is not a copy npm installed (a checkout, a linked folder, the copy Volta
+  keeps) and a copy npm installed needs repair: it leaves what you type alone. (With no
+  npm copy here there is nothing to repair, and `doctor` says the same.)
 - a folder that is not provably sessionpipe's sits where npm keeps the package (what an
   install that was cut off left, with no package.json to say what it is; a build): the
   line that moves it aside;
 - the folder the command would go in is not on your PATH.
 
-A copy it may not write is left, with the one line that removes exactly what it would
-have removed (`sudo rm -r <the folder> <its link>`).
+A line that moves something aside goes on through `npx` in the same line, since
+`sessionpipe` may be nowhere to type once it has run. A copy it may not write is left,
+with the one line that removes exactly what it would have removed (`sudo rm -r <the
+folder> <its link>`). What a system drops into a folder by itself (`.DS_Store`,
+`Thumbs.db`, `desktop.ini`) says nothing about whose the folder is, and goes with it.
 
 Exit codes are `update`'s: `0` one copy (or nothing to repair); `3` the background
 service is still at work on something of its own (it restarts by itself when it runs
