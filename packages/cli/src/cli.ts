@@ -115,6 +115,7 @@ import {
   span,
   table,
   tint,
+  tryLine,
   type Ui,
 } from "./style.js";
 import {
@@ -2397,9 +2398,14 @@ async function reinstall(): Promise<void> {
     process.exitCode = 3;
     return lastLine(done.said, true);
   }
-  ending(short(done.said), [...done.warn, ...p.notes].map(short));
-  // A copy that is still there: the job is not done, and it stops with the one line for it.
-  if (done.state === "left") throw new Refusal(short(done.still).replace(/\.$/, ""), done.next, true);
+  const more = [...done.warn, ...p.notes].map(short);
+  if (done.state === "one") return ending(short(done.said), more);
+  // A copy that is still there is no failure of this command's, and the job is not done:
+  // it is said last, over the one line for it, with an exit code a script can tell from
+  // "one copy".
+  ending(short(done.said), [...more, short(done.still)]);
+  say(tryLine(ui, done.next));
+  process.exitCode = 1;
 }
 
 /** `sessionpipe titles [on|off]`: whether the worker asks a harness's own service for a
