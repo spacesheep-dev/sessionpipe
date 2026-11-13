@@ -35,6 +35,7 @@ const service = (o: Partial<ServiceState> = {}): ServiceState => ({
   file: "/h/Library/LaunchAgents/x.plist",
   installed: true,
   loaded: true,
+  pid: null,
   argv: ["/usr/bin/node", `${MINE}/cli.js`, "control", "run"],
   ...o,
 });
