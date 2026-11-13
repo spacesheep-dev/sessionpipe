@@ -10,7 +10,17 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Status } from "../src/control/daemon.js";
-import { askHealth, freeBytes, logTroubles, serviceLog, tailOf } from "../src/control/health.js";
+import {
+  askHealth,
+  freeBytes,
+  logTroubles,
+  SERVICE_LABEL,
+  SERVICE_UNIT,
+  serviceLog,
+  serviceLook,
+  serviceSeen,
+  tailOf,
+} from "../src/control/health.js";
 import { heardAgo, hostOf, isLive, statusView } from "../src/control/view.js";
 import { makeUi, PLAIN, plain } from "../src/style.js";
 
@@ -61,6 +71,154 @@ describe.runIf(process.platform !== "win32")("what the service sees", () => {
     expect(await askHealth(other.sock, 2000)).toBeNull();
     other.close();
     expect(await askHealth(path.join(tmp, "nobody.sock"))).toBeNull();
+  });
+});
+
+// The service's file is read where its manager can't be asked. Every command is stood in
+// for (and `execFileSync` is, for the whole file): nothing here asks a real manager.
+describe.runIf(process.platform !== "win32")("the service as its file says it", () => {
+  /** A unit file, or a plist, as `control pair` writes one for this node and this copy. */
+  const argv = (cli: string) => ["/usr/bin/node", cli, "control", "run"];
+  const unitText = (cli: string) =>
+    `[Service]\nExecStart=${argv(cli)
+      .map((a) => `"${a}"`)
+      .join(" ")}\n`;
+  const plistText = (cli: string) =>
+    `<plist><dict><key>ProgramArguments</key><array>${argv(cli)
+      .map((a) => `<string>${a}</string>`)
+      .join("")}</array></dict></plist>\n`;
+  let cli: string;
+  let unit: string;
+
+  beforeEach(() => {
+    // This account's home and `$HOME` are both this test's folder, so "this computer's
+    // usual place" is in it: with nothing set, the usual service is the one looked at.
+    vi.spyOn(os, "homedir").mockReturnValue(tmp);
+    vi.spyOn(os, "userInfo").mockReturnValue({ ...os.userInfo(), homedir: tmp });
+    cli = path.join(tmp, ".npm-global", "lib", "node_modules", "sessionpipe", "dist", "cli.js");
+    unit = path.join(tmp, ".config", "systemd", "user", SERVICE_UNIT);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // Whatever was looked at, no real launchctl or systemctl was run for it.
+    expect(vi.mocked(execFileSync)).not.toHaveBeenCalled();
+  });
+
+  it("Linux: a service file whose manager can't be asked is still seen (serviceSeen), and serviceLook answers null", () => {
+    const o = { env: {}, platform: "linux" as const, home: tmp };
+    mkdirSync(path.dirname(unit), { recursive: true });
+    writeFileSync(unit, unitText(cli));
+    // A `su -` or `sudo -u` shell: there is no user manager to reach, whatever is asked.
+    const asked: string[] = [];
+    const unreachable = (cmd: string, args: string[]): string => {
+      asked.push([cmd, ...args].join(" "));
+      throw new Error("Failed to connect to bus: No medium found");
+    };
+    expect(serviceSeen({ ...o, exec: unreachable })).toEqual({
+      manager: null,
+      file: unit,
+      installed: true,
+      loaded: false,
+      // The copy the file names: in use, though nobody could be asked whether it runs.
+      argv: argv(cli),
+      pid: null,
+    });
+    expect(serviceLook({ ...o, exec: unreachable })).toBeNull();
+    // It asked, and only what changes nothing.
+    expect(asked.length).toBeGreaterThan(0);
+    for (const a of asked) expect(a).toMatch(/^systemctl --user (is-active \S+|show --property=Version)$/);
+    // No file: seen as that, and still no manager to say more.
+    rmSync(unit);
+    expect(serviceSeen({ ...o, exec: unreachable })).toEqual({
+      manager: null,
+      file: unit,
+      installed: false,
+      loaded: false,
+      argv: null,
+      pid: null,
+    });
+    expect(serviceLook({ ...o, exec: unreachable })).toBeNull();
+  });
+
+  it("where the manager answers, what is seen is the look: the same file, the same copy, and the manager's own word", () => {
+    const o = { env: {}, platform: "linux" as const, home: tmp };
+    mkdirSync(path.dirname(unit), { recursive: true });
+    writeFileSync(unit, unitText(cli));
+    const active = (_cmd: string, args: string[]): string =>
+      args.includes("--property=MainPID") ? "4242\n" : "active\n";
+    const seen = serviceSeen({ ...o, exec: active });
+    expect(seen).toEqual({ manager: "systemd", file: unit, installed: true, loaded: true, argv: argv(cli), pid: 4242 });
+    expect(serviceLook({ ...o, exec: active })).toEqual(seen);
+    // Not running, and systemd is there to say so: a manager, and nothing loaded.
+    const inactive = (_cmd: string, args: string[]): string => {
+      if (args.includes("is-active")) throw new Error("inactive");
+      return "Version=257\n";
+    };
+    expect(serviceSeen({ ...o, exec: inactive })).toMatchObject({ manager: "systemd", installed: true, loaded: false });
+    expect(serviceLook({ ...o, exec: inactive })).toEqual(serviceSeen({ ...o, exec: inactive }));
+  });
+
+  it("macOS: a launchctl that can't be run is no manager, and the plist is read all the same", () => {
+    const o = { env: {}, platform: "darwin" as const, home: tmp };
+    const plist = path.join(tmp, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`);
+    mkdirSync(path.dirname(plist), { recursive: true });
+    writeFileSync(plist, plistText(cli));
+    const noLaunchctl = (): string => {
+      throw Object.assign(new Error("spawnSync launchctl ENOENT"), { code: "ENOENT" });
+    };
+    expect(serviceSeen({ ...o, exec: noLaunchctl })).toEqual({
+      manager: null,
+      file: plist,
+      installed: true,
+      loaded: false,
+      argv: argv(cli),
+      pid: null,
+    });
+    expect(serviceLook({ ...o, exec: noLaunchctl })).toBeNull();
+    // launchd answers that it has no such service: it was asked, so it is a manager.
+    const notLoaded = (): string => {
+      throw new Error("Could not find service");
+    };
+    expect(serviceSeen({ ...o, exec: notLoaded })).toMatchObject({
+      manager: "launchd",
+      installed: true,
+      loaded: false,
+    });
+    expect(serviceLook({ ...o, exec: notLoaded })).toEqual(serviceSeen({ ...o, exec: notLoaded }));
+  });
+
+  it("is null where this sessionpipe has no service to look at, and then nothing is asked or read", () => {
+    mkdirSync(path.dirname(unit), { recursive: true });
+    writeFileSync(unit, unitText(cli));
+    const exec = vi.fn((): string => "active\n");
+    const base = { platform: "linux" as const, home: tmp, exec };
+    // It keeps its files somewhere other than this computer's usual place.
+    expect(serviceSeen({ ...base, env: { SESSIONPIPE_STATE: path.join(tmp, "state") } })).toBeNull();
+    // It names a service that is not one of sessionpipe's.
+    expect(serviceSeen({ ...base, env: { SESSIONPIPE_SERVICE_LABEL: "com.example.other" } })).toBeNull();
+    // With nothing handed in it is this process's own: a test's sandbox, elsewhere.
+    expect(serviceSeen()).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+    // A world that names a service of its own is seen under that name, by its own file.
+    const own = { SESSIONPIPE_STATE: path.join(tmp, "state"), SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest" };
+    expect(serviceSeen({ ...base, env: own })).toEqual({
+      manager: "systemd",
+      file: path.join(tmp, ".config", "systemd", "user", "org.sessionpipe.racetest.service"),
+      installed: false,
+      loaded: true,
+      argv: null,
+      pid: null,
+    });
+    // A platform with no manager: nothing to run, and nothing seen but that.
+    expect(serviceSeen({ env: {}, platform: "win32" })).toEqual({
+      manager: null,
+      file: null,
+      installed: false,
+      loaded: false,
+      argv: null,
+      pid: null,
+    });
+    expect(serviceLook({ env: {}, platform: "win32" })).toBeNull();
   });
 });
 
