@@ -15,6 +15,7 @@ export const GROUPS: readonly { title: string; rows: readonly (readonly [string,
       ["install", "Only the hooks; nothing is sent anywhere"],
       ["uninstall", "Take the hooks out again"],
       ["update [off|on]", "Bring this whole computer up to date, in one step"],
+      ["reinstall", "Repair: one clean, newest copy; the rest removed"],
     ],
   },
   {
