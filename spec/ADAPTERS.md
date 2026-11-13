@@ -235,7 +235,8 @@ one the [ACP registry](https://github.com/agentclientprotocol/registry) publishe
 checks nightly, as of its 2026-10-22 state (the registry id in the second column); a
 harness that has a row above keeps its name here. Claude Code, Codex and Antigravity
 have their own drivers (above) and their ACP wrappers (`claude-acp`, `codex-acp`,
-`antigravity-acp`) are not run.
+`antigravity-acp`) are not run. fx is not in the registry; its launch line is the one
+its own manual gives (fx.sh/docs/using-fx/acp, measured against fx 0.0.16 on 2026-11-13).
 
 | `harness.name` | Registry id | Product | Launch |
 |----------------|-------------|---------|--------|
@@ -268,6 +269,7 @@ have their own drivers (above) and their ACP wrappers (`claude-acp`, `codex-acp`
 | `corust-agent` | `corust-agent` | Corust Agent | `corust-agent-acp` |
 | `cortex-code` | `cortex-code` | Cortex Code (Snowflake) | `cortex acp serve` |
 | `kimchi` | `kimchi` | Kimchi | `kimchi --mode acp` |
+| `fx` | (not listed) | fx (Vercel Labs) | `fx acp` |
 
 What the daemon says and reads, in the protocol's own names:
 
@@ -278,6 +280,10 @@ What the daemon says and reads, in the protocol's own names:
   machine's terminal, never by the daemon.
 - `session/new` with `cwd` (the start's folder) and `mcpServers: []`; `session/load`
   with the same and the agent's `sessionId` to reopen one.
+  For fx both carry `_meta: {fx: {profileMcpServers: true}}`: an ACP session of fx's
+  leaves out the MCP servers in the person's own `~/.fx/mcp.json` unless the client
+  asks for them, and a session started from a phone should have what one started at
+  the terminal has.
 - `session/prompt` with one `text` block; its response's `stopReason` ends the turn.
 - `session/update`: `agent_message_chunk` whose `content` is `text` is the reply;
   `tool_call` and `tool_call_update` name what ran (for the reply's list of refusals);

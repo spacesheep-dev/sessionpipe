@@ -229,6 +229,7 @@ describe("the agents and where they are", () => {
       expect(a.bin).toMatch(/^[a-z][a-z0-9-]*$/);
     }
     expect(acpAgent("gemini-cli")).toMatchObject({ registry: "gemini", bin: "gemini", args: ["--acp"] });
+    expect(acpAgent("fx")).toMatchObject({ bin: "fx", args: ["acp"], meta: { fx: { profileMcpServers: true } } });
     expect(acpAgent("claude-code")).toBeUndefined();
     expect(acpOverride("gemini-cli")).toBe("SESSIONPIPE_ACP_GEMINI_CLI");
   });
@@ -247,6 +248,12 @@ describe("the agents and where they are", () => {
       args: ["acp"],
     });
     expect(findAcpAgent("kilo", { PATH: bin }, home, empty)).toBeNull();
+    const fx = script(path.join(home, ".local", "bin", `fx${ext}`));
+    expect(findAcpAgent("fx", { PATH: empty }, home, empty)).toEqual({
+      bin: fx,
+      args: ["acp"],
+      meta: { fx: { profileMcpServers: true } },
+    });
     expect(findAcpAgent("codex", { PATH: bin }, home, empty)).toBeNull();
     expect(acpHarnesses({ PATH: bin, HOME: empty })).toContain("gemini-cli");
     expect(drivableHarnesses({ PATH: bin })).toContain("gemini-cli");
@@ -477,6 +484,28 @@ describe("one agent, driven", () => {
       }
     },
   );
+  it("an agent's own meta rides on session/new and session/load, and on nothing else; without one neither carries any", async () => {
+    const meta = { fx: { profileMcpServers: true } };
+    const h = await open({ meta });
+    expect(await h.send("pong")).toEqual({ reply: "pong" });
+    const [init, fresh, prompt] = runs();
+    expect(fresh).toMatchObject({ method: "session/new", params: { cwd: project, mcpServers: [], _meta: meta } });
+    expect(init?.params).not.toHaveProperty("_meta");
+    expect(prompt?.params).not.toHaveProperty("_meta");
+    await open({ load: SESSION, meta });
+    expect(runs().find((r) => r.method === "session/load")).toMatchObject({
+      params: { sessionId: SESSION, _meta: meta },
+    });
+    await open();
+    expect(
+      runs()
+        .filter((r) => r.method === "session/new")
+        .at(-1)?.params,
+    ).not.toHaveProperty("_meta");
+    // Three stand-ins here: each has said its input closed before the next test reads the log.
+    for (const x of held.splice(0)) x.close();
+    await vi.waitFor(() => expect(runs().filter((r) => r.stdin === "end")).toHaveLength(3));
+  });
   it("reopening: session/load where the agent can, its replay is nobody's answer; an agent that can't is unsupported", async () => {
     const seen: string[] = [];
     const h = await open({ load: SESSION, onText: (t) => seen.push(t) });

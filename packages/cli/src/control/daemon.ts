@@ -459,7 +459,7 @@ export interface DaemonDeps {
   codexLogin?: (bin: string) => Promise<Login>;
   /** An ACP agent's CLI on this machine, by harness name (core's findAcpAgent; null:
    *  not installed). Absent: this daemon drives none of them. */
-  acp?: (harness: string) => { bin: string; args: string[] } | null;
+  acp?: (harness: string) => { bin: string; args: string[]; meta?: Record<string, unknown> } | null;
   /** The harnesses every hello advertises (core's drivableHarnesses); by default, the
    *  ones the finders above find. */
   harnesses?: () => string[];
@@ -4066,7 +4066,7 @@ export class ControlDaemon {
 
   private openAcp(
     id: string,
-    found: { bin: string; args: string[] },
+    found: { bin: string; args: string[]; meta?: Record<string, unknown> },
     cwd: string,
     label: string,
     stream: AnswerStream,
