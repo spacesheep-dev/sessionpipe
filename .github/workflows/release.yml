@@ -137,7 +137,9 @@ jobs:
           set -e
           for d in cli core receiver conformance; do
             case "$d" in cli) name=sessionpipe ;; *) name="sessionpipe-$d" ;; esac
-            file="pack/$name-$VERSION.tgz"
+            # "./": npm reads a bare "pack/<name>.tgz" as a GitHub repository (owner/repo)
+            # and tries to clone it; 0.16.0's first run failed that way.
+            file="./pack/$name-$VERSION.tgz"
             test -f "$file" || { echo "::error::$file was not packed"; exit 1; }
             if [ "$(npm view "$name@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
               echo "$name@$VERSION is on npm already"
