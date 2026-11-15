@@ -34,7 +34,7 @@ jobs:
     # package → Settings → Trusted publisher, file release.yml), or the NPM_TOKEN secret
     # holds an npm automation token.
     if: vars.RELEASES_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: graphide
     permissions:
       contents: read
     steps:
@@ -52,7 +52,7 @@ jobs:
   version:
     name: Version
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: graphide
     permissions:
       contents: write # pushes release/v<version>
     outputs:
@@ -81,7 +81,7 @@ jobs:
     name: Build, test and pack the version
     needs: version
     if: needs.version.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: graphide
     permissions:
       contents: read
     steps:
@@ -156,7 +156,7 @@ jobs:
     name: Receiver image → GHCR
     needs: [version, publish]
     if: needs.version.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: graphide
     permissions:
       contents: read
       packages: write
@@ -198,7 +198,7 @@ jobs:
     # Also when there was nothing left to publish (build and publish skipped): a re-run
     # finishes a release that reached npm and stopped before its tags or its PR.
     if: ${{ !cancelled() && !failure() && needs.version.outputs.finish == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: graphide
     permissions:
       contents: write # tags, the GitHub release, merging the PR
       pull-requests: write
