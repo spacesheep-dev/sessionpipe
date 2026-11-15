@@ -20,7 +20,7 @@ concurrency:
 jobs:
   test:
     name: node ${{ matrix.node }} · ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'graphide' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +61,7 @@ jobs:
 
   dco:
     name: DCO sign-off
-    runs-on: ubuntu-latest
+    runs-on: graphide
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,7 +95,7 @@ jobs:
 
   proto-additive:
     name: A proto change is additive
-    runs-on: ubuntu-latest
+    runs-on: graphide
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,7 +121,7 @@ jobs:
 
   spec-fixture:
     name: A spec change carries a fixture
-    runs-on: ubuntu-latest
+    runs-on: graphide
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,7 +142,7 @@ jobs:
 
   adapter-fixture:
     name: An adapter change carries a fixture or a test
-    runs-on: ubuntu-latest
+    runs-on: graphide
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
