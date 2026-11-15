@@ -226,7 +226,19 @@ describe("a start's options are checked before anything is taken", { timeout: 30
         code: "permission",
         detail: `this machine runs in safe mode; ${permission} needs \`sessionpipe control mode auto\` at the machine`,
       });
-      expect(outcomes(q.id).map((a) => a.outcome)).toEqual(["refused"]);
+      // A redelivery may replay the stored ack before its first POST lands.
+      const finals = outcomes(q.id);
+      expect(finals.length).toBeGreaterThanOrEqual(1);
+      const at = finals[0]?.at;
+      expect(at).toEqual(expect.any(String));
+      for (const ack of finals) {
+        expect(ack).toMatchObject({
+          outcome: "refused",
+          code: "permission",
+          detail: `this machine runs in safe mode; ${permission} needs \`sessionpipe control mode auto\` at the machine`,
+          at,
+        });
+      }
     }
     expect(runs).toEqual([]);
   });
