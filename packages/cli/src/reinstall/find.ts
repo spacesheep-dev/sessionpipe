@@ -215,6 +215,19 @@ export function canWrite(dir: string): boolean {
   }
 }
 
+/** May this user start a file as a program? What a shell asks of a file before it starts
+ *  it, and passes over the file where the answer is no. Node, handed a cli.js by its path,
+ *  reads one of any mode: asking a copy its version tells nothing of this. (Windows has no
+ *  such bit: there every file that is there may be started.) */
+export function startable(file: string): boolean {
+  try {
+    accessSync(file, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Something has this name, a link that leads nowhere included. */
 const isThere = (p: string): boolean => {
   try {
@@ -412,9 +425,11 @@ export function look(o: Looking): Inventory {
     try {
       whole = statSync(cli).isFile();
     } catch {}
+    // Whole, and a shell can start it: npm's link leads to the cli.js itself.
+    const starts = whole && startable(cli);
     // The one copy that is asked whether it runs: what typing starts, where that is a
     // folder the proof accepts and not the copy running now.
-    const ran = whole && slot && !kept && dir === typed && dir !== mine && o.runs ? { said: o.runs(cli) } : null;
+    const ran = starts && slot && !kept && dir === typed && dir !== mine && o.runs ? { said: o.runs(cli) } : null;
     return {
       dir,
       // An npx cache entry by its own folder (`~/.npm/_npx/<id>` says what it is); what is
@@ -429,15 +444,17 @@ export function look(o: Looking): Inventory {
         ? "left behind by an install that was cut off"
         : !whole
           ? "its dist/cli.js is missing (an install that was cut off?)"
-          : ran && ran.said === null
-            ? "it doesn't run: `--version` printed nothing"
-            : ran && ran.said !== version
-              ? `it says it is ${ran.said}, and its package.json says ${version}`
-              : // Whole, and nothing can start it: npm's link to it was taken away or written
-                // over. (An npx cache entry is started by npx, by its path.)
-                slot === "global" && !bins.length
-                ? "npm's link to it is gone"
-                : null,
+          : !starts
+            ? "its dist/cli.js is not executable, so a shell can't start it"
+            : ran && ran.said === null
+              ? "it doesn't run: `--version` printed nothing"
+              : ran && ran.said !== version
+                ? `it says it is ${ran.said}, and its package.json says ${version}`
+                : // Whole, and nothing can start it: npm's link to it was taken away or written
+                  // over. (An npx cache entry is started by npx, by its path.)
+                  slot === "global" && !bins.length
+                  ? "npm's link to it is gone"
+                  : null,
       bins,
       uses: [
         ...(dir === typed ? (["typed"] as const) : []),

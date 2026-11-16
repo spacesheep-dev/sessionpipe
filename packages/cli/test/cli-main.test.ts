@@ -160,7 +160,10 @@ const IGNORES_CASE = (() => {
 
 function put(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`);
+  // A copy's cli.js is a program: npm makes the file its link leads to executable.
+  writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`, {
+    mode: path.basename(file) === "cli.js" ? 0o755 : 0o644,
+  });
 }
 const cfg = () => readConfig();
 const onPlatform = (p: NodeJS.Platform) => Object.defineProperty(process, "platform", { value: p, configurable: true });

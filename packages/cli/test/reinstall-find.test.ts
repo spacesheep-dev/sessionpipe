@@ -41,6 +41,7 @@ import {
   look,
   prefixesOf,
   spelled,
+  startable,
 } from "../src/reinstall/find.js";
 import { prove, slotOf, within } from "../src/reinstall/ours.js";
 
@@ -185,7 +186,8 @@ function pkg(dir: string, o: Pkg = {}): string {
   if (o.raw !== null) writeFileSync(path.join(dir, "package.json"), o.raw ?? json);
   if (o.cli !== false) {
     mkdirSync(path.join(dir, "dist"), { recursive: true });
-    writeFileSync(path.join(dir, "dist", "cli.js"), CLI);
+    // A program: npm makes the file its link leads to executable.
+    writeFileSync(path.join(dir, "dist", "cli.js"), CLI, { mode: 0o755 });
   }
   for (const e of o.holds ?? []) mkdirSync(path.join(dir, e), { recursive: true });
   return dir;
@@ -323,6 +325,7 @@ const place = (prefix: string, why: string, o: Partial<Home> = {}): Home => ({
   ...o,
 });
 const MISSING = "its dist/cli.js is missing (an install that was cut off?)";
+const NOT_A_PROGRAM = "its dist/cli.js is not executable, so a shell can't start it";
 const LEFT = "left behind by an install that was cut off";
 /** What is wrong with a whole copy in a global folder that no link of npm's leads to. */
 const NO_LINK = "npm's link to it is gone";
@@ -1114,6 +1117,63 @@ describe.skipIf(win32)("look: what is wrong with a copy, read from the disk", ()
     ]);
     expect(inv.dangling).toEqual([]);
     expect(inv.strangers).toEqual([]);
+  });
+
+  it("Q1: a cli.js that is there and that this user may not start is no whole copy: said in that copy's row, and never asked its release, which node would read from a file of any mode", () => {
+    const at = (n: string) => path.join(tmp, n);
+    globalCopy(at("first"));
+    globalCopy(at("behind"));
+    const env = { PATH: PATH(path.join(at("first"), "bin"), path.join(at("behind"), "bin")) };
+    const cli = cliOf(at("first"));
+    // Readable, and no program: what a restore or a copy that drops modes leaves. (Whoever
+    // runs the tests: with no such bit at all, root may not start it either.)
+    for (const mode of [0o644, 0o600, 0o444]) {
+      chmodSync(cli, mode);
+      const { asked, runs } = runner({ [cli]: "0.15.0" });
+      const inv = look(looking({ env, runs }));
+      expect(inv.copies, mode.toString(8)).toEqual([
+        row(at("first"), { uses: ["typed"], wrong: NOT_A_PROGRAM }),
+        row(at("behind")),
+      ]);
+      // It would have answered its own release.
+      expect(asked).toEqual([]);
+      // What a shell passes over is still where the one copy lives, as a copy with no
+      // cli.js is: the fresh install there is what mends it.
+      expect(inv.typed).toBe(slot(at("first")));
+      expect(inv.home).toMatchObject({ prefix: at("first"), why: "where the one you type is", writable: true });
+    }
+    // A program for whoever owns it is whole, and is asked.
+    for (const mode of [0o755, 0o700, 0o744]) {
+      chmodSync(cli, mode);
+      const { asked, runs } = runner({ [cli]: "0.15.0" });
+      expect(look(looking({ env, runs })).copies, mode.toString(8)).toEqual([
+        row(at("first"), { uses: ["typed"] }),
+        row(at("behind")),
+      ]);
+      expect(asked).toEqual([cli]);
+    }
+    // The same is said of a copy nothing uses; and one with no cli.js at all is said to
+    // have none.
+    chmodSync(cliOf(at("behind")), 0o644);
+    rmSync(cli);
+    expect(look(looking({ env })).copies).toEqual([
+      row(at("first"), { uses: ["typed"], wrong: MISSING }),
+      row(at("behind"), { wrong: NOT_A_PROGRAM }),
+    ]);
+  });
+
+  it("Q1: startable: a file this user may start as a program; not one without the bit, nor what isn't there", () => {
+    const file = path.join(tmp, "program");
+    expect(startable(file)).toBe(false);
+    writeFileSync(file, "#!/bin/sh\n", { mode: 0o644 });
+    expect(startable(file)).toBe(false);
+    chmodSync(file, 0o755);
+    expect(startable(file)).toBe(true);
+    // Through a link, as npm's own leads to a cli.js: it is the file that is asked.
+    symlinkSync(file, path.join(tmp, "link"));
+    expect(startable(path.join(tmp, "link"))).toBe(true);
+    chmodSync(file, 0o644);
+    expect(startable(path.join(tmp, "link"))).toBe(false);
   });
 
   it("an empty folder of the name is a leftover wherever the proof accepts it: in a prefix's slot (the home's or another), in an npx cache entry; never 'a copy of no release'", () => {
