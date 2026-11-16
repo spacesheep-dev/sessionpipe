@@ -5,13 +5,14 @@
 //   node .github/vitest-parallel/run.mjs --coverage   # same tests and thresholds as `npm run test:coverage`
 //   ... --write-times                                 # also rewrite test-times.json from this run
 //
-// Most of the suite waits on timers, so 2 processes per CPU overlap those waits. The test names
-// always come from collecting the suite in Vitest itself; test-times.json only weights them.
-// The step fails if any process fails, writes no report, or runs a different multiset of test
-// names than was collected. On Node 22 the repo's own v8 provider checks the coverage of all
-// processes together once, with vitest.config.ts's include, reporters and thresholds.
+// Most of the suite waits on timers, so 2.5 processes per CPU overlap those waits. The test files
+// come from Vitest's own glob; each process collects its files itself, and test-times.json only
+// weights them. The step fails if any process fails or writes no report, if the processes that
+// ran one file collected different tests in it, or if a test did not run in exactly one process.
+// On Node 22 the repo's own v8 provider checks the coverage of all processes together once,
+// with vitest.config.ts's include, reporters and thresholds.
 // Anything this was not written for (another Vitest version, a changed test script, fewer than
-// 2 CPUs, a collection error) prints a warning and runs the npm script as written.
+// 2 CPUs, a test with retry or .only) prints a warning and runs the npm script as written.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,6 +22,12 @@ import { fileURLToPath } from "node:url";
 // The Vitest and coverage versions this was checked against; it uses Vitest internals
 // (per-file test name patterns, the v8 provider's coverage maps), so another version runs as written.
 const TESTED = { vitest: "5.0.3", coverage: "5.0.3" };
+// What one more test file costs a process besides its tests (a fresh worker and its imports), in ms.
+const FILE_MS = 300;
+// A test file with no recorded times (a new one) counts this many ms.
+const NEW_FILE_MS = 1000;
+// Tests at least this long are listed by name in test-times.json; the rest of a file is one sum.
+const LISTED_MS = 20;
 
 const self = fileURLToPath(import.meta.url);
 const here = path.dirname(self);
@@ -36,8 +43,8 @@ const count = (rows) => {
 const same = (a, b) => JSON.stringify(count(a)) === JSON.stringify(count(b));
 const seconds = (since) => `${((performance.now() - since) / 1000).toFixed(1)} s`;
 
-if (process.argv[2] === "collect") {
-  // The CLI's static list does not expand test.each, so collect in Vitest itself.
+if (process.argv[2] === "files") {
+  // The files `vitest run` would run, as Vitest globs them, without collecting or running any.
   const { createVitest } = await import("vitest/node");
   const ctx = await createVitest("test", { config: path.join(root, "vitest.config.ts"), watch: false, reporters: [] });
   try {
@@ -46,25 +53,11 @@ if (process.argv[2] === "collect") {
     if (process.argv[4] === "--coverage" && ctx.config.coverage.provider !== "v8")
       throw new Error("a coverage provider other than v8");
     const c = ctx.projects[0].config;
-    if (c.sequence.shuffle || c.sequence.concurrent || c.pool === "browser")
-      throw new Error("a sequence or pool setting");
-    const result = await ctx.collect([], { staticParse: false });
-    if (result.unhandledErrors.length || result.testModules.some((m) => m.errors().length))
-      throw new Error("collection failed");
-    const tests = result.testModules.flatMap((m) =>
-      [...m.children.allTests()].map((t) => {
-        if (typeof t.task.fullTestName !== "string" || t.options.retry || t.task.mode === "only")
-          throw new Error(`unexpected test shape: ${t.fullName}`);
-        return {
-          file: path.relative(root, m.moduleId),
-          name: t.fullName,
-          filter: t.task.fullTestName,
-          mode: t.task.mode,
-        };
-      }),
-    );
-    if (!tests.length) throw new Error("no tests collected");
-    write(process.argv[3], tests);
+    if (c.sequence.shuffle || c.sequence.concurrent || c.pool === "browser" || c.typecheck?.enabled)
+      throw new Error("a sequence, pool or typecheck setting");
+    const files = (await ctx.getRelevantTestSpecifications([])).map((s) => path.relative(root, s.moduleId));
+    if (!files.length || new Set(files).size !== files.length) throw new Error("no test files, or one twice");
+    write(process.argv[3], files);
   } finally {
     await ctx.close();
   }
@@ -96,48 +89,54 @@ if (coverage && version("@vitest/coverage-v8") !== TESTED.coverage)
 if (cpus < 2) asWritten(`${cpus} CPU`);
 
 const d = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), "vitest-parallel-"));
-const list = path.join(d, "tests.json");
-const collectStart = performance.now();
-const collection = spawnSync(process.execPath, [self, "collect", list, coverage ? "--coverage" : ""], {
-  stdio: "inherit",
-});
-if (collection.status !== 0) asWritten("collecting the tests failed");
-const collectTime = seconds(collectStart);
-const tests = read(list);
+const list = path.join(d, "files.json");
+const globStart = performance.now();
+const glob = spawnSync(process.execPath, [self, "files", list, coverage ? "--coverage" : ""], { stdio: "inherit" });
+if (glob.status !== 0) asWritten("listing the test files failed");
+const globTime = seconds(globStart);
+const files = read(list);
 
-// Pack by recorded duration (unknown tests count 10 ms). A file stays in one process unless its
-// tests add up to more than 10 s; then it is split by test name, identical names together, so
-// such a file's tests must not depend on each other or on a fixed path (true of every split file today).
-const timings = read(path.join(here, "test-times.json"));
-const byFile = new Map();
-for (const t of tests) {
-  t.ms = timings[key(t)] ?? 10;
-  if (!byFile.has(t.file)) byFile.set(t.file, []);
-  byFile.get(t.file).push(t);
-}
-const units = [];
-for (const entries of byFile.values()) {
-  if (entries.reduce((s, t) => s + t.ms, 0) <= 10000) units.push(entries);
-  else {
-    const byName = new Map();
-    for (const t of entries) {
-      if (!byName.has(t.filter)) byName.set(t.filter, []);
-      byName.get(t.filter).push(t);
-    }
-    units.push(...byName.values());
+// Weigh each file by its recorded test times. A file heavier than half a process's share is cut
+// into pieces: all but one name the tests they run (identical names together); the last runs
+// every test the others do not name, so a test missing from test-times.json still runs once.
+const times = read(path.join(here, "test-times.json"));
+const weight = (file) => {
+  const t = times[file];
+  return t ? Object.values(t.tests).reduce((s, ms) => s + ms, t.rest) : NEW_FILE_MS;
+};
+const laneCount = Math.max(2, Math.round(cpus * 2.5));
+const share = files.reduce((s, f) => s + weight(f), 0) / laneCount / 2;
+const pieces = [];
+for (const file of files) {
+  const t = times[file];
+  if (!t || weight(file) <= share) {
+    pieces.push({ file, ms: weight(file), out: [] });
+    continue;
   }
+  const bins = Array.from({ length: Math.ceil(weight(file) / share) }, () => ({ ms: 0, names: [] }));
+  bins[0].ms = t.rest;
+  for (const [name, ms] of Object.entries(t.tests).sort(([, a], [, b]) => b - a)) {
+    const bin = bins.reduce((a, b) => (a.ms <= b.ms ? a : b));
+    bin.names.push(name);
+    bin.ms += ms;
+  }
+  const named = bins.slice(1).filter((b) => b.names.length);
+  pieces.push({ file, ms: bins[0].ms, out: named.flatMap((b) => b.names) });
+  for (const b of named) pieces.push({ file, ms: b.ms, in: b.names });
 }
-const lanes = Array.from({ length: Math.min(cpus * 2, units.length) }, () => ({ ms: 0, tests: [] }));
-const unitMs = (u) => u.reduce((s, t) => s + t.ms, 0);
-units.sort((a, b) => unitMs(b) - unitMs(a));
-for (const u of units) {
+const lanes = Array.from({ length: Math.min(laneCount, pieces.length) }, () => ({ ms: 0, files: [] }));
+pieces.sort((a, b) => b.ms - a.ms);
+for (const p of pieces) {
   const lane = lanes.reduce((a, b) => (a.ms <= b.ms ? a : b));
-  lane.tests.push(...u);
-  lane.ms += unitMs(u);
-}
-const planned = lanes.flatMap((l) => l.tests);
-if (!same(tests, planned)) {
-  throw new Error("the plan does not hold every collected test once");
+  lane.ms += p.ms + FILE_MS;
+  // A process runs each of its files once: two pieces of one file in it run as one.
+  const had = lane.files.find((f) => f.file === p.file);
+  if (!had) lane.files.push({ file: p.file, in: p.in ?? null, out: p.out ?? null });
+  else if (had.in && p.in) had.in.push(...p.in);
+  else if (had.in) {
+    had.out = p.out.filter((n) => !had.in.includes(n));
+    had.in = null;
+  } else had.out = had.out.filter((n) => !p.in.includes(n));
 }
 write(path.join(d, "plan.json"), lanes);
 
@@ -180,29 +179,38 @@ const results = await Promise.all(
 );
 const runTime = seconds(runStart);
 let rc = results.some((r) => r !== 0) ? 1 : 0;
-const actual = [];
+const fail = (message) => {
+  console.error(`::error::vitest-parallel: ${message}`);
+  rc = 1;
+};
+// reports.get(file) holds, for each process that ran the file, every test it collected there.
+const reports = new Map(files.map((f) => [f, []]));
 for (let i = 0; i < lanes.length; i++) {
   const report = path.join(d, String(i), "results.json");
   if (!fs.existsSync(report)) {
-    console.error(`::error::vitest-parallel: process ${i + 1} wrote no test report`);
-    rc = 1;
-  } else actual.push(...read(report));
+    fail(`process ${i + 1} wrote no test report`);
+    continue;
+  }
+  const { modules, tests } = read(report);
+  for (const { file } of lanes[i].files) {
+    if (!modules.includes(file)) fail(`process ${i + 1} did not run ${file}`);
+    else reports.get(file).push(tests.filter((t) => t.file === file));
+  }
 }
-if (!same(tests, actual)) {
-  console.error("::error::vitest-parallel: the tests that ran differ from the tests collected");
-  rc = 1;
+const collected = [];
+const actual = [];
+for (const [file, seen] of reports) {
+  if (!seen.length) continue;
+  if (seen.some((rows) => !same(rows, seen[0]))) fail(`the processes that ran ${file} collected different tests`);
+  collected.push(...seen[0]);
+  actual.push(...seen.flat().filter((t) => t.selected));
 }
-if (actual.some((t) => !["passed", "failed", "skipped"].includes(t.state))) {
-  console.error("::error::vitest-parallel: a test did not finish");
-  rc = 1;
-}
+if (actual.some((t) => t.retry || t.mode === "only")) asWritten("a test with retry or .only");
+if (!same(collected, actual)) fail("a test did not run in exactly one process");
+if (actual.some((t) => !["passed", "failed", "skipped"].includes(t.state))) fail("a test did not finish");
 // A test collected to run may skip itself (ctx.skip()), but must not be left out by its process's filter.
-const toRun = tests.filter((t) => t.mode === "run" || t.mode === "queued");
-const ran = actual.filter((t) => t.state !== "skipped" || t.skippedItself);
-if (!same(toRun, ran)) {
-  console.error("::error::vitest-parallel: a test collected to run did not run in its process");
-  rc = 1;
-}
+if (actual.some((t) => (t.mode === "run" || t.mode === "queued") && t.state === "skipped" && !t.skippedItself))
+  fail("a test collected to run did not run in its process");
 let coverageTime = "";
 if (coverage && rc === 0) {
   const start = performance.now();
@@ -211,11 +219,16 @@ if (coverage && rc === 0) {
   coverageTime = `, coverage ${seconds(start)}`;
 }
 if (process.argv.includes("--write-times")) {
-  const times = {};
-  for (const t of actual) if (t.ms > 100) times[key(t)] = Math.round(t.ms);
-  fs.writeFileSync(path.join(here, "test-times.json"), `${JSON.stringify(times, null, 2)}\n`);
+  const out = {};
+  for (const t of [...actual].sort((a, b) => key(a).localeCompare(key(b)))) {
+    out[t.file] ??= { rest: 0, tests: {} };
+    if (t.ms >= LISTED_MS) out[t.file].tests[t.filter] = Math.round(t.ms);
+    else out[t.file].rest += t.ms ?? 0;
+  }
+  for (const t of Object.values(out)) t.rest = Math.round(t.rest);
+  fs.writeFileSync(path.join(here, "test-times.json"), `${JSON.stringify(out, null, 2)}\n`);
 }
 console.log(
-  `vitest-parallel: ${actual.length} of ${tests.length} collected tests ran in ${lanes.length} processes on ${cpus} CPUs; collect ${collectTime}, run ${runTime}${coverageTime}`,
+  `vitest-parallel: ${actual.length} of ${collected.length} collected tests ran in ${lanes.length} processes on ${cpus} CPUs; files ${globTime}, run ${runTime}${coverageTime}`,
 );
 process.exitCode = rc;

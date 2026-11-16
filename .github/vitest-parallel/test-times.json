@@ -1,307 +1,1311 @@
 {
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"sessionpipe ask against the daemon > from a plain terminal: the answer alone on stdout, exit 0; no asker, so no events; the child is told it was asked by another session\"]": 1343,
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"sessionpipe ask against the daemon > from inside a Claude Code session: the asker is read from its environment; the events land on it\"]": 1330,
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"sessionpipe ask against the daemon > the daemon stops before the child answers: exit 1 and one line saying so, nothing on stdout\"]": 728,
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"sessionpipe ask against the daemon > no daemon on the socket: exit 1 and what to run\"]": 702,
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"ask on, twice > the second run changes nothing: the same control.json, the folder allowed once, the service pointed at the same cli.js\"]": 703,
-  "[\"packages/cli/test/ask-daemon.test.ts\",\"ask on, twice > on after off keeps what on allowed: the switch flips back, the folders stay\"]": 703,
-  "[\"packages/cli/test/cli-main.test.ts\",\"tail, backfill, forget, replay > forget takes the drain's flush lock first; held past the wait, it changes nothing and says so\"]": 309,
-  "[\"packages/cli/test/cli.test.ts\",\"status > emits only JSON, with doctor's shared facts and pending session/job counts, without leaking credentials\"]": 317,
-  "[\"packages/cli/test/cli.test.ts\",\"control health in status and doctor > reports an old daemon that permanently stopped in both text and JSON\"]": 660,
-  "[\"packages/cli/test/cli.test.ts\",\"control health in status and doctor > reports a daemon backing off before its first s… in both text and JSON\"]": 653,
-  "[\"packages/cli/test/cli.test.ts\",\"control health in status and doctor > reports a stalled loop still claiming to poll in both text and JSON\"]": 660,
-  "[\"packages/cli/test/cli.test.ts\",\"control health in status and doctor > reports a healthy long-poll in both text and JSON\"]": 646,
-  "[\"packages/cli/test/connect-e2e.test.ts\",\"connect > one command: hooks through the launcher, paired, the sink at tier 2 with the handed-over key\"]": 2165,
-  "[\"packages/cli/test/connect-e2e.test.ts\",\"connect > again: nothing to approve, nothing duplicated\"]": 131,
-  "[\"packages/cli/test/connect-e2e.test.ts\",\"connect > a repeated setup line keeps the paired machine name even with a different --machine\"]": 139,
-  "[\"packages/cli/test/connect-e2e.test.ts\",\"connect > an explicit rename renames the hooks and the paired daemon together\"]": 139,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > start: the agent in the folder, held; the next message through the same process; cancel is session/cancel\"]": 10041,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > idle: the agent is closed, and the next message reopens the session in a new run (session/load)\"]": 6726,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > a session the agent's own hooks reported: reopened by its own id, in the folder the hooks gave\"]": 2020,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > an agent that can't reopen a session is unsupported once its process is gone\"]": 4101,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > the agent dies mid-turn: failed, let go of, and the next message reopens it\"]": 6037,
-  "[\"packages/cli/test/control-acp.test.ts\",\"an agent, driven > not installed: failed in words, for a start and for a resume; a start that can't open is failed\"]": 2050,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the child exits without an answer > exit 1 having said nothing: failed, with the exit and stderr's tail; the asker's events say so; nothing stays in hand\"]": 737,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the child exits without an answer > exit 0 having said nothing: an answer that says so, as a receiver's delivered ack would carry it\"]": 722,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the child exits without an answer > killed by a signal: failed, naming the signal; the next ask runs as if nothing happened\"]": 1348,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the daemon stops mid-ask > the asker's connection ends at once with no final reply; stop() doesn't wait on the child; a new daemon on the same socket serves the next ask\"]": 1964,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the daemon stops mid-ask > asking turned off while one is in hand: that one finishes; the next is refused\"]": 1328,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the headless slot and the start caps are the receiver's > a receiver's start holds the one slot: the ask is taken at once, its child starts when that one ends\"]": 1981,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the headless slot and the start caps are the receiver's > start_concurrent reached by a receiver's start: the ask is refused start_limit before it begins, and counted on the asker\"]": 1964,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the headless slot and the start caps are the receiver's > a receiver can't carry an ask as a command: the kind is refused before any rule runs\"]": 727,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"two asks at once from one session > two new sessions: both run side by side and answer; the asker's events pair up by ask_id with one seq counter\"]": 1332,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"two asks at once from one session > the same existing session twice: one agent on it at a time, the second message after the first's turn\"]": 2581,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the asker is gone > the asker's process went away mid-run: the run finishes, its events land, nothing is held\"]": 1967,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the asker is gone > an asker nobody here knows: the ask runs, the events go on that session with no facts of its own\"]": 1329,
-  "[\"packages/cli/test/control-ask-failures.test.ts\",\"the asker is gone > no session in the caller's environment: no from, no chain, no events; the child's chain still says unknown\"]": 1327,
-  "[\"packages/cli/test/control-ask.test.ts\",\"the wire (local.ts askMany) > a garbled line, a connection that closes before the end, no daemon, a timeout: nothing\"]": 158,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13) > a new Codex session: asked, the answer as it is written, the answer; the child is framed and knows who asked; the events reach the asker's sink\"]": 652,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13) > an existing session: the thread the daemon knows is resumed, under the ask's cap\"]": 1258,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13) > an existing Claude Code session with a waiter: in place, as an ask, the answer read from its transcript\"]": 607,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13) > no asker named: no events; the chain still grows, so the child can't ask without end\"]": 625,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13) > refusals, each with its code, in order: asking off, an agent it can't run, a session it can't reach, a folder off the list, two deep, fields out of shape, a loop, the start caps\"]": 638,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to) > the reply follows into reply_to after the command's one final ack, framed as a handoff; the events on reply_to say relayed\"]": 708,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to) > a session no mode fits: relayed unsupported, and why\"]": 650,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to) > reply_to in a folder the machine doesn't allow: no handoff at all — the command runs, nothing is relayed, nothing is written on that session; a folder that stops being allowed mid-run is unsupported at relay time\"]": 2654,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > mid-turn: the Stop hook's block is the ask alone, without the receiver's note; the answer follows\"]": 508,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > on an inherit machine an ask runs at safe, the one level a message may name there; a model goes to the start\"]": 1256,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > an ask that names no level runs at safe, on an auto machine too; a session a receiver started at auto takes the ask at safe; wider than safe can't be named\"]": 2531,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > the daemon counts depth and loops for itself: a session waiting on an ask can't be asked from a clean environment, and the session it asked can't ask on\"]": 1732,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > a session takes three asks at a time, as asker and as asked: the fourth is refused start_limit before it begins\"]": 3129,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > the daemon's own lineage never reaches a child: a receiver's start and an ask from nobody start clean\"]": 1901,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > a waiter that never answers: delivered all the same, with nothing to say\"]": 605,
-  "[\"packages/cli/test/control-ask.test.ts\",\"sessionpipe ask (CONTROL.md §13): the other modes and edges > the asker's outbox locked: recorded once the lock is free, logged when it never is\"]": 2636,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to with a waiter parked: in place, relayed the moment it is handed over\"]": 747,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to with the session parked on its channel: handed over there, proven by the row its turn begins with, and the channel stays open\"]": 2110,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to a Codex session the hooks reported: its thread resumed, the answer on the way\"]": 1280,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > a session that answered nothing in writing: nothing to relay, and the events say failed\"]": 613,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to no session on this machine: no handoff — the command runs and is acked as usual, nothing is relayed, no event and no outbox for a session a signer made up\"]": 630,
-  "[\"packages/cli/test/control-ask.test.ts\",\"a handoff (CONTROL.md §6 reply_to): the other modes and edges > a relay whose run throws: relayed failed, in its words\"]": 651,
-  "[\"packages/cli/test/control-ask.test.ts\",\"ask coverage: the level a child runs at, and depth from a terminal ask > the daemon counts depth from a terminal ask it has in hand (no asker named)\"]": 1103,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a resume: the child is ended, the turn says it was cancelled, the message queued behind it runs\"]": 4061,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > the stopped child reports no end, and the session is not left mid-turn: a message for it goes straight through, and so does one that was already waiting for its Stop\"]": 568,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a Stop addressed to the copy the turn runs in stops it: the copy is where the person was sent\"]": 469,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a Stop addressed to a copy that is still being made stops the run that is making it\"]": 470,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a turn that said nothing yet answers with the note alone; a turn waiting for its slot never starts\"]": 8064,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a copy stopped after it named itself is still the session's copy, and the ack says so\"]": 4049,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a copy that named itself and was stopped before it wrote anything is not the session's copy: there is nothing to resume\"]": 537,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a copy stopped before it named itself made none that anything knows of\"]": 2017,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a start: the new session's first turn is stopped, and its start is acked with what it ran with\"]": 2034,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a Codex turn: stopped the same way, with the messages it had finished\"]": 2040,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon is running as its own child > a turn that ended by itself before the stop took effect: the cancel expired, the answer stands\"]": 2078,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop by the other of a session's two names, its own and its copy's > the copy's name, while a message sent to the session is still being prepared: the turn never starts\"]": 1045,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop by the other of a session's two names, its own and its copy's > the session's name, while the turn runs in its copy for a message sent to the copy\"]": 472,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop by the other of a session's two names, its own and its copy's > the same with a message for the session waiting behind that turn: the turn that is running is the one stopped, and the one that waited runs\"]": 492,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop by the other of a session's two names, its own and its copy's > a turn that waits behind one that has not begun either is stopped where it waits, not when the other is over\"]": 1773,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a copy's run is the copy's, never the original's > a copy's turn that ends does not end the turn the person is in, in their own window: the next message waits for their Stop\"]": 1386,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a copy's run is the copy's, never the original's > a copy stopped before it wrote anything leaves the original as it was: mid-turn and just written to, it is not resumed in place\"]": 1089,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a copy's run is the copy's, never the original's > a run asked for a copy that says it is the original is still no run of the daemon's in the original\"]": 1088,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a Stop while a message's turn is being prepared: the turn never starts, and the Stop says it stopped it\"]": 1086,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a Stop while a message's files are being fetched: the same, and nothing is handed to the session\"]": 1046,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a turn stopped while its file is still on its way has one final ack, and the download is over\"]": 1646,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a start stopped while its file is still on its way writes nothing into the folder afterwards\"]": 1245,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a Stop while a new session's start is being prepared: no session is created, and the start says so\"]": 1067,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > the same for a Codex start, and for a start whose files are still on their way\"]": 1086,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > starts that wait for a slot, and a Codex start waiting for its files: stopped there, nothing started\"]": 169,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a message to a Codex session, stopped while Codex's login is checked: it never runs\"]": 1511,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > a Stop for a session being started goes to the start that is running, not to the message waiting behind it\"]": 490,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn the daemon has in hand and has not started yet > the same when the two came in one poll and the start was verified last: the waiting message is never the one a Stop finds\"]": 755,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop that is through its checks before the turn it was sent to stop > a start and its Stop in one poll, the Stop verified first: it waits for the start to be in hand, and stops it\"]": 1309,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop that is through its checks before the turn it was sent to stop > a message and its Stop in one poll, the Stop listed first: the same\"]": 1031,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop that is through its checks before the turn it was sent to stop > a message sent after the Stop, though it came with it, is not what the Stop was for: it runs\"]": 1541,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a Stop that is through its checks before the turn it was sent to stop > nor does it wait for another session's message, or for one that is refused\"]": 1535,
-  "[\"packages/cli/test/control-cancel.test.ts\",\"a turn in a process the daemon did not start > a turn its hooks reported and no process to be found: unsupported; silent for ten minutes: nothing runs\"]": 2023,
-  "[\"packages/cli/test/control-channel.test.ts\",\"runChannel > left to itself it parks again after a second\"]": 1101,
-  "[\"packages/cli/test/control-channel.test.ts\",\"runChannel on a real socket > parks on the daemon's socket from the environment and hands its message to the session\"]": 154,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > waiter: in place, in milliseconds, framed\"]": 628,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > channel: in place while the session is idle, proven by the row of the turn it caused\"]": 615,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > channel: a session that begins no turn for it is acked held, and that channel takes no more\"]": 10123,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > channel: a message whose id is not a ULID is not handed to it, and the channel stays open for the next\"]": 2613,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > channel: a session in the middle of a turn takes it at its Stop, not through the channel\"]": 3003,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > turn: a message for a session mid-turn is the Stop hook's block, once\"]": 1033,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > turn: a Stop that didn't take it (it came after the hook asked) reroutes to a resume\"]": 349,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > fork: a live session is copied, never resumed twice, and later messages go to the copy\"]": 2034,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > sdk: start goes through the Agent SDK host, and the next prompt lands in the held session\"]": 4029,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > start caps: at most N at once and M an hour, whatever the receiver sends\"]": 6034,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > headless runs wait their turn: never more Claude Code processes than the cap\"]": 2370,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > key.add: a trusted device vouches for a new one, which can then sign on its own\"]": 2049,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > key.add of a device key: stored whole, and its own grant and confirm are verified as a device key's\"]": 4031,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > a message while the daemon's own start still runs waits and resumes it, never forks\"]": 3556,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"delivery > start without the SDK is a headless claude -p --session-id\"]": 2045,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > an open prompt takes the signed answer\"]": 127,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > nothing is auto-allowed: an allow with no open prompt is refused, a deny expires\"]": 2027,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > the main thread asks while subagents work: their tools ending let go of nothing, and the page's answer is taken\"]": 130,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > the main thread's own events let go of its question: its tool ran, its turn ended, a new prompt, the session's end\"]": 304,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > a background subagent asks: the main thread's turn ending and beginning, its tools and another subagent's let go of nothing; its own tool, its own stop, a turn that ends with nothing in flight and the session's end do\"]": 207,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > two questions at once, the main thread's and a subagent's: each is let go by its own thread\"]": 128,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > an event from before the question says nothing about it, though it is reported after\"]": 102,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > hooks older than the rule: a question that names no thread is let go by the session's next event, and so is any question by an event that names none\"]": 302,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"permission answers (CONTROL.md §6, §7) > the terminal answered first: the next event releases the hook and a later answer expires\"]": 122,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"attachments on a start (CONTROL.md §6) > hello says per account whether the command line is signed in, from claude auth status, and logs a change once\"]": 127,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"attachments on a start (CONTROL.md §6) > a stream longer than the signed size is cut off at the size\"]": 390,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"attachments on a start (CONTROL.md §6) > a receiver that never answers, or stops mid-body: the download is abandoned at the timeout\"]": 2320,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"attachments on a start (CONTROL.md §6) > a .sessionpipe that is a file, or a session folder that already exists: failed, nothing started\"]": 2025,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"refusals (CONTROL.md §5) > a tampered command, a replay, a folder off the list, an expired message\"]": 4045,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"the built hook talks to the daemon > Stop prints a block for a queued message; PermissionRequest prints the signed decision\"]": 2014,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"the built hook talks to the daemon > a subagent's tool, reported by the real hook and its worker, leaves the main thread's question for the page to answer\"]": 281,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"one daemon, and when it may restart (autoupdate.ts) > busy while a headless run is in hand, idle once it is acked\"]": 652,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"one daemon, and when it may restart (autoupdate.ts) > busy while a permission prompt waits for an answer\"]": 102,
-  "[\"packages/cli/test/control-daemon.test.ts\",\"one daemon, and when it may restart (autoupdate.ts) > paused intake leaves new messages with the receiver until it resumes\"]": 942,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > start: a new session in the folder, named after the start; the next message resumes Codex's thread\"]": 4055,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > start with files: they land in the folder before codex runs, and the prompt lists them\"]": 2021,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > auto mode: --approve-for-me, never a bypass flag\"]": 748,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > inherit mode: no sandbox or approval flag, so config.toml decides\"]": 747,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > a session the hooks reported: its folder from the rollout, resumed under its own id\"]": 8022,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > not installed: failed in words, for a start and for a resume\"]": 4014,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > a thread id that isn't a UUID is nothing to resume; a start whose folder was never recorded has no folder\"]": 2033,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > a runner that hands the whole output over at the end is read the same way; one that fails is failed\"]": 4047,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > a start whose alias can't be recorded still delivers, and says so\"]": 750,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Codex (codex exec) > a waiter whose socket died before its close was seen doesn't count as one\"]": 2751,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Antigravity (agy) > start: agy -p in the folder, named after the start; the next message goes to --conversation\"]": 2745,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Antigravity (agy) > auto mode: --mode accept-edits, never --dangerously-skip-permissions\"]": 753,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Antigravity (agy) > inherit mode: no permission flag, as in safe\"]": 751,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Antigravity (agy) > a conversation the hooks reported: its folder from the hooks, and from the worker's facts after a restart\"]": 4773,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"Antigravity (agy) > a conversation agy doesn't know: it runs in a fresh one, says so, and the next message follows it\"]": 2749,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"a start and a prompt in the same poll > codex: the prompt waits for its start, then resumes the session the start named\"]": 1475,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"a start and a prompt in the same poll > antigravity: the prompt waits for its start, then resumes the session the start named\"]": 1474,
-  "[\"packages/cli/test/control-harnesses.test.ts\",\"hello > says a new folder list in a hello at once, and nothing when nothing it says changed\"]": 262,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a session is known by the id its harness gave it, exactly > named in another case it is no session of this machine's, whatever the disk answers: nothing is run in the one a window has\"]": 369,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a run asked for a copy that ran as the original instead > ends by itself: that is not the end of whatever wrote to the original, and the next message is not resumed in place\"]": 789,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a run asked for a copy that ran as the original instead > ends by itself while the original's own process begins a turn: that is not the end of whatever wrote to the original, and the next message is not resumed in place\"]": 790,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > a window opens the copy while the daemon runs in it: the message that waited is not resumed beside the window\"]": 501,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > the same and nothing took the copy meanwhile: it is resumed after the run it waited for, as before\"]": 759,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > a copy that is open in a window is being copied: a message for the original meanwhile is not resumed in it\"]": 1064,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > a Codex session the daemon starts is not a run of its own in the Claude Code session of that id: the window's session is copied, never resumed\"]": 952,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > a Stop for the Claude Code session of that id is not a Stop for the Codex run, and the other way round\"]": 485,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > nor is it one for a session of that id the daemon holds for another harness\"]": 1001,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > and its end accounts for no write to that Claude Code session\"]": 983,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a turn running in the copy a session's messages go to > the daemon's own run in the copy, killed from outside: the copy is not held on the word of a child that is gone\"]": 503,
-  "[\"packages/cli/test/control-holds.test.ts\",\"a turn running in the copy a session's messages go to > its own hooks say so and no registry row does: a message for the original is not resumed in the middle of it\"]": 409,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message into a live session's own inbox > is written once, declares the machine's class, and is delivered by the turn it caused\"]": 130,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message the session doesn't take > is acked held, once, and is never written anywhere else\"]": 8043,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message the session doesn't take > the same words again are not written in beside the copy already waiting, until it can't be\"]": 12057,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message the session doesn't take > a turn that began with nothing written for it yet is not a delivery either\"]": 1542,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message the session doesn't take > outlives the daemon that wrote it: a restart is not a second chance to write\"]": 8050,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"a message the session doesn't take > a session that has ended isn't kept waiting for a message it can never take\"]": 18045,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"what the lane will not write into > a session the registry says is not idle\"]": 2085,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"what the lane will not write into > busy by its registry row after its hooks said the turn was over: looked at again, idle by then, it takes the message in its inbox\"]": 514,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"what the lane will not write into > a Stop while the message waits for the hooks' word: it never runs\"]": 4065,
-  "[\"packages/cli/test/control-inbox.test.ts\",\"what the lane will not write into > a message whose id is not a ULID: nothing could prove the session took it, so it is not written there\"]": 2069,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"a harness with no headless path (Kiro) > is placed by its hooks' cwd: in place at its next Stop when mid-turn, else unsupported\"]": 12072,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the Agent SDK session > a prompt the SDK fails is `failed`; a cancel it can't carry out is `failed` in its words\"]": 8034,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the Agent SDK session > a start the SDK fails is `failed`; a second start for the same id in the same poll is refused\"]": 2032,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the Agent SDK session > the receiver's session tools reach an SDK start, a headless start and a resume; a changed list is said once\"]": 6673,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > a Claude Code that streams: the answer so far goes out as progress, then the whole as the reply\"]": 2648,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > auto mode on a Claude Code without an auto permission mode is refused, for a resume and a start\"]": 2021,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > inherit mode: a resume and a start pass no permission flag, so Claude Code picks its own default\"]": 2041,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > no Claude Code on this machine: a resume and a start fail in words\"]": 2025,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > a start is refused for a folder off the list, and for a session that already exists\"]": 2024,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > the login is asked once and remembered for ten minutes, thirty seconds after a no; an unanswerable one never blocks\"]": 8047,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"headless runs > a session that goes away between a message's two looks at it is refused on the second\"]": 739,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"a message waiting for a Stop > rerouted after the turn, it is refused when its session has gone, and failed when routing throws\"]": 2037,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the answer read from a live session > goes out as progress while the turn runs; the end of the turn is the reply\"]": 1117,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the answer read from a live session > a transcript that can't be read any more: delivered without a reply, never stuck, and no path in the ack\"]": 617,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the answer read from a live session > a session that has a copy answers its own waiter in its own transcript: that is where the reply is read\"]": 1111,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"the answer read from a live session > an answer whose ack can't be recorded is logged, and nothing else falls over\"]": 608,
-  "[\"packages/cli/test/control-ladder.test.ts\",\"key.add (CONTROL.md §2) > a device without a name; the same device twice; a store that can't be written\"]": 2044,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > two of one poll behind a running turn: the earlier one is verified last and still runs first (resume)\"]": 1442,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > the same with nothing running: the first of a poll goes first however its verification goes\"]": 588,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > by when they were signed, then by arrival: a poll that lists them the other way round, and a later poll that brings an earlier one\"]": 1677,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > a message that waits for its session's start is not passed by one that came after it\"]": 1427,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > a message whose files are slow to fetch keeps its place: the one behind it waits for it\"]": 693,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > a Stop for the running one, a failure, a refusal: the rest keep their order\"]": 873,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > what isn't a prompt it can read takes no place in line, and holds nobody's up\"]": 107,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > a kind written with a JSON escape is the same kind: the prompt has its place on arrival, and waits for a start written that way\"]": 2986,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > a message sent to a session's copy by its own name waits for the turn already running in that copy: never two at once in one transcript\"]": 747,
-  "[\"packages/cli/test/control-order.test.ts\",\"messages for one session run in the order they were sent > another session's messages don't wait for this one's\"]": 147,
-  "[\"packages/cli/test/control-order.test.ts\",\"the same order on the other rungs > turn: they are handed to the session's Stops in sent order, and if no Stop takes them they resume in it\"]": 479,
-  "[\"packages/cli/test/control-order.test.ts\",\"the same order on the other rungs > fork: the first makes the copy, the second resumes it, whichever was verified first\"]": 1595,
-  "[\"packages/cli/test/control-poll.test.ts\",\"a message queued for a Stop (CONTROL.md §6 `turn`) > goes another way after thirty minutes without a Stop; one the Stop took is left alone\"]": 148,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the listener's life, busy() and status() > poolChanged() on a daemon that isn't running sends nothing\"]": 104,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the `pool` command (CONTROL.md §6) > on: delivered with the summary line, the listener comes up; off: the listener goes down\"]": 2035,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the `pool` command (CONTROL.md §6) > enable, disable, remove, order and refresh, each acked with the pool as it now stands\"]": 10019,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the `pool` command (CONTROL.md §6) > login.begin: the pending id and the URL; login.complete adds the account\"]": 2030,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the `pool` command (CONTROL.md §6) > refused: pool_account, pool_order, pool_off; failed: login; and the detail never carries the code\"]": 10036,
-  "[\"packages/cli/test/control-pool.test.ts\",\"the `pool` command (CONTROL.md §6) > on, off, remove, order, disable and login.complete need a fresh confirm: a day grant is refused confirm_required\"]": 10026,
-  "[\"packages/cli/test/control-prompt-files.test.ts\",\"files on a prompt > a resume: written in the message's own folder first, then listed in the message the run gets\"]": 2028,
-  "[\"packages/cli/test/control-prompt-files.test.ts\",\"files on a prompt > a waiter: the files are on disk before the text is handed over\"]": 112,
-  "[\"packages/cli/test/control-relaunch.test.ts\",\"the mode a cold run is launched with > re-asserts a narrowing the session chose, and nothing else ever\"]": 337,
-  "[\"packages/cli/test/control-relaunch.test.ts\",\"the mode a cold run is launched with > on an auto machine whose Claude Code has auto turned off, the turn still runs and the ack says so\"]": 2038,
-  "[\"packages/cli/test/control-relaunch.test.ts\",\"a copy, when nothing can reach the session > is labelled, linked both ways, and told that the original is still open\"]": 2057,
-  "[\"packages/cli/test/control-relaunch.test.ts\",\"a copy, when nothing can reach the session > is never itself copied: the next message resumes it\"]": 2046,
-  "[\"packages/cli/test/control-reply.test.ts\",\"follow: the answer as the transcript gains it > gives up after its timeout when the turn never ends, with or without its row\"]": 663,
-  "[\"packages/cli/test/control-reply.test.ts\",\"follow: the answer as the transcript gains it > the hooks say the turn ended: what it said is the answer, once its last rows had their time\"]": 203,
-  "[\"packages/cli/test/control-reply.test.ts\",\"follow: the answer as the transcript gains it > `next`: the turn after a Stop block is the message's, found or not — an end with no row is no answer\"]": 162,
-  "[\"packages/cli/test/control-reply.test.ts\",\"follow: the answer as the transcript gains it > `marked`: a turn that ended before the session took the message was not the message's\"]": 412,
-  "[\"packages/cli/test/control-reply.test.ts\",\"follow: the answer as the transcript gains it > a message with no mark has no row to wait for: the next end of a turn settles it, with no answer\"]": 323,
-  "[\"packages/cli/test/control-socket.test.ts\",\"frames on the socket > a frame that isn't a line of JSON closes the connection\"]": 340,
-  "[\"packages/cli/test/control-socket.test.ts\",\"frames on the socket > a waiter for a session that isn't one is answered nothing; the newest waiter for a session wins\"]": 640,
-  "[\"packages/cli/test/control-socket.test.ts\",\"frames on the socket > a hook that gives up on its own is forgotten; a client that vanishes mid-reply is no trouble\"]": 224,
-  "[\"packages/cli/test/control-socket.test.ts\",\"frames on the socket > a second hook for the same attention releases the first; the first's close leaves the second in place\"]": 125,
-  "[\"packages/cli/test/control-socket.test.ts\",\"frames on the socket > the oldest recorded modes go once there are more than five hundred\"]": 150,
-  "[\"packages/cli/test/control-socket.test.ts\",\"the socket path > a poll that answers after the daemon stopped ends its loop quietly; a failed poll says why\"]": 1247,
-  "[\"packages/cli/test/control-socket.test.ts\",\"the socket path > while a poll's body is being read, and while acks go out, the daemon is busy\"]": 309,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"a start's options are checked before anything is taken > above the machine's mode: refused permission at once, no taken, nothing runs\"]": 4026,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"a start's options are checked before anything is taken > a level the harness doesn't have here, in its own words\"]": 6032,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"a start's options are checked before anything is taken > a Claude Code whose --help couldn't be read: refused, saying so, at every level (#152)\"]": 8090,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"what a start ran with: applied, recorded, and kept > Claude Code: the asked level and model run, applied on taken and delivered, and stick across a resume\"]": 2034,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"what a start ran with: applied, recorded, and kept > a machine turned down from auto to safe takes a recorded auto session down at its next run\"]": 2041,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"what a start ran with: applied, recorded, and kept > Codex: -s read-only and -m; the alias records them, and its resume keeps both\"]": 2020,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"a model the harness won't run > ends failed with code model and the harness's words; nothing else is tried\"]": 2026,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"an inherit machine (CONTROL.md §2, §3.1) > a start with no level passes no permission flag and says inherit; one may narrow to read\"]": 6032,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"an inherit machine (CONTROL.md §2, §3.1) > a session recorded at auto, on a machine now in inherit, runs at safe\"]": 2027,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"an ACP agent takes no start options > a permission or a model on its start is refused before anything runs\"]": 2023,
-  "[\"packages/cli/test/control-start-options.test.ts\",\"a start's folder under ~ > ~/… is read under this user's home; ~ alone is that folder; ~user is malformed\"]": 4024,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > not the words the turn was ending with, which reach the transcript after the hook has asked\"]": 1254,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > read from the session's own transcript, though it has a copy: the copy's answer is another message's\"]": 1029,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > two messages at two Stops: each gets its own answer, in order, and neither the other's\"]": 2626,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > a Stop's event that arrives late ends nothing: only the hook's own question says a continuation is over\"]": 1028,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > an answer that can't be put down to the message is not sent: acked without one when the continuation ends\"]": 649,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message delivered at a Stop: its reply is what the session wrote for it > a continuation that failed, or a session that ended, is its end too: what it had said is the reply\"]": 2444,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message handed to a waiter: the same rule > handed over mid-turn: the running turn's end is not the answer; the turn that read the message is\"]": 1135,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message whose id is not a ULID: the id is the receiver's, and nobody signed it > at a Stop: nothing of the id is in what the session is told, and it is delivered, without a reply, when the continuation ends\"]": 328,
-  "[\"packages/cli/test/control-turn-reply.test.ts\",\"a message whose id is not a ULID: the id is the receiver's, and nobody signed it > through a waiter: handed over unmarked, and acked when the session's turn ends, not when the answer-wait runs out\"]": 445,
-  "[\"packages/cli/test/control-update-e2e.test.ts\",\"the daemon restarts onto a new copy (no service manager) > stays as the parent, runs the new daemon, and the next one restarts by exiting 75\"]": 616,
-  "[\"packages/cli/test/control-wait.test.ts\",\"on the socket > left to itself it tries again after a second\"]": 1002,
-  "[\"packages/cli/test/delivered-frames.test.ts\",\"what a running daemon hands a live session, read back > its inbox, a Stop hook's block, its waiter: each turn's `user` side is the person's words, and each answer goes back\"]": 4077,
-  "[\"packages/cli/test/flush.test.ts\",\"flush > sinks drain at once: two slow receivers are in flight together\"]": 326,
-  "[\"packages/cli/test/flush.test.ts\",\"drain: one worker at a time > events another worker appended during a pass go out in the next pass of the same drain\"]": 1003,
-  "[\"packages/cli/test/fold.test.ts\",\"a worker's life: no pass starts that its deadline would end > a sweep marks each job's events for the drain running now, gives a busy session's job back within a second, and starts none it has no life for\"]": 1024,
-  "[\"packages/cli/test/fold.test.ts\",\"fan-out: 40 subagents × 30 tool calls > sends a small fraction of the requests 0.11.0 sent, and every turn, prompt and subagent\"]": 10122,
-  "[\"packages/cli/test/launcher.test.ts\",\"the launcher > copies hook.js and worker.js beside an executable launcher; a second install changes nothing\"]": 550,
-  "[\"packages/cli/test/launcher.test.ts\",\"the launcher > the hook answers Antigravity: `{}` to what sessionpipe hooks, an ask (never a silent deny) to a leftover PreToolUse\"]": 126,
-  "[\"packages/cli/test/limits.test.ts\",\"the pool's limits.observed (appendObserved) > waits for a hook that holds the session, then writes; past the wait it drops the numbers and says so\"]": 253,
-  "[\"packages/cli/test/pool-index.test.ts\",\"the listener > starts on a free port the first time, remembers it, rewrites settings when it moves, and serves a request end to end\"]": 551,
-  "[\"packages/cli/test/pool-index.test.ts\",\"the listener > F1: a second daemon on the same pool.json stands down when a pool already answers on the port\"]": 513,
-  "[\"packages/cli/test/pool-index.test.ts\",\"the listener > with the pool off a moved port rewrites nothing, and nothing is polled (SECURITY M2)\"]": 122,
-  "[\"packages/cli/test/pool-policy.test.ts\",\"pins > pins are capped; the one used longest ago goes first (SECURITY M4)\"]": 441,
-  "[\"packages/cli/test/pool-server.test.ts\",\"the front door > a body over the cap is a 413 before anything goes upstream; a 10 MiB one goes through\"]": 117,
-  "[\"packages/cli/test/run-edges.test.ts\",\"runJob with a harness that says little > one run in fifty prunes the outbox, to keep_days or 30\"]": 2008,
-  "[\"packages/cli/test/run.test.ts\",\"runJob > a job takes its session's lock as soon as a sibling lets go, not at the next backoff step\"]": 907,
-  "[\"packages/cli/test/run.test.ts\",\"runJob > a job the lock holds out goes back to the queue under a new file, its claim released\"]": 152,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > install renames the hooks and the paired daemon together on an explicit rename\"]": 170,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > connect renames the hooks and the paired daemon together on an explicit rename\"]": 183,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > installs normally over null (or no installed version)\"]": 200,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > installs normally over 0.6.0 (or no installed version)\"]": 191,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > installs normally over 0.7.0-devin.1 (or no installed version)\"]": 199,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > installs normally over 0.7.0 (or no installed version)\"]": 204,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > --allow-downgrade explicitly replaces the global package and both hook copies\"]": 175,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > install preserves a paired name and backoff when a setup command suggests another name\"]": 204,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > an unpaired machine needs --rename-machine to change its configured name\"]": 164,
-  "[\"packages/cli/test/setup.test.ts\",\"setup preserves installed code and machine identity > --machine sets the initial name; the default hostname is also persisted\"]": 156,
-  "[\"packages/cli/test/uninstall-scope.test.ts\",\"uninstall is scoped > --devin removes Devin's entries and leaves Claude Code's alone\"]": 168,
-  "[\"packages/cli/test/uninstall-scope.test.ts\",\"uninstall is scoped > refuses an all-harnesses uninstall that would reach outside the isolation vars\"]": 217,
-  "[\"packages/cli/test/uninstall-scope.test.ts\",\"uninstall is scoped > with no isolation vars at all, an unscoped uninstall just runs\"]": 165,
-  "[\"packages/cli/test/update.test.ts\",\"the install's edges > runs a command to its end, keeping its output; a timeout, a missing command and a bad argument are results too\"]": 230,
-  "[\"packages/cli/test/update.test.ts\",\"the supervisor (no service manager) > a crash is started again after a pause; a stop goes to the child and ends with it\"]": 266,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > how a turn ends: refusal and a cancel say so, max_tokens is an answer, anything else is an error\"]": 124,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > a turn over its time is cancelled, then the agent is closed\"]": 221,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > lines that aren't the protocol's are skipped, a line over 4 MB is dropped, titles are kept for 200 tool calls\"]": 125,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > close ends stdin, then SIGTERM, then SIGKILL for an agent that ignores it; closing twice is nothing\"]": 1409,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > an agent that goes with a message to it still unwritten: the failed write is nobody's uncaught error\"]": 577,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > an agent that stays when its input ends and ignores SIGTERM is killed, once\"]": 722,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > a close after the agent has exited signals nothing: its group's number is no longer certain to be its own\"]": 471,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > an agent's own meta rides on session/new and session/load, and on nothing else; without one neither carries any\"]": 110,
-  "[\"packages/core/test/acp-control.test.ts\",\"one agent, driven > opening fails in words: not signed in, no session id, an agent that says nothing, one that can't start\"]": 200,
-  "[\"packages/core/test/claude-control.test.ts\",\"capabilities and mode flags > a --help that times out, or fails before it lists its modes, is unread, never a claude with no modes (#152)\"]": 206,
-  "[\"packages/core/test/control-verify.test.ts\",\"fuzz: no mutation of a signed command verifies > 3,000 mutations across every signed field\"]": 471,
-  "[\"packages/core/test/devin.test.ts\",\"devin: the session store > reads the one chain that ends at main_chain_id, never the whole forest\"]": 104,
-  "[\"packages/core/test/devin.test.ts\",\"devin: a chain longer than the cap > delivers the NEWEST turns and keeps moving, instead of stalling for good\"]": 621,
-  "[\"packages/core/test/headless.test.ts\",\"runHeadless > a turn still running at the timeout is stopped and says so\"]": 203,
-  "[\"packages/core/test/headless.test.ts\",\"runHeadless > a tool left holding stdout after the harness exits does not hold the result past two seconds\"]": 2002,
-  "[\"packages/core/test/headless.test.ts\",\"runHeadless: nothing is signalled once the child is gone > a stopped child that exits: what it left in its group is ended as it goes, once, and nothing is sent ten seconds later\"]": 456,
-  "[\"packages/core/test/headless.test.ts\",\"runHeadless: nothing is signalled once the child is gone > a Stop or the cap that comes after the child has exited signals nothing, and the run is not called stopped\"]": 4007,
-  "[\"packages/core/test/outbox-delete.test.ts\",\"waitNamedLock > takes a free lock at once, one let go within the wait, and none held past it\"]": 164,
-  "[\"packages/core/test/outbox.test.ts\",\"outbox > over a megabyte of lines that parse to nothing never stops a drain\"]": 336,
-  "[\"packages/core/test/platform-edges.test.ts\",\"runHeadless stopping a turn > a process group that is already gone: the child itself is signalled\"]": 2107,
-  "[\"packages/core/test/platform-edges.test.ts\",\"runHeadless stopping a turn > a child that cannot be signalled either is left to finish on its own\"]": 505,
-  "[\"packages/core/test/platform-edges.test.ts\",\"runHeadless stopping a turn > on Windows there is no process group: the child is signalled directly\"]": 2102,
-  "[\"packages/core/test/readers.test.ts\",\"gitFacts > the origin with credentials stripped; the branch once there is one; none on a detached HEAD\"]": 149,
-  "[\"packages/core/test/service.test.ts\",\"installing and removing > darwin: with no stand-in for the wait, this thread sleeps between looks\"]": 101,
-  "[\"tools/doors/test/generator.test.ts\",\"reading the descriptors > every event type needs a tier on its message\"]": 146,
-  "[\"tools/doors/test/generator.test.ts\",\"what the generators refuse or haven't a shape for yet > gt and lt rules are refused: the wire says gte and lte\"]": 154,
-  "[\"tools/doors/test/generator.test.ts\",\"the schemas command > writes, checks, reports each kind of drift, and removes a file no longer generated\"]": 1297,
-  "[\"tools/doors/test/generator.test.ts\",\"the schemas command > a symbolic link where a generated file or its folder goes is refused, not read or written through\"]": 1285,
-  "[\"tools/doors/test/generator.test.ts\",\"the schemas command > on this repository, with the default output, everything is in sync\"]": 216,
-  "[\"tools/doors/test/parity.test.ts\",\"the proto and the Zod source agree > proto/ lints\"]": 118
+  "packages/cli/test/ask-daemon.test.ts": {
+    "rest": 0,
+    "tests": {
+      "ask on, twice > on after off keeps what on allowed: the switch flips back, the folders stay": 703,
+      "ask on, twice > the second run changes nothing: the same control.json, the folder allowed once, the service pointed at the same cli.js": 704,
+      "sessionpipe ask against the daemon > from a plain terminal: the answer alone on stdout, exit 0; no asker, so no events; the child is told it was asked by another session": 1346,
+      "sessionpipe ask against the daemon > from inside a Claude Code session: the asker is read from its environment; the events land on it": 1339,
+      "sessionpipe ask against the daemon > no daemon on the socket: exit 1 and what to run": 703,
+      "sessionpipe ask against the daemon > the daemon stops before the child answers: exit 1 and one line saying so, nothing on stdout": 731
+    }
+  },
+  "packages/cli/test/ask.test.ts": {
+    "rest": 50,
+    "tests": {}
+  },
+  "packages/cli/test/cli-entry.test.ts": {
+    "rest": 14,
+    "tests": {
+      "the entrypoint > runs the command when the process was started through a link to the module": 116
+    }
+  },
+  "packages/cli/test/cli-main.test.ts": {
+    "rest": 490,
+    "tests": {
+      "commands doctor prints for pasting > a folder with a space, a quote or a $ in it: the service's file, its log, an account's folder": 23,
+      "doctor > a healthy machine: every group, no warnings, all good once the stopped sink is seen to; the JSON says the same": 20,
+      "doctor > warns: a stopped daemon, a stalled poll, a failed update, a locked key, a signed-out account, a Linux logout": 34,
+      "doctor and status: receivers, sinks, updates and the hooks' own copy > the hooks' own copy: run by another version, naming a node that is gone, or missing a file": 26,
+      "doctor and status: receivers, sinks, updates and the hooks' own copy > updates: automatic with what the last check found, what waits for an idle moment, what failed, what was done": 38,
+      "doctor and status: the background service and the disk > a full disk comes first: by what the system says is free, or by what the service's log said this hour": 27,
+      "doctor and status: the background service and the disk > not loaded, or loaded and silent: which manager was asked, and the command that starts it there": 29,
+      "doctor: accounts > the pool: on or off, how many accounts have room, and when it had none to give": 29,
+      "help, version and the dispatch > pool: the family runs in this process when no daemon answers; status and uninstall know about it": 30,
+      "sink add | list | remove | test > a sink crossing tier 0 rewrites the hooks: the full set with one above it, the lean set without": 32,
+      "sink add | list | remove | test > changing a sink's tier keeps the key it has, wherever it lives; a new key replaces it": 96,
+      "tail, backfill, forget, replay > forget takes the drain's flush lock first; held past the wait, it changes nothing and says so": 310,
+      "words from outside, on the pages > doctor, status and control status write nothing a terminal acts on but their own colours": 30
+    }
+  },
+  "packages/cli/test/cli-update.test.ts": {
+    "rest": 99,
+    "tests": {}
+  },
+  "packages/cli/test/cli.test.ts": {
+    "rest": 0,
+    "tests": {
+      "control health in status and doctor > reports a daemon backing off before its first s… in both text and JSON": 626,
+      "control health in status and doctor > reports a healthy long-poll in both text and JSON": 598,
+      "control health in status and doctor > reports a stalled loop still claiming to poll in both text and JSON": 611,
+      "control health in status and doctor > reports an old daemon that permanently stopped in both text and JSON": 640,
+      "help never dispatches a command > --version --help with no operands": 56,
+      "help never dispatches a command > --version --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > --version -h: usage, exit 0, no writes, hooks, queued work, processes or network": 62,
+      "help never dispatches a command > -v --help with no operands": 54,
+      "help never dispatches a command > -v --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > -v -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > backfill --claude-code --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > backfill --claude-code -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > backfill --help with no operands": 57,
+      "help never dispatches a command > channel --help with no operands": 56,
+      "help never dispatches a command > channel --session claude-code:session --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > channel --session claude-code:session -h: usage, exit 0, no writes, hooks, queued work, processes or network": 62,
+      "help never dispatches a command > connect --help with no operands": 63,
+      "help never dispatches a command > connect https://receiver.invalid --mode safe --no-service --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > connect https://receiver.invalid --mode safe --no-service -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > control --help with no operands": 58,
+      "help never dispatches a command > control --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > control -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control folders --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control folders -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control folders add /tmp --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control folders add /tmp -h: usage, exit 0, no writes, hooks, queued work, processes or network": 59,
+      "help never dispatches a command > control folders remove /tmp --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control folders remove /tmp -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > control keys --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control keys -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > control keys remove key-id --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > control keys remove key-id -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > control mode auto --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > control mode auto -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control off --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > control off -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > control pair https://receiver.invalid --mode safe --no-service --help: usage, exit 0, no writes, hooks, queued work, processes or network": 57,
+      "help never dispatches a command > control pair https://receiver.invalid --mode safe --no-service -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > control run --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control run -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > control status --help: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > control status -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > doctor --help with no operands": 55,
+      "help never dispatches a command > doctor --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > doctor -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > forget --help with no operands": 58,
+      "help never dispatches a command > forget claude-code session --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > forget claude-code session -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > hook --help with no operands": 59,
+      "help never dispatches a command > hook --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > hook -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > install --claude-code --machine changed --sink https://receiver.invalid --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > install --claude-code --machine changed --sink https://receiver.invalid -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > install --help with no operands": 62,
+      "help never dispatches a command > replay --help with no operands": 56,
+      "help never dispatches a command > replay --sink receiver --from-start --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > replay --sink receiver --from-start -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > secrets --help with no operands": 56,
+      "help never dispatches a command > secrets --help: usage, exit 0, no writes, hooks, queued work, processes or network": 52,
+      "help never dispatches a command > secrets -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > secrets move file --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > secrets move file -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > sink --help with no operands": 59,
+      "help never dispatches a command > sink --help: usage, exit 0, no writes, hooks, queued work, processes or network": 53,
+      "help never dispatches a command > sink -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > sink add https://receiver.invalid --help: usage, exit 0, no writes, hooks, queued work, processes or network": 53,
+      "help never dispatches a command > sink add https://receiver.invalid -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > sink list --help: usage, exit 0, no writes, hooks, queued work, processes or network": 52,
+      "help never dispatches a command > sink list -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > sink remove receiver --help: usage, exit 0, no writes, hooks, queued work, processes or network": 52,
+      "help never dispatches a command > sink remove receiver -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > sink test receiver --help: usage, exit 0, no writes, hooks, queued work, processes or network": 52,
+      "help never dispatches a command > sink test receiver -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > status --help with no operands": 57,
+      "help never dispatches a command > status --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > status -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > tail --help with no operands": 57,
+      "help never dispatches a command > tail --help: usage, exit 0, no writes, hooks, queued work, processes or network": 57,
+      "help never dispatches a command > tail -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > titles --help with no operands": 58,
+      "help never dispatches a command > titles --help: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > titles -h: usage, exit 0, no writes, hooks, queued work, processes or network": 59,
+      "help never dispatches a command > titles off --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > titles off -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > titles on --help: usage, exit 0, no writes, hooks, queued work, processes or network": 57,
+      "help never dispatches a command > titles on -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > titles refresh --help: usage, exit 0, no writes, hooks, queued work, processes or network": 57,
+      "help never dispatches a command > titles refresh -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > top-level usage: ": 53,
+      "help never dispatches a command > top-level usage: --help install": 56,
+      "help never dispatches a command > top-level usage: --help": 56,
+      "help never dispatches a command > top-level usage: -h": 54,
+      "help never dispatches a command > top-level usage: help --help": 56,
+      "help never dispatches a command > top-level usage: help": 56,
+      "help never dispatches a command > uninstall --help with no operands": 64,
+      "help never dispatches a command > uninstall --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > uninstall -h: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > update --help with no operands": 56,
+      "help never dispatches a command > update --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > update -h: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > update off --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > update off -h: usage, exit 0, no writes, hooks, queued work, processes or network": 56,
+      "help never dispatches a command > update on --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > update on -h: usage, exit 0, no writes, hooks, queued work, processes or network": 58,
+      "help never dispatches a command > version --help with no operands": 54,
+      "help never dispatches a command > version --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > version -h: usage, exit 0, no writes, hooks, queued work, processes or network": 60,
+      "help never dispatches a command > wait --help with no operands": 58,
+      "help never dispatches a command > wait --session claude-code:session --help: usage, exit 0, no writes, hooks, queued work, processes or network": 55,
+      "help never dispatches a command > wait --session claude-code:session -h: usage, exit 0, no writes, hooks, queued work, processes or network": 64,
+      "help never dispatches a command > worker --help with no operands": 58,
+      "help never dispatches a command > worker JOB --help: usage, exit 0, no writes, hooks, queued work, processes or network": 54,
+      "help never dispatches a command > worker JOB -h: usage, exit 0, no writes, hooks, queued work, processes or network": 59,
+      "status > emits only JSON, with doctor's shared facts and pending session/job counts, without leaking credentials": 312,
+      "status > is a few lines for a person: the verdict, then a line a group, with what is wrong said and what is fine named": 58,
+      "status > uses empty collections, null timing and zero jobs on a fresh machine": 57,
+      "the installed binary > runs through npm's bin link (a symlink to dist/cli.js), as `npm install -g` places it": 51
+    }
+  },
+  "packages/cli/test/connect-e2e.test.ts": {
+    "rest": 0,
+    "tests": {
+      "connect > a repeated setup line keeps the paired machine name even with a different --machine": 184,
+      "connect > again: nothing to approve, nothing duplicated": 178,
+      "connect > an explicit rename renames the hooks and the paired daemon together": 185,
+      "connect > one command: hooks through the launcher, paired, the sink at tier 2 with the handed-over key": 2184
+    }
+  },
+  "packages/cli/test/connect.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/cli/test/control-acp.test.ts": {
+    "rest": 3,
+    "tests": {
+      "an agent, driven > a session the agent's own hooks reported: reopened by its own id, in the folder the hooks gave": 2036,
+      "an agent, driven > an agent that can't reopen a session is unsupported once its process is gone": 4142,
+      "an agent, driven > idle: the agent is closed, and the next message reopens the session in a new run (session/load)": 6766,
+      "an agent, driven > not installed: failed in words, for a start and for a resume; a start that can't open is failed": 2072,
+      "an agent, driven > start: the agent in the folder, held; the next message through the same process; cancel is session/cancel": 10074,
+      "an agent, driven > the agent dies mid-turn: failed, let go of, and the next message reopens it": 6068,
+      "hello > advertises the agents installed here, and the `api` mode their turns are acked in": 62,
+      "hello > lists at most 20 harnesses, the first 20 it is given (control-hello.json)": 53
+    }
+  },
+  "packages/cli/test/control-ask-failures.test.ts": {
+    "rest": 0,
+    "tests": {
+      "the asker is gone > an asker nobody here knows: the ask runs, the events go on that session with no facts of its own": 1346,
+      "the asker is gone > no session in the caller's environment: no from, no chain, no events; the child's chain still says unknown": 1346,
+      "the asker is gone > the asker's process went away mid-run: the run finishes, its events land, nothing is held": 1982,
+      "the child exits without an answer > exit 0 having said nothing: an answer that says so, as a receiver's delivered ack would carry it": 744,
+      "the child exits without an answer > exit 1 having said nothing: failed, with the exit and stderr's tail; the asker's events say so; nothing stays in hand": 746,
+      "the child exits without an answer > killed by a signal: failed, naming the signal; the next ask runs as if nothing happened": 1369,
+      "the daemon stops mid-ask > asking turned off while one is in hand: that one finishes; the next is refused": 1346,
+      "the daemon stops mid-ask > the asker's connection ends at once with no final reply; stop() doesn't wait on the child; a new daemon on the same socket serves the next ask": 2002,
+      "the headless slot and the start caps are the receiver's > a receiver can't carry an ask as a command: the kind is refused before any rule runs": 740,
+      "the headless slot and the start caps are the receiver's > a receiver's start holds the one slot: the ask is taken at once, its child starts when that one ends": 1997,
+      "the headless slot and the start caps are the receiver's > start_concurrent reached by a receiver's start: the ask is refused start_limit before it begins, and counted on the asker": 2020,
+      "two asks at once from one session > the same existing session twice: one agent on it at a time, the second message after the first's turn": 2602,
+      "two asks at once from one session > two new sessions: both run side by side and answer; the asker's events pair up by ask_id with one seq counter": 1346
+    }
+  },
+  "packages/cli/test/control-ask-run.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/cli/test/control-ask.test.ts": {
+    "rest": 30,
+    "tests": {
+      "a handoff (CONTROL.md §6 reply_to) > `ask off` reaches the receiver in the next hello, at once; an ask is then refused": 66,
+      "a handoff (CONTROL.md §6 reply_to) > a command that is refused relays nothing: ended with ok false and the code, no relayed": 53,
+      "a handoff (CONTROL.md §6 reply_to) > a session no mode fits: relayed unsupported, and why": 692,
+      "a handoff (CONTROL.md §6 reply_to) > reply_to in a folder the machine doesn't allow: no handoff at all — the command runs, nothing is relayed, nothing is written on that session; a folder that stops being allowed mid-run is unsupported at relay time": 2684,
+      "a handoff (CONTROL.md §6 reply_to) > the reply follows into reply_to after the command's one final ack, framed as a handoff; the events on reply_to say relayed": 775,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > a relay whose run throws: relayed failed, in its words": 687,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > a session that answered nothing in writing: nothing to relay, and the events say failed": 618,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to a Codex session the hooks reported: its thread resumed, the answer on the way": 1320,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to no session on this machine: no handoff — the command runs and is acked as usual, nothing is relayed, no event and no outbox for a session a signer made up": 687,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to with a waiter parked: in place, relayed the moment it is handed over": 780,
+      "a handoff (CONTROL.md §6 reply_to): the other modes and edges > reply_to with the session parked on its channel: handed over there, proven by the row its turn begins with, and the channel stays open": 2124,
+      "ask coverage: the level a child runs at, and depth from a terminal ask > an existing Claude Code session on an inherit machine runs at the ask's cap, not the machine's default": 44,
+      "ask coverage: the level a child runs at, and depth from a terminal ask > the daemon counts depth from a terminal ask it has in hand (no asker named)": 1107,
+      "sessionpipe ask (CONTROL.md §13) > a new Codex session: asked, the answer as it is written, the answer; the child is framed and knows who asked; the events reach the asker's sink": 654,
+      "sessionpipe ask (CONTROL.md §13) > an existing Claude Code session with a waiter: in place, as an ask, the answer read from its transcript": 608,
+      "sessionpipe ask (CONTROL.md §13) > an existing session: the thread the daemon knows is resumed, under the ask's cap": 1282,
+      "sessionpipe ask (CONTROL.md §13) > no asker named: no events; the chain still grows, so the child can't ask without end": 644,
+      "sessionpipe ask (CONTROL.md §13) > refusals, each with its code, in order: asking off, an agent it can't run, a session it can't reach, a folder off the list, two deep, fields out of shape, a loop, the start caps": 654,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > a session takes three asks at a time, as asker and as asked: the fourth is refused start_limit before it begins": 3219,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > a waiter that never answers: delivered all the same, with nothing to say": 614,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > an ask that names no level runs at safe, on an auto machine too; a session a receiver started at auto takes the ask at safe; wider than safe can't be named": 2592,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > mid-turn: the Stop hook's block is the ask alone, without the receiver's note; the answer follows": 516,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > on an inherit machine an ask runs at safe, the one level a message may name there; a model goes to the start": 1284,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > the asker's outbox locked: recorded once the lock is free, logged when it never is": 2661,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > the daemon counts depth and loops for itself: a session waiting on an ask can't be asked from a clean environment, and the session it asked can't ask on": 1754,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > the daemon's own lineage never reaches a child: a receiver's start and an ask from nobody start clean": 1936,
+      "sessionpipe ask (CONTROL.md §13): the other modes and edges > two sessions that each have a copy are two sessions: one may ask the other": 40,
+      "the wire (local.ts askMany) > a garbled line, a connection that closes before the end, no daemon, a timeout: nothing": 158,
+      "the wire (local.ts askMany) > every reply in order, then the one that ends it; the connection may split a line": 27
+    }
+  },
+  "packages/cli/test/control-attention.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/cli/test/control-autoupdate.test.ts": {
+    "rest": 34,
+    "tests": {}
+  },
+  "packages/cli/test/control-cancel.test.ts": {
+    "rest": 4,
+    "tests": {
+      "a Stop by the other of a session's two names, its own and its copy's > a turn that waits behind one that has not begun either is stopped where it waits, not when the other is over": 1822,
+      "a Stop by the other of a session's two names, its own and its copy's > the copy's name, while a message sent to the session is still being prepared: the turn never starts": 1050,
+      "a Stop by the other of a session's two names, its own and its copy's > the same with a message for the session waiting behind that turn: the turn that is running is the one stopped, and the one that waited runs": 606,
+      "a Stop by the other of a session's two names, its own and its copy's > the session's name, while the turn runs in its copy for a message sent to the copy": 476,
+      "a Stop that is through its checks before the turn it was sent to stop > a message and its Stop in one poll, the Stop listed first: the same": 1048,
+      "a Stop that is through its checks before the turn it was sent to stop > a message sent after the Stop, though it came with it, is not what the Stop was for: it runs": 1562,
+      "a Stop that is through its checks before the turn it was sent to stop > a start and its Stop in one poll, the Stop verified first: it waits for the start to be in hand, and stops it": 1346,
+      "a Stop that is through its checks before the turn it was sent to stop > nor does it wait for another session's message, or for one that is refused": 1559,
+      "a Stop that is through its checks before the turn it was sent to stop > nor for a start that waits behind another run of its session: a session the daemon holds in its first turn is interrupted at once": 48,
+      "a copy's run is the copy's, never the original's > a copy stopped before it wrote anything leaves the original as it was: mid-turn and just written to, it is not resumed in place": 1118,
+      "a copy's run is the copy's, never the original's > a copy that fails accounts for no write to the original: a message a second later is copied again, not resumed in place": 100,
+      "a copy's run is the copy's, never the original's > a copy's turn that ends does not end the turn the person is in, in their own window: the next message waits for their Stop": 1392,
+      "a copy's run is the copy's, never the original's > a run asked for a copy that says it is the original is still no run of the daemon's in the original": 1096,
+      "a turn in a process the daemon did not start > a turn its hooks reported and no process to be found: unsupported; silent for ten minutes: nothing runs": 2030,
+      "a turn in a process the daemon did not start > another harness's session: unsupported, in its own name": 28,
+      "a turn in a process the daemon did not start > open in its own window: unsupported, with the way to stop it; nothing is signalled": 27,
+      "a turn in a process the daemon did not start > someone else's headless run: unsupported, naming the process": 26,
+      "a turn in a process the daemon did not start > the copy is the one open: the Stop for its session says so too": 38,
+      "a turn the daemon has in hand and has not started yet > a Stop for a session being started goes to the start that is running, not to the message waiting behind it": 518,
+      "a turn the daemon has in hand and has not started yet > a Stop while a message's files are being fetched: the same, and nothing is handed to the session": 1060,
+      "a turn the daemon has in hand and has not started yet > a Stop while a message's turn is being prepared: the turn never starts, and the Stop says it stopped it": 1128,
+      "a turn the daemon has in hand and has not started yet > a Stop while a new session's start is being prepared: no session is created, and the start says so": 1070,
+      "a turn the daemon has in hand and has not started yet > a message to a Codex session, stopped while Codex's login is checked: it never runs": 1528,
+      "a turn the daemon has in hand and has not started yet > a start stopped while its file is still on its way writes nothing into the folder afterwards": 1260,
+      "a turn the daemon has in hand and has not started yet > a turn stopped while its file is still on its way has one final ack, and the download is over": 1650,
+      "a turn the daemon has in hand and has not started yet > starts that wait for a slot, and a Codex start waiting for its files: stopped there, nothing started": 188,
+      "a turn the daemon has in hand and has not started yet > the same for a Codex start, and for a start whose files are still on their way": 1093,
+      "a turn the daemon has in hand and has not started yet > the same when the two came in one poll and the start was verified last: the waiting message is never the one a Stop finds": 788,
+      "a turn the daemon is running as its own child > a Codex turn: stopped the same way, with the messages it had finished": 2028,
+      "a turn the daemon is running as its own child > a Stop addressed to a copy that is still being made stops the run that is making it": 514,
+      "a turn the daemon is running as its own child > a Stop addressed to the copy the turn runs in stops it: the copy is where the person was sent": 486,
+      "a turn the daemon is running as its own child > a copy stopped after it named itself is still the session's copy, and the ack says so": 4078,
+      "a turn the daemon is running as its own child > a copy stopped before it named itself made none that anything knows of": 2042,
+      "a turn the daemon is running as its own child > a copy that named itself and was stopped before it wrote anything is not the session's copy: there is nothing to resume": 568,
+      "a turn the daemon is running as its own child > a resume: the child is ended, the turn says it was cancelled, the message queued behind it runs": 4062,
+      "a turn the daemon is running as its own child > a start: the new session's first turn is stopped, and its start is acked with what it ran with": 2031,
+      "a turn the daemon is running as its own child > a turn that ended by itself before the stop took effect: the cancel expired, the answer stands": 2089,
+      "a turn the daemon is running as its own child > a turn that said nothing yet answers with the note alone; a turn waiting for its slot never starts": 8120,
+      "a turn the daemon is running as its own child > the stopped child reports no end, and the session is not left mid-turn: a message for it goes straight through, and so does one that was already waiting for its Stop": 626
+    }
+  },
+  "packages/cli/test/control-channel.test.ts": {
+    "rest": 5,
+    "tests": {
+      "channelMain > --name is the name the session's list uses; unnamed there, it says so on stderr and doesn't park": 93,
+      "channelMain > serves the session it was given until Claude Code closes it, then exits 0": 31,
+      "parentArgv > reads the parent's command line, word by word; a process that isn't there has none": 24,
+      "runChannel > a daemon away or a wait that took over: it parks again after a pause; a second initialized starts nothing": 61,
+      "runChannel > a session that didn't take it as a channel: it answers Claude Code but never parks, and says why": 32,
+      "runChannel > answers Claude Code and parks only once it is initialized; each message is a notification, then it parks again": 64,
+      "runChannel > closed by Claude Code: a message the daemon hands over afterwards is not written": 61,
+      "runChannel > left to itself it parks again after a second": 1101,
+      "runChannel on a real socket > parks on the daemon's socket from the environment and hands its message to the session": 154
+    }
+  },
+  "packages/cli/test/control-cli.test.ts": {
+    "rest": 36,
+    "tests": {}
+  },
+  "packages/cli/test/control-daemon.test.ts": {
+    "rest": 138,
+    "tests": {
+      "attachments on a start (CONTROL.md §6) > a .sessionpipe that is a file, or a session folder that already exists: failed, nothing started": 2026,
+      "attachments on a start (CONTROL.md §6) > a .sessionpipe that is a symlink is refused, and nothing is written through it": 27,
+      "attachments on a start (CONTROL.md §6) > a content-length past the signed size: not a byte of the body is read": 26,
+      "attachments on a start (CONTROL.md §6) > a file shorter than its signed size: failed before the hash is even looked at": 26,
+      "attachments on a start (CONTROL.md §6) > a file the receiver doesn't have (404): failed, and the files before it aren't kept": 28,
+      "attachments on a start (CONTROL.md §6) > a file whose bytes don't match the signed hash: failed, nothing kept, nothing started": 26,
+      "attachments on a start (CONTROL.md §6) > a receiver error (500) on a file: failed with the status": 27,
+      "attachments on a start (CONTROL.md §6) > a receiver that never answers, or stops mid-body: the download is abandoned at the timeout": 2336,
+      "attachments on a start (CONTROL.md §6) > a second session in the same folder: the .gitignore is already there and stays as it is": 56,
+      "attachments on a start (CONTROL.md §6) > a stream longer than the signed size is cut off at the size": 434,
+      "attachments on a start (CONTROL.md §6) > a symlink further down (.sessionpipe/files) is refused too": 27,
+      "attachments on a start (CONTROL.md §6) > downloads, checks and saves each file, then starts the session with their paths": 66,
+      "attachments on a start (CONTROL.md §6) > hello says per account whether the command line is signed in, from claude auth status, and logs a change once": 133,
+      "delivery > a device key stored without its type (an old daemon's record) verifies none of its signatures": 90,
+      "delivery > a key added while it runs (control pair again) is trusted on the next poll": 128,
+      "delivery > a message while the daemon's own start still runs waits and resumes it, never forks": 3558,
+      "delivery > a token that was locked in the keychain at start is read again before the first poll": 68,
+      "delivery > cancel with nothing running in the session: there was nothing to stop (control-cancel.test.ts has the rest)": 26,
+      "delivery > channel: a message whose id is not a ULID is not handed to it, and the channel stays open for the next": 2644,
+      "delivery > channel: a session in the middle of a turn takes it at its Stop, not through the channel": 3014,
+      "delivery > channel: a session that begins no turn for it is acked held, and that channel takes no more": 10158,
+      "delivery > channel: in place while the session is idle, proven by the row of the turn it caused": 670,
+      "delivery > fork: a live session is copied, never resumed twice, and later messages go to the copy": 2090,
+      "delivery > headless runs wait their turn: never more Claude Code processes than the cap": 2402,
+      "delivery > key.add of a device key: stored whole, and its own grant and confirm are verified as a device key's": 4055,
+      "delivery > key.add: a trusted device vouches for a new one, which can then sign on its own": 2100,
+      "delivery > resume: no live process — a headless turn, acked taken then delivered with the reply": 134,
+      "delivery > sdk: start goes through the Agent SDK host, and the next prompt lands in the held session": 4084,
+      "delivery > signed out as the daemon sees it: the resume fails with what to do, and Claude Code never runs": 26,
+      "delivery > signed out: a new session fails the same way; a Claude Code that can't say never blocks": 170,
+      "delivery > start caps: at most N at once and M an hour, whatever the receiver sends": 6036,
+      "delivery > start without the SDK is a headless claude -p --session-id": 2050,
+      "delivery > turn: a Stop that didn't take it (it came after the hook asked) reroutes to a resume": 353,
+      "delivery > turn: a message for a session mid-turn is the Stop hook's block, once": 1046,
+      "delivery > waiter: in place, in milliseconds, framed": 652,
+      "one daemon, and when it may restart (autoupdate.ts) > busy while a headless run is in hand, idle once it is acked": 656,
+      "one daemon, and when it may restart (autoupdate.ts) > busy while a permission prompt waits for an answer": 104,
+      "one daemon, and when it may restart (autoupdate.ts) > paused intake leaves new messages with the receiver until it resumes": 946,
+      "pairing (CONTROL.md §2) > a code nobody approved in time is renewed in place: fresh digits, the same machine, no second row": 46,
+      "pairing (CONTROL.md §2) > names the Claude Code accounts signed in here, so the board can label each account_id": 59,
+      "pairing (CONTROL.md §2) > open pairing: no token, the poll key gets the token, the sink key is handed over, the approver is named": 36,
+      "pairing (CONTROL.md §2) > refuses a key swapped in by the receiver": 39,
+      "pairing (CONTROL.md §2) > renewal has an end: past it, an expired code is the error it always was": 34,
+      "pairing (CONTROL.md §2) > trusts the key only after its proof verifies here": 54,
+      "permission answers (CONTROL.md §6, §7) > a background subagent asks: the main thread's turn ending and beginning, its tools and another subagent's let go of nothing; its own tool, its own stop, a turn that ends with nothing in flight and the session's end do": 212,
+      "permission answers (CONTROL.md §6, §7) > an event from before the question says nothing about it, though it is reported after": 110,
+      "permission answers (CONTROL.md §6, §7) > an open prompt takes the signed answer": 131,
+      "permission answers (CONTROL.md §6, §7) > hooks older than the rule: a question that names no thread is let go by the session's next event, and so is any question by an event that names none": 322,
+      "permission answers (CONTROL.md §6, §7) > nothing is auto-allowed: an allow with no open prompt is refused, a deny expires": 2037,
+      "permission answers (CONTROL.md §6, §7) > the main thread asks while subagents work: their tools ending let go of nothing, and the page's answer is taken": 188,
+      "permission answers (CONTROL.md §6, §7) > the main thread's own events let go of its question: its tool ran, its turn ended, a new prompt, the session's end": 310,
+      "permission answers (CONTROL.md §6, §7) > the terminal answered first: the next event releases the hook and a later answer expires": 125,
+      "permission answers (CONTROL.md §6, §7) > two questions at once, the main thread's and a subagent's: each is let go by its own thread": 130,
+      "refusals (CONTROL.md §5) > a command for no session on this machine: refused, naming the session by the id the person knows": 35,
+      "refusals (CONTROL.md §5) > a machine set to start no sessions says that, not that it is busy starting none": 52,
+      "refusals (CONTROL.md §5) > a tampered command, a replay, a folder off the list, an expired message": 4054,
+      "the built hook talks to the daemon > Stop prints a block for a queued message; PermissionRequest prints the signed decision": 2017,
+      "the built hook talks to the daemon > a payload another harness ran is not parked in the control wait": 76,
+      "the built hook talks to the daemon > a subagent's tool, reported by the real hook and its worker, leaves the main thread's question for the page to answer": 324,
+      "the built hook talks to the daemon > with no daemon the hook prints nothing and exits at once": 52
+    }
+  },
+  "packages/cli/test/control-drain.test.ts": {
+    "rest": 34,
+    "tests": {
+      "the control daemon's once-a-minute drain > retries a file-token sink's final 429 after the wait, once and outside the session lock": 26
+    }
+  },
+  "packages/cli/test/control-files.test.ts": {
+    "rest": 8,
+    "tests": {
+      "fetchFiles, told to stop > drops the download in flight, and asks for no file after it": 22
+    }
+  },
+  "packages/cli/test/control-folders.test.ts": {
+    "rest": 9,
+    "tests": {}
+  },
+  "packages/cli/test/control-harnesses.test.ts": {
+    "rest": 4,
+    "tests": {
+      "Antigravity (agy) > a conversation agy doesn't know: it runs in a fresh one, says so, and the next message follows it": 2768,
+      "Antigravity (agy) > a conversation the hooks reported: its folder from the hooks, and from the worker's facts after a restart": 4780,
+      "Antigravity (agy) > auto mode: --mode accept-edits, never --dangerously-skip-permissions": 763,
+      "Antigravity (agy) > inherit mode: no permission flag, as in safe": 762,
+      "Antigravity (agy) > start: agy -p in the folder, named after the start; the next message goes to --conversation": 2767,
+      "Codex (codex exec) > a runner that hands the whole output over at the end is read the same way; one that fails is failed": 4030,
+      "Codex (codex exec) > a session the hooks reported: its folder from the rollout, resumed under its own id": 8052,
+      "Codex (codex exec) > a start whose alias can't be recorded still delivers, and says so": 776,
+      "Codex (codex exec) > a thread id that isn't a UUID is nothing to resume; a start whose folder was never recorded has no folder": 2028,
+      "Codex (codex exec) > a waiter whose socket died before its close was seen doesn't count as one": 2762,
+      "Codex (codex exec) > auto mode: --approve-for-me, never a bypass flag": 770,
+      "Codex (codex exec) > inherit mode: no sandbox or approval flag, so config.toml decides": 756,
+      "Codex (codex exec) > not installed: failed in words, for a start and for a resume": 4026,
+      "Codex (codex exec) > signed out as the daemon sees it: failed with the command to run, and Codex never runs": 38,
+      "Codex (codex exec) > start with files: they land in the folder before codex runs, and the prompt lists them": 2053,
+      "Codex (codex exec) > start: a new session in the folder, named after the start; the next message resumes Codex's thread": 4055,
+      "a start and a prompt in the same poll > antigravity: the prompt waits for its start, then resumes the session the start named": 1502,
+      "a start and a prompt in the same poll > codex: the prompt waits for its start, then resumes the session the start named": 1490,
+      "hello > advertises the harnesses this machine can drive": 48,
+      "hello > names a home that runs on another API by its endpoint's host, never its token": 25,
+      "hello > names the accounts signed in, read again for each hello": 46,
+      "hello > says a new folder list in a hello at once, and nothing when nothing it says changed": 268
+    }
+  },
+  "packages/cli/test/control-health.test.ts": {
+    "rest": 18,
+    "tests": {}
+  },
+  "packages/cli/test/control-holds.test.ts": {
+    "rest": 0,
+    "tests": {
+      "a route chosen while a run of the daemon's own was in the way > a copy that is open in a window is being copied: a message for the original meanwhile is not resumed in it": 1067,
+      "a route chosen while a run of the daemon's own was in the way > a window opens the copy while the daemon runs in it: the message that waited is not resumed beside the window": 492,
+      "a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > a Codex session the daemon starts is not a run of its own in the Claude Code session of that id: the window's session is copied, never resumed": 954,
+      "a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > a Stop for the Claude Code session of that id is not a Stop for the Codex run, and the other way round": 491,
+      "a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > and its end accounts for no write to that Claude Code session": 993,
+      "a route chosen while a run of the daemon's own was in the way > another harness's session of the same id > nor is it one for a session of that id the daemon holds for another harness": 1013,
+      "a route chosen while a run of the daemon's own was in the way > the same and nothing took the copy meanwhile: it is resumed after the run it waited for, as before": 788,
+      "a run asked for a copy that ran as the original instead > ends by itself while the original's own process begins a turn: that is not the end of whatever wrote to the original, and the next message is not resumed in place": 821,
+      "a run asked for a copy that ran as the original instead > ends by itself: that is not the end of whatever wrote to the original, and the next message is not resumed in place": 834,
+      "a run asked for a copy that ran as the original instead > holds the original for as long as a write of unknown hand holds it, and no longer": 100,
+      "a session is known by the id its harness gave it, exactly > an id that differs from a session's only by case is not free for a new session: it would be written into that session's file": 29,
+      "a session is known by the id its harness gave it, exactly > named in another case it is no session of this machine's, whatever the disk answers: nothing is run in the one a window has": 376,
+      "a turn running in the copy a session's messages go to > its own hooks say so and no registry row does: a message for the original is not resumed in the middle of it": 415,
+      "a turn running in the copy a session's messages go to > the daemon's own run in the copy, killed from outside: the copy is not held on the word of a child that is gone": 512
+    }
+  },
+  "packages/cli/test/control-homes.test.ts": {
+    "rest": 0,
+    "tests": {
+      "one session id, several accounts > none of them holds it open: refused, naming the accounts by directory and nothing else": 72,
+      "one session id, several accounts > one account alone needs no live process": 46,
+      "one session id, several accounts > the one holding it open answers, whatever order the accounts are read in": 68,
+      "one session id, several accounts > two of them hold it open: refused too, and the ack says which two": 28
+    }
+  },
+  "packages/cli/test/control-inbox-write.test.ts": {
+    "rest": 33,
+    "tests": {
+      "the one line it writes > a socket that opened and took nothing yet is still committed, never tried elsewhere": 41,
+      "the one line it writes > an inbox that never answers is not a write": 42,
+      "the one line it writes > is a user frame at the lowest priority, in the envelope, and nothing else": 68,
+      "the one line it writes > off macOS an auth line goes first; on macOS the uid is the vetting": 63,
+      "the one line it writes > vets first: a refusal writes nothing at all": 31
+    }
+  },
+  "packages/cli/test/control-inbox.test.ts": {
+    "rest": 0,
+    "tests": {
+      "a message into a live session's own inbox > a machine that names a mode of its own is `prompting`, whatever the account defaults to": 84,
+      "a message into a live session's own inbox > a mode with no class of its own is no lane either": 80,
+      "a message into a live session's own inbox > an account that may not be in bypass at all makes the machine `prompting`": 86,
+      "a message into a live session's own inbox > is written once, declares the machine's class, and is delivered by the turn it caused": 104,
+      "a message into a live session's own inbox > says nothing about the platform when nobody asked it to: this computer's own": 76,
+      "a message into a live session's own inbox > the machine's class and the session's must be the same: otherwise the message takes the next rung": 90,
+      "a message into a live session's own inbox > two prompting sides agree: an Accept-edits session on a machine with no bypass default": 94,
+      "a message the session doesn't take > a session that has ended isn't kept waiting for a message it can never take": 18075,
+      "a message the session doesn't take > a turn that began with nothing written for it yet is not a delivery either": 1566,
+      "a message the session doesn't take > a turn the person began themselves in the same window is not this message's delivery": 86,
+      "a message the session doesn't take > is acked held, once, and is never written anywhere else": 8060,
+      "a message the session doesn't take > outlives the daemon that wrote it: a restart is not a second chance to write": 8078,
+      "a message the session doesn't take > the same words again are not written in beside the copy already waiting, until it can't be": 10112,
+      "a session that already has a copy > is messaged in the copy's own inbox, and the copy's own turn is what delivers it": 73,
+      "a session that already has a copy > is never copied again: the person is told that the copy is open too": 54,
+      "a session that already has a copy > is not messaged in the inbox of a copy whose own mode is not this machine's class": 59,
+      "what the lane will not write into > a Stop while the message waits for the hooks' word: it never runs": 4058,
+      "what the lane will not write into > a Windows machine: there is no inbox there, and nothing is read to find that out": 73,
+      "what the lane will not write into > a busy window whose hooks this daemon has never heard from is not waited for": 80,
+      "what the lane will not write into > a command dated in the future, which the verifier still admits": 58,
+      "what the lane will not write into > a command signed too long ago still gets a lane, just not this one": 48,
+      "what the lane will not write into > a message that can't be put in an envelope this lane is sure of": 70,
+      "what the lane will not write into > a message whose id is not a ULID: nothing could prove the session took it, so it is not written there": 2038,
+      "what the lane will not write into > a process that isn't one of the harness's own windows": 68,
+      "what the lane will not write into > a recycled pid: the registry's start time and the process's disagree": 66,
+      "what the lane will not write into > a refusal between the look and the first byte takes the next rung, with nothing written": 78,
+      "what the lane will not write into > a session a rung above the inbox can take: the look is never paid for": 36,
+      "what the lane will not write into > a session mid-turn: that is the turn lane's message, not this one's": 50,
+      "what the lane will not write into > a session one of the daemon's own runs is holding": 60,
+      "what the lane will not write into > a session the registry says is not idle": 2074,
+      "what the lane will not write into > an inbox protocol this daemon doesn't speak": 66,
+      "what the lane will not write into > busy by its registry row after its hooks said the turn was over: looked at again, idle by then, it takes the message in its inbox": 468,
+      "what the lane will not write into > busy by its registry row before its hooks have said so: the message waits for them, and is handed over at that turn's Stop": 52,
+      "what the lane will not write into > off macOS it reads the inbox's key first, and sends it with the message": 72,
+      "what the lane will not write into > off macOS with no readable key, the lane is not used at all": 68,
+      "what the lane will not write into > the writer is told the session's own class and the machine's own, separately": 72,
+      "what the lane will not write into > two live processes for one session: the daemon won't choose between them": 67
+    }
+  },
+  "packages/cli/test/control-ladder.test.ts": {
+    "rest": 3,
+    "tests": {
+      "a harness with no headless path (Kiro) > a folder allowed with a trailing slash that doesn't exist is matched as written": 38,
+      "a harness with no headless path (Kiro) > is placed by its hooks' cwd: in place at its next Stop when mid-turn, else unsupported": 12082,
+      "a message waiting for a Stop > rerouted after the turn, it is refused when its session has gone, and failed when routing throws": 2054,
+      "headless runs > a Claude Code that streams: the answer so far goes out as progress, then the whole as the reply": 2667,
+      "headless runs > a session that goes away between a message's two looks at it is refused on the second": 774,
+      "headless runs > a start is refused for a folder off the list, and for a session that already exists": 2028,
+      "headless runs > auto mode on a Claude Code without an auto permission mode is refused, for a resume and a start": 2034,
+      "headless runs > inherit mode: a resume and a start pass no permission flag, so Claude Code picks its own default": 2065,
+      "headless runs > no Claude Code on this machine: a resume and a start fail in words": 2026,
+      "headless runs > the login is asked once and remembered for ten minutes, thirty seconds after a no; an unanswerable one never blocks": 8076,
+      "key.add (CONTROL.md §2) > a device without a name; the same device twice; a store that can't be written": 2042,
+      "the Agent SDK session > a prompt the SDK fails is `failed`; a cancel it can't carry out is `failed` in its words": 8048,
+      "the Agent SDK session > a start the SDK fails is `failed`; a second start for the same id in the same poll is refused": 2058,
+      "the Agent SDK session > the receiver's session tools reach an SDK start, a headless start and a resume; a changed list is said once": 6714,
+      "the answer read from a live session > a session that has a copy answers its own waiter in its own transcript: that is where the reply is read": 1124,
+      "the answer read from a live session > a transcript that can't be read any more: delivered without a reply, never stuck, and no path in the ack": 620,
+      "the answer read from a live session > an answer whose ack can't be recorded is logged, and nothing else falls over": 620,
+      "the answer read from a live session > goes out as progress while the turn runs; the end of the turn is the reply": 1139
+    }
+  },
+  "packages/cli/test/control-line.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/cli/test/control-midturn.test.ts": {
+    "rest": 20,
+    "tests": {}
+  },
+  "packages/cli/test/control-order.test.ts": {
+    "rest": 0,
+    "tests": {
+      "messages for one session run in the order they were sent > a Stop for the running one, a failure, a refusal: the rest keep their order": 906,
+      "messages for one session run in the order they were sent > a kind written with a JSON escape is the same kind: the prompt has its place on arrival, and waits for a start written that way": 3038,
+      "messages for one session run in the order they were sent > a message sent to a session's copy by its own name waits for the turn already running in that copy: never two at once in one transcript": 776,
+      "messages for one session run in the order they were sent > a message that waits for its session's start is not passed by one that came after it": 1478,
+      "messages for one session run in the order they were sent > a message whose files are slow to fetch keeps its place: the one behind it waits for it": 707,
+      "messages for one session run in the order they were sent > another session's messages don't wait for this one's": 149,
+      "messages for one session run in the order they were sent > by when they were signed, then by arrival: a poll that lists them the other way round, and a later poll that brings an earlier one": 1727,
+      "messages for one session run in the order they were sent > the same with nothing running: the first of a poll goes first however its verification goes": 642,
+      "messages for one session run in the order they were sent > two of one poll behind a running turn: the earlier one is verified last and still runs first (resume)": 1486,
+      "messages for one session run in the order they were sent > what isn't a prompt it can read takes no place in line, and holds nobody's up": 162,
+      "the same order on the other rungs > fork: the first makes the copy, the second resumes it, whichever was verified first": 1630,
+      "the same order on the other rungs > turn: they are handed to the session's Stops in sent order, and if no Stop takes them they resume in it": 510
+    }
+  },
+  "packages/cli/test/control-pair.test.ts": {
+    "rest": 124,
+    "tests": {}
+  },
+  "packages/cli/test/control-poll.test.ts": {
+    "rest": 88,
+    "tests": {
+      "a message queued for a Stop (CONTROL.md §6 `turn`) > goes another way after thirty minutes without a Stop; one the Stop took is left alone": 148,
+      "acks (CONTROL.md §10) > an ack that never ends is left behind: kept, sent with the next try, and 'acks being sent' does not stay": 55,
+      "acks (CONTROL.md §10) > kept and sent again, with a growing pause, until the receiver accepts them; a receiver with none is skipped": 56,
+      "an Agent SDK session held idle > is closed after its idle time, unless mid-turn or just used, and a later message resumes it": 56,
+      "control poll recovery > retries a single 401 and delivers a signed message without restarting or re-pairing": 82,
+      "what a headless run's end means (outcome) > a session id that isn't one": 55,
+      "what a headless run's end means (outcome) > a start that ends badly is failed the same way": 57,
+      "what a headless run's end means (outcome) > an error with a result": 56,
+      "what a headless run's end means (outcome) > an error with a subtype": 54,
+      "what a headless run's end means (outcome) > an error with nothing": 56,
+      "what a headless run's end means (outcome) > couldn't start": 56,
+      "what a headless run's end means (outcome) > denials by name": 55,
+      "what a headless run's end means (outcome) > denials without names": 54,
+      "what a headless run's end means (outcome) > no result, a stderr tail": 55,
+      "what a headless run's end means (outcome) > no result, killed": 55,
+      "what a headless run's end means (outcome) > no words": 56,
+      "what a headless run's end means (outcome) > timed out": 54,
+      "what a headless run's end means (outcome) > too big": 56,
+      "what a poll can answer > a receiver unpaired while its poll was parked: what that poll brought is still handled; its ack has nowhere to go; the loop ends": 55,
+      "what a poll can answer > a start for a harness this daemon doesn't drive, with no env of its own": 56
+    }
+  },
+  "packages/cli/test/control-pool.test.ts": {
+    "rest": 86,
+    "tests": {
+      "hello (CONTROL.md §2 `pool`) > a change in the pool sends a hello at once": 54,
+      "hello (CONTROL.md §2 `pool`) > an empty pool is still said ({on:false, accounts:[]}); a daemon without one says nothing": 58,
+      "hello (CONTROL.md §2 `pool`) > carries the pool in every hello, and a hello with three accounts validates against the strict schema": 46,
+      "the `pool` command (CONTROL.md §6) > a daemon without a pool answers unsupported": 36,
+      "the `pool` command (CONTROL.md §6) > enable, disable, remove, order and refresh, each acked with the pool as it now stands": 10044,
+      "the `pool` command (CONTROL.md §6) > login.begin: the pending id and the URL; login.complete adds the account": 2035,
+      "the `pool` command (CONTROL.md §6) > on, off, remove, order, disable and login.complete need a fresh confirm: a day grant is refused confirm_required": 10041,
+      "the `pool` command (CONTROL.md §6) > on: delivered with the summary line, the listener comes up; off: the listener goes down": 68,
+      "the `pool` command (CONTROL.md §6) > refused: pool_account, pool_order, pool_off; failed: login; and the detail never carries the code": 9052,
+      "the listener's life, busy() and status() > poolChanged() on a daemon that isn't running sends nothing": 106
+    }
+  },
+  "packages/cli/test/control-prompt-files.test.ts": {
+    "rest": 0,
+    "tests": {
+      "files on a prompt > a file that fails: failed with code file, nothing kept, and the message is never delivered": 25,
+      "files on a prompt > a resume: written in the message's own folder first, then listed in the message the run gets": 2037,
+      "files on a prompt > a waiter: the files are on disk before the text is handed over": 114,
+      "files on a prompt > the hello says so": 40
+    }
+  },
+  "packages/cli/test/control-relaunch.test.ts": {
+    "rest": 1,
+    "tests": {
+      "a copy, when nothing can reach the session > a copy an older daemon recorded: its reason is not repeated, only that the answer came from the copy": 46,
+      "a copy, when nothing can reach the session > a day's copies already made: refused, with the count": 36,
+      "a copy, when nothing can reach the session > a machine that makes no copies says that, and starts nothing": 26,
+      "a copy, when nothing can reach the session > a resume passes no source-is-alive contract: there is no source to keep alive": 58,
+      "a copy, when nothing can reach the session > is labelled, linked both ways, and told that the original is still open": 2050,
+      "a copy, when nothing can reach the session > is never itself copied: the next message resumes it": 2044,
+      "resume or copy: what holds the session (CONTROL.md §6, What counts as held) > a session whose headless run has just exited is resumed in place at once, not copied": 53,
+      "resume or copy: what holds the session (CONTROL.md §6, What counts as held) > an ask is copied for the same reasons, with no inbox to speak of": 34,
+      "resume or copy: what holds the session (CONTROL.md §6, What counts as held) > another process's run that is still going: a copy, saying so": 67,
+      "resume or copy: what holds the session (CONTROL.md §6, What counts as held) > written to again after its end was reported: something else has it now, and it is copied": 48,
+      "resume or copy: what holds the session (CONTROL.md §6, What counts as held) > written to seconds ago, with no end reported and no process to be found: a copy, and that is the reason it gives": 47,
+      "the mode a cold run is launched with > a machine that names a mode of its own keeps naming it": 48,
+      "the mode a cold run is launched with > a session this machine started is the start's to decide for, not the hooks'": 47,
+      "the mode a cold run is launched with > acceptEdits is not re-asserted where the account's own default is narrower, or unreadable": 95,
+      "the mode a cold run is launched with > on an auto machine whose Claude Code has auto turned off, the turn still runs and the ack says so": 2050,
+      "the mode a cold run is launched with > re-asserts a narrowing the session chose, and nothing else ever": 427,
+      "the mode a cold run is launched with > says in the ack what the turn really ran in": 47,
+      "the mode a cold run is launched with > the same at the top level of the settings file, which is where it is written by hand": 46
+    }
+  },
+  "packages/cli/test/control-reply.test.ts": {
+    "rest": 14,
+    "tests": {
+      "answerIn: which words are the answer to one message > finds the mark in a row that holds a very long list": 38,
+      "follow: the answer as the transcript gains it > `marked`: a turn that ended before the session took the message was not the message's": 412,
+      "follow: the answer as the transcript gains it > `next`: the turn after a Stop block is the message's, found or not — an end with no row is no answer": 162,
+      "follow: the answer as the transcript gains it > a message with no mark has no row to wait for: the next end of a turn settles it, with no answer": 324,
+      "follow: the answer as the transcript gains it > a transcript rewritten, removed, unreadable or no longer a file gives no answer": 22,
+      "follow: the answer as the transcript gains it > gives up after its timeout when the turn never ends, with or without its row": 663,
+      "follow: the answer as the transcript gains it > reads only what the transcript gained after the hand-over, across partial writes": 62,
+      "follow: the answer as the transcript gains it > the hooks say the turn ended: what it said is the answer, once its last rows had their time": 203,
+      "sessionToolsFrom > keeps MCP server names only — never a built-in tool": 28
+    }
+  },
+  "packages/cli/test/control-restart.test.ts": {
+    "rest": 176,
+    "tests": {
+      "a run that has just ended, and a message after the restart > a run asked for a copy that ran as the original instead > and for no longer than the 90 seconds: after them it is resumed": 28,
+      "a run that has just ended, and a message after the restart > a run asked for a copy that ran as the original instead > the next message, after a restart, is not resumed in place: it is copied, as without one": 28,
+      "a run that has just ended, and a message after the restart > the daemon's own turn: the reply to it is resumed in place, not answered in a copy": 51,
+      "a session mid-turn in its own window, and a message after the restart > heard from meanwhile: the ten minutes count from then": 20,
+      "a session mid-turn in its own window, and a message after the restart > its Stop came while no daemon listened: the message waits out the ten minutes since the session was last heard from, then goes as for a session that is not mid-turn": 20,
+      "a session mid-turn in its own window, and a message after the restart > its Stop comes after the restart: the message is handed over there, and nothing is run": 35
+    }
+  },
+  "packages/cli/test/control-run.test.ts": {
+    "rest": 28,
+    "tests": {
+      "control run > the pool's hooks: a change sends a hello; numbers seen on a session's request become its limits.observed": 23,
+      "polls that go on never ending (the daemon's onWedged) > a mark dated ahead of the clock says nothing: restarted": 52,
+      "polls that go on never ending (the daemon's onWedged) > a restart that fails is said, and is nobody's unhandled rejection": 52,
+      "polls that go on never ending (the daemon's onWedged) > idle: marked, and restarted the way an update restarts it; asked again meanwhile, nothing more": 52,
+      "polls that go on never ending (the daemon's onWedged) > restarted for it less than an hour ago: said once, not restarted; an hour on, restarted again": 53
+    }
+  },
+  "packages/cli/test/control-sdk.test.ts": {
+    "rest": 25,
+    "tests": {
+      "loadSdk > a result nobody asked for is let go; the next message still gets its own": 23
+    }
+  },
+  "packages/cli/test/control-service-world.test.ts": {
+    "rest": 24,
+    "tests": {}
+  },
+  "packages/cli/test/control-service.test.ts": {
+    "rest": 27,
+    "tests": {}
+  },
+  "packages/cli/test/control-socket.test.ts": {
+    "rest": 48,
+    "tests": {
+      "frames on the socket > a frame that isn't a line of JSON closes the connection": 349,
+      "frames on the socket > a hook that gives up on its own is forgotten; a client that vanishes mid-reply is no trouble": 226,
+      "frames on the socket > a second hook for the same attention releases the first; the first's close leaves the second in place": 126,
+      "frames on the socket > a waiter for a session that isn't one is answered nothing; the newest waiter for a session wins": 656,
+      "frames on the socket > stopping the daemon lets a parked hook go, with no answer (nothing is ever auto-allowed)": 64,
+      "frames on the socket > the oldest recorded modes go once there are more than five hundred": 207,
+      "messages the daemon can't take in > a nonce that can't be recorded refuses the command (CONTROL.md §5 step 5: nonce_store)": 26,
+      "messages the daemon can't take in > a start for a harness the daemon can't drive is unsupported; a bad .claude.json names nobody": 26,
+      "messages the daemon can't take in > not a message, a start it can't read, a message dated nonsense; a handler that throws is logged": 73,
+      "the socket path > a poll that answers after the daemon stopped ends its loop quietly; a failed poll says why": 1151,
+      "the socket path > while a poll's body is being read, and while acks go out, the daemon is busy": 312
+    }
+  },
+  "packages/cli/test/control-start-options.test.ts": {
+    "rest": 0,
+    "tests": {
+      "a model the harness won't run > ends failed with code model and the harness's words; nothing else is tried": 2028,
+      "a record that can't be written > doesn't stop the start: it runs, and says so in the log": 35,
+      "a start's folder under ~ > ~/… is read under this user's home; ~ alone is that folder; ~user is malformed": 4040,
+      "a start's options are checked before anything is taken > a Claude Code whose --help couldn't be read: refused, saying so, at every level (#152)": 8114,
+      "a start's options are checked before anything is taken > a level the harness doesn't have here, in its own words": 6038,
+      "a start's options are checked before anything is taken > a model for a harness that takes none: refused model": 34,
+      "a start's options are checked before anything is taken > above the machine's mode: refused permission at once, no taken, nothing runs": 4053,
+      "an ACP agent takes no start options > a permission or a model on its start is refused before anything runs": 2024,
+      "an inherit machine (CONTROL.md §2, §3.1) > a level above safe is refused, never run": 36,
+      "an inherit machine (CONTROL.md §2, §3.1) > a session recorded at auto, on a machine now in inherit, runs at safe": 2027,
+      "an inherit machine (CONTROL.md §2, §3.1) > a start with no level passes no permission flag and says inherit; one may narrow to read": 6034,
+      "an inherit machine (CONTROL.md §2, §3.1) > the hello offers read and safe, and inherit as the default": 30,
+      "the hello says what a start may carry > a safe machine: read and safe, defaults safe; Codex's own models; Antigravity no model; never the home folder": 40,
+      "the hello says what a start may carry > an auto machine: every level Claude Code's --help lists, Codex auto, Antigravity edits": 31,
+      "the hello says what a start may carry > from --help: no plan, no acceptEdits; an auto machine whose Claude Code has no auto offers it nothing": 54,
+      "the hello says what a start may carry > with the Agent SDK, a start isn't limited by what claude --help lists": 30,
+      "what a start ran with: applied, recorded, and kept > Antigravity on an auto machine starts at edits by default, and says so": 36,
+      "what a start ran with: applied, recorded, and kept > Claude Code: the asked level and model run, applied on taken and delivered, and stick across a resume": 2054,
+      "what a start ran with: applied, recorded, and kept > Codex: -s read-only and -m; the alias records them, and its resume keeps both": 2028,
+      "what a start ran with: applied, recorded, and kept > a machine turned down from auto to safe takes a recorded auto session down at its next run": 2064,
+      "what a start ran with: applied, recorded, and kept > the Agent SDK gets the level and the model": 36
+    }
+  },
+  "packages/cli/test/control-store.test.ts": {
+    "rest": 26,
+    "tests": {}
+  },
+  "packages/cli/test/control-stream.test.ts": {
+    "rest": 2,
+    "tests": {
+      "AnswerStream > a failed send is not fatal and nothing is sent after close": 42,
+      "AnswerStream > nothing to say is nothing sent: an empty delta, the same text again, only whitespace": 61,
+      "AnswerStream > one in flight: a slow receiver gets the latest text next, not a backlog": 72,
+      "AnswerStream > sends the whole answer so far, seq rising, a new paragraph per message": 81
+    }
+  },
+  "packages/cli/test/control-turn-reply.test.ts": {
+    "rest": 0,
+    "tests": {
+      "a message delivered at a Stop: its reply is what the session wrote for it > a Stop's event that arrives late ends nothing: only the hook's own question says a continuation is over": 1044,
+      "a message delivered at a Stop: its reply is what the session wrote for it > a continuation that failed, or a session that ended, is its end too: what it had said is the reply": 2436,
+      "a message delivered at a Stop: its reply is what the session wrote for it > a session whose transcript is gone by its Stop still takes the message: delivered, with no reply to read": 32,
+      "a message delivered at a Stop: its reply is what the session wrote for it > an answer that can't be put down to the message is not sent: acked without one when the continuation ends": 648,
+      "a message delivered at a Stop: its reply is what the session wrote for it > not the words the turn was ending with, which reach the transcript after the hook has asked": 1270,
+      "a message delivered at a Stop: its reply is what the session wrote for it > read from the session's own transcript, though it has a copy: the copy's answer is another message's": 1053,
+      "a message delivered at a Stop: its reply is what the session wrote for it > two messages at two Stops: each gets its own answer, in order, and neither the other's": 2656,
+      "a message handed to a waiter: the same rule > handed over mid-turn: the running turn's end is not the answer; the turn that read the message is": 1135,
+      "a message whose id is not a ULID: the id is the receiver's, and nobody signed it > at a Stop: nothing of the id is in what the session is told, and it is delivered, without a reply, when the continuation ends": 334,
+      "a message whose id is not a ULID: the id is the receiver's, and nobody signed it > through a waiter: handed over unmarked, and acked when the session's turn ends, not when the answer-wait runs out": 451
+    }
+  },
+  "packages/cli/test/control-update-e2e.test.ts": {
+    "rest": 0,
+    "tests": {
+      "the daemon restarts onto a new copy (no service manager) > stays as the parent, runs the new daemon, and the next one restarts by exiting 75": 622
+    }
+  },
+  "packages/cli/test/control-wait.test.ts": {
+    "rest": 3,
+    "tests": {
+      "on the socket > ask: a reply arrives in pieces; one that isn't JSON is nothing": 32,
+      "on the socket > left to itself it tries again after a second": 1003,
+      "on the socket > prints the framed message with the re-arm note, after waiting out a daemon that was away": 28
+    }
+  },
+  "packages/cli/test/current.test.ts": {
+    "rest": 6,
+    "tests": {}
+  },
+  "packages/cli/test/delivered-frames.test.ts": {
+    "rest": 4,
+    "tests": {
+      "what a running daemon hands a live session, read back > its inbox, a Stop hook's block, its waiter: each turn's `user` side is the person's words, and each answer goes back": 4080
+    }
+  },
+  "packages/cli/test/delivered-turns.test.ts": {
+    "rest": 70,
+    "tests": {
+      "a message sessionpipe's Stop hook delivered in a terminal session > is the prompt of the turn that answers it; the turn before and the one after are their own": 39
+    }
+  },
+  "packages/cli/test/delivery-fixtures.test.ts": {
+    "rest": 38,
+    "tests": {
+      "conformance/delivery through the HTTP sink > accept (HTTP.md §7)": 24
+    }
+  },
+  "packages/cli/test/flush.test.ts": {
+    "rest": 60,
+    "tests": {
+      "drain: one worker at a time > events another worker appended during a pass go out in the next pass of the same drain": 1006,
+      "flush > sinks drain at once: two slow receivers are in flight together": 334
+    }
+  },
+  "packages/cli/test/fold.test.ts": {
+    "rest": 92,
+    "tests": {
+      "a worker's life: no pass starts that its deadline would end > a sweep marks each job's events for the drain running now, gives a busy session's job back within a second, and starts none it has no life for": 1029,
+      "fan-out: 40 subagents × 30 tool calls > sends a small fraction of the requests 0.11.0 sent, and every turn, prompt and subagent": 9366,
+      "flush with a sink that thins tool events > a receiver is sent a subagent's first tool.ended of the minute; a refused batch picks the same one again": 23
+    }
+  },
+  "packages/cli/test/hook-env.test.ts": {
+    "rest": 0,
+    "tests": {
+      "the job file's environment > carries nothing that was not set": 27,
+      "the job file's environment > carries the variables a harness's config and session store are resolved from": 33,
+      "the job file's environment > carries what session.attended is read from: Claude Code's word and the control daemon's mark": 30
+    }
+  },
+  "packages/cli/test/hook.test.ts": {
+    "rest": 58,
+    "tests": {}
+  },
+  "packages/cli/test/http-sink.test.ts": {
+    "rest": 3,
+    "tests": {
+      "retry-after (HTTP.md §2 429: wait as told) > a 429 with a dated retry-after asks to wait until then, not for the backoff ladder": 25
+    }
+  },
+  "packages/cli/test/launcher.test.ts": {
+    "rest": 14,
+    "tests": {
+      "the launcher > copies hook.js and worker.js beside an executable launcher; a second install changes nothing": 527,
+      "the launcher > runs the hook with PATH's node when the one it was written with is gone": 33,
+      "the launcher > the hook answers Antigravity: `{}` to what sessionpipe hooks, an ask (never a silent deny) to a leftover PreToolUse": 152
+    }
+  },
+  "packages/cli/test/limits.test.ts": {
+    "rest": 16,
+    "tests": {
+      "Codex: the rollout's newest limits after a turn > goes once per change, at tier 1 with its windows and plan": 22,
+      "the pool's limits.observed (appendObserved) > waits for a hook that holds the session, then writes; past the wait it drops the numbers and says so": 280
+    }
+  },
+  "packages/cli/test/pool-cli.test.ts": {
+    "rest": 96,
+    "tests": {}
+  },
+  "packages/cli/test/pool-credentials.test.ts": {
+    "rest": 14,
+    "tests": {}
+  },
+  "packages/cli/test/pool-index.test.ts": {
+    "rest": 73,
+    "tests": {
+      "adding accounts > the store is pinned at the first secret: on over SSH, then add at the desktop, keeps everything in the file": 24,
+      "the listener > F1: a second daemon on the same pool.json stands down when a pool already answers on the port": 513,
+      "the listener > a rotation keeps the old bearer good for 10 minutes, so running sessions go on; rotate() is the same act": 104,
+      "the listener > polls idle accounts on the interval, not the ones with fresh numbers, and drops stale pins": 86,
+      "the listener > starts on a free port the first time, remembers it, rewrites settings when it moves, and serves a request end to end": 550,
+      "the listener > with the pool off a moved port rewrites nothing, and nothing is polled (SECURITY M2)": 124
+    }
+  },
+  "packages/cli/test/pool-install.test.ts": {
+    "rest": 16,
+    "tests": {}
+  },
+  "packages/cli/test/pool-login.test.ts": {
+    "rest": 5,
+    "tests": {}
+  },
+  "packages/cli/test/pool-policy.test.ts": {
+    "rest": 2,
+    "tests": {
+      "pins > pins are capped; the one used longest ago goes first (SECURITY M4)": 514
+    }
+  },
+  "packages/cli/test/pool-server.test.ts": {
+    "rest": 160,
+    "tests": {
+      "nothing with room > a client that cuts the request body short gets nothing and costs nothing upstream": 52,
+      "nothing with room > a client that leaves while the upstream is being connected is simply dropped": 62,
+      "streaming > when the client leaves mid-stream the upstream request is aborted": 25,
+      "the front door > /health needs no bearer and counts the accounts with room; everything else does": 40,
+      "the front door > a body over the cap is a 413 before anything goes upstream; a 10 MiB one goes through": 116,
+      "what the soak found > F8: a body over the cap gets the 413 itself, three times out of three, not a closed socket": 28
+    }
+  },
+  "packages/cli/test/pool-store.test.ts": {
+    "rest": 14,
+    "tests": {}
+  },
+  "packages/cli/test/progress.test.ts": {
+    "rest": 58,
+    "tests": {
+      "turn.progress > the prompt goes out as the turn starts, before the transcript holds it": 22
+    }
+  },
+  "packages/cli/test/report.test.ts": {
+    "rest": 7,
+    "tests": {}
+  },
+  "packages/cli/test/run-edges.test.ts": {
+    "rest": 45,
+    "tests": {
+      "runJob with a harness that says little > one run in fifty prunes the outbox, to keep_days or 30": 2006
+    }
+  },
+  "packages/cli/test/run.test.ts": {
+    "rest": 74,
+    "tests": {
+      "runJob > a job takes its session's lock as soon as a sibling lets go, not at the next backoff step": 909,
+      "runJob > a job the lock holds out goes back to the queue under a new file, its claim released": 153,
+      "runJob > four concurrent hooks of one session all reach the outbox, in seq order": 20,
+      "runJob > takes claude.ai's name for a session only once the person turned remote_titles on": 22
+    }
+  },
+  "packages/cli/test/runtime.test.ts": {
+    "rest": 16,
+    "tests": {}
+  },
+  "packages/cli/test/secrets.test.ts": {
+    "rest": 42,
+    "tests": {}
+  },
+  "packages/cli/test/session-end.test.ts": {
+    "rest": 84,
+    "tests": {
+      "Claude SessionEnd > waits for the session lock before deciding that no session exists": 59
+    }
+  },
+  "packages/cli/test/setup.test.ts": {
+    "rest": 0,
+    "tests": {
+      "setup preserves installed code and machine identity > --allow-downgrade explicitly replaces the global package and both hook copies": 170,
+      "setup preserves installed code and machine identity > --machine sets the initial name; the default hostname is also persisted": 154,
+      "setup preserves installed code and machine identity > --rename-machine requires a name, without touching the install": 58,
+      "setup preserves installed code and machine identity > a direct CLI also checks the global package before writing hooks": 80,
+      "setup preserves installed code and machine identity > a legacy config without a machine name keeps the daemon's name": 77,
+      "setup preserves installed code and machine identity > a locally configured daemon with no pairing yet is renamed by setup too": 84,
+      "setup preserves installed code and machine identity > an unpaired machine needs --rename-machine to change its configured name": 152,
+      "setup preserves installed code and machine identity > checks the persistent Homebrew target instead of the disappearing Cellar prefix": 79,
+      "setup preserves installed code and machine identity > connect from direct protects newer hook copies even without the global package": 57,
+      "setup preserves installed code and machine identity > connect from npx protects newer hook copies even without the global package": 77,
+      "setup preserves installed code and machine identity > connect refuses 0.7.0 over global 0.9.0-devin.1 before any writes": 76,
+      "setup preserves installed code and machine identity > connect renames the hooks and the paired daemon together on an explicit rename": 196,
+      "setup preserves installed code and machine identity > install from direct protects newer hook copies even without the global package": 58,
+      "setup preserves installed code and machine identity > install from npx protects newer hook copies even without the global package": 76,
+      "setup preserves installed code and machine identity > install preserves a paired name and backoff when a setup command suggests another name": 194,
+      "setup preserves installed code and machine identity > install refuses 0.7.0 over global 0.9.0-devin.1 before any writes": 80,
+      "setup preserves installed code and machine identity > install renames the hooks and the paired daemon together on an explicit rename": 164,
+      "setup preserves installed code and machine identity > installs normally over 0.6.0 (or no installed version)": 183,
+      "setup preserves installed code and machine identity > installs normally over 0.7.0 (or no installed version)": 193,
+      "setup preserves installed code and machine identity > installs normally over 0.7.0-devin.1 (or no installed version)": 187,
+      "setup preserves installed code and machine identity > installs normally over null (or no installed version)": 186
+    }
+  },
+  "packages/cli/test/shell.test.ts": {
+    "rest": 3,
+    "tests": {
+      "what a shell makes of it > sh hands the program each word as it was, and runs nothing in it": 26
+    }
+  },
+  "packages/cli/test/sink-contract.test.ts": {
+    "rest": 146,
+    "tests": {
+      "sink contract: http > delivers a batch whole, in order, and acknowledges every event": 28,
+      "the drain: which sinks it builds, and how much it sends per run > one run sends at most 500 events per sink; the rest go with the next": 26
+    }
+  },
+  "packages/cli/test/sink-flood.test.ts": {
+    "rest": 0,
+    "tests": {
+      "flood: 200 events, a receiver that says 429 first > loses none, takes none twice, and leaves every cursor at the end of its file": 68
+    }
+  },
+  "packages/cli/test/style.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/cli/test/turn-settle.test.ts": {
+    "rest": 200,
+    "tests": {
+      "a turn's words, when its Stop comes before its last row is in the transcript > go out with the turn's end once the row lands, and the next turn's with its own": 35,
+      "a turn's words, when its Stop comes before its last row is in the transcript > with the worker's own clock: the words land in real time and go with the turn's end": 54
+    }
+  },
+  "packages/cli/test/uninstall-scope.test.ts": {
+    "rest": 0,
+    "tests": {
+      "uninstall is scoped > --devin removes Devin's entries and leaves Claude Code's alone": 179,
+      "uninstall is scoped > refuses an all-harnesses uninstall that would reach outside the isolation vars": 226,
+      "uninstall is scoped > with no isolation vars at all, an unscoped uninstall just runs": 174
+    }
+  },
+  "packages/cli/test/update-everywhere.test.ts": {
+    "rest": 32,
+    "tests": {
+      "installEverywhere (npm stood in for) > the hooks alone: written from the copy on disk, or said to have failed": 22
+    }
+  },
+  "packages/cli/test/update.test.ts": {
+    "rest": 52,
+    "tests": {
+      "the daemon's auto-update > `sessionpipe update` installed a copy: restart onto it once idle; the same copy stays": 42,
+      "the daemon's auto-update > never installs while busy: nothing happens until the daemon is idle": 31,
+      "the daemon's auto-update > starts with a check about a minute in (shortened here)": 41,
+      "the daemon's auto-update > turned off while it waits: it stops waiting and installs nothing": 21,
+      "the install's edges > runs a command to its end, keeping its output; a timeout, a missing command and a bad argument are results too": 230,
+      "the install's edges > with nothing stood in for: this node runs the built CLI for its version, and npm is not run for a checkout": 60,
+      "the supervisor (no service manager) > a crash is started again after a pause; a stop goes to the child and ends with it": 266,
+      "the supervisor (no service manager) > runs the new daemon as a child, starts it again on the update's exit, and exits with it": 38
+    }
+  },
+  "packages/cli/test/wellknown.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/cli/test/worker.test.ts": {
+    "rest": 13,
+    "tests": {
+      "the worker > `node worker.js <job>` runs the job for real and exits 0": 72
+    }
+  },
+  "packages/conformance/test/conformance.test.ts": {
+    "rest": 38,
+    "tests": {}
+  },
+  "packages/core/test/acp-control.test.ts": {
+    "rest": 14,
+    "tests": {
+      "one agent, driven > a close after the agent has exited signals nothing: its group's number is no longer certain to be its own": 478,
+      "one agent, driven > a turn over its time is cancelled, then the agent is closed": 226,
+      "one agent, driven > an agent that goes with a message to it still unwritten: the failed write is nobody's uncaught error": 581,
+      "one agent, driven > an agent that stays when its input ends and ignores SIGTERM is killed, once": 724,
+      "one agent, driven > an agent's own meta rides on session/new and session/load, and on nothing else; without one neither carries any": 113,
+      "one agent, driven > close ends stdin, then SIGTERM, then SIGKILL for an agent that ignores it; closing twice is nothing": 1417,
+      "one agent, driven > how a turn ends: refusal and a cancel say so, max_tokens is an answer, anything else is an error": 132,
+      "one agent, driven > initialize, session/new in the folder, then a turn: the chunks are the reply, in SESSIONPIPE_CONTROL_JOB": 35,
+      "one agent, driven > lines that aren't the protocol's are skipped, a line over 4 MB is dropped, titles are kept for 200 tool calls": 128,
+      "one agent, driven > opening fails in words: not signed in, no session id, an agent that says nothing, one that can't start": 214,
+      "one agent, driven > permissions: safe refuses and the reply lists what, auto allows; anything else the agent asks is not found": 66,
+      "one agent, driven > reopening: session/load where the agent can, its replay is nobody's answer; an agent that can't is unsupported": 62,
+      "one agent, driven > the agent dies mid-turn: the error names the exit and stderr's tail, and nothing more can be sent": 54
+    }
+  },
+  "packages/core/test/adapter-null-stdin.test.ts": {
+    "rest": 4,
+    "tests": {}
+  },
+  "packages/core/test/adapter-robustness.test.ts": {
+    "rest": 175,
+    "tests": {}
+  },
+  "packages/core/test/antigravity-projects.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/core/test/antigravity.test.ts": {
+    "rest": 19,
+    "tests": {}
+  },
+  "packages/core/test/claude-account.test.ts": {
+    "rest": 12,
+    "tests": {}
+  },
+  "packages/core/test/claude-code-pool.test.ts": {
+    "rest": 36,
+    "tests": {}
+  },
+  "packages/core/test/claude-code.test.ts": {
+    "rest": 106,
+    "tests": {
+      "claude-code facts > a file over 16 MB with no ask remembers that, so it is not scanned again": 68
+    }
+  },
+  "packages/core/test/claude-control.test.ts": {
+    "rest": 80,
+    "tests": {
+      "an npm claude.cmd shim (#165) > detectCaps reads its --help, and claudeLogin its auth status, with no shell": 50,
+      "capabilities and mode flags > a --help that times out, or fails before it lists its modes, is unread, never a claude with no modes (#152)": 206
+    }
+  },
+  "packages/core/test/claude-live-record.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/core/test/claude-shaped.test.ts": {
+    "rest": 12,
+    "tests": {}
+  },
+  "packages/core/test/codex-adapter.test.ts": {
+    "rest": 24,
+    "tests": {}
+  },
+  "packages/core/test/codex-config.test.ts": {
+    "rest": 4,
+    "tests": {}
+  },
+  "packages/core/test/codex-threads.test.ts": {
+    "rest": 12,
+    "tests": {}
+  },
+  "packages/core/test/codex-transcript.test.ts": {
+    "rest": 16,
+    "tests": {}
+  },
+  "packages/core/test/config.test.ts": {
+    "rest": 18,
+    "tests": {
+      "ulid > is strictly increasing within one millisecond, keeping the time prefix": 20
+    }
+  },
+  "packages/core/test/control-runners.test.ts": {
+    "rest": 46,
+    "tests": {}
+  },
+  "packages/core/test/control-vectors.gen.test.ts": {
+    "rest": 0,
+    "tests": {}
+  },
+  "packages/core/test/control-vectors.test.ts": {
+    "rest": 80,
+    "tests": {}
+  },
+  "packages/core/test/control-verify.test.ts": {
+    "rest": 65,
+    "tests": {
+      "device keys (CONTROL.md §2, §3.2) > keyUsable: a device key's exact rules, and closed fields for both kinds": 52,
+      "fuzz: no mutation of a signed command verifies > 3,000 mutations across every signed field": 722,
+      "keys > keyUsable: a well-formed id, a known algorithm, a key WebCrypto can import, RSA of 2048 bits": 59
+    }
+  },
+  "packages/core/test/delegated-by.test.ts": {
+    "rest": 6,
+    "tests": {}
+  },
+  "packages/core/test/devin.test.ts": {
+    "rest": 128,
+    "tests": {
+      "devin: a chain longer than the cap > delivers the NEWEST turns and keeps moving, instead of stalling for good": 652,
+      "devin: a chain longer than the cap > the cursor bounds the walk, so a Stop does not re-read the whole chain": 24,
+      "devin: a chain that loops back on itself > a parent with a higher node_id is still walked, when it is not a loop": 30,
+      "devin: a chain that loops back on itself > the reader delivers the turn, with the cursor past the head": 44,
+      "devin: a chain that loops back on itself > the walk stops at a node it has already passed, on every engine out of process": 50,
+      "devin: the session store > a missing, unreadable or wrongly addressed store costs an empty read, never a throw": 28,
+      "devin: the session store > every SQLite engine this machine has reads the same rows": 26
+    }
+  },
+  "packages/core/test/filter.test.ts": {
+    "rest": 20,
+    "tests": {}
+  },
+  "packages/core/test/fixtures.test.ts": {
+    "rest": 12,
+    "tests": {}
+  },
+  "packages/core/test/frames.test.ts": {
+    "rest": 6,
+    "tests": {}
+  },
+  "packages/core/test/gemini-cli.test.ts": {
+    "rest": 42,
+    "tests": {
+      "geminiVersion through an npm shim (#165) > runs the shim's own script under this node, so no shell sees it": 20
+    }
+  },
+  "packages/core/test/grok-build.test.ts": {
+    "rest": 18,
+    "tests": {}
+  },
+  "packages/core/test/headless.test.ts": {
+    "rest": 36,
+    "tests": {
+      "launcher shims (#165) > runHeadless runs a shim with no shell: a prompt's every character arrives as typed": 24,
+      "runHeadless > a tool left holding stdout after the harness exits does not hold the result past two seconds": 2002,
+      "runHeadless > a turn still running at the timeout is stopped and says so": 203,
+      "runHeadless: nothing is signalled once the child is gone > a Stop or the cap that comes after the child has exited signals nothing, and the run is not called stopped": 4008,
+      "runHeadless: nothing is signalled once the child is gone > a stopped child that exits: what it left in its group is ended as it goes, once, and nothing is sent ten seconds later": 457
+    }
+  },
+  "packages/core/test/index.test.ts": {
+    "rest": 1,
+    "tests": {}
+  },
+  "packages/core/test/install-unwritable.test.ts": {
+    "rest": 22,
+    "tests": {}
+  },
+  "packages/core/test/install.test.ts": {
+    "rest": 37,
+    "tests": {}
+  },
+  "packages/core/test/launched-by.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/core/test/launcher-entries.test.ts": {
+    "rest": 12,
+    "tests": {}
+  },
+  "packages/core/test/lock-takeover.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/core/test/outbox-delete.test.ts": {
+    "rest": 8,
+    "tests": {
+      "waitNamedLock > takes a free lock at once, one let go within the wait, and none held past it": 164
+    }
+  },
+  "packages/core/test/outbox-vectors.test.ts": {
+    "rest": 2,
+    "tests": {}
+  },
+  "packages/core/test/outbox.test.ts": {
+    "rest": 48,
+    "tests": {
+      "outbox > over a megabyte of lines that parse to nothing never stops a drain": 603,
+      "outbox: never lose, never duplicate (PROTOCOL.md §6) > two processes appending to one session file never tear a line": 70
+    }
+  },
+  "packages/core/test/pii.test.ts": {
+    "rest": 2,
+    "tests": {}
+  },
+  "packages/core/test/platform-edges.test.ts": {
+    "rest": 36,
+    "tests": {
+      "runHeadless stopping a turn > a child that cannot be signalled either is left to finish on its own": 506,
+      "runHeadless stopping a turn > a process group that is already gone: the child itself is signalled": 2106,
+      "runHeadless stopping a turn > on Windows there is no process group: the child is signalled directly": 2102
+    }
+  },
+  "packages/core/test/readers.test.ts": {
+    "rest": 19,
+    "tests": {
+      "gitFacts > the origin with credentials stripped; the branch once there is one; none on a detached HEAD": 48
+    }
+  },
+  "packages/core/test/registry.test.ts": {
+    "rest": 6,
+    "tests": {}
+  },
+  "packages/core/test/secrets.test.ts": {
+    "rest": 22,
+    "tests": {}
+  },
+  "packages/core/test/service-argv.test.ts": {
+    "rest": 6,
+    "tests": {}
+  },
+  "packages/core/test/service.test.ts": {
+    "rest": 23,
+    "tests": {
+      "installing and removing > darwin: with no stand-in for the wait, this thread sleeps between looks": 102
+    }
+  },
+  "packages/core/test/short-id.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/core/test/sinks-stdout.test.ts": {
+    "rest": 3,
+    "tests": {}
+  },
+  "packages/core/test/sqlite.test.ts": {
+    "rest": 47,
+    "tests": {}
+  },
+  "packages/core/test/start-options.test.ts": {
+    "rest": 8,
+    "tests": {}
+  },
+  "packages/core/test/tier-goldens.test.ts": {
+    "rest": 44,
+    "tests": {}
+  },
+  "packages/core/test/transcripts.test.ts": {
+    "rest": 10,
+    "tests": {}
+  },
+  "packages/receiver/test/receiver.test.ts": {
+    "rest": 4,
+    "tests": {}
+  },
+  "scripts/lib/walk.test.ts": {
+    "rest": 5,
+    "tests": {}
+  },
+  "tools/doors/test/generator.test.ts": {
+    "rest": 0,
+    "tests": {
+      "buf > a binary that isn't there is an error; a failed lint says buf's words": 75,
+      "reading the descriptors > a map's kind is its value's: a word, a message or a scalar": 88,
+      "reading the descriptors > every event type needs a tier on its message": 172,
+      "reading the descriptors > names a message the proto hasn't got": 84,
+      "reading the descriptors > refuses a descriptor set without the options it reads": 89,
+      "the schemas command > a symbolic link where a generated file or its folder goes is refused, not read or written through": 1506,
+      "the schemas command > on this repository, with the default output, everything is in sync": 258,
+      "the schemas command > schemaFiles names every file under schemas/v1": 120,
+      "the schemas command > writes, checks, reports each kind of drift, and removes a file no longer generated": 1593,
+      "what the generators refuse or haven't a shape for yet > a bytes field has no JSON Schema and no TypeScript type here": 86,
+      "what the generators refuse or haven't a shape for yet > a float or double with a ceiling, and a 32-bit float type": 86,
+      "what the generators refuse or haven't a shape for yet > gt and lt rules are refused: the wire says gte and lte": 172
+    }
+  },
+  "tools/doors/test/parity.test.ts": {
+    "rest": 12,
+    "tests": {
+      "the proto and the Zod source agree > proto/ lints": 152
+    }
+  },
+  "tools/doors/test/types.test.ts": {
+    "rest": 1,
+    "tests": {}
+  }
 }

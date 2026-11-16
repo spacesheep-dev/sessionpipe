@@ -10,22 +10,25 @@ import repo from "../../vitest.config";
 
 const dir = process.env.VITEST_PARALLEL_DIR ?? "";
 const index = Number(process.env.VITEST_PARALLEL_LANE);
-const tests = JSON.parse(fs.readFileSync(path.join(dir, "plan.json"), "utf8"))[index].tests;
-const byFile = new Map<string, any[]>();
-for (const test of tests) {
-  if (!byFile.has(test.file)) byFile.set(test.file, []);
-  byFile.get(test.file)!.push(test);
-}
+const plan: { file: string; in: string[] | null; out: string[] | null }[] = JSON.parse(
+  fs.readFileSync(path.join(dir, "plan.json"), "utf8"),
+)[index].files;
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const anyOf = (names: string[]) => `(?:${names.map(escapeRegex).join("|")})$`;
+// A file's tests in this process: the ones it names (in), or all but the ones it names (out).
+const patterns = new Map<string, RegExp | undefined>();
+for (const { file, in: names, out } of plan)
+  patterns.set(
+    file,
+    names ? new RegExp(`^${anyOf(names)}`) : out?.length ? new RegExp(`^(?!${anyOf(out)})`) : undefined,
+  );
 
 class LaneSequencer extends BaseSequencer {
   async sort(specs: any[]) {
     for (const spec of specs) {
-      const selected = byFile.get(path.relative(process.cwd(), spec.moduleId));
-      if (!selected) throw new Error(`unplanned file ${spec.moduleId}`);
-      spec.testNamePattern = new RegExp(
-        `^(?:${[...new Set(selected.map((t) => t.filter))].map(escapeRegex).join("|")})$`,
-      );
+      const file = path.relative(process.cwd(), spec.moduleId);
+      if (!patterns.has(file)) throw new Error(`unplanned file ${spec.moduleId}`);
+      spec.testNamePattern = patterns.get(file);
     }
     return super.sort(specs);
   }
@@ -45,33 +48,41 @@ class LaneReporter {
     fs.writeFileSync(path.join(dir, String(index), "coverage-map.json"), JSON.stringify(coverage));
   }
   onTestRunEnd(modules: any[]) {
-    const rows: any[] = [];
+    // Every test each file collected here, the ones this process left to others included, so
+    // run.mjs can check that every process running a file saw the same tests and each ran once.
+    const tests: any[] = [];
     for (const m of modules) {
       const file = path.relative(process.cwd(), m.moduleId);
-      const selected = new Set(byFile.get(file)!.map((t) => t.filter));
+      const pattern = patterns.get(file);
+      const selected = (t: any) => !pattern || pattern.test(t.fullTestName);
       for (const t of m.children.allTests()) {
-        if (selected.has(t.task.fullTestName))
-          rows.push({
-            file,
-            name: t.fullName,
-            state: t.result().state,
-            skippedItself: t.task.result?.pending === true,
-            ms: t.diagnostic()?.duration,
-          });
-        else if (t.result().state !== "skipped") throw new Error(`unplanned test ran: ${file} ${t.fullName}`);
+        if (!selected(t.task) && t.result().state !== "skipped")
+          throw new Error(`unplanned test ran: ${file} ${t.fullName}`);
+        tests.push({
+          file,
+          name: t.fullName,
+          filter: t.task.fullTestName,
+          selected: selected(t.task),
+          mode: t.task.mode,
+          retry: t.options.retry ?? 0,
+          state: t.result().state,
+          skippedItself: t.task.result?.pending === true,
+          ms: t.diagnostic()?.duration,
+        });
       }
       // The tests left out here belong to other processes: drop them from the task tree, so the
       // reporters after this one list only this process's tests.
       const prune = (suite: any) => {
         suite.tasks = suite.tasks.filter((t: any) => {
-          if (t.type === "test") return selected.has(t.fullTestName);
+          if (t.type === "test") return selected(t);
           prune(t);
           return t.tasks.length > 0;
         });
       };
       prune(m.task);
     }
-    fs.writeFileSync(path.join(dir, String(index), "results.json"), JSON.stringify(rows));
+    const ran = modules.map((m) => path.relative(process.cwd(), m.moduleId));
+    fs.writeFileSync(path.join(dir, String(index), "results.json"), JSON.stringify({ modules: ran, tests }));
   }
 }
 
@@ -79,7 +90,7 @@ export default {
   ...repo,
   test: {
     ...repo.test,
-    include: [...byFile.keys()],
+    include: [...patterns.keys()],
     maxWorkers: 1,
     sequence: { ...repo.test?.sequence, sequencer: LaneSequencer },
     reporters: [new LaneReporter(), ["default", { summary: false }]],

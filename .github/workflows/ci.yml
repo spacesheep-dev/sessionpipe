@@ -46,7 +46,7 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
         if: matrix.os != 'ubuntu-latest'
-      # The same tests as `npm test` / `npm run test:coverage`, in 2 processes per CPU
+      # The same tests as `npm test` / `npm run test:coverage`, in 2.5 processes per CPU
       # (.github/vitest-parallel/run.mjs says how and when it runs the script as written).
       - name: Unit tests (vitest, parallel processes)
         run: node .github/vitest-parallel/run.mjs
