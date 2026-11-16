@@ -26,6 +26,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -209,7 +210,10 @@ afterEach(async () => {
 
 function put(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`);
+  // A copy's cli.js is a program: npm makes the file its link leads to executable.
+  writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`, {
+    mode: path.basename(file) === "cli.js" ? 0o755 : 0o644,
+  });
 }
 async function run(where: { tty?: boolean; columns?: number; errTty?: boolean }, ...argv: string[]) {
   const lines: string[] = [];
@@ -2446,10 +2450,17 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: every effe
       argv[0] === fresh && argv[1] === "--version"
         ? { status: 0, stdout: `${NEWEST}\n`, stderr: "" }
         : { status: 1, stdout: "", stderr: "" }) as never);
+    put(fresh, "");
     // No link leads to the copy in the home yet: it is not run by any other way.
     expect((await d.prove(gone)).runs).toBeNull();
     expect(spawnSync).not.toHaveBeenCalled();
     link(LOCAL());
+    // Q1: the link leads to a cli.js that is no program (its mode was lost): a shell can't
+    // start it, so it does not run, whatever it would answer when node reads it.
+    chmodSync(fresh, 0o644);
+    expect((await d.prove(gone)).runs).toBeNull();
+    expect(spawnSync).not.toHaveBeenCalled();
+    chmodSync(fresh, 0o755);
     expect(await d.prove(gone)).toEqual({
       runs: NEWEST,
       typed: true,
@@ -3864,6 +3875,94 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall on real fol
       }
     },
   );
+
+  const NOT_A_PROGRAM = "its dist/cli.js is not executable, so a shell can't start it";
+
+  it.skipIf(process.getuid?.() === 0)(
+    "Q1: the newest copy first on PATH, in a prefix this user may not write, its cli.js not executable, and an older copy behind it, which is what a shell starts: no copy is removed, and the one line installs it again where it is (it was kept 'as it is', and the copy behind removed)",
+    async () => {
+      const w = onDisk();
+      const { prefix, unlock } = asRoot(NEWEST);
+      w.npmPrefix = prefix;
+      // Its mode was lost (a restore, a copy that drops modes): a file's own mode is its
+      // owner's to change, whoever may write the folder it is in.
+      chmodSync(path.join(slotOf(prefix), "dist", "cli.js"), 0o644);
+      const behind = installed(LOCAL(), "1.0.0");
+      onPath(path.join(prefix, "bin"), path.join(LOCAL(), "bin"));
+      try {
+        const before = tree(tmp);
+        for (const flags of [[], ["--dry-run"], ["--yes"]]) {
+          const r = await w.run({}, "reinstall", ...flags);
+          expect(r.lines).toEqual([
+            "Found 2 copies of sessionpipe on this computer",
+            `  ✗ 9.9.9  ~/opt/node  you type this · ${NOT_A_PROGRAM}`,
+            "  · 1.0.0  ~/.local    nothing uses it",
+          ]);
+          expect(r.err).toHaveBeenCalledTimes(1);
+          expect(r.err).toHaveBeenCalledWith(
+            `sessionpipe: ~/opt/node holds the copy you type (9.9.9), and you may not write there. Nothing was changed. Update it there, then run this again. Next: sudo npm install -g --prefix ${prefix} sessionpipe@${NEWEST}\n`,
+          );
+          expect(r.exit).toHaveBeenCalledWith(1);
+        }
+        expect(w.seen[0]?.copies[0]).toMatchObject({ dir: slotOf(prefix), writable: false, wrong: NOT_A_PROGRAM });
+        // Node reads a cli.js of any mode, and this one would have answered 9.9.9: no copy
+        // was asked. The copy a shell goes on to is there, byte for byte.
+        expect(w.ran).toEqual([]);
+        expect(w.installs).toEqual([]);
+        expect(w.removals).toEqual([]);
+        expect(w.npm.every((x) => x.join(" ") === "prefix -g")).toBe(true);
+        expect(versionOf(behind)).toBe("1.0.0");
+        expect(tree(tmp)).toEqual(before);
+      } finally {
+        unlock();
+      }
+    },
+  );
+
+  it("Q1: the same two copies where that prefix may be written: a fresh copy goes where the one a shell can't start is, a program again, and only then is the copy behind it removed", async () => {
+    const w = onDisk();
+    const prefix = path.join(home, "opt", "node");
+    const cli = path.join(installed(prefix, NEWEST), "dist", "cli.js");
+    chmodSync(cli, 0o644);
+    installed(LOCAL(), "1.0.0");
+    onPath(path.join(prefix, "bin"), path.join(LOCAL(), "bin"));
+    w.npmPrefix = prefix;
+    const r = await w.run({}, "reinstall", "--yes");
+    expect(r.lines).toEqual([
+      "Found 2 copies of sessionpipe on this computer",
+      `  ✗ 9.9.9  ~/opt/node  you type this · ${NOT_A_PROGRAM}`,
+      "  · 1.0.0  ~/.local    nothing uses it",
+      "",
+      "This will",
+      "  + install  9.9.9, the newest release, fresh in ~/opt/node (replaces 9.9.9)",
+      "  - remove   1.0.0 in ~/.local",
+      KEEP,
+      "",
+      SAFE,
+      "",
+      "  ✓ sessionpipe 9.9.9 downloaded",
+      "  ✓ installed fresh in ~/opt/node, and it runs (what was there is gone)",
+      "  ✓ removed 1.0.0 in ~/.local, with its link",
+      "  ✓ the copy in ~/opt/node runs: `--version` says 9.9.9",
+      "  ✓ typing `sessionpipe` starts it: ~/opt/node/bin/sessionpipe",
+      "  ✓ nothing here names a removed copy any more",
+      "",
+      "✓ This computer has one sessionpipe: 9.9.9, in ~/opt/node. Pairings and settings are as they were.",
+    ]);
+    expect(r.err).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    // What a shell starts now is a program, and the one copy.
+    expect(statSync(cli).mode & 0o111).toBe(0o111);
+    expect(versionOf(slotOf(prefix))).toBe(NEWEST);
+    expect(existsSync(slotOf(LOCAL()))).toBe(false);
+    expect(existsSync(binOf(LOCAL()))).toBe(false);
+    // The look asked no copy (the one typed could not be started); the fresh one was asked
+    // where npm unpacked it, and in the home before the removal and after it.
+    const fresh = path.join(slotOf(w.installs[0]?.prefix as string), "dist", "cli.js");
+    expect(w.ran).toEqual([fresh, cli, cli]);
+    // And then there is nothing to repair.
+    expect((await w.run({}, "reinstall", "--yes")).lines.at(-1)).toBe(`✓ ${NOTHING}`);
+  });
 
   /** A version manager's shims folder first on PATH, the one copy in the Node it manages,
    *  and ~/.local/bin on PATH behind. */

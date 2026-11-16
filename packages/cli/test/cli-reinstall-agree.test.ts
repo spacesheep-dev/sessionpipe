@@ -817,7 +817,10 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
 describe.skipIf(process.platform === "win32")("doctor and reinstall, at real folders", () => {
   function put(file: string, value: unknown): void {
     mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`);
+    // A copy's cli.js is a program: npm makes the file its link leads to executable.
+    writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value)}\n`, {
+      mode: path.basename(file) === "cli.js" ? 0o755 : 0o644,
+    });
   }
   /** A published sessionpipe as npm installs one for every folder, with its bin link. */
   const install = (prefix: string, version: string): string => {
@@ -1077,6 +1080,41 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, at real fol
       expect(said.out).toContain("This will");
       expect([said.refused, said.code]).toEqual([[], undefined]);
     }
+  });
+
+  it("Q1: the one copy, the newest, with a cli.js that is not executable: a shell can't start it, and both say so: doctor names it and reinstall puts a fresh copy in its place (it was 'All good' and 'Nothing to repair')", async () => {
+    const copy = install(path.join(home, ".local"), NEWEST);
+    const cli = path.join(copy, "dist", "cli.js");
+    const WRONG = "its dist/cli.js is not executable, so a shell can't start it";
+    answers(NEWEST);
+    // Readable, and no program: what a restore or a copy that drops modes leaves. Whoever
+    // runs the tests: with no such bit at all, root may not start it either.
+    chmodSync(cli, 0o644);
+    const said = await both(null);
+    expect(seenBy().copies.map((c) => [c.dir, c.wrong, c.uses])).toEqual([[copy, WRONG, ["typed"]]]);
+    // doctor reads it from the disk, with nothing run: a finding, and the command for it.
+    expect([said.verdict, said.row]).toEqual(["! 1 thing needs attention", true]);
+    expect(said.listed).toEqual([{ dir: copy, version: NEWEST, whole: false, uses: ["typed"] }]);
+    expect(said.warnings).toEqual([
+      `the copy of sessionpipe on this computer is not whole (${NEWEST} in ${copy}: ${WRONG}); \`sessionpipe reinstall\` leaves one clean copy`,
+    ]);
+    // reinstall: a fresh copy where it is, which is how its mode comes back.
+    expect(said.plan.nothing).toBeNull();
+    expect(said.plan.steps.map((s) => s.do)).toEqual(["fetch", "install", "use", "prove"]);
+    expect(said.out).toContain(`  ✗ ${NEWEST}  ~/.local  you type this · ${WRONG}`);
+    expect(said.out).toContain(`  + install  ${NEWEST}, the newest release, fresh in ~/.local (replaces ${NEWEST})`);
+    expect([said.refused, said.code]).toEqual([[], undefined]);
+    // Node reads a cli.js of any mode, and this one would have answered its release: it
+    // is not asked.
+    expect(vi.mocked(spawnSync).mock.calls.filter((c) => (c[1] as string[] | undefined)?.[1] === "--version")).toEqual(
+      [],
+    );
+    // With the bit back, for its owner alone: all good, and nothing to repair.
+    chmodSync(cli, 0o700);
+    const well = await both(null);
+    expect(seenBy().copies.map((c) => c.wrong)).toEqual([null]);
+    expect([well.verdict, well.row, well.warnings]).toEqual(["✓ All good", false, []]);
+    expect(well.plan).toMatchObject({ nothing: NOTHING, steps: [], refuse: null });
   });
 
   it("no program is started by either command but the hook doctor times: no manager, no npm, no copy", async () => {

@@ -85,7 +85,7 @@ import { installLauncher, launcherPath, launcherState, removeLauncher, usesLaunc
 import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
 import { Refusal } from "./refusal.js";
-import { type Inventory, look, spelled } from "./reinstall/find.js";
+import { type Inventory, look, spelled, startable } from "./reinstall/find.js";
 import { binTarget, remove, same } from "./reinstall/ours.js";
 import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
 import { cutOff, type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
@@ -2500,8 +2500,12 @@ async function reinstall(): Promise<void> {
       };
       const files = [served?.file, ...facts.hookFiles].filter((x): x is string => !!x);
       return {
-        // The copy in the home runs, through the link npm made for it.
-        runs: leads(path.join(home, "bin", "sessionpipe"), slot) ? versionRun(path.join(dist, "cli.js")) : null,
+        // The copy in the home runs, through the link npm made for it: a shell can start
+        // the file that link leads to (node, asked next, reads one of any mode).
+        runs:
+          leads(path.join(home, "bin", "sessionpipe"), slot) && startable(path.join(dist, "cli.js"))
+            ? versionRun(path.join(dist, "cli.js"))
+            : null,
         typed: now.typed !== null && same(now.typed, slot),
         onPath: now.onPath.map((e) => e.file),
         named: files.flatMap((file) => removed.filter((r) => text(file).includes(r)).map((r) => ({ file, path: r }))),
