@@ -22,6 +22,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -622,6 +623,9 @@ describe.skipIf(win32)("look: where copies are found", () => {
       typed: slot(a),
       unsure: null,
       inferred: null,
+      // Every entry of PATH is an absolute folder; and a free name beside what is typed.
+      loose: null,
+      spare: { [slot(a)]: `${slot(a)}.old` },
       home: place(a, TYPED, { onPath: true }),
       taken: null,
       prefixes: usual(a, b, c),
@@ -2074,6 +2078,8 @@ describe.skipIf(win32)("look: only what is inside the reach folder", () => {
       typed: slot(local),
       unsure: null,
       inferred: null,
+      loose: null,
+      spare: { [slot(local)]: `${slot(local)}.old` },
       home: place(local, TYPED, { onPath: true }),
       taken: null,
       prefixes: [
@@ -2106,6 +2112,8 @@ describe.skipIf(win32)("look: only what is inside the reach folder", () => {
       typed: null,
       unsure: null,
       inferred: null,
+      loose: null,
+      spare: {},
       home: null,
       taken: null,
       prefixes: [],
@@ -2197,6 +2205,8 @@ describe.skipIf(win32)("look: one folder under two spellings is one folder", () 
       typed: slot(local),
       unsure: null,
       inferred: null,
+      loose: null,
+      spare: { [slot(local)]: `${slot(local)}.old` },
       home: place(local, TYPED, { onPath: true }),
       taken: null,
       prefixes: [
@@ -2578,6 +2588,159 @@ describe.skipIf(win32)("look: a project's own dependency is not an install", () 
     expect(twoNames(inv)).toEqual([]);
     // The prefix's slot holds what is not ours: no place for the one copy.
     expect(look(looking({ npmPrefix: prefix })).home).toEqual(place(path.join(home, ".local"), OWN));
+  });
+});
+
+describe.skipIf(win32)("look: a PATH that is not all absolute folders, and names that are taken", () => {
+  /** A PATH entry that is no absolute folder and, read against the folder these tests run
+   *  in (as a shell would read it from there), is this very folder. */
+  const fromHere = (dir: string): string => path.relative(process.cwd(), dir);
+
+  it("P1: an entry of PATH that is not an absolute folder is never looked in; ahead of what was read as typed, `loose` is that entry as it is written", () => {
+    // The reviewer's V3: PATH `.local/bin:<nvm>/bin`, the command typed in the home.
+    // Read against the folder the command ran in, `.local/bin` was "what you type": from
+    // any other folder a shell finds the nvm copy, and the run removed it.
+    const local = path.join(home, ".local");
+    const a = globalCopy(local, { version: "0.15.9" });
+    const b = globalCopy(node.nvm(), { version: "0.16.0" });
+    const rel = fromHere(path.join(local, "bin"));
+    expect(path.isAbsolute(rel)).toBe(false);
+    expect(readlinkSync(path.join(rel, "sessionpipe"))).toBe(readlinkSync(binOf(local)));
+    const inv = look(looking({ env: { PATH: PATH(rel, path.join(node.nvm(), "bin")) } }));
+    // What a shell finds by a folder that is the same from everywhere, and nothing else.
+    expect(inv.onPath).toEqual([{ file: binOf(node.nvm()), dir: b }]);
+    expect(inv.typed).toBe(b);
+    expect(inv.loose).toBe(rel);
+    expect(inv.home?.prefix).toBe(node.nvm());
+    // The copy that entry leads to from here is found, as a copy nothing is known to use.
+    expect(inv.copies.find((c) => c.dir === a)).toMatchObject({ uses: [], onPath: false });
+    expect(inv.copies.find((c) => c.dir === b)).toMatchObject({ uses: ["typed"], onPath: true });
+    // Alone on PATH: nothing is typed (it was the copy in ~/.local), and nothing is read
+    // that it could come before.
+    const alone = look(looking({ env: { PATH: rel } }));
+    expect(alone).toMatchObject({ onPath: [], typed: null, unsure: null, loose: null });
+  });
+
+  it("P1: `loose` by where the entry stands: ahead of the folder the first `sessionpipe` is in, yes; behind it, no; an empty entry is `.`; the first such entry is the one named", () => {
+    const empty = path.join(tmp, "tools");
+    mkdirSync(empty);
+    const b = node.nvm();
+    globalCopy(b);
+    const c = path.join(home, ".npm-global");
+    globalCopy(c);
+    const bins = { empty, b: path.join(b, "bin"), c: path.join(c, "bin") };
+    const loose = (...entries: string[]): string | null => {
+      const inv = look(looking({ env: { PATH: PATH(...entries) } }));
+      // Whatever else is on it, what is read is the same: the first absolute folder with one.
+      expect(inv.typed, entries.join(path.delimiter)).toBe(slot(b));
+      expect(inv.onPath.map((e) => e.file)).toEqual([binOf(b), binOf(c)]);
+      return inv.loose;
+    };
+    // All absolute: none.
+    expect(loose(bins.empty, bins.b, bins.c)).toBeNull();
+    // Ahead of everything; between a folder with no sessionpipe in it and the first with one.
+    expect(loose("bin", bins.empty, bins.b, bins.c)).toBe("bin");
+    expect(loose(bins.empty, "bin", bins.b, bins.c)).toBe("bin");
+    expect(loose(path.join("node_modules", ".bin"), bins.b, bins.c)).toBe(path.join("node_modules", ".bin"));
+    expect(loose("..", bins.b, bins.c)).toBe("..");
+    // Behind the folder what is typed is in, a shell never gets to it: it changes nothing.
+    expect(loose(bins.empty, bins.b, "bin", bins.c)).toBeNull();
+    expect(loose(bins.b, bins.c, "bin")).toBeNull();
+    expect(loose(bins.b, ".", bins.c, "")).toBeNull();
+    // An empty entry (a `:` at either end, two in a row) is the folder a shell is in.
+    expect(loose("", bins.b, bins.c)).toBe(".");
+    expect(loose(bins.empty, "", bins.b, bins.c)).toBe(".");
+    expect(loose(".", bins.b, bins.c)).toBe(".");
+    // Two of them ahead: the first is the one a shell tries first.
+    expect(loose("bin", "", bins.b, bins.c)).toBe("bin");
+    expect(loose("", "bin", bins.b, bins.c)).toBe(".");
+    // One ahead and one behind: the one ahead.
+    expect(loose("tools", bins.b, "bin", bins.c)).toBe("tools");
+    // The folder what is typed is in, named twice: where it comes first is what counts.
+    expect(loose(bins.b, "bin", bins.b, bins.c)).toBeNull();
+    // By another spelling of that folder (a link to it), the same.
+    symlinkSync(b, path.join(tmp, "also"));
+    expect(loose(path.join(tmp, "also", "bin"), "bin", bins.c)).toBeNull();
+    expect(loose("bin", path.join(tmp, "also", "bin"), bins.c)).toBe("bin");
+  });
+
+  it("P1: with nothing on PATH that starts anything there is nothing an entry comes before; where the first one is a file nobody can see through, it is said all the same", () => {
+    const b = node.nvm();
+    globalCopy(b);
+    // No PATH at all, an empty one, and only entries that are no folders.
+    for (const env of [{}, { PATH: "" }, { PATH: PATH("bin", "") }, { PATH: PATH("", path.join(tmp, "nothing")) }])
+      expect(look(looking({ env })), JSON.stringify(env)).toMatchObject({ typed: null, loose: null, onPath: [] });
+    // A link to a copy that is gone starts nothing, and a shell goes on to the next.
+    const gone = path.join(tmp, "gone");
+    linkBin(gone);
+    expect(look(looking({ env: { PATH: PATH(path.join(gone, "bin"), "bin", path.join(b, "bin")) } }))).toMatchObject({
+      typed: slot(b),
+      loose: "bin",
+    });
+    // A wrapper first on PATH, and an entry ahead of it: what can't be told, and the entry.
+    const wrapper = path.join(home, "bin", "sessionpipe");
+    mkdirSync(path.dirname(wrapper), { recursive: true });
+    writeFileSync(wrapper, "#!/bin/sh\n");
+    const inv = look(looking({ env: { PATH: PATH("bin", path.dirname(wrapper), path.join(b, "bin")) } }));
+    expect(inv).toMatchObject({ typed: null, unsure: wrapper, loose: "bin" });
+    expect(look(looking({ env: { PATH: PATH(path.dirname(wrapper), "bin", path.join(b, "bin")) } })).loose).toBeNull();
+  });
+
+  it("P3: `spare` names, for what is typed, a free name beside it: `.old`, and where that is taken `.old.2`, `.old.3`, by whatever has the name (a file, a folder, a link that leads nowhere)", () => {
+    const local = path.join(home, ".local");
+    const dir = globalCopy(local);
+    const env = { PATH: path.join(local, "bin") };
+    const spare = (): Record<string, string> => look(looking({ env })).spare;
+    expect(spare()).toEqual({ [dir]: `${dir}.old` });
+    // `mv -n X X.old` with `X.old` there moves nothing and says nothing: the name must be free.
+    mkdirSync(`${dir}.old`);
+    expect(spare()).toEqual({ [dir]: `${dir}.old.2` });
+    writeFileSync(`${dir}.old.2`, "");
+    expect(spare()).toEqual({ [dir]: `${dir}.old.3` });
+    symlinkSync(path.join(tmp, "nowhere"), `${dir}.old.3`);
+    expect(spare()).toEqual({ [dir]: `${dir}.old.4` });
+    // A gap is taken: the first free one, counting up.
+    rmSync(`${dir}.old.2`);
+    expect(spare()).toEqual({ [dir]: `${dir}.old.2` });
+    rmSync(`${dir}.old`, { recursive: true });
+    expect(spare()).toEqual({ [dir]: `${dir}.old` });
+    // Nothing typed, a home with nothing in the way: nothing a refusal would move.
+    expect(look(looking()).spare).toEqual({});
+  });
+
+  it("P3: `spare` for the file at the home's command path, and for the folder in the way where there is no home: each its own free name", () => {
+    const local = path.join(home, ".local");
+    // A script where the installed copy's link was: the home is blocked by it.
+    globalCopy(local);
+    rmSync(binOf(local));
+    writeFileSync(binOf(local), "#!/bin/sh\n");
+    const env = { PATH: path.join(local, "bin") };
+    const blocked = look(looking({ env }));
+    expect(blocked.home?.blocked).toBe(binOf(local));
+    expect(blocked.spare).toEqual({ [binOf(local)]: `${binOf(local)}.old` });
+    // The use before left `sessionpipe.old` there: the line would have moved nothing.
+    writeFileSync(`${binOf(local)}.old`, "#!/bin/sh\n");
+    expect(look(looking({ env })).spare).toEqual({ [binOf(local)]: `${binOf(local)}.old.2` });
+    // No home: the one place holds what a cut-off install left, and it is what is in the way.
+    rmSync(path.join(local, "bin"), { recursive: true });
+    rmSync(path.join(slot(local), "package.json"));
+    const none = look(looking());
+    expect(none.home).toBeNull();
+    expect(none.taken?.dir).toBe(slot(local));
+    expect(none.spare).toEqual({ [slot(local)]: `${slot(local)}.old` });
+    mkdirSync(`${slot(local)}.old`);
+    mkdirSync(`${slot(local)}.old.2`);
+    expect(look(looking()).spare).toEqual({ [slot(local)]: `${slot(local)}.old.3` });
+    // Typed through npm's link into that folder: it is what is typed that would be moved,
+    // and the folder is named once.
+    linkBin(local);
+    const typed = look(looking({ env }));
+    expect(typed).toMatchObject({ typed: slot(local), home: null, taken: null });
+    expect(typed.spare).toEqual({ [slot(local)]: `${slot(local)}.old.3` });
+    // With a home found elsewhere, the folder that was tried and passed over is in nobody's way.
+    rmSync(binOf(local));
+    const free = path.join(tmp, "free");
+    expect(look(looking({ npmPrefix: free }))).toMatchObject({ home: { prefix: free }, taken: null, spare: {} });
   });
 });
 

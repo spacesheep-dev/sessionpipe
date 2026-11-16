@@ -156,18 +156,26 @@ const entries = (dir: string): string[] | null => {
     return null;
   }
 };
+/** One of those names, and a plain file: a folder or a link of the name is someone's. */
+const dropped = (dir: string, name: string): boolean => {
+  try {
+    return DROPPED.has(name) && lstatSync(path.join(dir, name)).isFile();
+  } catch {
+    return false;
+  }
+};
 const only = (dir: string, names: readonly string[]): boolean =>
-  entries(dir)?.every((e) => names.includes(e) || DROPPED.has(e)) ?? false;
+  entries(dir)?.every((e) => names.includes(e) || dropped(dir, e)) ?? false;
 
 /** The entry of a folder that no published sessionpipe has; null where it holds nothing
  *  but those; undefined where it is no real folder that can be read. */
 const extra = (dir: string): string | null | undefined => {
   const all = entries(dir);
-  return all === null ? undefined : (all.find((e) => !PUBLISHED.has(e) && !DROPPED.has(e)) ?? null);
+  return all === null ? undefined : (all.find((e) => !PUBLISHED.has(e) && !dropped(dir, e)) ?? null);
 };
 
 /** Nothing in it but, at most, what a system dropped there. */
-const empty = (dir: string): boolean => entries(dir)?.every((e) => DROPPED.has(e)) ?? false;
+const empty = (dir: string): boolean => entries(dir)?.every((e) => dropped(dir, e)) ?? false;
 
 /** Why a folder's package.json does not say it is a release of sessionpipe; null where
  *  it does. */
@@ -302,7 +310,9 @@ export function remove(asked: string, o: Proving): string[] {
   try {
     if (p.staging) rmSync(what, { recursive: true });
     else {
-      for (const e of [...REST, ...DROPPED]) rmSync(path.join(what, e), { recursive: true, force: true });
+      for (const e of REST) rmSync(path.join(what, e), { recursive: true, force: true });
+      // What a system dropped: files, and removed as files (never a folder of the name).
+      for (const e of DROPPED) rmSync(path.join(what, e), { force: true });
       rmSync(path.join(what, "package.json"), { force: true });
       rmdirSync(what);
     }

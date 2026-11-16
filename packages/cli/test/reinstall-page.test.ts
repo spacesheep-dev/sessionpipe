@@ -68,6 +68,8 @@ const inv = (copies: Copy[], over: Partial<Inventory> = {}): Inventory => ({
   typed: copies.find((c) => c.uses.includes("typed"))?.dir ?? null,
   unsure: null,
   inferred: null,
+  loose: null,
+  spare: {},
   home: home(),
   taken: null,
   prefixes: [],

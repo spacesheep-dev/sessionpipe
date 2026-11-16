@@ -2128,6 +2128,13 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
       ["prefix= \t\nfund=false\n", null],
       [`prefix=\nprefix=${O}/npm\n`, `${O}/npm`],
       [`\n\n\tprefix\t=\t${O}/npm\t\n`, `${O}/npm`],
+      // Line by line: the first line that names a folder is the one, whatever comes after;
+      // a file written on Windows ends its lines with a return too; blanks after a quote.
+      [`prefix=${O}/first\nprefix=${O}/second\n`, `${O}/first`],
+      [`fund=false\r\nprefix=${O}/npm\r\nregistry=https://registry.npmjs.org/\r\n`, `${O}/npm`],
+      [`prefix="${O}/my npm"  \t\n`, `${O}/my npm`],
+      // A key is the whole of what is before the `=`: nothing on another line is its value.
+      [`prefix\n=${O}/npm\n`, null],
     ] as const) {
       put(rc, text);
       expect(await asked(), JSON.stringify(text)).toBe(prefix);
@@ -2147,6 +2154,82 @@ describe.skipIf(process.platform === "win32")("doctor and status: every copy of 
     vi.stubEnv("npm_config_userconfig", "");
     expect(await asked()).toBe(`${O}/home`);
     // `reinstall` does not read it: it asks npm itself (cli-reinstall.test.ts).
+  });
+
+  it("npmrc: a line longer than a folder's name can be is passed over, and the lines after it are still read (the pattern was put to the whole file, and one long line took a long time)", async () => {
+    const asked = async (): Promise<string | null | undefined> => {
+      vi.mocked(look).mockClear();
+      await run("status");
+      return vi.mocked(look).mock.calls[0]?.[0].npmPrefix;
+    };
+    const rc = path.join(home, ".npmrc");
+    const O = path.join(tmp, "opt");
+    // 4096 characters is the longest line that is read: one more, and it is no line of this.
+    const just = `prefix=${O}/`;
+    const longest = `${just}${"a/".repeat((4096 - just.length) / 2).padEnd(4096 - just.length, "b")}`;
+    expect(longest).toHaveLength(4096);
+    put(rc, `${longest}\n`);
+    expect(await asked()).toBe(longest.slice("prefix=".length));
+    put(rc, `${longest}c\n`);
+    expect(await asked()).toBeNull();
+    // A token, a certificate, anything pasted on one line: skipped whatever it is, and the
+    // prefix on a later line is found.
+    put(rc, `//registry.example/:_authToken=${"x".repeat(100_000)}\nprefix=${O}/npm\n`);
+    expect(await asked()).toBe(`${O}/npm`);
+    put(rc, `prefix=${" ".repeat(50_000)}${"=".repeat(50_000)}\nprefix=${O}/npm\n`);
+    expect(await asked()).toBe(`${O}/npm`);
+    // A long `prefix=` line is not the prefix either, and nothing after the file's last line is.
+    put(rc, `prefix=${O}/${"a".repeat(5000)}\nfund=false`);
+    expect(await asked()).toBeNull();
+    process.exitCode = undefined;
+  });
+
+  it("P4: an install that was cut off in npm's own place is what typing starts, alone on the computer: doctor says so as a warning and names `npx -y sessionpipe@latest reinstall` (it said 'All good' with a plain row, where `sessionpipe` can't be typed)", async () => {
+    // The reviewer's computer: no package.json, no dist/cli.js, and npm's link, first on
+    // PATH, leading to a file that is gone. Doctor is run through npx there.
+    const local = path.join(home, ".local");
+    put(path.join(local, "lib", "node_modules", "sessionpipe", "README.md"), "half of it\n");
+    mkdirSync(path.join(local, "bin"), { recursive: true });
+    symlinkSync(
+      path.join("..", "lib", "node_modules", "sessionpipe", "dist", "cli.js"),
+      path.join(local, "bin", "sessionpipe"),
+    );
+    const sentence =
+      "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which is no whole install of it";
+    const d = await run("doctor");
+    expect(d.lines[0]).toBe("! 1 thing needs attention");
+    expect(d.text).toMatch(row("!", "copies", sentence));
+    expect(d.text.match(/^ {2}. copies /gm)).toHaveLength(1);
+    expect(fixes(d)).toEqual([
+      "To fix",
+      "  1. What you type is no whole install of sessionpipe (an install that was cut off?). One command puts it right:",
+      "       npx -y sessionpipe@latest reinstall",
+    ]);
+    // A command to run: doctor exits 1.
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const brief = await run("status");
+    expect(brief.lines[0]).toBe("! 1 thing needs attention");
+    expect(said(brief, "This computer")).toContain(`copies: ${sentence}`);
+    const j = await json();
+    expect(j.copies).toEqual([]);
+    expect(about(j)).toEqual([`${sentence}.`]);
+    process.exitCode = undefined;
+    // Nothing of that folder was started to find it out.
+    expect(readdirSync(ran())).toEqual([]);
+    // The same folder with someone's checkout in it, typed the same way, in a folder that
+    // is no Node's global one: a plain row, and all good, as before.
+    const own = path.join(home, "work", "lib", "node_modules", "sessionpipe");
+    pkg(own, "1.1.0");
+    put(path.join(own, "src", "cli.ts"), "");
+    mkdirSync(path.join(home, "bin"), { recursive: true });
+    symlinkSync(path.join(own, "dist", "cli.js"), path.join(home, "bin", "sessionpipe"));
+    onPath(path.join(home, "bin"));
+    const plain = await run("doctor");
+    expect(plain.text).toMatch(
+      /^ {2}· copies +Typing `sessionpipe` starts .*, which npm did not install \(a checkout, a linked folder\)$/m,
+    );
+    expect(plain.text).not.toContain("no whole install");
   });
 
   it("M3, N4: what typing starts is said where npm did not install it: a checkout linked first on PATH is a row that only informs, no warning, nothing to fix, all good", async () => {

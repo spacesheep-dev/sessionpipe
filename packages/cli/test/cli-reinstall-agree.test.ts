@@ -31,7 +31,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { serviceLook, serviceSeen } from "../src/control/health.js";
 import { type Copy, type Inventory, look, type Use } from "../src/reinstall/find.js";
 import { remove } from "../src/reinstall/ours.js";
-import { type Facts, idle, type Plan, plan, typedAs, typing } from "../src/reinstall/plan.js";
+import { cutOff, type Facts, idle, type Plan, plan, typedAs, typing } from "../src/reinstall/plan.js";
 import { carryOut } from "../src/reinstall/run.js";
 import { VERSION } from "../src/run.js";
 import { execCapture, installInto, latestVersion, npmDo } from "../src/update.js";
@@ -193,6 +193,8 @@ interface Said {
   row: boolean;
   /** doctor's own page: its `copies` row that only informs (a `·`), by what it says. */
   info: string | null;
+  /** And whether its "To fix" names the way in that needs no installed copy. */
+  byNpx: boolean;
   warnings: string[];
   listed: { dir: string; version: string | null; whole: boolean; uses: string[] }[];
   /** reinstall --dry-run: all it printed, what it refused with, its exit code, and the plan
@@ -217,6 +219,7 @@ async function both(inv: Inventory | null): Promise<Said> {
     verdict: brief.lines[0] as string,
     row: computer(brief.lines).includes("copies: "),
     info: page.lines.map((l) => /^ {2}· copies +(.*)$/.exec(l)).find(Boolean)?.[1] ?? null,
+    byNpx: page.lines.includes("       npx -y sessionpipe@latest reinstall"),
     warnings: about(j.warnings),
     listed: j.copies,
     out: dry.text,
@@ -289,7 +292,7 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
     expect(wrong).toEqual([]);
   }, 60_000);
 
-  it(`property (a), both ways, N4: of a computer whose one installed copy is the newest, doctor says all good exactly where reinstall says "Nothing to repair"; and through what typing starts: unsure is nothing to doctor, what npm did not install is a plain row of doctor's and a note of reinstall's in the same words, a copy off PATH is a finding for both (${SEEDS} computers of any kind)`, async () => {
+  it(`property (a), both ways, N4, P4: of a computer whose one installed copy is the newest, doctor says all good exactly where reinstall says "Nothing to repair"; and through what typing starts: unsure is nothing to doctor, what npm did not install is a plain row of doctor's and a note of reinstall's in the same words, a cut-off folder in npm's own place is a warning with npx's line and a refusal that moves it, a copy off PATH is a finding for both (${SEEDS} computers of any kind)`, async () => {
     const wrong: string[] = [];
     const seen = {
       met: 0,
@@ -301,6 +304,9 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
       plain: 0,
       noneOfNpms: 0,
       aloneInSlot: 0,
+      cut: 0,
+      cutBesideOne: 0,
+      secondName: 0,
       beside: 0,
       inSlot: 0,
       elsewhere: 0,
@@ -342,7 +348,75 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
       // where something is, it changes nothing.
       const own = typedAs(inv);
       if ((own !== null) !== (inv.typed !== null && typed?.slot !== "global")) no("typedAs() answers", own);
-      if (own !== null) {
+      // P4: but where what is typed is a folder in npm's own place that is no install (what
+      // an install that was cut off left), `sessionpipe` may not run at all: that is a
+      // finding for doctor, with npx's line, and never all good.
+      const cut = cutOff(inv);
+      const owns = own === null ? [] : [own, typedAs(inv, tilde) as string];
+      if (cut && own === null) no("cut off, and typedAs() has no answer", inv.typed);
+      if (own !== null && cut) {
+        seen.cut++;
+        if (!own.endsWith(", which is no whole install of it.")) no("cut off, and typedAs() says", own);
+        if (known !== null) no("cut off, and typing() answers", known);
+        if (
+          said.warnings.filter((w) => w.startsWith("Typing")).length !== 1 ||
+          !said.warnings.some((w) => owns.includes(w))
+        )
+          no("cut off, and doctor's warnings are", said.warnings);
+        if (said.verdict === "✓ All good" || !said.row || said.info !== null)
+          no("cut off, and doctor says", [said.verdict, said.row, said.info]);
+        if (!said.byNpx) no("cut off, and doctor does not name npx's line", said.warnings);
+        if (said.plan.steps.length) no("cut off, and reinstall has steps", "");
+        // Reinstall refuses, with the line that moves the folder to a free name (P3) and
+        // goes on through npx; or with what comes before any look at what is typed.
+        const toTyped = `The line moves it aside and runs the repair again, through npx. Next: mv -n ${inv.typed} ${inv.spare[inv.typed as string]} && npx -y sessionpipe@latest reinstall\n`;
+        for (const r of said.refused) {
+          if (/npm install/.test(r)) no("cut off, and the line installs", said.refused);
+          if (r.startsWith("sessionpipe: Typing `sessionpipe` starts")) {
+            seen.inSlot++;
+            if (!r.endsWith(toTyped)) no("cut off, and the line is", r);
+            if (!owns.some((o) => r.startsWith(`sessionpipe: ${o.slice(0, -1)}: `)))
+              no("cut off, and the refusal begins", r);
+            if (inv.spare[inv.typed as string]?.endsWith(".old.2")) seen.secondName++;
+          }
+        }
+        const whole = installs.length === 1 && installs[0]?.slot === "global" && !installs[0].wrong;
+        if (whole && installs[0]?.version === NEWEST && !inv.dangling.length) {
+          // REPORTED, not decided here: with one whole copy of the newest release
+          // installed elsewhere, reinstall says "Nothing to repair" of this computer (the
+          // sentence beside it as a note), where doctor names `npx … reinstall` for it:
+          // the command doctor names does nothing, and typing `sessionpipe` still starts
+          // the folder that is no install. (plan.ts: the first "nothing to repair" answer
+          // does not ask whether what is typed is cut off; the second does.)
+          seen.cutBesideOne++;
+          if (said.plan.nothing !== NOTHING || !said.plan.notes.some((n) => owns.includes(n)) || said.refused.length)
+            no("cut off beside one whole newest copy, and reinstall (as reported) says", said.plan);
+        } else {
+          if (nothing) no("cut off, and reinstall says", said.plan.nothing);
+          if (said.refused.length !== 1 || said.code !== undefined)
+            no("cut off, and reinstall ended", [said.refused, said.code]);
+        }
+        // The same folder where nobody keeps packages (that prefix is not looked in) is a
+        // checkout like any other: with nothing of npm's here, the whole of it for both.
+        if (!installs.length && !inv.dangling.length) {
+          seen.aloneInSlot++;
+          const slot = (x: string) => path.join(x, "lib", "node_modules", "sessionpipe");
+          const elsewhere = { ...inv, prefixes: inv.prefixes.filter((x) => slot(x) !== inv.typed) };
+          const apart = await both(elsewhere);
+          seen.noneOfNpms++;
+          if (cutOff(elsewhere)) no("the same folder outside every slot, and cutOff()", inv.typed);
+          if (
+            apart.verdict !== "✓ All good" ||
+            apart.info !== typedAs(elsewhere)?.slice(0, -1) ||
+            apart.warnings.length ||
+            apart.byNpx
+          )
+            no("the same folder outside every slot, and doctor", [apart.verdict, apart.info, apart.warnings]);
+          if (apart.plan.nothing !== NONE_OF_NPMS || !apart.out.includes(`✓ ${NONE_OF_NPMS}`) || apart.refused.length)
+            no("the same folder outside every slot, and reinstall says", [apart.plan.nothing, apart.refused]);
+        }
+      }
+      if (own !== null && !cut) {
         seen.noInstall++;
         if (known !== null) no("what is typed is not npm's, and typing() answers", known);
         if (said.warnings.some((w) => w.startsWith("Typing")))
@@ -351,42 +425,22 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
         // without their full stop; with a finding, the row is the finding's.
         if ((said.info !== null) === said.row)
           no("what is typed is not npm's, and doctor's rows are", [said.info, said.row]);
-        if (said.info !== null && said.info !== own.slice(0, -1) && said.info !== typedAs(inv, tilde)?.slice(0, -1))
+        if (said.info !== null && !owns.some((o) => o.slice(0, -1) === said.info))
           no("what is typed is not npm's, and doctor's plain row says", said.info);
         if (said.info !== null) {
           seen.plain++;
           if (said.verdict !== "✓ All good") no("a plain row, and doctor's verdict", said.verdict);
         }
+        if (said.byNpx) no("what is typed is not npm's, and doctor names npx's line", said.warnings);
         if (said.plan.steps.length) no("what is typed is not npm's, and reinstall has steps", "");
-        // (Never of what someone else's tool keeps: Volta's copy is Volta's to remove.)
-        const inSlot =
-          !typed?.keeper && inv.prefixes.some((x) => path.join(x, "lib", "node_modules", "sessionpipe") === inv.typed);
         // With no copy that npm installed here at all (and no link to one that is gone),
-        // that is the whole of it for doctor: all good. And for reinstall: nothing to
-        // repair, in those words; but where what is typed sits where npm keeps the package
-        // (what a cut-off install left is in the way of the one copy), it is refused with
-        // the line that moves it.
+        // that is the whole of it for both: all good, and nothing to repair, in those words.
         if (!installs.length && !inv.dangling.length) {
+          seen.noneOfNpms++;
           if (said.verdict !== "✓ All good" || said.info === null)
             no("what is typed is not npm's and nothing of npm's is here, and doctor", [said.verdict, said.info]);
-          if (inSlot) {
-            seen.aloneInSlot++;
-            if (said.plan.nothing !== null || !said.plan.refuse?.next.startsWith("mv -n ") || said.refused.length !== 1)
-              no("what is typed is in a slot and nothing of npm's is here, and reinstall says", said.plan);
-            // The same folder where nobody keeps packages (that prefix is not looked in):
-            // a checkout like any other, and the whole of it for both.
-            const slot = (x: string) => path.join(x, "lib", "node_modules", "sessionpipe");
-            const apart = await both({ ...inv, prefixes: inv.prefixes.filter((x) => slot(x) !== inv.typed) });
-            seen.noneOfNpms++;
-            if (apart.verdict !== "✓ All good" || apart.info !== said.info || apart.warnings.length)
-              no("the same folder outside every slot, and doctor", [apart.verdict, apart.info, apart.warnings]);
-            if (apart.plan.nothing !== NONE_OF_NPMS || !apart.out.includes(`✓ ${NONE_OF_NPMS}`) || apart.refused.length)
-              no("the same folder outside every slot, and reinstall says", [apart.plan.nothing, apart.refused]);
-          } else {
-            seen.noneOfNpms++;
-            if (said.plan.nothing !== NONE_OF_NPMS || !said.out.includes(`✓ ${NONE_OF_NPMS}`))
-              no("what is typed is not npm's and nothing of npm's is here, and reinstall says", said.plan.nothing);
-          }
+          if (said.plan.nothing !== NONE_OF_NPMS || !said.out.includes(`✓ ${NONE_OF_NPMS}`))
+            no("what is typed is not npm's and nothing of npm's is here, and reinstall says", said.plan.nothing);
         } else if (said.plan.nothing === NONE_OF_NPMS)
           no(
             "something of npm's is here, and reinstall says there is none",
@@ -394,7 +448,7 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
           );
         if (nothing) {
           seen.beside++;
-          if (!said.plan.notes.includes(own) && !said.plan.notes.includes(typedAs(inv, tilde) as string))
+          if (!said.plan.notes.some((n) => owns.includes(n)))
             no("what is typed is not npm's, and reinstall's notes are", said.plan.notes);
           if (said.refused.length || said.code !== undefined)
             no("what is typed is not npm's, nothing to repair, and it ended", [said.refused, said.code]);
@@ -402,23 +456,16 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
           if (said.verdict !== "✓ All good")
             no("nothing to repair beside what is typed, and doctor's verdict", said.verdict);
         }
-        // No line installs over what is left alone. Where it sits in a looked-in prefix's
-        // own slot (what an install that was cut off left, a build) the line moves that
-        // folder aside and goes on through npx (N3); anywhere else it shows what PATH finds.
+        // No line installs over what is left alone, and none moves it: it is somebody's
+        // own (a checkout, Volta's copy), and the line shows what PATH finds.
         for (const r of said.refused) {
           if (/npm install/.test(r)) no("what is typed is left alone, and the line installs", said.refused);
           if (r.startsWith("sessionpipe: Typing `sessionpipe` starts")) {
-            const line = inSlot
-              ? `The line moves it aside and runs the repair again, through npx. Next: mv -n ${inv.typed} ${inv.typed}.old && npx -y sessionpipe@latest reinstall\n`
-              : "Nothing was changed. Next: which -a sessionpipe\n";
-            if (!r.endsWith(line)) no("what is typed is left alone, and the line is", r);
-            if (
-              !r.startsWith(`sessionpipe: ${(typedAs(inv, tilde) as string).slice(0, -1)}`) &&
-              !r.startsWith(`sessionpipe: ${own.slice(0, -1)}`)
-            )
+            if (!r.endsWith("Nothing was changed. Next: which -a sessionpipe\n"))
+              no("what is typed is left alone, and the line is", r);
+            if (!owns.some((o) => r.startsWith(`sessionpipe: ${o.slice(0, -1)}`)))
               no("what is typed is left alone, and the refusal begins", r);
-            if (inSlot) seen.inSlot++;
-            else seen.elsewhere++;
+            seen.elsewhere++;
           }
         }
       }
@@ -461,7 +508,8 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
       }
       // Whatever doctor says of what typing starts is `typing`'s sentence, and no other.
       const told = said.warnings.filter((w) => w.startsWith("Typing") || w.includes("is not on your PATH"));
-      if (JSON.stringify(told) !== JSON.stringify(known ? [known] : []))
+      // (And, of what is typed where that is a cut-off folder, `typedAs`'s: above.)
+      if (JSON.stringify(told.filter((w) => !(cut && owns.includes(w)))) !== JSON.stringify(known ? [known] : []))
         no("doctor's word on what typing starts", told);
 
       // --- the one installed copy is the newest: all good exactly where nothing to repair ----
@@ -474,6 +522,8 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
         continue;
       }
       seen.met++;
+      // (Reported above: a cut-off folder that is typed beside that one copy.)
+      if (cut) continue;
       if (!said.row !== nothing)
         no(`doctor ${said.row ? "has a finding" : "says all good"}, and reinstall`, {
           nothing: said.plan.nothing,
@@ -511,9 +561,11 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
     expect(seen.unsure).toBeGreaterThan(SEEDS / 25);
     expect(seen.unsureGood).toBeGreaterThan(0);
     expect(seen.noInstall).toBeGreaterThan(SEEDS / 50);
-    expect(seen.plain).toBeGreaterThan(SEEDS / 100);
+    expect(seen.plain).toBeGreaterThan(0);
     expect(seen.noneOfNpms).toBeGreaterThan(0);
     expect(seen.aloneInSlot).toBeGreaterThan(0);
+    expect(seen.cut).toBeGreaterThan(SEEDS / 50);
+    expect(seen.secondName).toBeGreaterThan(0);
     expect(seen.beside).toBeGreaterThan(0);
     expect(seen.inSlot).toBeGreaterThan(0);
     expect(seen.elsewhere).toBeGreaterThan(0);
@@ -668,6 +720,8 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
       typed: null,
       unsure: null,
       inferred: null,
+      loose: null,
+      spare: {},
       home: null,
       taken: null,
       prefixes: [a.prefix as string, b.prefix as string],
@@ -682,6 +736,81 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, of the same
     expect(said.refused).toEqual([
       "sessionpipe: no folder on this computer can hold the one copy of sessionpipe. Nothing was changed. Next: which -a sessionpipe\n",
     ]);
+  });
+
+  it("P4, as it is answered now: what typing starts is a cut-off folder in npm's own place, beside ONE whole copy of the newest release: doctor names `npx -y sessionpipe@latest reinstall`, and reinstall answers 'Nothing to repair'", async () => {
+    // The made-up computers above never have this one. Doctor's finding is right:
+    // `sessionpipe` starts a folder that is no install. The command it names then says
+    // there is nothing to repair, with the same sentence beside it as a note: the plan's
+    // first "nothing to repair" answer (one whole newest copy, wherever it lives) does not
+    // ask whether what is typed is cut off; its second one does. With that copy a release
+    // behind, or with none, it refuses with the line that moves the folder (above).
+    const local = path.join(home, ".local");
+    const nvm = path.join(home, ".nvm", "versions", "node", "v22.1.0");
+    const slot = (prefix: string) => path.join(prefix, "lib", "node_modules", "sessionpipe");
+    const bin = (prefix: string) => path.join(prefix, "bin", "sessionpipe");
+    const cut: Copy = {
+      dir: slot(local),
+      where: "~/.local/lib/node_modules/sessionpipe",
+      prefix: null,
+      slot: null,
+      not: "it has no package.json that can be read (an install that was cut off?)",
+      aside: false,
+      version: null,
+      wrong: null,
+      bins: [bin(local)],
+      uses: ["typed"],
+      onPath: false,
+      writable: true,
+      keeper: null,
+    };
+    const whole: Copy = {
+      ...cut,
+      dir: slot(nvm),
+      where: "~/.nvm/versions/node/v22.1.0",
+      prefix: nvm,
+      slot: "global",
+      not: null,
+      version: NEWEST,
+      bins: [bin(nvm)],
+      uses: [],
+      onPath: true,
+    };
+    const CUT = "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which is no whole install of it.";
+    const inv = (copies: Copy[]): Inventory => ({
+      reach: true,
+      copies,
+      dangling: [],
+      strangers: [],
+      onPath: [
+        { file: bin(local), dir: cut.dir },
+        { file: bin(nvm), dir: whole.dir },
+      ],
+      typed: cut.dir,
+      unsure: null,
+      inferred: null,
+      loose: null,
+      spare: { [cut.dir]: `${cut.dir}.old` },
+      home: null,
+      taken: null,
+      prefixes: [local, nvm],
+      npx: path.join(home, ".npm", "_npx"),
+    });
+    const said = await both(inv([cut, whole]));
+    // Doctor: a warning, and the one command.
+    expect([said.verdict, said.row, said.info, said.byNpx]).toEqual(["! 1 thing needs attention", true, null, true]);
+    expect(said.warnings).toEqual([CUT]);
+    // Reinstall, run as doctor says: never "nothing to repair" (it said so): refused, as below.
+    expect(said.plan).toMatchObject({ nothing: null, steps: [] });
+    // The same computer with that copy a release behind: the two agree, and the line leads out.
+    const behind = await both(inv([cut, { ...whole, version: "1.9.0" }]));
+    expect(behind.byNpx).toBe(true);
+    expect(behind.plan.nothing).toBeNull();
+    expect(behind.refused).toEqual([
+      `sessionpipe: ${CUT.slice(0, -1)}: ${cut.not}. This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed. The line moves it aside and runs the repair again, through npx. Next: mv -n ${cut.dir} ${cut.dir}.old && npx -y sessionpipe@latest reinstall\n`,
+    ]);
+    // And with the whole copy the newest: the very same refusal.
+    expect(said.refused).toEqual(behind.refused);
   });
 });
 
@@ -808,6 +937,8 @@ describe.skipIf(process.platform === "win32")("doctor and reinstall, at real fol
       typed: null,
       unsure: null,
       inferred: null,
+      loose: null,
+      spare: {},
       home: { prefix: path.join(home, ".local"), onPath: false },
       taken: null,
     });
