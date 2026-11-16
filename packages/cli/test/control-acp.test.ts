@@ -18,6 +18,7 @@ import { FakeReceiver } from "./helpers/receiver.js";
 const SESSION = "01a15fcd-05fc-78f3-83d7-6cc03f65676c"; // what the agent names a new session
 const RECV = "0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7e01"; // the id the receiver's start names
 const HOOKED = "7f2c1b3a-9d8e-4c5f-a1b2-c3d4e5f6a7b8"; // a session the agent's own hooks reported
+const OTHER = "3c9e8d7f-1a2b-4c3d-8e9f-0a1b2c3d4e5f"; // a second agent's start
 const unix = process.platform !== "win32"; // the daemon's socket is a Unix socket here
 
 let tmp: string;
@@ -50,7 +51,7 @@ process.stdin.on("data", (b) => {
 });
 process.stdin.on("end", () => setTimeout(() => process.exit(0), 20));
 function handle(m) {
-  log({ method: m.method, params: m.params, job: process.env.SESSIONPIPE_CONTROL_JOB || null, cwd: process.cwd(), start: Date.now() });
+  log({ method: m.method, params: m.params, job: process.env.SESSIONPIPE_CONTROL_JOB || null, fxMode: process.env.FX_PERMISSION_MODE || null, cwd: process.cwd(), start: Date.now() });
   if (m.method === "initialize")
     return reply(m.id, { protocolVersion: 1, agentInfo: { name: "fake-acp", version: "1" }, agentCapabilities: { loadSession: how !== "noload" }, authMethods: [] });
   if (m.method === "session/new") return reply(m.id, { sessionId: session });
@@ -72,7 +73,13 @@ function handle(m) {
   );
 }
 
-const runs = (): { method?: string; params?: Record<string, unknown>; cwd?: string; job?: string | null }[] =>
+const runs = (): {
+  method?: string;
+  params?: Record<string, unknown>;
+  cwd?: string;
+  job?: string | null;
+  fxMode?: string | null;
+}[] =>
   existsSync(calls)
     ? readFileSync(calls, "utf8")
         .trim()
@@ -294,6 +301,61 @@ describe.runIf(unix)("an agent, driven", () => {
     const q3 = await rx.send({ session: `goose:${RECV}`, text: "again" });
     expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "delivered", mode: "api" });
     expect(methods()).toHaveLength(7);
+  });
+  it("a change of the machine's mode lets go of a held agent, idle at once and mid-turn when its turn ends; the next message reopens it", {
+    timeout: 20_000,
+  }, async () => {
+    // The agent's word for each mode (AcpAgent.modeEnv), as the daemon finds it.
+    const modeEnv = { safe: { FX_PERMISSION_MODE: "ask" }, auto: { FX_PERMISSION_MODE: "auto" } };
+    await startDaemon({
+      mode: "auto",
+      extra: {
+        acp: (h) =>
+          h === "goose"
+            ? { bin: process.execPath, args: [fake], modeEnv }
+            : h === "gemini-cli"
+              ? { bin: process.execPath, args: [fake] }
+              : null,
+      },
+    });
+    const q = await rx.send({ kind: "start", session: `goose:${RECV}`, cwd: project, text: "build" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "api" });
+    expect(d?.status().sdk).toEqual([RECV]);
+    // The same mode again: held as it was.
+    d?.reload(cfg("auto"));
+    expect(d?.status().sdk).toEqual([RECV]);
+    // Idle, and the mode changes: let go of now.
+    d?.reload(cfg("safe"));
+    expect(d?.status().sdk).toEqual([]);
+    const q2 = await rx.send({ session: `goose:${RECV}`, text: "wait for me" });
+    for (let i = 0; i < 100 && !rx.progress(q2.id).length; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(methods().filter((m) => m === "session/load")).toHaveLength(1);
+    // Mid-turn, and the mode changes back: held until the turn is over, then let go of.
+    d?.reload(cfg("auto"));
+    expect(d?.status().sdk).toEqual([RECV]);
+    const c = await rx.send({ kind: "cancel", session: `goose:${RECV}`, text: undefined });
+    expect(await rx.waitAck(c.id)).toMatchObject({ outcome: "delivered", mode: "api" });
+    expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(d?.status().sdk).toEqual([]);
+    const q3 = await rx.send({ session: `goose:${RECV}`, text: "more" });
+    expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(methods().filter((m) => m === "session/load")).toHaveLength(2);
+    // Each run was given the mode it started in: auto, then safe, then auto again.
+    expect(
+      runs()
+        .filter((r) => r.method === "initialize")
+        .map((r) => r.fxMode),
+    ).toEqual(["auto", "ask", "auto"]);
+    // Safe and inherit are answered alike: an agent with no word of its own for either stays
+    // held across the change; one whose words for them differ is let go of.
+    d?.reload(cfg("safe"));
+    const q4 = await rx.send({ session: `goose:${RECV}`, text: "and again" });
+    expect(await rx.waitAck(q4.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const g = await rx.send({ kind: "start", session: `gemini-cli:${OTHER}`, cwd: project, text: "look" });
+    expect(await rx.waitAck(g.id)).toMatchObject({ outcome: "delivered", mode: "api" });
+    expect(d?.status().sdk.sort()).toEqual([OTHER, RECV].sort());
+    d?.reload({ ...cfg("safe"), mode: "inherit" });
+    expect(d?.status().sdk).toEqual([OTHER]);
   });
   it("a session the agent's own hooks reported: reopened by its own id, in the folder the hooks gave", {
     timeout: 20_000,

@@ -1,0 +1,10 @@
+{
+  "spec": "ADAPTERS.md, Agents driven through ACP; CONTROL.md §2 (`mode`)",
+  "note": "What an ACP agent's process is given for the machine's mode, where the agent's own default would act on what the mode says must ask. `env` is added to the process's environment for that run only and never saved anywhere; `{}` is nothing added, so the agent starts in its own default. `safe` is \"anything that would ask is denied\", `auto` is \"the harness's auto mode\", `inherit` is \"no permission flag\". An agent with no case here gets nothing for any mode. Measured against fx 0.0.16 on 2026-11-16: with nothing added, fx's `auto` wrote a file and ran a shell command for a safe machine without asking; with `ask`, the write reached `session/request_permission` and was refused.",
+  "cases": [
+    { "name": "fx on a safe machine asks for every call that needs approval, so the daemon's refusal is the answer", "harness": "fx", "mode": "safe", "env": { "FX_PERMISSION_MODE": "ask" } },
+    { "name": "fx on an auto machine runs in fx's own auto mode", "harness": "fx", "mode": "auto", "env": { "FX_PERMISSION_MODE": "auto" } },
+    { "name": "fx on an inherit machine starts in the person's own fx setting", "harness": "fx", "mode": "inherit", "env": {} },
+    { "name": "an agent with no word for the mode gets nothing added", "harness": "gemini-cli", "mode": "safe", "env": {} }
+  ]
+}

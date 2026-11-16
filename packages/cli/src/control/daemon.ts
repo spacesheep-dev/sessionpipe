@@ -459,7 +459,7 @@ export interface DaemonDeps {
   codexLogin?: (bin: string) => Promise<Login>;
   /** An ACP agent's CLI on this machine, by harness name (core's findAcpAgent; null:
    *  not installed). Absent: this daemon drives none of them. */
-  acp?: (harness: string) => { bin: string; args: string[]; meta?: Record<string, unknown> } | null;
+  acp?: (harness: string) => acpControl.AcpFound | null;
   /** The harnesses every hello advertises (core's drivableHarnesses); by default, the
    *  ones the finders above find. */
   harnesses?: () => string[];
@@ -671,6 +671,9 @@ export class ControlDaemon {
   private readonly live = new Map<string, Live>();
   /** Sessions the daemon holds (the Agent SDK's, an ACP agent's), by their ref. */
   private readonly sdkSessions = new Map<string, SdkSession>();
+  /** The mode each held ACP agent was opened in, and its word for each mode: what its
+   *  process was given and how its permission requests are answered (sameRun). */
+  private readonly heldRuns = new Map<string, HeldRun>();
   private readonly nonces: NonceStore;
   private readonly acks: AckOutbox;
   private readonly recentAcks = new Map<string, { ack: Ack; at: number }>();
@@ -1110,6 +1113,13 @@ export class ControlDaemon {
     const known = new Set(this.cfg.receivers.map((r) => r.control + r.machine));
     const told = JSON.stringify([this.cfg.folders, this.cfg.mode, this.cfg.name, askOn(this.cfg)]);
     this.cfg = cfg;
+    // An agent driven over ACP runs, and has its permission requests answered, in the mode it
+    // was opened in (ADAPTERS.md): one that would run otherwise now is let go of when idle,
+    // and a busy one when its turn ends (sendHeld), so the next message reopens it in this mode.
+    for (const [session, run] of this.heldRuns) {
+      const s = this.sdkSessions.get(session)!;
+      if (!s.busy && !sameRun(run, cfg.mode)) this.letGoHeld(session, s);
+    }
     for (const r of cfg.receivers) if (!known.has(r.control + r.machine)) void this.pollLoop(r);
     // `control folders`, `control mode`, `ask on|off` or a `--rename-machine` changed what a
     // hello says: say it now, so the receiver doesn't wait up to ten minutes for the next one.
@@ -3130,15 +3140,23 @@ export class ControlDaemon {
     }
   }
 
-  /** One message through a held session; one whose process left is let go of, so the
-   *  next message reopens the session instead of finding it closed. */
+  /** One message through a held session; one whose process left, or that no longer runs as
+   *  the machine's mode says (reload), is let go of, so the next message reopens the session
+   *  instead of finding it closed. */
   private async sendHeld(session: string, s: SdkSession, text: string): Promise<{ reply: string; error?: string }> {
     const out = await s.send(text);
-    if (s.closed) {
-      s.close();
-      this.sdkSessions.delete(session);
-    }
+    const run = this.heldRuns.get(session);
+    if (s.closed) this.letGoHeld(session, s, true);
+    else if (run && !sameRun(run, this.cfg.mode)) this.letGoHeld(session, s);
     return out;
+  }
+
+  /** A held session closed and forgotten, so the next message reopens it. */
+  private letGoHeld(session: string, s: SdkSession, gone = false): void {
+    s.close();
+    this.sdkSessions.delete(session);
+    this.heldRuns.delete(session);
+    if (!gone) this.deps.log(`${idOf(session).slice(0, 8)} let go of: the machine's mode is ${this.cfg.mode} now`);
   }
 
   /** A turn message whose Stop never took it: route again, now that it isn't mid-turn.
@@ -4006,11 +4024,13 @@ export class ControlDaemon {
     this.deps.log(`${id.slice(-8)}: ${found.bin} new session for ${known(ref.id)} (${this.cfg.mode}) in ${cwd}`);
     const stream = this.answerStream(r, id);
     const out = await this.slot(async () => {
+      const run: HeldRun = { mode: this.cfg.mode, modeEnv: found.modeEnv };
       const opened = await this.openAcp(id, found, cwd, label, stream, { env: this.childEnv(r, cmd) });
       if ("failed" in opened) return { reply: "", error: opened.failed };
       /* v8 ignore next -- unsupported only comes of a session/load, which a start never asks for */
       if ("unsupported" in opened) return { reply: "", error: opened.unsupported };
       this.sdkSessions.set(cmd.session, opened.held);
+      this.heldRuns.set(cmd.session, run);
       this.setAlias(ref.harness, ref.id, opened.held.session, cwd, null);
       return this.sendHeld(cmd.session, opened.held, this.framed(r, text, true));
     });
@@ -4041,6 +4061,7 @@ export class ControlDaemon {
       const stream = this.answerStream(r, id);
       const out = await this.owning(cmd.session, () =>
         this.slot(async () => {
+          const run: HeldRun = { mode: this.cfg.mode, modeEnv: found.modeEnv };
           const opened = await this.openAcp(id, found, place.folder, label, stream, {
             load: target,
             env: this.childEnv(r, cmd),
@@ -4048,6 +4069,7 @@ export class ControlDaemon {
           if ("unsupported" in opened) return { reply: "", unsupported: opened.unsupported };
           if ("failed" in opened) return { reply: "", error: opened.failed };
           this.sdkSessions.set(cmd.session, opened.held);
+          this.heldRuns.set(cmd.session, run);
           return this.sendHeld(cmd.session, opened.held, this.framed(r, cmd.text as string, false));
         }),
       );
@@ -4066,7 +4088,7 @@ export class ControlDaemon {
 
   private openAcp(
     id: string,
-    found: { bin: string; args: string[]; meta?: Record<string, unknown> },
+    found: acpControl.AcpFound,
     cwd: string,
     label: string,
     stream: AnswerStream,
@@ -4563,12 +4585,27 @@ export class ControlDaemon {
       if (!s.busy && this.deps.now() - s.lastUsed > idle) {
         s.close();
         this.sdkSessions.delete(session);
+        this.heldRuns.delete(session);
         this.deps.log(
           `sdk session ${idOf(session).slice(0, 8)} closed after ${Math.round(idle / 60_000)} min idle (it resumes on the next message)`,
         );
       }
   }
 }
+
+/** How a held ACP agent was opened: the machine's mode then, and the agent's word for each
+ *  mode (AcpAgent.modeEnv). */
+interface HeldRun {
+  mode: ControlMode;
+  modeEnv?: acpControl.AcpFound["modeEnv"];
+}
+
+/** Whether an agent opened as `run` runs and is answered as one opened in `now` would be:
+ *  the same answers to its permission requests (inherit answers as safe does) and the same
+ *  word for the mode in its process. */
+const sameRun = (run: HeldRun, now: ControlMode): boolean =>
+  (run.mode === "auto") === (now === "auto") &&
+  JSON.stringify(run.modeEnv?.[run.mode] ?? {}) === JSON.stringify(run.modeEnv?.[now] ?? {});
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms).unref?.());
 

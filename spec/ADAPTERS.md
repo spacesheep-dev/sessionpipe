@@ -291,6 +291,16 @@ What the daemon says and reads, in the protocol's own names:
 - `session/request_permission`: answered from the machine's mode (CONTROL.md §6).
 - `session/cancel` (a notification) for `cancel`.
 
+What the agent's process is given. fx's own default permission mode (`auto`) edits files
+and runs the commands it recognises without asking, so fx's process is given its mode
+for the machine's (`FX_PERMISSION_MODE`, for that run only, never saved): `ask` on a
+`safe` machine, so every call that needs approval reaches `session/request_permission`
+and is refused; `auto` on an `auto` machine; nothing on an `inherit` machine, where the
+person's own fx setting decides. It wins over a value the daemon's own environment
+carries. Every other agent is given nothing for the mode
+([control-acp-mode-env.json](../conformance/control-acp-mode-env.json)); a change of
+the machine's mode lets go of a held agent (CONTROL.md §6 `start`).
+
 A session an ACP agent runs is placed by the folder its start ran in, which the daemon
 records with the agent's session id (`aliases.json`), or by the folder the harness's
 own hooks reported where it has a row above.

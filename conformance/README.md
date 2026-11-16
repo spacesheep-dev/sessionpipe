@@ -53,6 +53,10 @@
   and whether that event ends it. A receiver runs it to know when to stop showing Allow /
   Deny; the reference daemon lets go of the prompt's hook by the same answers. Run by
   `packages/cli/test/control-attention.test.ts`.
+- `control-acp-mode-env.json` — what an ACP agent's process is given for the machine's mode
+  (spec/ADAPTERS.md, *Agents driven through ACP*): `{ harness, mode, env }`, the environment added
+  for that run only (`{}`: nothing, the agent's own default). Run by
+  `packages/core/test/acp-control.test.ts`.
 - `control-busy-window.json` — when a message waits a moment for a window's hooks before it
   is routed (spec/CONTROL.md §6.3): `{ look, hooks_heard, has_copy, asked_before, expect }`, why
   the window's inbox was no way in, whether its hooks report to the machine, whether the window
