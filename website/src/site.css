@@ -3197,7 +3197,7 @@ details > p {
 .mk.sp .b {
   stroke: var(--fg);
 }
-/* Devin has no mark of its own here: the GUI's monogram */
+/* Devin, Grok Build and fx have no mark of their own here: a monogram */
 .mk.mono {
   display: inline-grid;
   place-items: center;

@@ -111,7 +111,7 @@ const menuIcon =
 // {{mark:<key>}} in a page. The harnesses' are their makers' marks in one colour, as
 // sessionpipe-gui draws them (web/src/lib/harnessIcons.ts): path data for Anthropic, OpenAI
 // and Google Gemini from simple-icons (CC0), Antigravity's arch redrawn from its own asset,
-// and Devin, which has none there, as the GUI's monogram. They are trademarks of their
+// and Devin, Grok Build and fx, which have none there, as monograms. They are trademarks of their
 // owners, shown only to name the software (TRADEMARKS.md). The rest are drawn here, on one
 // 24 px grid at one stroke, so a row of them reads as one set.
 const fillMark = (viewBox, d) =>
@@ -135,6 +135,8 @@ const marks = {
     "M89.754 92.75c4.667 3.5 11.667 1.167 5.25-5.25-19.25-18.667-15.167-70-39.083-70-23.917 0-19.834 51.333-39.084 70-7 7 .584 8.75 5.25 5.25C40.171 80.5 39.004 58.917 55.921 58.917c16.916 0 15.75 21.583 33.833 33.833Z",
   ),
   devin: '<span class="mk mono" aria-hidden="true">De</span>',
+  fx: '<span class="mk mono" aria-hidden="true">fx</span>',
+  "grok-build": '<span class="mk mono" aria-hidden="true">Gb</span>',
   // sessionpipe's own mark: the wires, the bar and the one orange dot
   sessionpipe:
     '<svg class="mk sp" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g fill="none" stroke-linecap="round" stroke-width="7"><path class="w" d="M9 47C20 47 19 32 29 32M9 32H29M9 17C20 17 19 32 29 32"/><path class="b" d="M29 32H36"/></g><circle cx="51" cy="32" r="7.5" fill="#FF5A1F"/></svg>',
@@ -805,11 +807,11 @@ const guiTour = () => {
 const FAQ = [
   [
     "What is sessionpipe?",
-    "An open protocol, and a small client, that turns the hooks coding agents already fire (Claude Code, Codex, Gemini CLI, Antigravity and Devin today; Cursor, Copilot CLI and others next) into one uniform stream of session events: started, working on a tool, needs you, ended. You choose per destination how much leaves your machine.",
+    "An open protocol, and a small client, that turns the hooks coding agents already fire (Claude Code, Codex, Gemini CLI, Antigravity, Devin and Grok Build today; Cursor, Copilot CLI and others next) into one uniform stream of session events: started, working on a tool, needs you, ended. You choose per destination how much leaves your machine.",
   ],
   [
     "Does it work with Claude Code hooks?",
-    "Yes. <code>sessionpipe install</code> writes Claude Code's SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Notification, Stop, Subagent and Compact hooks into every config dir on the machine, and maps them to protocol events. Codex hooks, Gemini CLI hooks, Antigravity hooks and Devin CLI hooks work the same way.",
+    "Yes. <code>sessionpipe install</code> writes Claude Code's SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, Notification, Stop, Subagent and Compact hooks into every config dir on the machine, and maps them to protocol events. Codex hooks, Gemini CLI hooks, Antigravity hooks, Devin CLI hooks and Grok Build hooks work the same way.",
   ],
   [
     "What are the privacy tiers?",
