@@ -297,6 +297,8 @@ function inventory(o: Partial<Inventory> = {}): Inventory {
     typed: null,
     unsure: null,
     inferred: null,
+    loose: null,
+    spare: {},
     home: home0(),
     taken: null,
     prefixes: [LOCAL(), NVM()],
@@ -631,6 +633,34 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall: what it re
     await run({}, "reinstall");
     expect(looked().npmPrefix).toBeNull();
     expect(facts().npm).toBe(false);
+  });
+
+  it("L5: the prefix handed to the look is the one npm answered to `npm prefix -g`, not the one the person's npmrc sets, where the two differ; doctor, which starts no npm, reads the npmrc", async () => {
+    // npm's answer is the truth of where it installs (an environment variable, a flag in
+    // a project's npmrc, a `--location` all move it); the file is only what doctor can
+    // read without starting anything.
+    vi.mocked(look).mockReturnValue(one());
+    const written = path.join(home, "from-the-npmrc");
+    const answered = path.join(home, "from-npm-itself");
+    put(path.join(home, ".npmrc"), `prefix=${written}\n`);
+    vi.mocked(execCapture).mockResolvedValue({ code: 0, stdout: `${answered}\n`, stderr: "" });
+    for (const flags of [[], ["--dry-run"], ["--yes"]]) {
+      await run({}, "reinstall", ...flags);
+      expect(looked().npmPrefix, flags.join(" ")).toBe(answered);
+    }
+    // npm answering nothing, or not there to be asked: none, and never the file's instead.
+    vi.mocked(execCapture).mockResolvedValue({ code: 0, stdout: "\n", stderr: "" });
+    await run({}, "reinstall", "--dry-run");
+    expect(looked().npmPrefix).toBeNull();
+    vi.mocked(execCapture).mockResolvedValue({ code: 127, stdout: "", stderr: "npm: not found" });
+    await run({}, "reinstall", "--dry-run");
+    expect(looked().npmPrefix).toBeNull();
+    // Doctor, of the same computer: the file's, with no npm asked.
+    vi.mocked(execCapture).mockClear();
+    await run({}, "doctor");
+    expect(looked().npmPrefix).toBe(written);
+    expect(execCapture).not.toHaveBeenCalled();
+    process.exitCode = undefined;
   });
 
   it("the one copy the look may ask is asked for its version by running it: what it prints is its version, or it doesn't run", async () => {
@@ -3024,6 +3054,98 @@ describe.skipIf(process.platform === "win32")("doctor and status: the copies of 
     expect(looked().tilde(path.join(home, `a${ESC}[31mb\nc`))).toBe("~/ab c");
   });
 
+  it("P4: what is typed is a folder in npm's own place that is no whole install: a warning row in the plan's sentence, a warning for a program, and the one command is npx's, alone and when copies collide; a checkout there stays a plain row", async () => {
+    // An install cut off in ~/.local: no package.json. npm's link still leads to it.
+    const cut = copy(LOCAL(), {
+      where: "~/.local/lib/node_modules/sessionpipe",
+      prefix: null,
+      slot: null,
+      not: "it has no package.json that can be read (an install that was cut off?)",
+      version: null,
+      uses: ["typed"],
+    });
+    const at = (copies: Copy[], o: Partial<Inventory> = {}) =>
+      inventory({
+        copies: [cut, ...copies],
+        onPath: [{ file: binOf(LOCAL()), dir: cut.dir }],
+        typed: cut.dir,
+        home: null,
+        ...o,
+      });
+    const CUT = "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which is no whole install of it";
+    const WHAT = "What you type is no whole install of sessionpipe (an install that was cut off?). ";
+    // Alone on the computer: it was "✓ All good" with a plain row, where nothing can be typed.
+    vi.mocked(look).mockReturnValue(at([]));
+    const alone = await run({}, "doctor");
+    expect(alone.lines[0]).toBe("! 1 thing needs attention");
+    expect(row(alone)).toBe(CUT);
+    expect(alone.lines.filter((l) => /^ {2}\S copies /.test(l))).toEqual([expect.stringMatching(/^ {2}! copies /)]);
+    expect(fix(alone)).toEqual([
+      "To fix",
+      `  1. ${WHAT}One command puts it right:`,
+      "       npx -y sessionpipe@latest reinstall",
+      "",
+      REPAIR,
+    ]);
+    expect(alone.text).not.toMatch(/^ {7}sessionpipe reinstall$/m);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    expect((await json()).warnings).toEqual([`${CUT}.`]);
+    process.exitCode = undefined;
+    const brief = await run({}, "status");
+    expect(brief.lines[0]).toBe("! 1 thing needs attention");
+    process.exitCode = undefined;
+    // With two installed copies beside it: one row (the copies, then what is typed), both
+    // warnings, one thing to fix, and still npx's line (it was no command at all).
+    vi.mocked(look).mockReturnValue(at([copy(NVM(), { version: "0.9.0" }), copy(path.join(home, ".npm-global"))]));
+    const both = await run({}, "doctor");
+    expect(both.lines[0]).toBe("! 1 thing needs attention");
+    expect(row(both)).toBe(
+      `0.9.0 in ~/.nvm/versions/node/v22.1.0 (nothing uses it); ${NEWEST} in ~/.npm-global (nothing uses it); ${CUT}`,
+    );
+    expect(both.lines.filter((l) => /^ {2}\S copies /.test(l))).toHaveLength(1);
+    expect(fix(both)).toEqual([
+      "To fix",
+      `  1. ${WHAT}2 copies of sessionpipe are on this computer, and one is enough. One command puts it right:`,
+      "       npx -y sessionpipe@latest reinstall",
+      "",
+      REPAIR,
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const warned = (await json()).warnings as string[];
+    expect(warned).toContain(`${CUT}.`);
+    expect(warned.some((x) => x.startsWith("2 copies of sessionpipe are on this computer"))).toBe(true);
+    process.exitCode = undefined;
+    // The very sentence `reinstall` refuses with for the same look, and its line moves the folder.
+    const refused = await run({}, "reinstall", "--dry-run");
+    expect(String(refused.err.mock.calls[0]?.[0])).toMatch(
+      new RegExp(
+        `^sessionpipe: ${CUT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .* Next: mv -n .* && npx -y sessionpipe@latest reinstall\n$`,
+      ),
+    );
+    // The same folder where no prefix is looked in is somebody's own (a checkout): the
+    // plain row, all good, as before.
+    vi.mocked(look).mockReturnValue(at([], { prefixes: [NVM()] }));
+    const own = await run({}, "doctor");
+    expect(own.lines[0]).toBe("✓ All good");
+    expect(own.lines.filter((l) => /^ {2}\S copies /.test(l))).toEqual([
+      expect.stringMatching(/^ {2}· copies .*which npm did not install \(a checkout, a linked folder\)$/),
+    ]);
+    expect(fix(own)).toEqual([]);
+    expect(process.exitCode).toBeUndefined();
+    // And what Volta keeps, in a prefix that is looked in: the plain row.
+    vi.mocked(look).mockReturnValue(
+      at([], { copies: [{ ...cut, not: "Volta keeps it", keeper: "volta uninstall sessionpipe" }] }),
+    );
+    const volta = await run({}, "doctor");
+    expect(volta.lines[0]).toBe("✓ All good");
+    expect(row(volta)).toBe(
+      "Typing `sessionpipe` starts the copy Volta keeps, in ~/.local/lib/node_modules/sessionpipe",
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it("M3, N4: what typing starts, where that is something npm did not install: a `·` row that says it as `reinstall` does, no warning, nothing to fix, all good; what can't be told is nothing to doctor, and nothing to repair", async () => {
     // One clean copy, and a checkout's link ahead of it on PATH.
     const stays = path.join(home, "bin", "sessionpipe");
@@ -3939,6 +4061,113 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall on real fol
     expect(doctor.lines).toContain("       sessionpipe reinstall");
   });
 
+  it("P1: PATH `.local/bin:<nvm>/bin`, an entry that is no absolute folder first: it is not read as what you type, the copy it leads to from here is not removed, and no line says what typing starts", async () => {
+    // The reviewer's V3. Read against the folder the command was run in, `.local/bin`
+    // was "you type this": the nvm copy was removed, exit 0, and from any other folder
+    // `sessionpipe` was not found. (Here the entry is written against the folder these
+    // tests run in, which is what a shell there would read it against.)
+    const a = installed(LOCAL(), "0.9.0");
+    const b = installed(NVM(), "1.0.0");
+    const rel = path.relative(process.cwd(), path.join(LOCAL(), "bin"));
+    expect(path.isAbsolute(rel)).toBe(false);
+    expect(readlinkSync(path.join(rel, "sessionpipe"))).toBe(readlinkSync(binOf(LOCAL())));
+    onPath(rel, path.join(NVM(), "bin"));
+    const w = onDisk();
+    const whole = tree(LOCAL());
+    const note = `\`${rel}\` on your PATH is not an absolute folder: what typing \`sessionpipe\` starts depends on where you stand, so no other installed copy is removed.`;
+    const r = await w.run({}, "reinstall", "--yes");
+    expect(r.err).not.toHaveBeenCalled();
+    // What was read: the one folder of PATH that is the same from everywhere.
+    expect(w.seen[0]).toMatchObject({ typed: b, unsure: null, inferred: null, loose: rel });
+    expect(w.seen[0]?.onPath).toEqual([{ file: binOf(NVM()), dir: b }]);
+    expect(r.lines).toEqual([
+      "Found 2 copies of sessionpipe on this computer",
+      "  · 1.0.0  ~/.nvm/versions/node/v22.1.0  you type this",
+      "  · 0.9.0  ~/.local                      nothing uses it",
+      "",
+      "This will",
+      "  + install  9.9.9, the newest release, fresh in ~/.nvm/versions/node/v22.1.0 (replaces 1.0.0)",
+      KEEP,
+      "",
+      "Left alone",
+      "  · ~/.local  it may be what you type from another folder",
+      "",
+      `  ! ${note}`,
+      "",
+      SAFE,
+      "",
+      "  ✓ sessionpipe 9.9.9 downloaded",
+      "  ✓ installed fresh in ~/.nvm/versions/node/v22.1.0, and it runs (what was there is gone)",
+      "  ✓ the copy in ~/.nvm/versions/node/v22.1.0 runs: `--version` says 9.9.9",
+      "",
+      "✓ sessionpipe 9.9.9 is installed in ~/.nvm/versions/node/v22.1.0 and in use. Pairings and settings are as they were.",
+      `! ${note}`,
+    ]);
+    expect(r.text).not.toMatch(/typing `sessionpipe` starts it|^ +\S removed/m);
+    // The copy in ~/.local is as it was, with npm's link to it: from the home, it is still
+    // what `.local/bin` starts.
+    expect(tree(LOCAL())).toEqual(whole);
+    expect(versionOf(a)).toBe("0.9.0");
+    expect(versionOf(b)).toBe(NEWEST);
+    expect(w.removals.every((x) => staging(NVM()).test(x.what))).toBe(true);
+    // The same PATH with that entry BEHIND the folder what is typed is in: a shell never
+    // gets to it, what is typed is read, and the other copy goes as ever.
+    onPath(path.join(NVM(), "bin"), rel);
+    const read = await w.run({}, "reinstall", "--yes");
+    expect(read.err).not.toHaveBeenCalled();
+    expect(w.seen.at(-1)).toMatchObject({ typed: b, loose: null });
+    expect(read.lines).toContain("  ✓ removed 0.9.0 in ~/.local, with its link");
+    expect(read.lines.at(-1)).toBe(
+      "✓ This computer has one sessionpipe: 9.9.9, in ~/.nvm/versions/node/v22.1.0. Pairings and settings are as they were.",
+    );
+    expect(existsSync(a)).toBe(false);
+  });
+
+  it("P3: the line that moves a file out of the way names a name that is free: with `sessionpipe.old` there from the last time, it is `.old.2`, and pasted, the next run finishes", async () => {
+    // `mv -n X X.old` with `X.old` there moves nothing, says nothing, and exits 0: npx
+    // then ran and came back to the same refusal, with the same line, every time.
+    const mine = unpack(slotOf(LOCAL()), "1.0.0");
+    const file = binOf(LOCAL());
+    put(file, "#!/bin/sh\n# second\n");
+    put(`${file}.old`, "#!/bin/sh\n# first\n");
+    onPath(path.join(LOCAL(), "bin"));
+    const w = onDisk();
+    const line = (to: string) =>
+      `sessionpipe: ~/.local/bin/sessionpipe is not sessionpipe's, and it is where the fresh copy's link goes: npm won't write over it. Nothing was changed. The line moves it aside and runs the repair again, through npx. Next: mv -n ${file} ${to} && npx -y sessionpipe@latest reinstall\n`;
+    const before = tree(tmp);
+    const r = await w.run({}, "reinstall", "--yes");
+    expect(r.err).toHaveBeenCalledWith(line(`${file}.old.2`));
+    expect(w.seen[0]?.spare).toEqual({ [file]: `${file}.old.2` });
+    expect(tree(tmp)).toEqual(before);
+    // The person pastes it: the file goes to the free name, and nothing is written over.
+    renameSync(file, `${file}.old.2`);
+    const again = await w.run({}, "reinstall", "--yes");
+    expect(again.err).not.toHaveBeenCalled();
+    expect(again.lines.at(-1)).toBe(`✓ ${ONE.said}`);
+    expect(versionOf(mine)).toBe(NEWEST);
+    expect(readFileSync(`${file}.old`, "utf8")).toBe("#!/bin/sh\n# first\n");
+    expect(readFileSync(`${file}.old.2`, "utf8")).toBe("#!/bin/sh\n# second\n");
+    // And the folder a cut-off install left in npm's own place, with `.old` and `.old.2`
+    // there (beside a copy that is a release behind: something to repair).
+    put(path.join(mine, "package.json"), { name: "sessionpipe", version: "1.0.0" });
+    const dir = slotOf(NVM());
+    put(path.join(dir, "README.md"), "half\n");
+    link(NVM());
+    mkdirSync(`${dir}.old`);
+    put(`${dir}.old.2`, "");
+    onPath(path.join(NVM(), "bin"), path.join(LOCAL(), "bin"));
+    const cut = await w.run({}, "reinstall", "--yes");
+    expect(String(cut.err.mock.calls[0]?.[0])).toMatch(
+      /^sessionpipe: Typing `sessionpipe` starts .*, which is no whole install of it: /,
+    );
+    expect(
+      String(cut.err.mock.calls[0]?.[0]).endsWith(
+        `Next: mv -n ${dir} ${dir}.old.3 && npx -y sessionpipe@latest reinstall\n`,
+      ),
+    ).toBe(true);
+    expect(w.seen.at(-1)?.spare).toEqual({ [dir]: `${dir}.old.3` });
+  });
+
   it("S2: a script of the person's own where the installed copy's link was: it is moved aside by the one line, never installed over, whether the command was started by its path or through npx", async () => {
     // The end-to-end run's S2. `~/.local/bin/sessionpipe` is a script, the copy is whole
     // in `~/.local/lib/node_modules`. Taken for a shim nobody can see through, the answer
@@ -4359,7 +4588,7 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall on real fol
     installed(NVM(), "0.9.0");
     onPath(path.join(LOCAL(), "bin"));
     const before = tree(tmp);
-    const said = `sessionpipe: Typing \`sessionpipe\` starts ~/.local/lib/node_modules/sessionpipe, which npm did not install (a checkout, a linked folder): it has no package.json that can be read (an install that was cut off?). This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed. The line moves it aside and runs the repair again, through npx. Next: mv -n ${dir} ${dir}.old && npx -y sessionpipe@latest reinstall\n`;
+    const said = `sessionpipe: Typing \`sessionpipe\` starts ~/.local/lib/node_modules/sessionpipe, which is no whole install of it: it has no package.json that can be read (an install that was cut off?). This command leaves it alone, so it can't put one clean copy in its place. Nothing was changed. The line moves it aside and runs the repair again, through npx. Next: mv -n ${dir} ${dir}.old && npx -y sessionpipe@latest reinstall\n`;
     for (const flags of [["--yes"], ["--dry-run"], []]) {
       const r = await w.run({}, "reinstall", ...flags);
       expect(r.err).toHaveBeenCalledWith(said);
@@ -4385,11 +4614,27 @@ describe.skipIf(process.platform === "win32")("sessionpipe reinstall on real fol
     expect(w.removals).toEqual([]);
     expect(w.npm.every((x) => x.join(" ") === "prefix -g")).toBe(true);
     expect(tree(tmp)).toEqual(before);
-    // Doctor says what is typed in the plan's own sentence, beside the copy it lists.
+    // P4: doctor does not call this computer all good. `sessionpipe` may not run at all
+    // here, so it is a warning in the plan's own sentence, and the one command is the way
+    // in that needs no installed copy.
+    const CUT = "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which is no whole install of it";
     const doctor = await w.run({}, "doctor");
-    expect(doctor.text).toContain(
-      "Typing `sessionpipe` starts ~/.local/lib/node_modules/sessionpipe, which npm did not install (a checkout, a linked folder)",
-    );
+    expect(doctor.lines[0]).toBe("! 1 thing needs attention");
+    expect(doctor.lines.filter((l) => /^ {2}\S copies /.test(l))).toEqual([
+      expect.stringMatching(new RegExp(`^ {2}! copies +${CUT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)),
+    ]);
+    expect(doctor.lines.slice(doctor.lines.indexOf("To fix"), doctor.lines.indexOf("To fix") + 3)).toEqual([
+      "To fix",
+      "  1. What you type is no whole install of sessionpipe (an install that was cut off?). One command puts it right:",
+      "       npx -y sessionpipe@latest reinstall",
+    ]);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    const told = JSON.parse((await w.run({}, "doctor", "--json")).text) as { warnings: string[]; copies: unknown[] };
+    expect(told.warnings).toContain(`${CUT}.`);
+    expect(told.copies).toHaveLength(1);
+    process.exitCode = undefined;
+    expect(tree(tmp)).toEqual(before);
     // The person does as the line says. Then npm's link leads nowhere, its prefix is
     // where a link already is, and the run installs there and removes the stray: one copy.
     renameSync(dir, `${dir}.old`);

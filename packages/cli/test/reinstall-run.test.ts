@@ -1447,6 +1447,32 @@ describe("the proof at the end", () => {
     expect((await carry(plan([use(), prove()], { inferred: "/x/shims/sessionpipe" }), {})).done).toEqual(ONE);
   });
 
+  it("P1: the same where what the plan could not read is a PATH entry that is no absolute folder: the proof is not asked about typing, no line says what typing starts, and with a copy kept it is not ONE sessionpipe", async () => {
+    // The plan hands the run the entry as it hands it a wrapper's file (`Plan.inferred`):
+    // what typing starts depends on where a person stands, so it is nobody's to say.
+    for (const typed of [true, false]) {
+      const proof = { typed, onPath: [BIN] };
+      const w = await carry(
+        plan([fetch(), install(true), use(), remove(LEFTOVER), prove()], { inferred: ".local/bin", kept: 1 }),
+        { there: [SLOT, LEFTOVER], proof },
+      );
+      expect(w.done, String(typed)).toEqual({
+        state: "one",
+        said: "sessionpipe 2.0.0 is installed in ~/.local and in use. Pairings and settings are as they were.",
+        warn: [],
+      });
+      // The leftover still goes, after a proof that asked only that the copy runs.
+      expect(taken(w)).toEqual([LEFTOVER]);
+      expect(w.proved).toEqual([[], [LEFTOVER]]);
+      expect(w.said).toContain(RUNS);
+      for (const line of w.said) expect(line).not.toMatch(/starts it|does not start|\.local\/bin\b.*PATH/);
+    }
+    // None kept: one sessionpipe, and still not a word of what typing starts.
+    const alone = await carry(plan([use(), prove()], { inferred: "." }), { proof: { typed: false, onPath: [] } });
+    expect(alone.done).toEqual(ONE);
+    expect(alone.said).toEqual([RUNS]);
+  });
+
   it("N1: over computers made up from a seed, no run of a plan whose `inferred` is set says what typing starts, or fails for it; and with a copy kept it never says this computer has ONE", async () => {
     let ran = 0;
     let keeping = 0;

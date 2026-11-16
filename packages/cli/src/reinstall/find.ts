@@ -100,6 +100,14 @@ export interface Inventory {
    *  another copy. Where this is set, no installed copy is removed, and nothing is said of
    *  what typing starts as if it were known. */
   inferred: string | null;
+  /** An entry of PATH that is no absolute folder (empty: the folder a shell is in) and
+   *  comes before what was read as typed: what typing starts then depends on where a
+   *  person stands. Handled as `inferred` is: nothing installed is removed, and it is said. */
+  loose: string | null;
+  /** For each thing a refusal may tell a person to move aside (the file at the home's
+   *  command path, the folder in the way, what is typed): a name beside it that is free
+   *  (`<it>.old`, else `.old.2`, …), so the line always moves it. */
+  spare: Record<string, string>;
   /** Where the copy that typing starts lives; with nothing typed, the place a shell would
    *  find a fresh one. Never chosen by who may write it. Null: no such place, or what is
    *  typed is no install of ours. */
@@ -217,6 +225,14 @@ const isThere = (p: string): boolean => {
   }
 };
 
+/** A name beside a file or folder that nothing has yet: `.old`, else `.old.2`, and on. */
+const spare = (p: string): string => {
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${p}.old` : `${p}.old.${n}`;
+    if (!isThere(name)) return name;
+  }
+};
+
 /** The package folder a `…/dist/cli.js` is in; null for any other file. */
 const packageOf = (cli: string | null): string | null =>
   cli && path.basename(cli) === "cli.js" && path.basename(path.dirname(cli)) === "dist"
@@ -257,7 +273,14 @@ export function look(o: Looking): Inventory {
 
   // PATH, each folder once: a folder named twice (/bin and /usr/bin, a home reached through
   // a link) is looked in once, and a link in it is read from where it really is.
-  const pathDirs = uniq((o.env.PATH ?? "").split(path.delimiter).filter(Boolean).map(one));
+  // An entry that is not an absolute folder (an empty one is the folder a shell is in)
+  // names a different folder from every place a person types in: it is never read.
+  const entries = (o.env.PATH ?? "").split(path.delimiter);
+  const pathDirs = uniq(entries.filter((e) => path.isAbsolute(e)).map(one));
+  /** Which absolute folder of PATH each such entry comes before. */
+  const looseAt = entries.flatMap((e, i) =>
+    path.isAbsolute(e) ? [] : [{ entry: e, before: entries.slice(0, i).filter((x) => path.isAbsolute(x)).length }],
+  );
   // A prefix is a folder that was looked in as one: the places a Node keeps its global
   // packages, and a PATH folder whose own npm link leads into the `lib` beside it. A
   // `lib/node_modules` anywhere else is some project's.
@@ -340,6 +363,14 @@ export function look(o: Looking): Inventory {
   // The first on PATH that starts something: a link to a copy that is gone starts nothing,
   // and a shell goes on to the next.
   const first = onPath.find((e) => !e.dir || isThere(e.dir)) ?? null;
+  // An entry that is no absolute folder, ahead of it on PATH: what typing starts then
+  // depends on the folder a person is in, and what was read is only what it may be.
+  const firstAt = first
+    ? entries.filter((e) => path.isAbsolute(e)).findIndex((e) => one(e) === path.dirname(first.file))
+    : -1;
+  const ahead = first ? looseAt.find((l) => l.before <= firstAt) : undefined;
+  // (An empty entry is the folder a shell is in: `.`.)
+  const loose = ahead ? ahead.entry || "." : null;
   const installed = (dir: string): boolean => {
     const p = prove(dir, proving);
     return p.is === "folder" && p.slot === "global" && !p.aside;
@@ -495,6 +526,12 @@ export function look(o: Looking): Inventory {
     typed,
     unsure,
     inferred: shimmed ? opaque : null,
+    loose,
+    spare: Object.fromEntries(
+      [home?.blocked, home ? null : (taken as Inventory["taken"])?.dir, typed].flatMap((p) =>
+        p ? [[p, spare(p)]] : [],
+      ),
+    ),
     home,
     taken: home ? null : taken,
     prefixes,

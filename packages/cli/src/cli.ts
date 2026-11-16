@@ -88,7 +88,7 @@ import { Refusal } from "./refusal.js";
 import { type Inventory, look, spelled } from "./reinstall/find.js";
 import { binTarget, remove, same } from "./reinstall/ours.js";
 import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
-import { type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
+import { cutOff, type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
 import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
@@ -1335,7 +1335,16 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   // What is typed is not a copy npm installed (a checkout, Volta's copy): nothing to fix,
   // and said as what is so. It counts for nothing in the verdict.
   const own = around ? typedAs(around, shown) : null;
-  if (own && !collide && !astray) computer.rows.push({ mark: "info", label: "copies", value: own.slice(0, -1) });
+  // But not where what is typed is a folder in npm's own place that is no whole install
+  // (an install that was cut off): `sessionpipe` may not run at all there, and the repair
+  // is started through npx.
+  const cut = !!around && cutOff(around);
+  if (own && !cut && !collide && !astray)
+    computer.rows.push({ mark: "info", label: "copies", value: own.slice(0, -1) });
+  if (own && cut) {
+    if (!collide && !astray) computer.rows.push({ mark: "warn", label: "copies", value: own.slice(0, -1) });
+    warnings.push(own);
+  }
   if (collide || astray)
     computer.rows.push({
       mark: "warn",
@@ -1368,15 +1377,15 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
             ].join("; ")})`
       }; \`sessionpipe reinstall\` leaves one clean copy`,
     );
-  const blocked = !!own && (collide || two);
-  if (down || apart.length || collide || two)
+  const blocked = !!own && !cut && (collide || two);
+  if (down || apart.length || collide || two || cut)
     todo.push({
       order: 1,
       // Which release runs where is in the rows above: with copies to clear away the fix
       // is said by their number alone.
-      say: `${down ? "The background service isn't running, so no message reaches this computer. " : ""}${
-        two ? "A daemon someone started by hand holds the socket the background service needs. " : ""
-      }${
+      say: `${cut ? "What you type is no whole install of sessionpipe (an install that was cut off?). " : ""}${
+        down ? "The background service isn't running, so no message reaches this computer. " : ""
+      }${two ? "A daemon someone started by hand holds the socket the background service needs. " : ""}${
         collide
           ? installs.length > 1
             ? `${installs.length} copies of sessionpipe are on this computer, and one is enough. `
@@ -1391,7 +1400,16 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
           ? "What you type is not a copy npm installed, so `sessionpipe reinstall` leaves it alone and can't put this right from here."
           : "One command puts it right:"
       }`,
-      ...(blocked ? {} : { run: collide || two ? "sessionpipe reinstall" : "sessionpipe update" }),
+      // Where what is typed is not whole, `sessionpipe` may not run: the repair goes through npx.
+      ...(blocked
+        ? {}
+        : {
+            run: cut
+              ? "npx -y sessionpipe@latest reinstall"
+              : collide || two
+                ? "sessionpipe reinstall"
+                : "sessionpipe update",
+          }),
     });
   const w = report.hook_wall_ms as { p50: number; p95: number; n: number } | null;
   if (w)
@@ -2195,8 +2213,17 @@ function npmrcPrefix(): string | null {
   } catch {
     return null;
   }
-  // (Blanks on the line only: a `prefix=` with nothing after it names no folder.)
-  const said = /^[ \t]*prefix[ \t]*=[ \t]*(\S.*?)[ \t]*$/m.exec(text)?.[1]?.replace(/^(["'])(.*)\1$/, "$2");
+  // Line by line, and no line longer than a folder's name can be: a `prefix=` with
+  // nothing after it names no folder.
+  let said: string | undefined;
+  for (const line of text.split("\n")) {
+    if (line.length > 4096) continue;
+    const m = /^\s*prefix\s*=\s*(\S.*)$/.exec(line.trimEnd());
+    if (m) {
+      said = (m[1] as string).replace(/^(["'])(.*)\1$/, "$2");
+      break;
+    }
+  }
   if (!said) return null;
   // npm's own two ways to say the home folder.
   return said.replace(/^~(?=$|[\\/])/, os.homedir()).replace(/\$\{HOME\}/g, os.homedir());

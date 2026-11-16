@@ -39,6 +39,11 @@
 //    `dangling`, as is such a link in a prefix that is not on PATH.
 //  - `inferred`: that file, where what is typed was taken from how the command was started
 //    (as npm's link to an installed copy) and so is not read from anywhere.
+//  - `loose`: an entry of PATH that is no absolute folder (an empty one is `.`), where it
+//    comes before the folder the first of them that starts anything is in: such an entry
+//    is never looked in, and what typing starts then depends on where a person stands.
+//  - `spare`: for the home's blocked file, the folder that is in the way (with no home)
+//    and what is typed: a name beside it that nothing has yet (`.old`, else `.old.2`).
 //  - `home`: the typed copy's prefix when that copy is a global one of ours, whatever
 //    folder that is; null when what is typed is no install of ours, and with `unsure`;
 //    with nothing typed, the first of (the prefix whose copy has a file where its link
@@ -179,6 +184,11 @@ interface Model {
   others: Other[];
   /** PATH, folder by folder. */
   path: string[];
+  /** An entry of PATH that is no absolute folder, and how many of those folders come
+   *  before it. */
+  loose?: { entry: string; at: number };
+  /** Whatever a refusal would tell a person to move aside has a `.old` beside it already. */
+  oldThere?: boolean;
   /** The package folder this command runs from. */
   mine: string;
   /** It was started as a link that leads to that folder (where there is one): npm's own
@@ -390,6 +400,10 @@ function seen(m: Model): Inventory {
   if (serving) add(serving);
 
   const first = onPath.find((e) => !e.dir || folders.has(e.dir)) ?? null;
+  // An entry that is no absolute folder, ahead of (or right behind nothing but) the folder
+  // that first one is in. (An empty entry is the folder a shell is in: `.`.)
+  const loose =
+    first && m.loose && m.loose.at <= m.path.indexOf(path.dirname(first.file)) ? m.loose.entry || "." : null;
   const installed = (dir: string): boolean => {
     const f = folders.get(dir);
     return !!f && inReach(dir) && f.slot === "global" && !f.aside;
@@ -497,6 +511,8 @@ function seen(m: Model): Inventory {
     const h = p ? homeAt(p, why) : null;
     return h ? [h] : [];
   });
+  const home = homes.find((h) => h.onPath) ?? homes[0] ?? null;
+  const inWayOfHome = (home ? null : (taken as Inventory["taken"]))?.dir;
   return {
     reach: m.reach,
     copies,
@@ -507,7 +523,12 @@ function seen(m: Model): Inventory {
     unsure,
     // What is typed was taken from how the command was started, not read: by which file.
     inferred: shimmed ? opaque : null,
-    home: homes.find((h) => h.onPath) ?? homes[0] ?? null,
+    loose,
+    // A free name beside each thing a refusal may tell a person to move aside.
+    spare: Object.fromEntries(
+      [home?.blocked, inWayOfHome, typed].flatMap((x) => (x ? [[x, `${x}.old${m.oldThere ? ".2" : ""}`]] : [])),
+    ),
+    home,
     taken: homes.length ? null : taken,
     prefixes: places.map((p) => p.prefix),
     npx: NPX,
@@ -1041,5 +1062,15 @@ function chaos(d: Dice): Model {
 export function world(seed: number): World {
   const d = dice(rng(seed));
   const kind = d.next();
-  return made(seed, kind < 0.06 ? sound(d) : kind < 0.4 ? troubled(d) : chaos(d));
+  const m = kind < 0.06 ? sound(d) : kind < 0.4 ? troubled(d) : chaos(d);
+  // From a stream of its own, so every computer made up before these were is as it was: a
+  // PATH with an entry that is no absolute folder somewhere in it, and names taken.
+  const more = dice(rng((seed ^ 0x5bd1e995) >>> 0));
+  if (more.chance(0.1))
+    m.loose = {
+      entry: more.pick([".", "", "bin", path.join("node_modules", ".bin")]),
+      at: Math.floor(more.next() * (m.path.length + 1)),
+    };
+  m.oldThere = more.chance(0.2);
+  return made(seed, m);
 }

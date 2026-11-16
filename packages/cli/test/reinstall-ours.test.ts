@@ -48,7 +48,7 @@ import {
   within,
 } from "../src/reinstall/ours.js";
 
-type Cue = "readdirSync" | "realpathSync" | "rmSync" | "rmdirSync";
+type Cue = "readdirSync" | "realpathSync" | "rmSync" | "rmdirSync" | "lstatSync";
 const fake = vi.hoisted(() => ({
   /** The test's temp dir. A deletion handed any other path is refused here, loudly. */
   root: "",
@@ -107,7 +107,11 @@ vi.mock("node:fs", async (original) => {
     const said = typeof what === "string" ? fake.ids?.(what) : null;
     return said ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, said) : st;
   }) as typeof real.statSync;
-  return { ...real, rmSync, rmdirSync, unlinkSync, readdirSync, realpathSync, statSync };
+  const lstatSync = ((what: unknown, ...rest: unknown[]) => {
+    refuse("lstatSync", what);
+    return (real.lstatSync as (...a: unknown[]) => unknown)(what, ...rest);
+  }) as typeof real.lstatSync;
+  return { ...real, rmSync, rmdirSync, unlinkSync, readdirSync, realpathSync, statSync, lstatSync };
 });
 
 /** What is on the disk is tested where the module runs: `reinstall` refuses on Windows
@@ -1743,6 +1747,93 @@ disk("the folder this command has npm install into, beside the slot", () => {
     expect(existsSync(path.join(slot(kept), "CHANGELOG.md"))).toBe(true);
   });
 
+  it("P2: only a plain FILE of those names is passed over: a folder or a link named .DS_Store, Thumbs.db or desktop.ini is an extra like any other, the copy is refused, and nothing under it is removed", () => {
+    // The reviewer's stray copy: a folder `.DS_Store` with `my-notes.txt` in it went whole
+    // with the copy, "removed", with no word of it: the one thing removed that the proof
+    // had not looked into.
+    for (const [n, name] of DROPPED.entries()) {
+      const HOLDS = `it holds ${name}, which no published sessionpipe has (a checkout or a build?)`;
+      // A folder of the name, with someone's file in it.
+      const kept = unpack(slot(path.join(tmp, `prefix${n}`)));
+      link(path.join(tmp, `prefix${n}`));
+      mkdirSync(path.join(kept, name));
+      writeFileSync(path.join(kept, name, "my-notes.txt"), "mine");
+      refused(kept, posix(), HOLDS);
+      expect(readFileSync(path.join(kept, name, "my-notes.txt"), "utf8")).toBe("mine");
+      // An empty folder of the name is a folder too.
+      fake.real.rmSync(path.join(kept, name), { recursive: true });
+      mkdirSync(path.join(kept, name));
+      refused(kept, posix(), HOLDS);
+      // A link of the name: to a file, to a folder, to nothing.
+      for (const to of [path.join(kept, "README.md"), path.join(kept, "dist"), path.join(tmp, "nowhere")]) {
+        fake.real.rmSync(path.join(kept, name), { recursive: true, force: true });
+        symlinkSync(to, path.join(kept, name));
+        refused(kept, posix(), HOLDS);
+      }
+      // The plain file it is for: the copy is ours again.
+      fake.real.rmSync(path.join(kept, name));
+      writeFileSync(path.join(kept, name), "");
+      expect(prove(kept, posix()), name).toEqual(FOLDER);
+    }
+    // One of the names that can't be looked at (listed, and gone or shut by then) is not
+    // known to be a plain file: it is an extra too.
+    const shut = unpack(slot(path.join(tmp, "prefix3")));
+    writeFileSync(path.join(shut, "desktop.ini"), "");
+    fake.fails = (call, p) => call === "lstatSync" && p === path.join(shut, "desktop.ini");
+    refused(shut, posix(), "it holds desktop.ini, which no published sessionpipe has (a checkout or a build?)");
+    fake.fails = null;
+    expect(prove(shut, posix())).toEqual(FOLDER);
+    // In a folder with nothing else in it: no longer "what is left of a copy".
+    const hollow = slot(path.join(tmp, "prefix4"));
+    mkdirSync(path.join(hollow, ".DS_Store"), { recursive: true });
+    writeFileSync(path.join(hollow, ".DS_Store", "my-notes.txt"), "mine");
+    expect(prove(hollow, posix()).is).toBe("not");
+    expect(thrownBy(() => remove(hollow, posix()))).toBeInstanceOf(NotOurs);
+    // In the folder npm installs into, at any level of it, and in the copy inside it.
+    for (const [n, at] of [
+      (d: string) => d,
+      (d: string) => path.join(d, "bin"),
+      (d: string) => path.join(d, "lib"),
+      (d: string) => path.dirname(slot(d)),
+      (d: string) => slot(d),
+    ].entries()) {
+      const stage = staged(path.join(tmp, `prefix${5 + n}`));
+      mkdirSync(path.join(at(stage), "Thumbs.db"));
+      writeFileSync(path.join(at(stage), "Thumbs.db", "my-notes.txt"), "mine");
+      // (Named by whichever entry the disk lists first that no published copy has.)
+      refused(stage, posix(), /^it holds (bin|lib|Thumbs\.db), which no published/);
+      expect(readFileSync(path.join(at(stage), "Thumbs.db", "my-notes.txt"), "utf8")).toBe("mine");
+    }
+    expect(fake.gone).toEqual([]);
+  });
+
+  it("P2: the removal takes those names as files, never with what is under them: a folder that takes a file's place between the proof and the removal stays, with what is in it, and that is said", () => {
+    const prefix = path.join(tmp, "prefix");
+    const dir = unpack(slot(prefix));
+    link(prefix);
+    writeFileSync(path.join(dir, ".DS_Store"), "");
+    expect(prove(dir, posix())).toEqual(FOLDER);
+    // Proven with a plain file there. As the removal begins, a folder of the name with
+    // someone's notes in it is there instead.
+    fake.fails = (call, p) => {
+      if (call === "rmSync" && p === path.join(dir, "dist")) {
+        fake.real.rmSync(path.join(dir, ".DS_Store"));
+        mkdirSync(path.join(dir, ".DS_Store"));
+        writeFileSync(path.join(dir, ".DS_Store", "my-notes.txt"), "mine");
+      }
+      return false;
+    };
+    const e = thrownBy(() => remove(dir, posix())) as Error;
+    expect(e).not.toBeInstanceOf(NotOurs);
+    expect(e.message).toMatch(/could only be removed in part \(.*\): what is left of it no longer runs/);
+    // It stopped at that name: nothing after it was asked to go, the manifest least of all.
+    expect(fake.gone).toEqual(["dist", "README.md", "LICENSE", "NOTICE", ".DS_Store"].map((x) => path.join(dir, x)));
+    expect(readFileSync(path.join(dir, ".DS_Store", "my-notes.txt"), "utf8")).toBe("mine");
+    expect(existsSync(path.join(dir, "package.json"))).toBe(true);
+    // Its link is still there (it leads to a file that is gone, as after any removal in part).
+    expect(fake.real.lstatSync(path.join(prefix, "bin", "sessionpipe")).isSymbolicLink()).toBe(true);
+  });
+
   it("N3: what an operating system drops into a folder by itself (.DS_Store, Thumbs.db, desktop.ini) says nothing of whose it is: a copy, an empty folder and a staging folder are ours with it, and it goes with them", () => {
     // Someone opened the folder in the Finder: with a `.DS_Store` in it the copy "held
     // what no published sessionpipe has", was left alone, and was what typing started.
@@ -2041,6 +2132,9 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
   const COMPUTED = /([A-Za-z_$][\w$]*|[)\]])\s*(?:\?\.\s*)?\[([^\]\n]*)\]/g;
   /** The tables page.ts looks a word up in, and the types a field is read from by name. */
   const TABLES = ["USED", "KIND", "VERB"];
+  /** The one record that is read by a path: the look's free name beside what a refusal
+   *  tells a person to move (`inv.spare[file]`, P3). What it holds is words for a line. */
+  const RECORDS = ["spare"];
   const TYPES = ["Inventory", "Facts", "Plan"];
   const WORDS = ["const", "let", "var", "return", "of", "in", "as", "case", "yield", "await", "typeof", "else"];
   /** What is wrong with a computed access; null for one of the kinds these files use. */
@@ -2053,7 +2147,9 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     if (key === "" || /^\d+$/.test(key) || key === "\\\\/") return null;
     if (/^"[A-Za-z]+"$/.test(key)) return TYPES.includes(receiver) ? null : `${said}: a member by a name in a string`;
     if (/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(key))
-      return TABLES.includes(receiver) ? null : `${said}: a member by a name held in a variable`;
+      return TABLES.includes(receiver) || RECORDS.includes(receiver)
+        ? null
+        : `${said}: a member by a name held in a variable`;
     return `${said}: a member by a name made at run time`;
   };
 
@@ -2308,6 +2404,12 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
 
   it("only ours.ts names a deletion; every other file can only read; none runs a program, says uninstall, or reaches a member by a made-up name", () => {
     for (const name of files) expect(inModule(name, source(name)), name).toEqual([]);
+    // P3: the one record read by a path is read once, in plan.ts, for the words of a line.
+    for (const name of files)
+      expect(code(source(name)).match(/\bspare\s*(?:\?\.\s*)?\[/g) ?? [], name).toHaveLength(
+        name === "plan.ts" ? 1 : 0,
+      );
+    expect(source("plan.ts")).toContain(q('shq(inv.spare[file] ?? `@{file}.old`, "linux")'));
     expect(fromFs(source("ours.ts"))).toEqual(expect.arrayContaining(OURS_ONLY));
     expect(fromFs(source("find.ts")).length).toBeGreaterThan(0);
     // The two lines that are only shown are there, once each, as this guard knows them.
@@ -2517,10 +2619,11 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
       expect(d.at).toBeGreaterThan(taken.index);
       expect(d.at).toBeLessThan(taken.index + taken[0].length);
     }
-    // After it: the six uses, each a call, and no other function begins before the file ends.
+    // After it: the seven uses, each a call, and no other function begins before the file ends.
     const body = text.slice(start);
     expect(deletes(body).map((d) => d.word)).toEqual([
       "unlinkSync",
+      "rmSync",
       "rmSync",
       "rmSync",
       "rmSync",
@@ -2531,9 +2634,9 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     // copy has, or a link the proof called its own.
     expect(
       body.match(
-        /unlinkSync\(what\)|rmSync\(what, \{ recursive: true \}\)|rmSync\(path\.join\(what, e\), \{ recursive: true, force: true \}\)|rmSync\(path\.join\(what, "package\.json"\), \{ force: true \}\)|rmdirSync\(what\)|unlinkSync\(b\)/g,
+        /unlinkSync\(what\)|rmSync\(what, \{ recursive: true \}\)|rmSync\(path\.join\(what, e\), \{ recursive: true, force: true \}\)|rmSync\(path\.join\(what, e\), \{ force: true \}\)|rmSync\(path\.join\(what, "package\.json"\), \{ force: true \}\)|rmdirSync\(what\)|unlinkSync\(b\)/g,
       ),
-    ).toHaveLength(6);
+    ).toHaveLength(7);
     expect(body.slice(1)).not.toMatch(/^(?:export\s+)?(?:async\s+)?(?:function|const|let|var|class)\b/m);
     expect(body.trimEnd().endsWith("\n}")).toBe(true);
     // Each is reached only past the proof.
@@ -2548,7 +2651,9 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     const order = [
       "const bins = binsOf(what, o);",
       "if (p.staging) rmSync(what, { recursive: true });",
-      "for (const e of [...REST, ...DROPPED]) rmSync(path.join(what, e), { recursive: true, force: true });",
+      "for (const e of REST) rmSync(path.join(what, e), { recursive: true, force: true });",
+      // P2: what a system dropped is a file, and goes as one: never with what is under it.
+      "for (const e of DROPPED) rmSync(path.join(what, e), { force: true });",
       'rmSync(path.join(what, "package.json"), { force: true });',
       "rmdirSync(what);",
       "} catch (e) {",
@@ -2558,6 +2663,11 @@ describe("the guard: one file deletes, in one function, and nothing is npm's or 
     ].map((line) => body.indexOf(line));
     expect(order[0]).toBeGreaterThan(proved);
     for (const [i, at] of order.entries()) if (i) expect(at, String(i)).toBeGreaterThan(order[i - 1] as number);
+    // P2: two removals go down into a folder: the staging folder, and the entries a
+    // published copy has. And one of those names counts only as a plain file.
+    expect(body.match(/recursive: true/g)).toHaveLength(2);
+    expect(text).toContain("return DROPPED.has(name) && lstatSync(path.join(dir, name)).isFile();");
+    expect(code(text).match(/DROPPED\.has\(/g)).toHaveLength(1);
     expect(text).toContain('const REST = ["dist", "README.md", "LICENSE", "NOTICE"] as const;');
     expect(text).toContain('const PUBLISHED: ReadonlySet<string> = new Set(["package.json", ...REST]);');
     expect(text).toContain('const DROPPED: ReadonlySet<string> = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);');
