@@ -149,8 +149,10 @@ const results = await Promise.all(
     fs.mkdirSync(dir);
     const fd = fs.openSync(path.join(dir, "run.log"), "w");
     const start = performance.now();
+    // `node` from PATH, as `npm test` starts Vitest (its bin's `#!/usr/bin/env node`), so a tool
+    // that wraps `node` on PATH (a CI's test-report recorder) sees each process as it sees `npm test`.
     const child = spawn(
-      process.execPath,
+      "node",
       [
         path.join(root, "node_modules/vitest/vitest.mjs"),
         "run",
