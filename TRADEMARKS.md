@@ -25,11 +25,12 @@ cover copyright, not the name. This page says how the name may be used.
 
 ## Third-party names
 
-Claude Code, Codex, Gemini, Antigravity, Devin, Cursor, GitHub Copilot, Droid, Kiro,
-OpenCode, Warp, Zed, Amp and Goose are trademarks of their respective owners. They
+Claude Code, Codex, Gemini, Antigravity, Devin, Grok, fx, Cursor, GitHub Copilot, Droid,
+Kiro, OpenCode, Warp, Zed, Amp and Goose are trademarks of their respective owners. They
 are used here only to identify the software sessionpipe integrates with. This project
 is not affiliated with, sponsored by or endorsed by Anthropic, OpenAI, Google,
-Cognition, Cursor, GitHub / Microsoft, Factory, Amazon, Anomaly, Sourcegraph or Block.
+Cognition, xAI, Vercel, Cursor, GitHub / Microsoft, Factory, Amazon, Anomaly, Sourcegraph
+or Block.
 
 ## Questions
 

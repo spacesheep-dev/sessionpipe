@@ -3197,20 +3197,6 @@ details > p {
 .mk.sp .b {
   stroke: var(--fg);
 }
-/* Devin, Grok Build and fx have no mark of their own here: a monogram */
-.mk.mono {
-  display: inline-grid;
-  place-items: center;
-  border-radius: 5px;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-  font: 500 8px / 1 var(--sans);
-  letter-spacing: -0.02em;
-  vertical-align: -4px;
-}
-.tail .mk.mono {
-  border-radius: 3.5px;
-  font-size: 6.5px;
-}
 /* spacesheep's sheep: open wool on paper, white wool and deeper ink in the dark */
 .sheep .ss-wool {
   fill: none;
