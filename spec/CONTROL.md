@@ -928,7 +928,14 @@ else `allow_always`, and answers `cancelled` when neither is offered; `inherit` 
 as `safe` does, since the agent asked because its own settings want a person. The mode governs
 what the daemon answers, not what the agent asks: an agent that runs a tool without
 asking (OpenCode 2.1 wrote a file in `safe` mode with no `session/request_permission`)
-is bound only by its own settings, as it would be at its own terminal.
+is bound only by its own settings, as it would be at its own terminal. The exception is
+an agent that ADAPTERS.md gives a word of its own for the mode (fx: its permission mode,
+in its process's environment): that run is started in it, so what the mode says must ask
+does. A held agent runs, and is answered, in the mode it was opened in, so when the
+machine's mode changes in a way that would run it otherwise (another answer, or another
+word of its own for the mode) the daemon lets go of it, at once when idle and else when
+its turn ends: the next `prompt` reopens the session (`session/load`) in the new mode, or
+is acked `unsupported` by an agent that can't reopen one, as after ten idle minutes.
 Every other request an agent makes of its client (`fs/*`, `terminal/*`,
 `elicitation/create`) is answered *method not found*, since the daemon advertised none
 of them. The daemon only ever runs an agent that is already installed on the machine

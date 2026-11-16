@@ -29,6 +29,18 @@ export interface AcpAgent {
   args: string[];
   /** The agent's own `_meta` for `session/new` and `session/load`, where it has one. */
   meta?: Record<string, unknown>;
+  /** What the agent's process is given per machine mode, where the agent's own default
+   *  would act on what the mode says must ask: the agent's own word for that mode, for
+   *  this process only, never saved (conformance/control-acp-mode-env.json). */
+  modeEnv?: Partial<Record<Mode, Record<string, string>>>;
+}
+
+/** An agent found on this machine: how to run it, and what to send it. */
+export interface AcpFound {
+  bin: string;
+  args: string[];
+  meta?: Record<string, unknown>;
+  modeEnv?: Partial<Record<Mode, Record<string, string>>>;
 }
 
 /** The agents the daemon can drive, with the launch line the registry publishes. */
@@ -77,6 +89,10 @@ export const ACP_AGENTS: readonly AcpAgent[] = [
   // Not in the registry (2026-11-13): the launch line is fx's own manual's
   // (fx.sh/docs/using-fx/acp). An ACP session of fx's leaves out the MCP servers in the
   // person's ~/.fx/mcp.json unless the client asks for them; measured on fx 0.0.16.
+  // fx's own default (`auto`) edits files and runs recognised commands without asking,
+  // so on a safe machine it runs in its `ask` mode, where every such call reaches the
+  // daemon's answer; an auto machine names fx's `auto`; inherit leaves fx's own setting.
+  // FX_PERMISSION_MODE is fx's process override (fx.sh/docs/configure-fx/permissions).
   {
     harness: "fx",
     registry: "fx",
@@ -84,6 +100,7 @@ export const ACP_AGENTS: readonly AcpAgent[] = [
     bin: "fx",
     args: ["acp"],
     meta: { fx: { profileMcpServers: true } },
+    modeEnv: { safe: { FX_PERMISSION_MODE: "ask" }, auto: { FX_PERMISSION_MODE: "auto" } },
   },
 ];
 
@@ -101,7 +118,7 @@ export function findAcpAgent(
   env: NodeJS.ProcessEnv = process.env,
   home = os.homedir(),
   nodeDir = path.dirname(process.execPath),
-): { bin: string; args: string[]; meta?: Record<string, unknown> } | null {
+): AcpFound | null {
   const a = acpAgent(harness);
   if (!a) return null;
   const bin = findBinary({
@@ -116,7 +133,9 @@ export function findAcpAgent(
       "/usr/local/bin",
     ],
   });
-  return bin ? { bin, args: a.args, ...(a.meta ? { meta: a.meta } : {}) } : null;
+  return bin
+    ? { bin, args: a.args, ...(a.meta ? { meta: a.meta } : {}), ...(a.modeEnv ? { modeEnv: a.modeEnv } : {}) }
+    : null;
 }
 
 /** The ACP agents installed here, by harness name, for the daemon's hello. */
@@ -185,6 +204,8 @@ export interface AcpOptions {
   args: string[];
   /** Sent as `_meta` when the session is opened (AcpAgent.meta). */
   meta?: Record<string, unknown>;
+  /** Added to the agent's env for `mode` (AcpAgent.modeEnv). */
+  modeEnv?: Partial<Record<Mode, Record<string, string>>>;
   cwd: string;
   mode: Mode;
   label: string;
@@ -220,8 +241,9 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
     child = spawn(c.file, c.args, {
       cwd: o.cwd,
       // The caller's env as given (the daemon's is jobEnv's already, with the ask's
-      // lineage on top), marked as a control job.
-      env: { ...o.env, SESSIONPIPE_CONTROL_JOB: "1" },
+      // lineage on top), with the agent's word for the machine's mode, marked as a
+      // control job.
+      env: { ...o.env, ...o.modeEnv?.[o.mode], SESSIONPIPE_CONTROL_JOB: "1" },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true,

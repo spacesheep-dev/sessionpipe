@@ -75,7 +75,7 @@ process.stdin.on("end", () => { log({ stdin: "end" }); if (how !== "deaf") setTi
 if (how !== "quiet") process.stderr.write("fake-acp starting\\n");
 async function handle(m) {
   if (m.id !== undefined && m.method === undefined) { const w = waiting.get(m.id); waiting.delete(m.id); log({ answer: m }); w?.(m); return; }
-  log({ method: m.method, params: m.params, job: process.env.SESSIONPIPE_CONTROL_JOB || null, cwd: startCwd });
+  log({ method: m.method, params: m.params, job: process.env.SESSIONPIPE_CONTROL_JOB || null, fxMode: process.env.FX_PERMISSION_MODE || null, cwd: startCwd });
   if (m.method === "initialize") {
     if (how === "mute") return;
     if (how === "garbage") return reply(m.id, null);
@@ -233,6 +233,22 @@ describe("the agents and where they are", () => {
     expect(acpAgent("claude-code")).toBeUndefined();
     expect(acpOverride("gemini-cli")).toBe("SESSIONPIPE_ACP_GEMINI_CLI");
   });
+  it("what an agent's process is given per machine mode is conformance/control-acp-mode-env.json, and nothing else", () => {
+    const fixture = JSON.parse(
+      readFileSync(new URL("../../../conformance/control-acp-mode-env.json", import.meta.url), "utf8"),
+    ) as { cases: { harness: string; mode: "safe" | "auto" | "inherit"; env: Record<string, string> }[] };
+    for (const c of fixture.cases) {
+      expect(acpAgent(c.harness), c.harness).toBeDefined();
+      expect(acpAgent(c.harness)?.modeEnv?.[c.mode] ?? {}, c.harness).toEqual(c.env);
+    }
+    // Every agent that is given anything has every mode in the fixture.
+    for (const a of ACP_AGENTS.filter((x) => x.modeEnv))
+      for (const mode of ["safe", "auto", "inherit"])
+        expect(
+          fixture.cases.some((c) => c.harness === a.harness && c.mode === mode),
+          `${a.harness} ${mode}`,
+        ).toBe(true);
+  });
   it("found by the override, on PATH, or in an installer's folder; a harness that isn't an agent is never found", async () => {
     const ext = process.platform === "win32" ? ".cmd" : "";
     const bin = path.join(tmp, "bin");
@@ -253,6 +269,7 @@ describe("the agents and where they are", () => {
       bin: fx,
       args: ["acp"],
       meta: { fx: { profileMcpServers: true } },
+      modeEnv: { safe: { FX_PERMISSION_MODE: "ask" }, auto: { FX_PERMISSION_MODE: "auto" } },
     });
     expect(findAcpAgent("codex", { PATH: bin }, home, empty)).toBeNull();
     expect(acpHarnesses({ PATH: bin, HOME: empty })).toContain("gemini-cli");
@@ -505,6 +522,27 @@ describe("one agent, driven", () => {
     // Three stand-ins here: each has said its input closed before the next test reads the log.
     for (const x of held.splice(0)) x.close();
     await vi.waitFor(() => expect(runs().filter((r) => r.stdin === "end")).toHaveLength(3));
+  });
+  it("the agent's process gets its word for the machine's mode, over the person's own env; inherit and an agent without one leave theirs", async () => {
+    const modeEnv = { safe: { FX_PERMISSION_MODE: "ask" }, auto: { FX_PERMISSION_MODE: "auto" } };
+    // The person's own value, as an exported variable would give it.
+    const env = { ...process.env, FX_PERMISSION_MODE: "full-access" };
+    const last = () =>
+      runs()
+        .filter((r) => r.method === "initialize")
+        .at(-1);
+    for (const [mode, want] of [
+      ["safe", "ask"],
+      ["auto", "auto"],
+      ["inherit", "full-access"],
+    ] as const) {
+      await open({ mode, modeEnv, env });
+      expect(last(), mode).toMatchObject({ fxMode: want, job: "1" });
+    }
+    await open({ mode: "safe", env });
+    expect(last()).toMatchObject({ fxMode: "full-access" });
+    for (const x of held.splice(0)) x.close();
+    await vi.waitFor(() => expect(runs().filter((r) => r.stdin === "end")).toHaveLength(4));
   });
   it("reopening: session/load where the agent can, its replay is nobody's answer; an agent that can't is unsupported", async () => {
     const seen: string[] = [];

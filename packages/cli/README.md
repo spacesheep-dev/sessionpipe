@@ -150,7 +150,8 @@ Before a Codex run the daemon checks `codex login status` (or `CODEX_API_KEY`) a
 
 Any other agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
 is reached the same way: Gemini CLI, OpenCode, goose, Copilot CLI, Cursor, Droid, Devin,
-Kilo, Qwen Code, Cline and the rest of the ACP registry ([the list, with each one's
+Kilo, Qwen Code, Cline and the rest of the ACP registry, and fx (Vercel Labs), which the
+registry doesn't list yet ([the list, with each one's
 launch line](../../spec/ADAPTERS.md#agents-driven-through-acp-control-only)). The daemon
 runs the agent's own CLI (`gemini --acp`, `opencode acp`, …) when it is installed, on
 PATH or where `SESSIONPIPE_ACP_<HARNESS>` points (`SESSIONPIPE_ACP_GEMINI_CLI`), and
@@ -160,7 +161,9 @@ message lands in it with no cold start (`api` mode); `cancel` works there too. A
 idle for ten minutes is closed, and a later message reopens the session where the agent
 supports `session/load`. Safe mode answers every permission the agent asks with a
 refusal, listed in the reply; auto mode allows. An agent that never asks (OpenCode, by
-its own settings) runs its tools as it would at your terminal. Signing in is yours to do
+its own settings) runs its tools as it would at your terminal. fx is the exception that
+is told: on a safe machine it runs in its own `ask` mode for that run, so its edits and
+commands come to the daemon to be refused, and on an auto machine in its `auto` mode. Signing in is yours to do
 at the terminal: an agent that wants it says so in the reply.
 
 ## The pool: several Claude accounts, one session that keeps going
