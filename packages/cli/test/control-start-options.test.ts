@@ -221,25 +221,21 @@ describe("a start's options are checked before anything is taken", { timeout: 30
       [`antigravity:${RECV}`, "edits"],
     ] as const) {
       const q = await start(session, { permission });
-      expect(await rx.waitAck(q.id)).toMatchObject({
+      const first = await rx.waitAck(q.id);
+      expect(first).toMatchObject({
         outcome: "refused",
         code: "permission",
         detail: `this machine runs in safe mode; ${permission} needs \`sessionpipe control mode auto\` at the machine`,
       });
-      // A redelivery may replay the stored ack before its first POST lands.
-      const finals = outcomes(q.id);
-      expect(finals.length).toBeGreaterThanOrEqual(1);
-      const at = finals[0]?.at;
-      expect(at).toEqual(expect.any(String));
-      for (const ack of finals) {
-        expect(ack).toMatchObject({
-          outcome: "refused",
-          code: "permission",
-          detail: `this machine runs in safe mode; ${permission} needs \`sessionpipe control mode auto\` at the machine`,
-          at,
-        });
-      }
+      // The daemon decides once but may post that ack twice: a long-poll can re-serve the
+      // message before the first ack's POST lands, and `recentAcks` re-sends the stored
+      // ack (CONTROL.md §10). A re-send is that same ack, `at` and all, so every final
+      // ack equals the first; a `taken` or a different refusal doesn't.
+      for (const a of outcomes(q.id)) expect(a).toStrictEqual(first);
     }
+    // A second decision in the same millisecond makes an identical ack, so the daemon's
+    // own count is the check for that: one refusal per start, and a re-send adds none.
+    expect(d?.status().delivered).toEqual({ refused: 3 });
     expect(runs).toEqual([]);
   });
   it("a level the harness doesn't have here, in its own words", async () => {
