@@ -181,9 +181,15 @@
 <tr><td>{{mark:gemini-cli}}Gemini CLI</td><td data-l="Hooks">8 events</td><td data-l="Transcript">the chat log</td><td data-l="Facts">title, model</td><td class="r">14</td></tr>
 <tr><td>{{mark:antigravity}}Antigravity</td><td data-l="Hooks">4 events</td><td data-l="Transcript"><code>brain/&lt;id&gt;</code> messages</td><td data-l="Facts">title, url to the conversation, in a git checkout too</td><td class="r">8</td></tr>
 <tr><td>{{mark:devin}}Devin CLI</td><td data-l="Hooks">8 events</td><td data-l="Transcript">its SQLite session store, read-only</td><td data-l="Facts">title, model, times</td><td class="r">8</td></tr>
+<tr><td>{{mark:grok-build}}Grok Build</td><td data-l="Hooks">11 events</td><td data-l="Transcript">the session's <code>updates.jsonl</code></td><td data-l="Facts">title, model, branch, times</td><td class="r">11</td></tr>
 </tbody>
 </table>
 <p class="note">Next in the registry: Cursor, Copilot CLI, Droid, Kiro and OpenCode. Every mapping, native hook to protocol event, is in <a href="/protocol/adapters/">the adapters spec</a>.</p>
+<h3 class="part" id="drives" data-reveal>Agents it drives</h3>
+<dl class="rows" data-reveal="kids">
+<div><dt>{{mark:fx}}<a href="https://fx.sh">fx</a></dt><dd>Vercel Labs' native coding agent. Start it in a folder you allowed, message it and stop it from your phone or the GUI. On a safe machine whatever would need your approval is asked first, and refused.</dd><dd class="tier"><span>new · ACP</span></dd></div>
+<div><dt>{{mark:plus}}The ACP registry</dt><dd>Gemini CLI, OpenCode, goose, Copilot CLI, Cursor, Droid, Devin, Kilo, Qwen Code, Cline and nineteen more, the same way, once they are installed. <a href="/protocol/adapters/#agents-driven-through-acp-control-only">The list</a>.</dd><dd class="tier"><span>ACP</span></dd></div>
+</dl>
 <h3 class="part" id="receivers" data-reveal>Receivers</h3>
 <dl class="rows" data-reveal="kids">
 <div><dt>{{mark:sessionpipe}}<a href="/gui/">sessionpipe-gui</a></dt><dd>Local. Every session on your machines, live, on a laptop or a phone; search across agent history, offline. Desktop apps for macOS and Linux.</dd><dd class="tier"><span>tier 3</span></dd></div>

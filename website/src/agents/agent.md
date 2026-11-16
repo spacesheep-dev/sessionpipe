@@ -7,7 +7,7 @@ https://sessionpipe.org/llms-full.txt.
 
 ## What it is
 
-An open protocol and a small CLI. Coding agents (Claude Code, Codex, Gemini CLI, Antigravity)
+An open protocol and a small CLI. Coding agents (Claude Code, Codex, Gemini CLI, Antigravity, Devin, Grok Build)
 fire hooks when a session starts, a tool runs, or the agent needs the person. sessionpipe
 installs those hooks, turns each one into a protocol event (`session.started`, `tool.ended`,
 `attention.needed`, 17 types in protocol 1), removes secrets on the machine, writes the events
