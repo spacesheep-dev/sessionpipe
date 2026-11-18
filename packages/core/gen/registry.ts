@@ -62,4 +62,4 @@ export const DATA_ALLOW: Readonly<Record<string, Readonly<Partial<Record<0 | 1 |
 export const SESSION_KEYS = ["id", "seq", "machine", "cwd", "repo", "branch", "model", "title", "title_source", "url", "account_id", "attended", "parent_id", "launched_by", "delegated_by"] as const;
 
 /** The harnesses in the registry (spec/ADAPTERS.md), in the definition's order. */
-export const HARNESS_NAMES = ["claude-code", "codex", "gemini-cli", "antigravity", "devin", "cursor", "copilot-cli", "droid", "kiro", "opencode"] as const;
+export const HARNESS_NAMES = ["claude-code", "codex", "gemini-cli", "antigravity", "devin", "cursor", "copilot-cli", "droid", "kiro", "opencode", "grok-build", "autopilot"] as const;

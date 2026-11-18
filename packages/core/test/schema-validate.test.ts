@@ -129,3 +129,10 @@ describe("the protocol's own schemas", () => {
     expect(HARNESS_NAMES).toContain("claude-code");
   });
 });
+
+describe("the registry names every adapter", () => {
+  it("each adapter's name is one of the proto's harness names", async () => {
+    const { ADAPTERS } = await import("../src/adapters/index.js");
+    for (const a of ADAPTERS) expect(HARNESS_NAMES, a.name).toContain(a.name);
+  });
+});
