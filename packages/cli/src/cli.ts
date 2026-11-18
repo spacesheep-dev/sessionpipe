@@ -708,6 +708,7 @@ const AWAY_FROM_HOME: Record<string, string | null> = {
   antigravity: "GEMINI_CLI_HOME",
   devin: "XDG_CONFIG_HOME",
   "grok-build": "GROK_HOME",
+  autopilot: "XDG_CONFIG_HOME",
 };
 /** Harnesses this process would read out of the real home although SESSIONPIPE_CONFIG
  *  or SESSIONPIPE_STATE say "not this machine". Setting those is how a test or an agent

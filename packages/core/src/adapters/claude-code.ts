@@ -20,6 +20,7 @@ import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { gitFacts } from "../readers/git.js";
 import { isInjected, readClaude } from "../readers/transcripts.js";
 import type { DataOf, HarnessAccount } from "../types.js";
+import { isAutopilotPayload } from "./autopilot.js";
 import {
   formatJson,
   installClaudeShaped,
@@ -468,9 +469,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  *  nothing to a Claude Code reader. Every Claude Code payload names a transcript and a
  *  UUID session (all 21 recorded fixtures do); a payload with neither is somebody else's.
  *  Grok Build's has both — it writes Claude Code's keys for the hooks it imports — so it
- *  is told by its own keys instead (`isGrokPayload`). */
+ *  is told by its own keys instead (`isGrokPayload`). So is Autopilot's, which carries Claude
+ *  Code's keys and a transcript path too, and imports Claude Code's hooks (switched off until
+ *  the person turns them on): it names itself in `client` (`isAutopilotPayload`). */
 export function notClaudeCode(id: string, s: Record<string, unknown>): boolean {
-  return (typeof s.transcript_path !== "string" && !UUID.test(id)) || isGrokPayload(s);
+  return (typeof s.transcript_path !== "string" && !UUID.test(id)) || isGrokPayload(s) || isAutopilotPayload(s);
 }
 function pickSource(v: unknown): string {
   return typeof v === "string" && ["startup", "resume", "clear", "compact", "fork"].includes(v) ? v : "unknown";

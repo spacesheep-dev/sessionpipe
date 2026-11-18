@@ -210,6 +210,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // from that file) and is told by its own two keys, as core's isGrokPayload tells it.
     if (typeof s.transcript_path !== "string" && !UUID.test(id)) return null;
     if (typeof s.hookEventName === "string" && typeof s.workspaceRoot === "string") return null;
+    // Autopilot's payload has both too, and names itself in `client` (core's isAutopilotPayload).
+    if (s.client === "autopilot") return null;
     const session = `claude-code:${id}`;
     // The session's own permission mode, in its own words. Every Claude Code hook
     // payload carries it, and it is the only place a mode the person chose at the
