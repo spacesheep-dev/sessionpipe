@@ -4,6 +4,7 @@
 import { acpHarnesses } from "./acp-control.js";
 import { antigravity } from "./antigravity.js";
 import { findAgy } from "./antigravity-control.js";
+import { autopilot } from "./autopilot.js";
 import { claudeCode } from "./claude-code.js";
 import { findClaude } from "./claude-code-control.js";
 import { codex } from "./codex.js";
@@ -13,11 +14,12 @@ import { geminiCli } from "./gemini-cli.js";
 import { grokBuild } from "./grok-build.js";
 import type { Adapter } from "./types.js";
 
-export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity, devin, grokBuild];
+export const ADAPTERS: readonly Adapter[] = [claudeCode, codex, geminiCli, antigravity, devin, grokBuild, autopilot];
 export const adapterByName = (name: string): Adapter | undefined => ADAPTERS.find((a) => a.name === name);
 export * as acpControl from "./acp-control.js";
 export { AG_STALE_PRETOOL, antigravityAnswer } from "./antigravity.js";
 export * as antigravityControl from "./antigravity-control.js";
+export { AUTOPILOT_EVENTS, autopilotConfigDir, isAutopilotPayload, protocolId } from "./autopilot.js";
 export { claudeAccountDirs, claudeAccounts, claudeDirs, notClaudeCode } from "./claude-code.js";
 export * as claudeControl from "./claude-code-control.js";
 export * as codexControl from "./codex-control.js";
@@ -63,4 +65,4 @@ export type {
   TranscriptRead,
   Turn,
 } from "./types.js";
-export { antigravity, claudeCode, codex, devin, geminiCli, grokBuild };
+export { antigravity, autopilot, claudeCode, codex, devin, geminiCli, grokBuild };

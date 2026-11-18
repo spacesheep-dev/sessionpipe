@@ -1,0 +1,39 @@
+{
+  "harness": "autopilot",
+  "event": "StopFailure",
+  "recorded": {
+    "at": "2026-11-18T02:41:24.000Z",
+    "harness_version": "3.26.0+directionally-local/autopilot#1272",
+    "how": "autopilot -p against a scripted local OpenAI-compatible endpoint, with a recording hook in ~/.config/autopilot/settings.json"
+  },
+  "input": {
+    "argv": [
+      "autopilot",
+      "StopFailure"
+    ],
+    "stdin": "{\"event\":\"StopFailure\",\"session_id\":\"2026-11-18T02-41-24-129Z_broken-request\",\"cwd\":\"/home/slp-test/rec/ap-proj\",\"error\":\"model_error\",\"is_interrupt\":false,\"hook_event_name\":\"StopFailure\",\"client\":\"autopilot\",\"beacon.harness.name\":\"autopilot\",\"autopilot_version\":\"3.26.0\",\"hook_payload_version\":1,\"transcript_path\":\"/home/slp-test/rec-home/.local/share/autopilot/sessions/2026-11-18T02-41-24-129Z_broken-request.jsonl\",\"transcript_format\":\"claude-jsonl\"}",
+    "env": {},
+    "cwd": "/home/slp-test/rec/ap-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "turn.ended",
+      "harness": {
+        "name": "autopilot",
+        "event": "StopFailure"
+      },
+      "session": {
+        "id": "2026-11-18T02-41-24-129Z.broken-request",
+        "cwd": "/home/slp-test/rec/ap-proj",
+        "seq": "*"
+      },
+      "data": {
+        "reason": "error",
+        "error": "model_error"
+      }
+    }
+  ]
+}

@@ -242,7 +242,9 @@ export function kindPath(
           ? { unsupported: "Devin has no permission answer channel" }
           : harness === "grok-build"
             ? { unsupported: "Grok Build has no permission answer channel" }
-            : "permission";
+            : harness === "autopilot"
+              ? { unsupported: "Autopilot has no permission answer channel yet" }
+              : "permission";
     case "cancel":
       return "cancel";
     case "start":

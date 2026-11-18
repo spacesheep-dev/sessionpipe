@@ -1,0 +1,2813 @@
+{
+  "recorded_from": "sessionpipe-core 0.17.0",
+  "cases": {
+    "permission-request-bash.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_1",
+          "kind": "permission",
+          "tool": "Bash",
+          "message": "Bash ls"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "permission-request-write.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "attention.needed",
+        "harness": {
+          "name": "autopilot",
+          "event": "PermissionRequest"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "attention_id": "call_work_2",
+          "kind": "permission",
+          "tool": "Write",
+          "message": "Write /home/slp-test/rec/ap-proj/out.txt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-failed.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory",
+          "input": {
+            "command": "cat missing.txt"
+          },
+          "output": {
+            "ok": true,
+            "content": "exit=1\n--- stderr ---\ncat: missing.txt: No such file or directory",
+            "success": false,
+            "is_error": true,
+            "stdout": "",
+            "stderr": "cat: missing.txt: No such file or directory\n",
+            "exit_code": 1,
+            "interrupted": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_fail_0",
+          "ok": false,
+          "error": "Exit code 1\ncat: missing.txt: No such file or directory",
+          "input": {
+            "command": "cat missing.txt"
+          },
+          "output": {
+            "ok": true,
+            "content": "exit=1\n--- stderr ---\ncat: missing.txt: No such file or directory",
+            "success": false,
+            "is_error": true,
+            "stdout": "",
+            "stderr": "cat: missing.txt: No such file or directory\n",
+            "exit_code": 1,
+            "interrupted": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-read.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true,
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/note.txt"
+          },
+          "output": {
+            "ok": true,
+            "content": "1\tRead this file.\n2\t",
+            "success": true,
+            "is_error": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "ok": true,
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/note.txt"
+          },
+          "output": {
+            "ok": true,
+            "content": "1\tRead this file.\n2\t",
+            "success": true,
+            "is_error": false
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "post-tool-use-write.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true,
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/out.txt",
+            "content": "done\n"
+          },
+          "output": {
+            "ok": true,
+            "content": "done\n",
+            "success": true,
+            "is_error": false,
+            "filePath": "/home/slp-test/rec/ap-proj/out.txt",
+            "type": "create",
+            "originalFile": null,
+            "structuredPatch": []
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "PostToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Write",
+          "call_id": "call_work_2",
+          "ok": true,
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/out.txt",
+            "content": "done\n"
+          },
+          "output": {
+            "ok": true,
+            "content": "done\n",
+            "success": true,
+            "is_error": false,
+            "filePath": "/home/slp-test/rec/ap-proj/out.txt",
+            "type": "create",
+            "originalFile": null,
+            "structuredPatch": []
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-bash.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Bash",
+          "call_id": "call_work_1",
+          "input": {
+            "command": "ls"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "pre-tool-use-read.json#0": {
+      "0": null,
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/note.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": null,
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "tool.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "PreToolUse"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "tool": "Read",
+          "call_id": "call_work_0",
+          "input": {
+            "file_path": "/home/slp-test/rec/ap-proj/note.txt"
+          }
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-end.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionEnd"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "exit"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start-resume.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "resume"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "session-start.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "session.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "SessionStart"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj",
+          "model": "stub/model"
+        },
+        "data": {
+          "source": "startup"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-failure-error.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-24-129Z.broken-request",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "error",
+          "error": "model_error"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop-failure-interrupt.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "StopFailure"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-32-154Z.slow-think-for-a-while",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "interrupt"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "stop.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.ended",
+        "harness": {
+          "name": "autopilot",
+          "event": "Stop"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "reason": "stop"
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    },
+    "user-prompt-submit.json#0": {
+      "0": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [],
+          "pii": false
+        }
+      },
+      "1": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "2": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "3": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1"
+          ],
+          "pii": false
+        }
+      },
+      "0+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 0,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {},
+        "privacy": {
+          "rulesets": [
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "1+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 1,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "2+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 2,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      },
+      "3+pii": {
+        "protocol": 1,
+        "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "time": "2026-09-28T00:00:00.000Z",
+        "tier": 3,
+        "type": "turn.started",
+        "harness": {
+          "name": "autopilot",
+          "event": "UserPromptSubmit"
+        },
+        "session": {
+          "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+          "seq": 0,
+          "cwd": "/home/slp-test/rec/ap-proj"
+        },
+        "data": {
+          "prompt_chars": 42
+        },
+        "privacy": {
+          "rulesets": [
+            "secrets@1",
+            "pii@1"
+          ],
+          "pii": true
+        }
+      }
+    }
+  }
+}

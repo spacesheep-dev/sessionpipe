@@ -39,6 +39,7 @@ or a log. Only Claude Code has one (claude.ai, below).
 | `antigravity` | Antigravity (Google) | antigravity.google/docs/hooks | **no** | no | M2 |
 | `devin` | Devin CLI (Cognition) | docs.devin.ai/cli/extensibility/hooks/overview | yes | yes (exit 2) | M2 |
 | `grok-build` | Grok Build (xAI) | the user guide the CLI installs (`~/.grok/docs/user-guide/10-hooks.md`) | yes | yes | M2 |
+| `autopilot` | Autopilot (Directionally Local) | github.com/directionally-local/autopilot#hooks | yes | no | M2 |
 | `cursor` | Cursor | cursor.com/docs/hooks | yes | yes (`followup_message`) | M7 |
 | `copilot-cli` | GitHub Copilot CLI | docs.github.com/en/copilot/reference/hooks-reference | yes | yes | M7 |
 | `droid` | Droid (Factory) | docs.factory.ai/reference/hooks-reference | yes | yes | M7 |
@@ -200,6 +201,27 @@ Fixtures recorded 2026-11-11 on Grok Build 1.0.77 (four `grok -p` runs with a re
 `PostToolUse`, `Notification` (`permission_prompt`), `Stop` (`end_turn` and `shutdown`),
 `StopCancelled` (`max_turns` and `permission_cancelled`), `SessionEnd`. Still pending a real
 payload: `PostToolUseFailure`, `StopFailure`, `PreCompact` *(recording pending)*.
+
+## Autopilot (`autopilot`) — M2
+
+| | |
+|---|---|
+| Config | The global hook settings file, `$XDG_CONFIG_HOME/autopilot/settings.json` (default `~/.config/autopilot/settings.json`, on every platform). Autopilot's own shape, not Claude Code's: `{"hooks":{"<Event>":[{"id":"sessionpipe","command":"…","timeoutMs":5000}]}}`, one flat entry per hook, timeouts in **milliseconds**, no `matcher` (every tool). Every entry of ours has the id `sessionpipe`: Autopilot merges its settings files by id per event, and `/hooks disable sessionpipe` switches all of them off at once, which `sessionpipe status` reports as **`inactive`**. A running session reads the file again on `/hooks reload`. Project files (`.autopilot/settings.json`) are never written. |
+| Mapping | `SessionStart` → `session.started` (`source`: `startup` · `resume`; `session.model` ← `model`) · `UserPromptSubmit` → `turn.started` (`prompt_chars`) · `PreToolUse` → `tool.started` · `PostToolUse` → `tool.ended` (`ok` ← not `tool_response.is_error`; `error` ← the top-level `error`, which is `Exit code N` and the output for a shell command that failed) · `PermissionRequest` → `attention.needed` permission (`attention_id` ← `tool_use_id`; `message` ← the tool and its command, file, URL or pattern) · `Stop` → `turn.ended` stop · `StopFailure` → `turn.ended` (`is_interrupt` → `interrupt`, else `error` with `error` ← its kind: `model_error`, `budget_exhausted`, `context_limit`, `error`) · `PreCompact` → `context.compacted` (`trigger`) · `SessionEnd` → `session.ended` (`exit` · `clear`). `PostToolUseFailure` is not hooked: Autopilot fires it beside `PostToolUse` for the same failed call. Not mapped: a pull request the session opened, which the protocol has no event for ([#280](https://github.com/spacesheep-dev/sessionpipe/issues/280)); it reaches a receiver as the `github_create_pr` tool's `tool.ended`. |
+| Ids in stdin | Claude Code's keys (`hook_event_name`, `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`, `tool_use_id`, `error`, `is_interrupt`, `transcript_path`, `transcript_format`, `last_assistant_message`, `permission_mode`) beside Autopilot's own (`event`, `tool`, `args`, `result`, `tool_call_id`, `mode`, `tier`), and on every payload `client: "autopilot"`, `autopilot_version` and `hook_payload_version` (the payload contract's version; fields are only added within one). No `prompt_id`, so turns carry no `turn_id`; no `duration_ms`. |
+| Ids | `session_id` is `<ISO time with - for : and .>_<slug of the first prompt, ≤ 40 chars of [a-z0-9-]>`. The protocol's id has no `_` (PROTOCOL.md §3), and neither part of Autopilot's id holds a `.`, so the adapter writes the `_` as `.`; [#279](https://github.com/spacesheep-dev/sessionpipe/issues/279) proposes allowing `_`. The slug is words of the first prompt: tier 0 carries them in the id, as it carries a `first-ask` title. |
+| Transcript (tier 2) | `transcript_path` when `transcript_format` is `claude-jsonl`: `$XDG_DATA_HOME/autopilot/sessions/<session id>.jsonl` (default `~/.local/share/autopilot/…`), Claude Code's JSONL, read by the Claude Code reader. Redacted by Autopilot before it is written. With `AUTOPILOT_TRANSCRIPT=0` the path names Autopilot's own session JSON (`transcript_format: "autopilot-json"`) and nothing is read. |
+| Facts | Version ← `autopilot_version`. From the transcript: title ← the first prompt (`first-ask`, 80 chars), model ← the last assistant record's `message.model`, times ← the records' `timestamp`. |
+| stdout | **Nothing**, for every event. Autopilot reads a decision only from a veto event's stdout; silence with exit 0 is "carry on". |
+| Quirks | Hooks run in the turn: Autopilot waits for each one, up to its `timeoutMs`. Autopilot imports Claude Code's hooks into its own settings switched off; one the person switches on runs sessionpipe's `claude-code` entry inside Autopilot with a Claude-shaped payload and a transcript path, which that entry tells by `client` and leaves to this adapter. `StopFailure`, `PreCompact.trigger` and the two version fields arrive with [directionally-local/autopilot#1272](https://github.com/directionally-local/autopilot/pull/1272), not yet released. `client` is on every payload since Autopilot 1.28; an Autopilot without `StopFailure` fires no hook for a turn that was interrupted or failed, so such a turn gets no `turn.ended` (which PROTOCOL.md §4 already tells a receiver not to expect for every `turn.started`). |
+| Control | None yet: no start options, no permission answer, no prompt delivery. |
+
+Fixtures recorded 2026-11-18 on a build of directionally-local/autopilot#1272 (version 3.26.0 plus that PR), six `autopilot -p`
+runs against a scripted local OpenAI-compatible endpoint, with a recording hook in `~/.config/autopilot/settings.json`:
+`SessionStart` (`startup` and `resume`), `UserPromptSubmit`, `PreToolUse`, `PostToolUse` (ok, a write with its diff, a
+shell command that exited 1), `PostToolUseFailure` (not hooked; empty `expect`), `PermissionRequest`, `Stop`,
+`StopFailure` (`model_error` from a rejected request, `interrupted` from SIGINT mid-stream), `SessionEnd`. Still
+pending a real payload: `PreCompact` (a `/compact` in the interactive UI) *(recording pending)*.
 
 ## Cursor (`cursor`) — M7
 

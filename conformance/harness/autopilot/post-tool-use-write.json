@@ -1,0 +1,54 @@
+{
+  "harness": "autopilot",
+  "event": "PostToolUse",
+  "recorded": {
+    "at": "2026-11-18T02:41:19.000Z",
+    "harness_version": "3.26.0+directionally-local/autopilot#1272",
+    "how": "autopilot -p against a scripted local OpenAI-compatible endpoint, with a recording hook in ~/.config/autopilot/settings.json"
+  },
+  "input": {
+    "argv": [
+      "autopilot",
+      "PostToolUse"
+    ],
+    "stdin": "{\"event\":\"PostToolUse\",\"session_id\":\"2026-11-18T02-41-18-962Z_work-read-note-txt-run-ls-write-out-txt\",\"cwd\":\"/home/slp-test/rec/ap-proj\",\"tool\":\"write\",\"tool_call_id\":\"call_work_2\",\"args\":{\"path\":\"out.txt\",\"content\":\"done\\n\"},\"tier\":\"medium\",\"result\":{\"ok\":true,\"content\":\"Created out.txt (5 chars).\"},\"hook_event_name\":\"PostToolUse\",\"client\":\"autopilot\",\"beacon.harness.name\":\"autopilot\",\"autopilot_version\":\"3.26.0\",\"hook_payload_version\":1,\"transcript_path\":\"/home/slp-test/rec-home/.local/share/autopilot/sessions/2026-11-18T02-41-18-962Z_work-read-note-txt-run-ls-write-out-txt.jsonl\",\"transcript_format\":\"claude-jsonl\",\"tool_name\":\"Write\",\"autopilot_tool_name\":\"write\",\"tool_input\":{\"file_path\":\"/home/slp-test/rec/ap-proj/out.txt\",\"content\":\"done\\n\"},\"tool_response\":{\"ok\":true,\"content\":\"done\\n\",\"success\":true,\"is_error\":false,\"filePath\":\"/home/slp-test/rec/ap-proj/out.txt\",\"type\":\"create\",\"originalFile\":null,\"structuredPatch\":[]},\"tool_use_id\":\"call_work_2\"}",
+    "env": {},
+    "cwd": "/home/slp-test/rec/ap-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "tool.ended",
+      "harness": {
+        "name": "autopilot",
+        "event": "PostToolUse"
+      },
+      "session": {
+        "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+        "cwd": "/home/slp-test/rec/ap-proj",
+        "seq": "*"
+      },
+      "data": {
+        "tool": "Write",
+        "call_id": "call_work_2",
+        "ok": true,
+        "input": {
+          "file_path": "/home/slp-test/rec/ap-proj/out.txt",
+          "content": "done\n"
+        },
+        "output": {
+          "ok": true,
+          "content": "done\n",
+          "success": true,
+          "is_error": false,
+          "filePath": "/home/slp-test/rec/ap-proj/out.txt",
+          "type": "create",
+          "originalFile": null,
+          "structuredPatch": []
+        }
+      }
+    }
+  ]
+}

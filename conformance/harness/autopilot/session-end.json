@@ -1,0 +1,38 @@
+{
+  "harness": "autopilot",
+  "event": "SessionEnd",
+  "recorded": {
+    "at": "2026-11-18T02:41:19.000Z",
+    "harness_version": "3.26.0+directionally-local/autopilot#1272",
+    "how": "autopilot -p against a scripted local OpenAI-compatible endpoint, with a recording hook in ~/.config/autopilot/settings.json"
+  },
+  "input": {
+    "argv": [
+      "autopilot",
+      "SessionEnd"
+    ],
+    "stdin": "{\"event\":\"SessionEnd\",\"session_id\":\"2026-11-18T02-41-18-962Z_work-read-note-txt-run-ls-write-out-txt\",\"cwd\":\"/home/slp-test/rec/ap-proj\",\"reason\":\"exit\",\"hook_event_name\":\"SessionEnd\",\"client\":\"autopilot\",\"beacon.harness.name\":\"autopilot\",\"autopilot_version\":\"3.26.0\",\"hook_payload_version\":1,\"transcript_path\":\"/home/slp-test/rec-home/.local/share/autopilot/sessions/2026-11-18T02-41-18-962Z_work-read-note-txt-run-ls-write-out-txt.jsonl\",\"transcript_format\":\"claude-jsonl\"}",
+    "env": {},
+    "cwd": "/home/slp-test/rec/ap-proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "session.ended",
+      "harness": {
+        "name": "autopilot",
+        "event": "SessionEnd"
+      },
+      "session": {
+        "id": "2026-11-18T02-41-18-962Z.work-read-note-txt-run-ls-write-out-txt",
+        "cwd": "/home/slp-test/rec/ap-proj",
+        "seq": "*"
+      },
+      "data": {
+        "reason": "exit"
+      }
+    }
+  ]
+}

@@ -31,6 +31,7 @@ const watched = [
   path.join(under(real.GEMINI_CLI_HOME, ".gemini"), "config", "hooks.json"),
   path.join(under(real.XDG_CONFIG_HOME, ".config"), "devin", "config.json"),
   path.join(under(real.GROK_HOME, ".grok"), "hooks", "sessionpipe.json"),
+  path.join(under(real.XDG_CONFIG_HOME, ".config"), "autopilot", "settings.json"),
 ];
 const stamp = (file: string): string => {
   const s = statSync(file, { throwIfNoEntry: false });
