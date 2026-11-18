@@ -331,7 +331,10 @@ message TurnStarted {
   // The harness's id for the turn.
   string turn_id = 1 [(buf.validate.field).string.max_len = 128];
   // How long the prompt was.
-  int32 prompt_chars = 2 [(buf.validate.field).int32.gte = 0];
+  int32 prompt_chars = 2 [
+    (buf.validate.field).int32.gte = 0,
+    (sessionpipe.v1.at_tier) = 1
+  ];
   // The harness's OWN word for who submitted the prompt, forwarded verbatim; not an enum
   // of this spec (Claude Code: user, sdk, system, loop_wakeup, schedule_wakeup,
   // poll_event), and a different vocabulary from session.started.source. A bare word:
@@ -353,7 +356,10 @@ message TurnEnded {
   // Why it ended.
   TurnEndReason reason = 2 [(google.api.field_behavior) = REQUIRED];
   // The harness's error class when reason is error (rate_limit, overloaded, authentication_failed, server_error …).
-  string error = 3 [(buf.validate.field).string.max_len = 200];
+  string error = 3 [
+    (buf.validate.field).string.max_len = 200,
+    (sessionpipe.v1.at_tier) = 1
+  ];
   // How long the turn took.
   int64 ms = 4 [(buf.validate.field).int64.gte = 0];
   // Background work the harness reports still in flight as the turn ends, each of which wakes the session when it finishes (Claude Code: shell commands, monitors, subagents, workflows). Absent when the harness doesn't say.
@@ -441,7 +447,7 @@ message ToolStarted {
   // Set when a subagent made the call.
   string agent_id = 4 [(buf.validate.field).string.max_len = 128];
   // The tool's input (tier 3).
-  google.protobuf.Value input = 5;
+  google.protobuf.Value input = 5 [(sessionpipe.v1.at_tier) = 3];
 }
 
 // `tool.ended`: a tool call finished (tier 1; its input and output at tier 3).
@@ -466,9 +472,9 @@ message ToolEnded {
   // The error, when it didn't.
   string error = 7 [(buf.validate.field).string.max_len = 2000];
   // The tool's input (tier 3).
-  google.protobuf.Value input = 8;
+  google.protobuf.Value input = 8 [(sessionpipe.v1.at_tier) = 3];
   // The tool's output (tier 3).
-  google.protobuf.Value output = 9;
+  google.protobuf.Value output = 9 [(sessionpipe.v1.at_tier) = 3];
 }
 
 // `files.changed`: files a turn wrote.
@@ -499,11 +505,20 @@ message AttentionNeeded {
   // What it waits on.
   AttentionKind kind = 2 [(google.api.field_behavior) = REQUIRED];
   // The tool asking, for a permission.
-  string tool = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_.:-]{1,120}$"];
+  string tool = 3 [
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_.:-]{1,120}$",
+    (sessionpipe.v1.at_tier) = 1
+  ];
   // What it asks, in at most 200 characters (tier 1).
-  string message = 4 [(buf.validate.field).string.max_len = 200];
+  string message = 4 [
+    (buf.validate.field).string.max_len = 200,
+    (sessionpipe.v1.at_tier) = 1
+  ];
   // Set when a subagent asked.
-  string agent_id = 5 [(buf.validate.field).string.max_len = 128];
+  string agent_id = 5 [
+    (buf.validate.field).string.max_len = 128,
+    (sessionpipe.v1.at_tier) = 1
+  ];
 }
 
 // `attention.cleared`: the session no longer waits.
@@ -615,7 +630,10 @@ message DelegationStarted {
   // existing session; for a new session, when the harness reveals its id.
   string to = 4 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
   // Tier 1: what was asked, cut to 200 characters, redacted.
-  string text = 5 [(buf.validate.field).string.max_len = 200];
+  string text = 5 [
+    (buf.validate.field).string.max_len = 200,
+    (sessionpipe.v1.at_tier) = 1
+  ];
 }
 
 // `delegation.ended`: the asked agent's turn ended, or the ask failed before one.
@@ -641,13 +659,17 @@ message DelegationEnded {
   // A handoff only: whether the answer reached `reply_to`.
   RelayOutcome relayed = 6;
   // Tier 2: the answer, redacted.
-  string reply = 7 [(buf.validate.field).string.max_len = 20000];
+  string reply = 7 [
+    (buf.validate.field).string.max_len = 20000,
+    (sessionpipe.v1.at_tier) = 2
+  ];
 }
 
 // `native`: a harness's raw hook line, tier 3 only.
 message Native {
   option (sessionpipe.v1.open) = true;
   option (sessionpipe.v1.tier) = 3;
+  option (sessionpipe.v1.unfiltered) = true;
 }
 
 // The known event types and the shape of each one's `data`. A field's JSON name is the type.

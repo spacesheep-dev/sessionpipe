@@ -20,6 +20,10 @@ enum Format {
 extend google.protobuf.FieldOptions {
   // The string's format (JSON Schema `format`).
   Format format = 53001;
+  // On a field of an event's data: the lowest tier that carries this field, when it is above
+  // its message's `tier` (`prompt_chars` rides on a tier 0 event but is sent from tier 1). The
+  // sender's filter keeps a field only at its tier and above (spec/PRIVACY.md §1).
+  int32 at_tier = 53004;
   // The field may be sent as JSON `null`, which means the same as leaving it out.
   bool nullable = 53002;
   // What a reader takes when the field is absent, as JSON text (`["bearer"]`).
@@ -38,6 +42,9 @@ extend google.protobuf.MessageOptions {
   bool either = 53012;
   // The lowest privacy tier that carries this event type (spec/PRIVACY.md). On a data message.
   int32 tier = 53013;
+  // The sender's filter carries this event's data whole, never by an allow list of fields: a
+  // harness's raw line (`native`), whose keys nobody names. Only with `tier`.
+  bool unfiltered = 53014;
 }
 
 extend google.protobuf.EnumValueOptions {

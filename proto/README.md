@@ -6,21 +6,22 @@ commands and the documentation from the same files.
 
 | File | Holds | Generates |
 |---|---|---|
-| `sessionpipe/v1/events.proto` | the envelope (`Event`), `Session`, `Harness`, `Privacy`, one message per event type, `EventData` | `event.json`, `event-data.json` |
+| `sessionpipe/v1/events.proto` | the envelope (`Event`), `Session`, `Harness`, `Privacy`, one message per event type, `EventData` | `event.json`, `event-data.json`; the filter's tables in `packages/core/gen/registry.ts` |
 | `sessionpipe/v1/http.proto` | the well-known file, the batch and the receiver's answers | `well-known.json`, `batch.json`, `batch-response.json`, `error.json` |
 | `sessionpipe/v1/control.proto` | the signed command, its carrier, acks, pairing, hello | `control*.json` |
 | `sessionpipe/v1/options.proto` | the few facts a type and its rules can't say (§ below) | |
 | `buf/validate/validate.proto`, `google/api/field_behavior.proto` | vendored, Apache-2.0: protovalidate's rules and Google's `REQUIRED` | |
 
 ```sh
-npm run schemas            # buf lint, then write schemas/v1/ and packages/core/gen/v1.ts from the proto
+npm run schemas            # buf lint, then write schemas/v1/ and packages/core/gen/ from the proto
 npm run schemas -- --check # what CI runs: exit 1 when a committed schema differs
 ```
 
 `tools/doors/src/` is the generator, strict TypeScript under the repository's 100 % coverage
 rule: `buf.ts` runs buf, `read.ts` reads the descriptors and our options, `jsonschema.ts`
 writes the schemas (the mapping is in its header), `types.ts` writes `packages/core/gen/v1.ts`
-(decision 002), `main.ts` is the command; `tools/doors/schemas.mjs` bundles and runs it on
+(decision 002), `registry.ts` the filter's tables and `schemasmodule.ts` the schemas as a module
+(decision 004), `main.ts` is the command; `tools/doors/schemas.mjs` bundles and runs it on
 any Node the matrix has. The generated files are committed; a change to the protocol is a
 change to a `.proto`, then `npm run schemas`, then one commit with all of it.
 
@@ -47,7 +48,9 @@ change to a `.proto`, then `npm run schemas`, then one commit with all of it.
   (JSON `null` allowed, same as absent), `default_json` (what absence means), `open` (a
   message keeps extra keys), `strict` (refuses them), `either` (one of its fields'
   shapes, carried bare, for the closed unions a signature or a key is), `tier` (the
-  lowest tier that carries an event type), `word` (an enum value's spelling).
+  lowest tier that carries an event type), `at_tier` (on a data field: the tier it is first
+  carried at, when above its message's), `unfiltered` (a type whose data is carried
+  whole, never by key: `native`), `word` (an enum value's spelling).
 
 ## Versioning
 

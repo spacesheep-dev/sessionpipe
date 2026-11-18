@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// One source per fact: schemas/v1/*.json and packages/core/gen/v1.ts are GENERATED from
+// One source per fact: schemas/v1/*.json and packages/core/gen/*.ts are GENERATED from
 // proto/sessionpipe/v1/*.proto. `npm run schemas` rewrites them; `--check` exits 1 when a committed
 // file differs from what the proto says (CI runs that), and so does `buf lint`.
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -7,6 +7,8 @@ import path from "node:path";
 import { build, lint } from "./buf.js";
 import { schemaFiles } from "./jsonschema.js";
 import { Descriptors } from "./read.js";
+import { registryFile } from "./registry.js";
+import { schemasModuleFile } from "./schemasmodule.js";
 import { typesFile } from "./types.js";
 
 export interface RunOptions {
@@ -19,7 +21,12 @@ export interface RunOptions {
 }
 
 const SCHEMAS_DIR = "schemas/v1";
-const TYPES_FILE = "packages/core/gen/v1.ts";
+/** The generated modules under packages/core/gen, and what writes each. */
+const MODULES: Record<string, (d: Descriptors) => string> = {
+  "packages/core/gen/v1.ts": typesFile,
+  "packages/core/gen/registry.ts": registryFile,
+  "packages/core/gen/schemas.ts": schemasModuleFile,
+};
 
 /** Throws when `rel`, or a folder on the way to it from the root, is a symbolic link. The
  *  generated files are read, rewritten and deleted by name: through a link, that would be a
@@ -41,7 +48,8 @@ export function run(o: RunOptions): number {
   const error = o.error ?? console.error;
   lint({ root: o.root });
   const d = new Descriptors(build({ root: o.root }));
-  const generated: Record<string, string> = { ...schemaFiles(d), [TYPES_FILE]: typesFile(d) };
+  const generated: Record<string, string> = { ...schemaFiles(d) };
+  for (const [rel, write] of Object.entries(MODULES)) generated[rel] = write(d);
 
   const schemasDir = path.join(o.root, SCHEMAS_DIR);
   for (const rel of [SCHEMAS_DIR, ...Object.keys(generated)]) refuseLinks(o.root, rel);
@@ -51,8 +59,8 @@ export function run(o: RunOptions): number {
       refuseLinks(o.root, `${SCHEMAS_DIR}/${f}`);
       existing[`${SCHEMAS_DIR}/${f}`] = readFileSync(path.join(schemasDir, f), "utf8");
     }
-  if (existsSync(path.join(o.root, TYPES_FILE)))
-    existing[TYPES_FILE] = readFileSync(path.join(o.root, TYPES_FILE), "utf8");
+  for (const rel of Object.keys(MODULES))
+    if (existsSync(path.join(o.root, rel))) existing[rel] = readFileSync(path.join(o.root, rel), "utf8");
 
   let drift = 0;
   for (const rel of [...new Set([...Object.keys(existing), ...Object.keys(generated)])].sort()) {
@@ -78,8 +86,8 @@ export function run(o: RunOptions): number {
   }
   log(
     o.check
-      ? `schemas/v1 and ${TYPES_FILE} in sync with proto/ (${n} files)`
-      : `wrote ${n} file(s) from proto/: schemas/v1/ and ${TYPES_FILE}`,
+      ? `schemas/v1 and packages/core/gen in sync with proto/ (${n} files)`
+      : `wrote ${n} file(s) from proto/ into schemas/v1/ and packages/core/gen/`,
   );
   return 0;
 }
