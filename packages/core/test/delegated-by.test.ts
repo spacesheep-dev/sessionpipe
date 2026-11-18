@@ -6,10 +6,10 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { Session } from "../schema/v1.js";
 import { adapterByName } from "../src/adapters/index.js";
 import type { Adapter, HookInput } from "../src/adapters/types.js";
 import { DELEGATED_BY_ENV, delegatedBy, LAUNCHED_BY_ENV, readHook } from "../src/launched-by.js";
+import { problems, SCHEMAS } from "../src/schema/index.js";
 
 const ASKER = "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc";
 const input = (env: Record<string, string> = {}): HookInput => ({ argv: ["x", "Start"], stdin: "{}", env, cwd: "/" });
@@ -28,7 +28,8 @@ describe("delegatedBy (PROTOCOL.md §3)", () => {
     );
   });
   it("agrees with the schema's pattern", () => {
-    const field = Session.shape.delegated_by;
+    const field = (SCHEMAS.event.properties.session.properties as Record<string, Record<string, unknown>>)
+      .delegated_by!;
     for (const v of [
       ASKER,
       "a:b",
@@ -40,7 +41,7 @@ describe("delegatedBy (PROTOCOL.md §3)", () => {
       `codex:${"a".repeat(129)}`,
       `${"h".repeat(41)}:x`,
     ])
-      expect(delegatedBy({ [DELEGATED_BY_ENV]: v }) !== undefined, v).toBe(field.safeParse(v).success);
+      expect(delegatedBy({ [DELEGATED_BY_ENV]: v }) !== undefined, v).toBe(problems(field, v).length === 0);
   });
   it("is nothing when the variable is absent, blank or malformed", () => {
     expect(delegatedBy({})).toBeUndefined();

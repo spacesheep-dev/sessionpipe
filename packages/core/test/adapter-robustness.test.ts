@@ -5,16 +5,17 @@
 // into a number and back, an empty string, a null, malformed JSON, no stdin at all,
 // an event name the adapter has never heard of), and fromHook must never throw. What
 // it still emits must fit the protocol: the Event envelope and the per-type data
-// schema from packages/core/schema/v1.ts. Antigravity's stdout stays a JSON answer,
+// JSON Schemas generated from the proto (packages/core/gen/schemas.ts). Antigravity's stdout stays a JSON answer,
 // since anything else there is a deny.
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Event, EventData, TYPE_TIER } from "../schema/v1.js";
+import { TYPE_TIER } from "../gen/registry.js";
 import { ADAPTERS, AG_STALE_PRETOOL } from "../src/adapters/index.js";
 import type { HookInput } from "../src/adapters/types.js";
+import { dataSchema, problems, validate } from "../src/schema/index.js";
 
 // Claude Code's hook looks for its parent process in the registry through `ps`: a
 // process table per mutation is seconds of nothing. The lookup is its own test.
@@ -116,8 +117,6 @@ function mutations(stdin: string, argv: string[]): Mutation[] {
 }
 
 const WILD = { id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", time: "2026-09-28T00:00:00.000Z" };
-const why = (r: { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } }) =>
-  r.success ? "" : (r.error?.issues ?? []).map((x) => `${x.path.join(".")} ${x.message}`).join("; ");
 
 describe("adapter robustness: a bent payload never throws, and what comes out still fits the schema", () => {
   for (const adapter of ADAPTERS) {
@@ -162,12 +161,10 @@ describe("adapter robustness: a bent payload never throws, and what comes out st
                 privacy: { rulesets: ["secrets@1"], pii: false },
                 data: e.data,
               };
-              const env = Event.safeParse(ev);
-              expect(env.success, `${file} [${m.name}] ${e.type} envelope: ${why(env)}`).toBe(true);
-              const dataSchema = EventData.shape[e.type as keyof typeof EventData.shape];
-              expect(dataSchema, `${file} [${m.name}]: unknown type ${e.type}`).toBeDefined();
-              const d = dataSchema.safeParse(e.data);
-              expect(d.success, `${file} [${m.name}] ${e.type} data: ${why(d)}`).toBe(true);
+              expect(validate("event", ev), `${file} [${m.name}] ${e.type} envelope`).toEqual([]);
+              const schema = dataSchema(e.type);
+              expect(schema, `${file} [${m.name}]: unknown type ${e.type}`).toBeDefined();
+              expect(problems(schema!, e.data), `${file} [${m.name}] ${e.type} data`).toEqual([]);
             }
           }
         });

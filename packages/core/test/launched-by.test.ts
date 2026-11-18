@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { Session } from "../schema/v1.js";
 import { jobEnv } from "../src/adapters/headless.js";
 import type { Adapter, HookInput } from "../src/adapters/types.js";
 import {
@@ -12,6 +11,7 @@ import {
   readHook,
   withoutLineage,
 } from "../src/launched-by.js";
+import { problems, SCHEMAS } from "../src/schema/index.js";
 
 const LAUNCHER = "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc";
 const input = (env: Record<string, string> = {}): HookInput => ({ argv: ["x", "Start"], stdin: "{}", env, cwd: "/" });
@@ -44,7 +44,7 @@ describe("launchedBy (PROTOCOL.md §3)", () => {
     );
   });
   it("agrees with the schema's pattern", () => {
-    const field = Session.shape.launched_by;
+    const field = (SCHEMAS.event.properties.session.properties as Record<string, Record<string, unknown>>).launched_by!;
     for (const v of [
       LAUNCHER,
       "a:b",
@@ -56,7 +56,7 @@ describe("launchedBy (PROTOCOL.md §3)", () => {
       `codex:${"a".repeat(129)}`,
       `${"h".repeat(41)}:x`,
     ])
-      expect(launchedBy({ [LAUNCHED_BY_ENV]: v }) !== undefined, v).toBe(field.safeParse(v).success);
+      expect(launchedBy({ [LAUNCHED_BY_ENV]: v }) !== undefined, v).toBe(problems(field, v).length === 0);
   });
   it("is nothing when the variable is absent, blank or malformed", () => {
     expect(launchedBy({})).toBeUndefined();

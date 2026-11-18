@@ -26,20 +26,19 @@ const PLANS = {
   core: {
     entries: {
       index: "src/index.ts",
-      schema: "schema/v1.ts",
+      schema: "src/schema/index.ts",
       control: "src/control/index.ts",
       // Node only: a per-user service, and versions and restarts (never the root export).
       service: "src/service/index.ts",
       version: "src/version.ts",
     },
-    external: ["zod"],
   },
   cli: {
     entries: { index: "src/index.ts", cli: "src/cli.ts", hook: "src/hook.ts", worker: "src/worker.ts" },
     bundleWorkspace: true,
   },
-  receiver: { entries: { index: "src/index.ts", cli: "src/cli.ts" }, bundleWorkspace: true, external: ["zod"] },
-  conformance: { entries: { index: "src/index.ts", cli: "src/cli.ts" }, bundleWorkspace: true, external: ["zod"] },
+  receiver: { entries: { index: "src/index.ts", cli: "src/cli.ts" }, bundleWorkspace: true },
+  conformance: { entries: { index: "src/index.ts", cli: "src/cli.ts" }, bundleWorkspace: true },
 };
 const plan = PLANS[dir];
 if (!plan) throw new Error(`no build plan for ${dir}`);
@@ -66,7 +65,7 @@ const result = await build({
   alias: plan.bundleWorkspace
     ? {
         "@sessionpipe/core": path.join(root, "packages/core/src/index.ts"),
-        "@sessionpipe/core/schema": path.join(root, "packages/core/schema/v1.ts"),
+        "@sessionpipe/core/schema": path.join(root, "packages/core/src/schema/index.ts"),
         "@sessionpipe/core/control": path.join(root, "packages/core/src/control/index.ts"),
         "@sessionpipe/core/service": path.join(root, "packages/core/src/service/index.ts"),
         "@sessionpipe/core/version": path.join(root, "packages/core/src/version.ts"),
