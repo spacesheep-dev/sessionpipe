@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { envelope } from "../../../scripts/lib/envelope.mjs";
-import { TYPE_TIER } from "../schema/v1.js";
+import { TYPE_TIER } from "../gen/registry.js";
 import { filterEvent } from "../src/privacy/filter.js";
 import type { Event, Tier } from "../src/types.js";
 
@@ -25,7 +25,7 @@ describe("filterEvent matches the 0.13.3 goldens", () => {
       for (const [key, cases] of Object.entries(golden.cases)) {
         const [fixture, index] = key.split("#") as [string, string];
         const fx = JSON.parse(readFileSync(path.join(root, "conformance/harness", harness, fixture), "utf8"));
-        const ev = envelope(fx.expect[Number(index)], TYPE_TIER) as Event;
+        const ev = envelope(fx.expect[Number(index)], TYPE_TIER) as unknown as Event;
         for (const [c, want] of Object.entries(cases)) {
           const [tier, pii] = c.split("+");
           expect(filterEvent(ev, Number(tier) as Tier, pii === "pii"), `${harness}/${key} @${c}`).toEqual(want);

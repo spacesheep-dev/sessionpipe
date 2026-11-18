@@ -9,7 +9,7 @@ const full = { lines: 100, branches: 100, functions: 100, statements: 100 };
 export default defineConfig({
   resolve: {
     alias: {
-      "@sessionpipe/core/schema": path.resolve(import.meta.dirname, "packages/core/schema/v1.ts"),
+      "@sessionpipe/core/schema": path.resolve(import.meta.dirname, "packages/core/src/schema/index.ts"),
       "@sessionpipe/core/control": path.resolve(import.meta.dirname, "packages/core/src/control/index.ts"),
       "@sessionpipe/core/service": path.resolve(import.meta.dirname, "packages/core/src/service/index.ts"),
       "@sessionpipe/core/version": path.resolve(import.meta.dirname, "packages/core/src/version.ts"),

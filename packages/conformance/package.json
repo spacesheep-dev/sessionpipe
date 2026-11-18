@@ -45,9 +45,6 @@
   "scripts": {
     "build": "node ../../scripts/build.mjs conformance"
   },
-  "dependencies": {
-    "zod": "^4.6.7"
-  },
   "publishConfig": {
     "access": "public"
   }

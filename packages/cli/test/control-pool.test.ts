@@ -8,7 +8,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ControlHello, ControlHelloPool } from "@sessionpipe/core/schema";
+import { validate } from "@sessionpipe/core/schema";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
@@ -259,8 +259,8 @@ describe.skipIf(process.platform === "win32")("hello (CONTROL.md §2 `pool`)", (
     three(pool);
     await startDaemon(pool);
     const h = await lastHello((x) => "pool" in x);
-    expect(ControlHello.safeParse(h)).toMatchObject({ success: true });
-    expect(ControlHelloPool.parse(h.pool)).toMatchObject({
+    expect(validate("control-hello", h)).toEqual([]);
+    expect(h.pool).toMatchObject({
       on: true,
       harness: "claude-code",
       accounts: [
@@ -279,7 +279,7 @@ describe.skipIf(process.platform === "win32")("hello (CONTROL.md §2 `pool`)", (
     await startDaemon(null);
     const h = await lastHello((x) => x.name === "testbox");
     expect(h).not.toHaveProperty("pool");
-    expect(ControlHello.safeParse(h)).toMatchObject({ success: true });
+    expect(validate("control-hello", h)).toEqual([]);
   });
 
   it("a change in the pool sends a hello at once", async () => {

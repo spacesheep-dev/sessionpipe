@@ -1,7 +1,7 @@
 {
   "name": "sessionpipe-core",
   "version": "0.17.0",
-  "description": "sessionpipe core: protocol types, harness adapters, privacy filter and redaction rulesets, outbox and sinks. Zero runtime dependencies. (published unscoped until the @sessionpipe npm org exists; the code is the same)",
+  "description": "sessionpipe core: protocol types and JSON Schemas generated from the proto, harness adapters, privacy filter and redaction rulesets, outbox and sinks. Zero runtime dependencies. (published unscoped until the @sessionpipe npm org exists; the code is the same)",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -37,7 +37,7 @@
       "import": "./dist/index.js"
     },
     "./schema": {
-      "types": "./dist/schema/v1.d.ts",
+      "types": "./dist/src/schema/index.d.ts",
       "import": "./dist/schema.js"
     },
     "./control": {
@@ -61,8 +61,5 @@
   "dependencies": {},
   "publishConfig": {
     "access": "public"
-  },
-  "devDependencies": {
-    "zod": "^4.6.7"
   }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Conformance fixtures, two checks:
-//  1. Shape: every expected event in conformance/harness/** validates against the
-//     Zod source (wildcards "*" substituted), and every delivery scenario parses.
+//  1. Shape: every expected event in conformance/harness/** fits the protocol's JSON
+//     Schemas (wildcards "*" substituted), and every delivery scenario parses.
 //     This runs from M1 on, so a fixture can never contradict the schema.
 //  2. Behaviour: when @sessionpipe/conformance is built (M2+), every adapter fixture
 //     is run through core's adapter and the events compared.
@@ -62,19 +62,12 @@ for (const f of harness) {
       problems.push(`expect[${i}] envelope: ${err.message}`);
       continue;
     }
-    const r = S.Event.safeParse(ev);
-    if (!r.success)
-      problems.push(
-        `expect[${i}] envelope: ${r.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`,
-      );
-    // Own keys only: "constructor" and "toString" are on every object, and are not schemas.
-    const dataSchema = Object.hasOwn(S.EventData.shape, e.type) ? S.EventData.shape[e.type] : null;
+    const envelopeProblems = S.validate("event", ev);
+    if (envelopeProblems.length) problems.push(`expect[${i}] envelope: ${envelopeProblems.join("; ")}`);
+    const dataSchema = S.dataSchema(e.type);
     if (dataSchema) {
-      const d = dataSchema.safeParse(e.data);
-      if (!d.success)
-        problems.push(
-          `expect[${i}] data for ${e.type}: ${d.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`,
-        );
+      const dataProblems = S.problems(dataSchema, e.data);
+      if (dataProblems.length) problems.push(`expect[${i}] data for ${e.type}: ${dataProblems.join("; ")}`);
     }
   }
   if (problems.length) failed++;
@@ -96,7 +89,11 @@ for (const f of delivery) {
 // fields aside), and every command a vector expects to verify fits control-command.json,
 // as every key a vector expects to enroll fits control-key.json.
 const vectors = walk(path.join(root, "conformance/control-vectors")).filter((f) => f.endsWith(".json"));
-const Carried = S.ControlMessage.omit({ id: true, at: true, expires_at: true });
+// The receiver's envelope fields aside: a vector carries only what the device signed and sent.
+const carried = {
+  ...S.SCHEMAS.control,
+  required: S.SCHEMAS.control.required.filter((k) => !["id", "at", "expires_at"].includes(k)),
+};
 for (const f of vectors) {
   const rel = path.relative(root, f);
   const problems = [];
@@ -105,19 +102,18 @@ for (const f of vectors) {
     if (!v.name || !v.input || !v.expect || typeof v.expect.ok !== "boolean")
       problems.push("needs name, input, expect.ok");
     if (v.input?.signed) {
-      const shape = Carried.safeParse(v.input.signed);
+      const shape = S.problems(carried, v.input.signed);
       // Broken vectors may break the command, never the envelope's own types.
-      if (!shape.success && typeof v.input.signed.cmd === "string" && v.input.signed.cmd.length <= 12_000)
-        problems.push(`signed: ${shape.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
+      if (shape.length && typeof v.input.signed.cmd === "string" && v.input.signed.cmd.length <= 12_000)
+        problems.push(`signed: ${shape.join("; ")}`);
       if (v.expect.ok) {
-        const c = S.ControlCommand.safeParse(JSON.parse(v.input.signed.cmd));
-        if (!c.success)
-          problems.push(`cmd: ${c.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
+        const c = S.validate("control-command", JSON.parse(v.input.signed.cmd));
+        if (c.length) problems.push(`cmd: ${c.join("; ")}`);
       }
     } else if (v.input?.proof) {
       // Like a command: a broken vector may bring a key no machine takes, but a key a
       // vector expects to enroll fits control-key.json.
-      if (v.expect.ok && !S.ControlKey.safeParse(v.input.key).success)
+      if (v.expect.ok && S.validate("control-key", v.input.key).length)
         problems.push("key does not fit control-key.json");
     } else problems.push("input needs signed or proof");
   } catch (e) {
