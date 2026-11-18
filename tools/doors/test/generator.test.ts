@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import { build, lint } from "../src/buf.js";
 import { messageSchema, schemaFiles } from "../src/jsonschema.js";
 import { run } from "../src/main.js";
-import { Descriptors, kindOf, typeTiers } from "../src/read.js";
+import { Descriptors, eventTypes, kindOf, typeTiers } from "../src/read.js";
+import { registryFile } from "../src/registry.js";
 import { typesFile } from "../src/types.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -56,6 +57,24 @@ describe("reading the descriptors", () => {
   });
   it("names a message the proto hasn't got", () => {
     expect(() => compile("message Here {}").message("Elsewhere")).toThrow(/no message sessionpipe.v1.Elsewhere/);
+  });
+  it("an event type's data keys arrive by tier; a field below its message's tier is refused; an unfiltered type has no list", () => {
+    const d = compile(
+      "message A { option (sessionpipe.v1.tier) = 1; string x = 1; string y = 2 [(sessionpipe.v1.at_tier) = 3]; }\n" +
+        "message Raw { option (sessionpipe.v1.tier) = 3; option (sessionpipe.v1.unfiltered) = true; }\n" +
+        'message EventData { A a = 1 [json_name = "a.b"]; Raw raw = 2; }\n' +
+        "message Session { string id = 1; int64 seq = 2; }\nenum HarnessName { HARNESS_NAME_UNSPECIFIED = 0; HARNESS_NAME_X = 1; }",
+    );
+    expect(eventTypes(d)).toEqual({ "a.b": { tier: 1, allow: { 1: ["x"], 3: ["y"] } }, raw: { tier: 3, allow: null } });
+    expect(typeTiers(d)).toEqual({ "a.b": 1, raw: 3 });
+    expect(registryFile(d)).toContain('"a.b": { 1: ["x"], 3: ["y"] },');
+    expect(registryFile(d)).not.toContain('"raw": {');
+    expect(registryFile(d)).toContain('export const SESSION_KEYS = ["id", "seq"] as const;');
+    expect(registryFile(d)).toContain('export const HARNESS_NAMES = ["x"] as const;');
+    const low = compile(
+      "message B { option (sessionpipe.v1.tier) = 2; string x = 1 [(sessionpipe.v1.at_tier) = 1]; }\nmessage EventData { B b = 1; }",
+    );
+    expect(() => eventTypes(low)).toThrow(/B.x: at_tier 1 is below the message's tier 2/);
   });
   it("every event type needs a tier on its message", () => {
     expect(() => typeTiers(compile("message NoTier {}\nmessage EventData { NoTier a = 1; }"))).toThrow(
@@ -124,7 +143,7 @@ describe("the schemas command", () => {
     const error: string[] = [];
     const io = { log: (s: string) => log.push(s), error: (s: string) => error.push(s) };
     expect(run({ root: fake, check: true, ...io })).toBe(1);
-    expect(error.filter((l) => l.endsWith(": missing"))).toHaveLength(17);
+    expect(error.filter((l) => l.endsWith(": missing"))).toHaveLength(19);
     expect(run({ root: fake, check: false, ...io })).toBe(0);
     expect(existsSync(path.join(fake, "packages/core/gen/v1.ts"))).toBe(true);
     expect(readFileSync(path.join(fake, "schemas/v1/event.json"), "utf8")).toBe(
@@ -145,7 +164,7 @@ describe("the schemas command", () => {
     expect(run({ root: fake, check: false, ...io })).toBe(0);
     expect(existsSync(path.join(fake, "schemas/v1/extra.json"))).toBe(false);
     expect(run({ root: fake, check: true, ...io })).toBe(0);
-    expect(log.at(-1)).toMatch(/in sync with proto\/ \(17 files\)/);
+    expect(log.at(-1)).toMatch(/in sync with proto\/ \(19 files\)/);
     // Six runs of the generator over a copied tree: about five seconds on a Windows
     // runner, where the default 5 s limit failed it twice in one day (2026-11-11).
   }, 30_000);

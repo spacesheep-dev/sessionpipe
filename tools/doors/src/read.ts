@@ -75,6 +75,8 @@ const EXTENSIONS = {
   strict: "sessionpipe.v1.strict",
   either: "sessionpipe.v1.either",
   tier: "sessionpipe.v1.tier",
+  atTier: "sessionpipe.v1.at_tier",
+  unfiltered: "sessionpipe.v1.unfiltered",
   word: "sessionpipe.v1.word",
 } as const;
 
@@ -159,6 +161,12 @@ export class Descriptors {
   tier(m: DescMessage): number | undefined {
     return this.get<number>(m.proto.options, "tier");
   }
+  atTier(f: DescField): number | undefined {
+    return this.get<number>(f.proto.options, "atTier");
+  }
+  unfiltered(m: DescMessage): boolean {
+    return this.get<boolean>(m.proto.options, "unfiltered") ?? false;
+  }
   word(v: DescEnumValue): string | undefined {
     return this.get<string>(v.proto.options, "word");
   }
@@ -201,14 +209,37 @@ export function enumWords(desc: DescEnum, d: Descriptors): string[] {
   return desc.values.filter((v) => v.number !== 0).map((v) => d.word(v) ?? v.name.replace(prefix, "").toLowerCase());
 }
 
-/** The tier each event type is carried at, by the type's JSON name: EventData's fields' messages' `tier`. */
-export function typeTiers(d: Descriptors): Record<string, number> {
-  const out: Record<string, number> = {};
+/** One event type as the sender's filter needs it: its lowest tier, and which of its data keys arrive
+ *  at each tier (cumulative in the filter: tier 1 adds to tier 0's). `null` for a type carried whole. */
+export interface EventTypeInfo {
+  tier: number;
+  allow: Record<number, string[]> | null;
+}
+
+/** Every event type by its JSON name, in EventData's order: EventData's fields' messages' `tier`,
+ *  `unfiltered` and their fields' `at_tier`. */
+export function eventTypes(d: Descriptors): Record<string, EventTypeInfo> {
+  const out: Record<string, EventTypeInfo> = {};
   for (const f of d.message("EventData").fields) {
     const kind = kindOf(f);
     const tier = "message" in kind ? d.tier(kind.message) : undefined;
     if (tier === undefined) throw new Error(`EventData.${f.name}: no tier option on its message`);
-    out[wireName(f)] = tier;
+    const m = (kind as { message: DescMessage }).message;
+    let allow: Record<number, string[]> | null = null;
+    if (!d.unfiltered(m)) {
+      allow = { [tier]: [] };
+      for (const g of m.fields) {
+        const at = d.atTier(g) ?? tier;
+        if (at < tier) throw new Error(`${m.name}.${g.name}: at_tier ${at} is below the message's tier ${tier}`);
+        allow[at] ??= [];
+        allow[at].push(wireName(g));
+      }
+    }
+    out[wireName(f)] = { tier, allow };
   }
   return out;
 }
+
+/** The tier each event type is carried at, by the type's JSON name. */
+export const typeTiers = (d: Descriptors): Record<string, number> =>
+  Object.fromEntries(Object.entries(eventTypes(d)).map(([t, i]) => [t, i.tier]));
