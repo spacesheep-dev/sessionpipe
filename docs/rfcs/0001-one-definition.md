@@ -265,7 +265,7 @@ CI fails when:
 | # | Step | Touches | Done when | Release |
 |---|---|---|---|---|
 | 1 | `proto/` for the wire: `events`, `http`, `control`, `options`; `tools/doors` writes `schemas/v1/` and `packages/core/gen/v1.ts` (decision 002, unused until step 2); the tier goldens (decision 003) | new files; `scripts/schemas.mjs` retired | gates 1, 3 green; Zod kept one release, held equal to the proto by `tools/doors/test/parity.test.ts` | **built 2026-11-08** on `one-definition/step-1` (decision 001); a patch; then **one release cycle on spacesheep before step 2** |
-| 2 | Generated TS types in core; `filterEvent` and `TYPE_TIER` from `tier` options | `packages/core` | goldens unchanged; GUI builds against the new core (gate 10) | minor |
+| 2 | Core's types are the generated ones; the filter's tables (`TYPE_TIER`, the per-tier data keys, the session keys) come from the proto's `tier` and `at_tier` options; the Zod file is gone and `sessionpipe-core/schema` carries the JSON Schemas and a checker instead (decision 004) | `packages/core` | goldens unchanged; GUI typechecks against the new core (gate 10) | **built 2026-11-18** (decision 004); minor |
 | 3 | The command surface in proto; `doors.json`; the CLI door; status, doctor, sink list first | `packages/cli` | gate 6; every command has `--json`; `help.ts` deleted; website reads the table | minor |
 | 4 | `local.proto` and the socket door | `packages/cli/src/control` | gate 9 | minor |
 | 5 | `sessionpipe mcp` | `packages/cli` | `ask` and `status` work from a Claude Code session with no shell | minor |
