@@ -20,6 +20,12 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "scripts/**/*.test.ts", "tools/*/test/**/*.test.ts"],
     // Each file starts in a sandbox home; the real one is watched. See the file.
     setupFiles: ["test/sandbox-home.ts"],
+    // The default five seconds is a guess at a quiet machine. A CI leg runs more files
+    // at once than it has CPUs, and with coverage on: a test that takes one second
+    // alone has taken more than five there (cli-main's sink tests, 2026-11-18). A test
+    // that hangs still fails; one that was only kept waiting no longer does.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],

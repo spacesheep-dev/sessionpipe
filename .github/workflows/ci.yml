@@ -46,6 +46,12 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
         if: matrix.os != 'ubuntu-latest' || matrix.node != 22
+        # The suite waits far more than it computes (daemons, sockets, timers): about a
+        # fifth of a CPU per worker. Vitest's default is one worker fewer than the CPUs,
+        # which is two on a macOS runner, and the step took six minutes there. Six
+        # workers on its three CPUs (four on Windows) keeps them busy. Ubuntu keeps the default.
+        env:
+          VITEST_MAX_WORKERS: ${{ matrix.os != 'ubuntu-latest' && '6' || '' }}
       - name: Unit tests with coverage thresholds (vitest)
         run: npm run test:coverage
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
