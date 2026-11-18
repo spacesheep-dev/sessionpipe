@@ -18,6 +18,7 @@ export interface Queued {
   at: string;
   expires_at: string;
   takenAt?: number;
+  servedAt?: number;
 }
 
 let seq = 0;
@@ -34,6 +35,12 @@ export class FakeReceiver {
   readonly hellos: Record<string, unknown>[] = [];
   readonly pairs: Record<string, unknown>[] = [];
   readonly polls: number[] = [];
+  /** How long a message just handed over is held back before it is handed over again.
+   *  The daemon asks again the moment a poll answers, before its ack for that answer has
+   *  landed; handed the same message, it waits two seconds before its next poll, so as
+   *  not to spin, and the next message a test sends waits with it. A receiver gives an
+   *  ack this long to land first. 0 redelivers at once. */
+  redeliverAfterMs = 300;
   machine = "m_fakemachine0000000001";
   token = "tok_machine_0123456789abcdef";
   sinkToken = "sink_token_abc";
@@ -160,7 +167,10 @@ export class FakeReceiver {
     const now = Date.now();
     const list = (this.queue.get(this.machine) ?? []).filter((q) => Date.parse(q.expires_at) > now);
     this.queue.set(this.machine, list);
-    return list.filter((q) => !q.takenAt || now - q.takenAt > 35 * 60_000);
+    return list.filter(
+      (q) =>
+        (!q.takenAt || now - q.takenAt > 35 * 60_000) && (!q.servedAt || now - q.servedAt >= this.redeliverAfterMs),
+    );
   }
 
   private async body(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -262,10 +272,13 @@ export class FakeReceiver {
       const until = Date.now() + wait;
       for (;;) {
         const p = this.pending();
-        if (p.length) return send(200, { messages: p.map(({ takenAt: _t, ...q }) => q) });
+        if (p.length) {
+          for (const q of p) q.servedAt = Date.now();
+          return send(200, { messages: p.map(({ takenAt: _t, servedAt: _s, ...q }) => q) });
+        }
         if (Date.now() >= until || req.destroyed) return send(204);
         await new Promise<void>((r) => {
-          const t = setTimeout(r, Math.min(until - Date.now(), 200));
+          const t = setTimeout(r, Math.min(until - Date.now(), 50));
           this.waiters.push(() => {
             clearTimeout(t);
             r();
