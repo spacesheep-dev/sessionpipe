@@ -35,6 +35,10 @@ enum HarnessName {
   HARNESS_NAME_KIRO = 9;
   // OpenCode.
   HARNESS_NAME_OPENCODE = 10;
+  // Grok Build.
+  HARNESS_NAME_GROK_BUILD = 11 [(sessionpipe.v1.word) = "grok-build"];
+  // Autopilot (Directionally Local).
+  HARNESS_NAME_AUTOPILOT = 12;
 }
 
 // The harness that produced an event.

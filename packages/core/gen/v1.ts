@@ -6,7 +6,7 @@
  * The harnesses in the registry (spec/ADAPTERS.md). A name outside it is allowed on the wire
  * (`Harness.name` is a pattern), so a harness can report before it is listed here.
  */
-export type HarnessName = "claude-code" | "codex" | "gemini-cli" | "antigravity" | "devin" | "cursor" | "copilot-cli" | "droid" | "kiro" | "opencode";
+export type HarnessName = "claude-code" | "codex" | "gemini-cli" | "antigravity" | "devin" | "cursor" | "copilot-cli" | "droid" | "kiro" | "opencode" | "grok-build" | "autopilot";
 
 /** Where a session's title came from. */
 export type TitleSource = "custom" | "harness" | "first-ask";
