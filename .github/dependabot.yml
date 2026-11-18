@@ -9,6 +9,12 @@ updates:
       npm-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # A Biome minor changes lint rules and its config schema (2.5 → 2.6 failed lint on every
+      # cell, #171), so it never rides in the group: it gets a PR of its own, with `biome migrate`
+      # and the rule diff reviewed. Patches still come.
+      - dependency-name: "@biomejs/biome"
+        update-types: ["version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
