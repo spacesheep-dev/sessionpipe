@@ -238,6 +238,17 @@ describe("a start's options are checked before anything is taken", { timeout: 30
     expect(d?.status().delivered).toEqual({ refused: 3 });
     expect(runs).toEqual([]);
   });
+  it("a refusal handed over again gets the ack it already has; nothing is decided twice", async () => {
+    await startDaemon();
+    const q = await start(`claude-code:${NEW}`, { permission: "auto" });
+    const first = await rx.waitAck(q.id);
+    // A receiver that never saw the ack hands the message over again (CONTROL.md §10).
+    rx.enqueue(q);
+    await vi.waitFor(() => expect(outcomes(q.id).length).toBeGreaterThan(1), { timeout: 5000, interval: 20 });
+    for (const a of outcomes(q.id)) expect(a).toStrictEqual(first);
+    expect(d?.status().delivered).toEqual({ refused: 1 });
+    expect(runs).toEqual([]);
+  });
   it("a level the harness doesn't have here, in its own words", async () => {
     await startDaemon({ mode: "auto", caps: ["dontAsk", "auto"] });
     const cases = [
