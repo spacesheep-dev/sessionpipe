@@ -1,0 +1,54 @@
+{
+  "spec": "HTTP.md §2 Errors, the two 403 rows",
+  "note": "What a sender does with a 403. `tier` is the tier the sink sends at, `body` the 403's body (an object is sent as JSON, a string as it is). `expect` is `lower-tier` with the `max_tier` to cap the sink at, or `retry`: the batch waits on the 5xx backoff ladder and the sink is neither paused nor capped.",
+  "cases": [
+    {
+      "name": "tier_above_max with a cap below the sink's tier: lower the tier",
+      "tier": 3,
+      "body": { "reason": "tier_above_max", "max_tier": 1 },
+      "expect": { "action": "lower-tier", "max_tier": 1 }
+    },
+    {
+      "name": "a cap of 0 is a cap",
+      "tier": 1,
+      "body": { "reason": "tier_above_max", "max_tier": 0 },
+      "expect": { "action": "lower-tier", "max_tier": 0 }
+    },
+    {
+      "name": "tier_above_max with no max_tier: nothing to lower to, back off",
+      "tier": 3,
+      "body": { "reason": "tier_above_max" },
+      "expect": { "action": "retry" }
+    },
+    {
+      "name": "an access proxy's HTML page: back off",
+      "tier": 1,
+      "body": "<html><body><h1>Forbidden</h1></body></html>",
+      "expect": { "action": "retry" }
+    },
+    {
+      "name": "an empty body: back off",
+      "tier": 2,
+      "body": "",
+      "expect": { "action": "retry" }
+    },
+    {
+      "name": "a cap equal to the sink's tier lowers nothing: back off",
+      "tier": 1,
+      "body": { "reason": "tier_above_max", "max_tier": 1 },
+      "expect": { "action": "retry" }
+    },
+    {
+      "name": "a cap above the sink's tier lowers nothing: back off",
+      "tier": 2,
+      "body": { "reason": "tier_above_max", "max_tier": 3 },
+      "expect": { "action": "retry" }
+    },
+    {
+      "name": "a max_tier that is not a number is no cap: back off",
+      "tier": 3,
+      "body": { "reason": "tier_above_max", "max_tier": "1" },
+      "expect": { "action": "retry" }
+    }
+  ]
+}
