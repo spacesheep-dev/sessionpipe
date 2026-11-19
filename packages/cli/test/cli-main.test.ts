@@ -1050,7 +1050,7 @@ describe.skipIf(process.platform === "win32")("sink add | list | remove | test",
     expect((await run("sink", "remove", "a")).lines).toEqual(["  no sink named a"]);
     expect(cfg().sinks.map((s) => s.name)).toEqual(["b"]);
     for (const argv of [["sink"], ["sink", "add"], ["sink", "remove"], ["sink", "test"], ["sink", "x"]])
-      expect((await run(...argv)).text).toMatch(/^usage: sessionpipe sink add/);
+      expect((await run(...argv)).text).toMatch(/^usage: sessionpipe sink add .*\[--token T\] \[--secret S\]/);
   });
 
   it("tests a sink with a heartbeat and its forget, and reports what the receiver said", async () => {

@@ -80,7 +80,7 @@ import {
 import { heardAgo, hostOf, isLive } from "./control/view.js";
 import { bringCurrent, type CurrentDeps } from "./current.js";
 import { isToolsMode, ToolClock, type ToolsMode, toolsMode } from "./fold.js";
-import { helpFor } from "./help.js";
+import { helpFor, usageTable } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
@@ -831,9 +831,7 @@ async function sink(): Promise<void> {
     );
     return;
   }
-  out(
-    "usage: sessionpipe sink add <url|file:PATH|stdout> [--tier N] [--token T] [--pii] [--tools all|main|beat] [--name N] | list | remove <name> | test <name>",
-  );
+  out(`usage: sessionpipe ${usageTable([])["sink add"]} | list | remove <name> | test <name>`);
 }
 
 async function sinkAdd(url: string, cfg: Config): Promise<void> {

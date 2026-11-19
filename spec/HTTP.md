@@ -34,7 +34,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
 | `protocol` | The protocol integers the receiver accepts. |
 | `max_tier` | The highest tier it will store. A sender MUST cap its sink's tier at this value. |
 | `capabilities` | `events` is required. `backfill`: accepts `session.backfill`. `forget`: honours `session.forgotten`. `control`: serves the control endpoint. `native`: serves the native lane. Additions to the protocol are announced here ([VERSIONING.md](VERSIONING.md)). |
-| `auth` | `bearer` only in v1. |
+| `auth` | `bearer` only in v1: the scheme of `authorization` (§2). A signature is not listed here. |
 | `endpoints` | Paths relative to the origin, or absolute URLs. |
 | `batch` | The largest request the receiver takes. A sender MUST NOT exceed either bound. Defaults when absent: 50 / 262 144. |
 | `tools` | Optional: the tool events the receiver would rather be sent (PROTOCOL.md §4, *Thinned tool events*): `all` (every one, what an absent field means), `main` (a subagent's thinned to at most one `tool.ended` per session per minute), `beat` (every session's thinned so). A sender SHOULD honour it unless the sink's owner chose otherwise, and SHOULD read it again at least daily; a sender that predates the field sends every tool event. A receiver that meters requests per machine SHOULD say `main`. |
@@ -52,11 +52,15 @@ Request headers:
 | Header | Rule |
 |--------|------|
 | `content-type` | `application/json` |
-| `authorization` | `Bearer <token>` — the token the person configured for the sink. |
+| `authorization` | `Bearer <token>` — the token the person configured for the sink. OPTIONAL when the request carries `webhook-signature`. |
 | `sessionpipe-protocol` | `1` — the batch's protocol integer, so a receiver can answer 400 without parsing. |
 | `webhook-id` | OPTIONAL. A unique id for this delivery attempt's message (retries reuse it). |
 | `webhook-timestamp` | OPTIONAL. Unix seconds. |
 | `webhook-signature` | OPTIONAL. `v1,<base64>` — HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the secret behind the `whsec_` prefix (base64-decoded). Several space-separated signatures MAY be present; one match is enough. A receiver that verifies MUST reject a timestamp more than 5 minutes off its clock. |
+
+A sender sends the bearer, the signature, or both: what the person configured for the
+sink. A receiver that verifies the signature MAY accept a signed request with no bearer;
+one that does not accept it answers 401, as for a missing token.
 
 Response `202` with [`batch-response.json`](https://sessionpipe.org/schema/v1/batch-response.json):
 
@@ -74,7 +78,7 @@ the well-known value so a sender learns a lowered cap without a discovery round 
 | Status | Meaning | Sender behaviour |
 |-------:|---------|------------------|
 | 400 | Malformed body, or `{"reason":"unsupported_protocol","supported":[1]}` | Drop the whole batch; log it. |
-| 401 | Bad or missing token | Pause the sink; `doctor` says so. Never retry in a loop. |
+| 401 | Bad token, or no token and no signature the receiver accepts | Pause the sink; `doctor` says so. Never retry in a loop. |
 | 403 | `{"reason":"tier_above_max","max_tier":N}`: an event's `tier` exceeds the receiver's maximum | Lower the sink's tier to `max_tier`, re-filter, retry. |
 | 413 | Batch too large | Halve the batch and retry; a single event over the limit is dropped and logged. |
 | 429 | Too many requests, with `retry-after` | Wait as told, then retry. |
@@ -177,6 +181,7 @@ The runner sends and expects, in this order; each is a fixture under
 | tier | an event with `tier` > `max_tier` | 403 with `max_tier` |
 | protocol | `sessionpipe-protocol: 99` | 400 `unsupported_protocol` |
 | auth | a wrong bearer (`auth: "wrong"` in the fixture) | 401 |
+| auth-signed | a signed batch with no bearer (`auth: "signed"`), at a receiver that accepts one: the runner is given the sink's secret only for such a receiver (`skip_when: "no secret"`) | 202, `accepted` = n |
 | unknown-type | `type: "x.y"` | 202, stored, retrievable |
 | forget | `session.forgotten`, then a read | 202, then nothing |
 | seq-gap | a batch with gaps in `seq` and a `tool.started` with no `tool.ended` (a thinned sink, PROTOCOL.md §4), then one of its events again | 202, `accepted` = n; then 202, `duplicates` = 1 |
