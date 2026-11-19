@@ -75,14 +75,20 @@ function redactAssignments(text: string): string {
     if (!v) continue;
     const value = (v[1] ?? v[2] ?? v[3] ?? v[4]) as string;
     NAME_SEP.lastIndex = VALUE.lastIndex;
-    if (isPlaceholder(value) || value.includes(REDACTED)) continue;
-    // `max_tokens: 4096`, `input_tokens=12k` — a token COUNT, not a token.
-    if (/tokens?$/i.test(name) && /^\d+(?:[.,]\d+)*[km]?$/i.test(value)) continue;
+    if (keepsValue(name, value)) continue;
     const q = v[1] != null ? '"' : v[2] != null ? "'" : v[3] != null ? "`" : "";
     out += text.slice(last, v.index) + q + REDACTED + q;
     last = VALUE.lastIndex;
   }
   return last ? out + text.slice(last) : text;
+}
+
+/** Does a value assigned to the secret name `name` stay? A placeholder, a value
+ *  already redacted, and a count under a `*token(s)` name are not the secret. */
+function keepsValue(name: string, value: string): boolean {
+  if (isPlaceholder(value) || value.includes(REDACTED)) return true;
+  // `max_tokens: 4096`, `input_tokens=12k` — a token COUNT, not a token.
+  return /tokens?$/i.test(name) && /^\d+(?:[.,]\d+)*[km]?$/i.test(value);
 }
 
 /** Is this identifier the name of a secret? `DB_PASSWORD`, `apiKey`, `client-secret`,
@@ -162,13 +168,25 @@ export function hasSecret(text: string): boolean {
   return !!text && redactSecrets(text) !== text;
 }
 
-/** Redact every string in a JSON-able value (keys are left alone). */
+/** Redact every string in a JSON-able value. Keys stay; a string stored directly
+ *  under a key that names a secret goes whole, `{"api_key":"[redacted]"}`, with the
+ *  exemptions an assignment has: the key is the name, the string its value. */
 export function redactDeep<T>(v: T): T {
-  if (typeof v === "string") return redactSecrets(v) as T;
-  if (Array.isArray(v)) return v.map(redactDeep) as T;
+  return redactUnder(v, undefined);
+}
+
+function redactUnder<T>(v: T, key: string | undefined): T {
+  if (typeof v === "string")
+    return (key !== undefined && isSecretName(key) && !keepsValue(key, v) ? REDACTED : redactSecrets(v)) as T;
+  // An element has no key of its own. A loop, not a callback: one stack frame per level.
+  if (Array.isArray(v)) {
+    const out: unknown[] = [];
+    for (const x of v) out.push(redactUnder(x, undefined));
+    return out as T;
+  }
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = redactDeep(x);
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = redactUnder(x, k);
     return out as T;
   }
   return v;

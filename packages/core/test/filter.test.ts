@@ -308,6 +308,23 @@ describe("filterEvent: caps", () => {
     expect(small.data.input).toEqual({ a: 1 });
     expect(small.data.output).toBe(5);
   });
+  it("a string under a secret-named key in tool input is redacted at tier 3, whatever the input's size (#206)", () => {
+    // A value with a quote in it, and one longer than the text rule reads: over 64 KB the
+    // input becomes text, so it is redacted while it still has its keys.
+    const long = "Kq7mZx81".repeat(50);
+    const login = { api_key: "Zx81kfjQ02mmAq", password: 'Ab"Hunter2xyz9', private_key: long, user: "sam" };
+    const at3 = (key: "input" | "output", value: unknown) =>
+      JSON.stringify(
+        filterEvent(base({ type: "tool.ended", data: { tool: "login", ok: true, [key]: value } }), 3, false)!.data[key],
+      );
+    const kept = `{"api_key":"${REDACTED}","password":"${REDACTED}","private_key":"${REDACTED}","user":"sam"`;
+    for (const key of ["input", "output"] as const) {
+      expect(at3(key, login)).toBe(`${kept}}`);
+      const over = JSON.parse(at3(key, { ...login, pad: "x".repeat(70_000) })) as string;
+      expect(over.startsWith(`${kept},"pad":"xxx`)).toBe(true);
+      expect(over).toHaveLength(64 * 1024 + 1);
+    }
+  });
   it("a running turn's reply keeps its end; an attention message is cut at 200", () => {
     const reply = `${"a".repeat(10)}${"b".repeat(30_000)}`;
     const p = filterEvent(
