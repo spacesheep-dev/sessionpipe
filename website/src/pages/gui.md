@@ -15,13 +15,13 @@ A separate open-source project ([repository](https://github.com/spacesheep-dev/s
 
 ## Desktop apps
 
-The same UI in a Tauri 2 app on the system's own web view. It connects to the receiver on this machine, and on first run it can start one for you as a service (that needs Node 20 or newer). A menu bar item and a Dock badge count what needs you; on a Mac it also sends, signed with a key in the Secure Enclave and Touch ID. It updates itself.
+The same UI in a Tauri 2 app on the system's own web view. It connects to the receiver on this machine, and on first run it can start one for you as a service (that needs Node 22.12 or newer, or Node 20 from 20.19 on). A menu bar item and a Dock badge count what needs you; on a Mac it also sends, signed with a key in the Secure Enclave and Touch ID. It updates itself.
 
 | Platform | Download |
 |---|---|
 | macOS 13 or newer, Apple silicon and Intel | [.dmg]({{gui:dmg}}), signed and notarized |
 | Linux, x86-64 | [.deb]({{gui:deb}}) · [AppImage]({{gui:appimage}}) |
-| Anything with Node 20, Windows included | npm, below |
+| Anything with Node 22.12 or 20.19, Windows included | npm, below |
 
 ## On your phone
 

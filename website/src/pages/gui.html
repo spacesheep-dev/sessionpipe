@@ -30,7 +30,7 @@
 <div class="gui">
 <div><h2 class="kick" id="desktop-h">Desktop apps</h2><h3>A small app, on macOS and Linux.</h3></div>
 <div class="gui-get">
-<p>The same UI in a <a href="https://tauri.app">Tauri&nbsp;2</a> app on the system's own web view, not Electron. It connects to the receiver on this machine, and on first run it can start one for you as a service (that needs Node 20 or newer).</p>
+<p>The same UI in a <a href="https://tauri.app">Tauri&nbsp;2</a> app on the system's own web view, not Electron. It connects to the receiver on this machine, and on first run it can start one for you as a service (that needs Node 22.12 or newer, or Node 20 from 20.19 on).</p>
 <ul class="ticks">
 <li>{{mark:bell}}<span>A menu bar item and a Dock badge that count what needs you, and a notification when something does.</span></li>
 <li>{{mark:fingerprint}}<span>On a Mac it sends too: prompts, new sessions and permission answers, signed with a key in the Secure Enclave and unlocked with Touch ID.</span></li>
@@ -39,7 +39,7 @@
 <dl class="platforms">
 <div><dt>macOS 13 or newer</dt><dd>Apple silicon and Intel · <a href="{{gui:dmg}}">.dmg</a>, signed and notarized</dd></div>
 <div><dt>Linux, x86-64</dt><dd><a href="{{gui:deb}}">.deb</a> · <a href="{{gui:appimage}}">AppImage</a>, for any distribution</dd></div>
-<div><dt>Anything with Node 20</dt><dd>Windows included: <a href="#npm">install with npm</a> and open it in a browser</dd></div>
+<div><dt>Anything with Node 22.12 or 20.19</dt><dd>Windows included: <a href="#npm">install with npm</a> and open it in a browser</dd></div>
 </dl>
 </div>
 </div>
@@ -63,7 +63,7 @@
 
 <section class="sec" id="npm" aria-labelledby="npm-h">
 <h2 class="sh" id="npm-h" data-reveal>Or install it with npm</h2>
-<p class="sub" data-reveal>On any system with Node 20 or newer, Windows included. Then run <code>npx sessionpipe install</code> on each machine whose sessions you want on the board; search of this machine's own history works without it.</p>
+<p class="sub" data-reveal>On any system with Node 22.12 or newer (or Node 20 from 20.19 on), Windows included. Then run <code>npx sessionpipe install</code> on each machine whose sessions you want on the board; search of this machine's own history works without it.</p>
 <div class="cmds" data-reveal>
 <p class="cmd"><span class="p" aria-hidden="true">$</span><code>npx github:spacesheep-dev/sessionpipe-gui</code><button type="button" class="copy" data-text="npx github:spacesheep-dev/sessionpipe-gui" hidden>Copy</button></p>
 <p class="cmd"><span class="p" aria-hidden="true">$</span><code>npm i -g {{gui:tgz}}</code><button type="button" class="copy" data-text="npm i -g {{gui:tgz}}" hidden>Copy</button></p>
