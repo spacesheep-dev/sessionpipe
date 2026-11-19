@@ -50,6 +50,32 @@ const TOKEN_PATTERNS: RegExp[] = [
 ];
 /** `scheme://user:password@host` — the password goes, the user and host stay. */
 const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]{1,20}:\/\/[^\s:/@'"`<>]{1,100}:)([^\s@/'"`<>]{1,200})(@)/gi;
+/** A credential in a URL's query: `?k=…`, `&sig=…`, `&X-Amz-Signature=…`. A `?`, `&` or an
+ *  HTML `&amp;` opens the parameter; its name is one of a closed list, in any case; a value of
+ *  16 or more URL characters goes, whole. The name, the other parameters and the rest of the
+ *  URL stay: `?page=2&k=short` is left as it is. `token`, `access_token`, `api_key` and
+ *  `apikey` are not on the list: they name a secret, and redactAssignments takes their value. */
+const URL_QUERY_KEY =
+  /((?:[?&]|&amp;)(k|key|sig|signature|x-amz-signature|x-goog-signature)=)([A-Za-z0-9._~%+/=-]{16,})/gi;
+/** `k` and `key` are everyday names too (`?k=wireless+bluetooth+headphones`), so their value
+ *  stays when it reads as words: without the punctuation at its end, split on `+`, `-`, `_`,
+ *  `.` and `%20`, every piece is lowercase letters, one capital then lowercase letters, or one
+ *  to four digits, and none is empty. A hex or base64 key, a UUID, a long number has a piece
+ *  that is none of those. */
+const WORD_NAME = /^k(?:ey)?$/i;
+const WORD_SEP = /[+_.-]|%20/;
+const WORD_PIECE = /^(?:[a-z]+|[A-Z][a-z]+|[0-9]{1,4})$/;
+
+function redactQueryKeys(text: string): string {
+  return text.replace(URL_QUERY_KEY, (m, head: string, name: string, value: string) =>
+    WORD_NAME.test(name) &&
+    untrailed(value, ".,;:!?")
+      .split(WORD_SEP)
+      .every((piece) => WORD_PIECE.test(piece))
+      ? m
+      : `${head}${REDACTED}`,
+  );
+}
 /** `Authorization: Bearer …` / `Basic …`, and a bare `Bearer <token>` in a curl line. */
 const AUTH_HEADER = /\b((?:Bearer|Basic|Token)\s+)([A-Za-z0-9._~+/=-]{16,})/g;
 // The words that name a secret, in prose. `key` alone is too common ("the key
@@ -179,9 +205,10 @@ export function redactSecrets(text: string): string {
   out = out.replace(PROSE, (m, head: string, q: string, v: string) =>
     !looksSecret(v) || v.includes(REDACTED) ? m : `${head}${q}${REDACTED}${q}`,
   );
-  // Last, each on what the rules above it left: a value they changed is no stand-in any
-  // more, and a jar's string is judged as it will stand.
-  return redactNamed(redactCookies(out));
+  // Then, each on what the rules above it left: a value they changed is no stand-in any
+  // more, and a jar's string is judged as it will stand. Last, a link's key in what is left:
+  // a value those rules take whole (`api_key=https://…?k=…`) goes with the link in it.
+  return redactQueryKeys(redactNamed(redactCookies(out)));
 }
 
 /** Did redaction change anything? */

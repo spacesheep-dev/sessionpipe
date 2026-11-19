@@ -296,6 +296,37 @@ describe("filterEvent: pii@1 runs only when opted in", () => {
   });
 });
 
+describe("filterEvent: links that carry a key", () => {
+  it("a tier-2 prompt keeps both links, each without its key", () => {
+    const boardKey = "AbCdEfGhIjKlMnOpQrStUv";
+    const signature = "0123456789abcdef0123456789abcdef";
+    const user = [
+      "Look at the 2 attached pictures:",
+      `http://192.0.2.10:7461/attachments/01M7P7707DCXFRRZDA7VSGD62J.png?k=${boardKey}`,
+      `https://example.com/talk-files/o1/9f2c1e0a7b.png?e=1795139368424&k=${signature}`,
+    ].join("\n");
+    const e = filterEvent(
+      base({
+        type: "turn.transcript",
+        harness: { name: "claude-code", event: "Stop" },
+        data: { turn: 1, user, assistant: "Both are cats.", at: "2026-09-28T00:00:00.000Z" },
+      }),
+      2,
+      false,
+    )!;
+    expect(e.data.user).toBe(
+      [
+        "Look at the 2 attached pictures:",
+        `http://192.0.2.10:7461/attachments/01M7P7707DCXFRRZDA7VSGD62J.png?k=${REDACTED}`,
+        `https://example.com/talk-files/o1/9f2c1e0a7b.png?e=1795139368424&k=${REDACTED}`,
+      ].join("\n"),
+    );
+    expect(JSON.stringify(e)).not.toContain(boardKey);
+    expect(JSON.stringify(e)).not.toContain(signature);
+    expect(e.privacy.rulesets).toEqual(["secrets@1"]);
+  });
+});
+
 describe("filterEvent: caps", () => {
   it("tool input and output: a string or an object over 64 KB is cut, anything else passes as is", () => {
     const big = { blob: "x".repeat(70_000) };
