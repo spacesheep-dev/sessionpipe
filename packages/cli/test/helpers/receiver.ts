@@ -68,6 +68,8 @@ export class FakeReceiver {
    *  pieces (a stream the machine must cap); `error` answers 500; `stall-headers` never
    *  answers; `stall-body` sends the headers and then nothing. */
   fileMode: "plain" | "chunked" | "error" | "stall-headers" | "stall-body" = "plain";
+  /** The next this many file requests answer 503, whatever `fileMode` says. */
+  fileFailures = 0;
   readonly fileGets: string[] = [];
   /** Bytes of the last file request the server actually got written before the client hung up. */
   lastFileSent = 0;
@@ -301,6 +303,12 @@ export class FakeReceiver {
     }
     const gone = new Promise<void>((r) => req.once("close", () => r()));
     this.lastFileSent = 0;
+    if (this.fileFailures > 0) {
+      this.fileFailures--;
+      res.writeHead(503);
+      res.end("busy");
+      return;
+    }
     switch (this.fileMode) {
       case "error":
         res.writeHead(500);

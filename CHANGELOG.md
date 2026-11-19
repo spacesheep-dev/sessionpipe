@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Five additions on protocol 1. Every rule a receiver may already rely on still holds.
+Six additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -39,6 +39,11 @@ Five additions on protocol 1. Every rule a receiver may already rely on still ho
   original_size, dimensions}` at any size, and a PDF's base64 or an image part's `data`
   as `omitted_bytes`, its length. A Read over 1 MiB that used to be cut now arrives
   whole. Fixture: `harness/claude-code/post-tool-use-read-image.json`.
+- **A command's file is fetched again after a moment's trouble** (CONTROL.md §6, *Files*).
+  After no answer, a dropped connection or a `5xx`, the machine SHOULD ask for the file
+  again inside the file's one time limit; the reference daemon asks twice more, after 1 s
+  and 4 s, within 5 minutes. A receiver may see up to three `GET`s for one file. A `404`,
+  another status, or a wrong length or hash is final. Vectors: `control-file-retry.json`.
 
 ### For receivers (0.13.3)
 

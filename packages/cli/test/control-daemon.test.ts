@@ -1269,6 +1269,7 @@ describe.runIf(unix)("attachments on a start (CONTROL.md §6)", () => {
     rx.files.clear();
     rx.fileGets.length = 0;
     rx.fileMode = "plain";
+    rx.fileFailures = 0;
   });
 
   it("downloads, checks and saves each file, then starts the session with their paths", async () => {
@@ -1464,23 +1465,34 @@ describe.runIf(unix)("attachments on a start (CONTROL.md §6)", () => {
     expect(existsSync(path.join(project, ".sessionpipe"))).toBe(false);
   });
 
-  it("a receiver error (500) on a file: failed with the status", async () => {
-    await startDaemon();
+  it("a receiver error (500) on a file: tried twice more, then failed with the status", async () => {
+    await startDaemon({ extra: { fileRetryMs: [10, 20] } });
     rx.fileMode = "error";
     const png = await rx.upload("screenshot.png", "image/png", bytes(1000, 9));
     const q = await start([png]);
     await failed(q.id, /couldn't download "screenshot\.png": HTTP 500/);
+    expect(rx.fileGets).toEqual([png.sha256, png.sha256, png.sha256]);
   });
 
-  it("a receiver that never answers, or stops mid-body: the download is abandoned at the timeout", async () => {
+  it("a receiver that is busy for a moment (503): the file is asked for again and the session starts", async () => {
+    await startDaemon({ extra: { fileRetryMs: [10, 20] } });
+    const png = await rx.upload("screenshot.png", "image/png", bytes(1000, 9));
+    rx.fileFailures = 2;
+    const q = await start([png]);
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    expect(rx.fileGets).toEqual([png.sha256, png.sha256, png.sha256]);
+    expect(existsSync(path.join(filesDir(), "screenshot.png"))).toBe(true);
+  });
+
+  it("a receiver that never answers, or stops mid-body: the download is abandoned at the timeout, in words", async () => {
     await startDaemon({ extra: { fileTimeoutMs: 300 } });
     const png = await rx.upload("screenshot.png", "image/png", bytes(1000, 9));
     rx.fileMode = "stall-headers";
     const q = await start([png]);
-    await failed(q.id, /couldn't download "screenshot\.png": .*abort/i);
+    await failed(q.id, /^"screenshot\.png" didn't finish downloading within 0\.3 seconds$/);
     rx.fileMode = "stall-body";
     const q2 = await start([png]);
-    await failed(q2.id, /couldn't download "screenshot\.png": .*abort/i);
+    await failed(q2.id, /^"screenshot\.png" didn't finish downloading within 0\.3 seconds$/);
   });
 
   it("a .sessionpipe that is a symlink is refused, and nothing is written through it", async () => {

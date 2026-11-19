@@ -988,7 +988,11 @@ the session starts, the machine:
 1. Downloads each file (one after another is fine) with
    `GET {control}/files/{sha256}` and the machine's token. It MUST stop reading a
    response once it passes `size` bytes, and MUST NOT write a file whose length is not
-   `size` or whose SHA-256 is not `sha256`.
+   `size` or whose SHA-256 is not `sha256`. A download the network or the receiver let
+   down (no answer, a connection that drops, a `5xx`) SHOULD be tried again, inside the
+   one time limit the machine gives each file: the reference daemon tries twice more,
+   after 1 s and 4 s, within 5 minutes. Any other answer (a `404`, another status, a
+   wrong length or hash) is final: asking again would get the same.
 2. Writes the files to `<cwd>/.sessionpipe/files/<session id>/<name>` (the id the
    command names, which is the session's name everywhere, above), creating
    `<cwd>/.sessionpipe/.gitignore` with the single line `*` when it is absent (the
@@ -1010,10 +1014,13 @@ the session starts, the machine:
 
    (sizes in units of 1 024 bytes), framed like any other `start`.
 
-If any file cannot be downloaded (a `404`: gone or expired), is too long or too
-short, has another hash, or cannot be written, the command is acked `failed` with
-code `file` and a `detail` naming the file and the reason, nothing that was written
-for it is kept, and **no session starts**.
+If any file still cannot be downloaded (a `404`: gone or expired), is too long or
+too short, has another hash, or cannot be written, the command is acked `failed` with
+code `file` and a `detail` naming the file and the reason in plain words (the
+reference daemon: `"notes.pdf" didn't finish downloading within 5 minutes`, `couldn't
+download "notes.pdf": the connection to the receiver kept failing`, `couldn't save the
+files: this folder can't be written to`, `… the disk is full`), nothing that
+was written for it is kept, and **no session starts**.
 
 ### `pool`
 
@@ -1296,6 +1303,9 @@ send → delivered time.
 - `conformance/control-cancel-waits.json` — when a `cancel` that is through its checks
   waits before it acts (§6 `cancel`): for a start or a prompt for its session that was
   signed no later than it and is still in its own checks, and for nothing else.
+- `conformance/control-file-retry.json` — whether a file is tried again after a try at
+  it failed (§6 `start`, *Files*): after the network or a `5xx`, and never after a
+  `404`, another status, a wrong length or hash, the file's time limit or a stop.
 - `conformance/transcripts/claude-code/stop-hook-ask.jsonl` — an ask handed to a live
   session at its Stop (§13): the paragraph that names the message, by which the daemon
   finds the answer, and which a reader gives back in its plain form.

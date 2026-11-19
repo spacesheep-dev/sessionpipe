@@ -72,6 +72,9 @@
   `cancel`): `{ in_hand, coming: [{ kind, session, signed_ms, ready }], expect }`, what is the
   machine's to stop already, what has arrived and is not in hand yet, and `waits` or `acts`.
   Run by `packages/cli/test/control-daemon.test.ts`.
+- `control-file-retry.json` — whether a machine tries a command's file again after a try at it
+  failed (spec/CONTROL.md §6 `start`, *Files*): `{ failure, status?, expect }`, how the try
+  ended and `retries` or `fails`. Run by `packages/cli/test/control-files.test.ts`.
 - `control-marks.json` — what a machine names a message by when it hands it to a live session
   (spec/CONTROL.md §6 `prompt`): `{ id, mark, channel }`, the receiver's unsigned `id`, the mark
   it makes for a frame and for a channel's tag, and null for every id that is not a whole ULID.
