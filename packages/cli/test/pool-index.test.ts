@@ -558,7 +558,9 @@ describe("the listener", () => {
       res.end('{"id":"msg"}');
     });
     try {
-      const pool = open({ upstream: up.url, persistMs: 20 });
+      // The persist period has to outlast the two requests below, or the "not written yet"
+      // line loses the race: at 20 ms it did on a busy Windows runner (twice on 2026-11-18).
+      const pool = open({ upstream: up.url, persistMs: 300 });
       const one = await signIn(pool, "one");
       await pool.setOn(true);
       const port = readPool(env).port;
