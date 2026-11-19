@@ -3385,10 +3385,6 @@ footer .team .sheep {
 .home .closer .sheep .ss-ink {
   fill: #0b0c10;
 }
-/* a page that closes with the credit doesn't repeat it in the footer */
-body:has(.closer .team) footer .team {
-  display: none;
-}
 @media (max-width: 960px) {
   .home .closer .card {
     grid-template-columns: minmax(0, 1fr);
