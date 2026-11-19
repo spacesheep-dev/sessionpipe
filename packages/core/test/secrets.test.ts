@@ -67,6 +67,11 @@ describe("secrets@1 adversarial (linear time)", () => {
 });
 
 describe("redactDeep", () => {
+  it("a header's stand-in that the text rules would change goes whole, and stays so on a second pass", () => {
+    const once = redactDeep({ Authorization: `<ghp_${rnd(36)}>`, cookie: "<token>" });
+    expect(once).toEqual({ Authorization: REDACTED, cookie: "<token>" });
+    expect(redactDeep(once)).toEqual(once);
+  });
   it("redacts every string in a value, leaving keys and numbers", () => {
     const out = redactDeep({
       session: { id: "019a-77", seq: 3 },

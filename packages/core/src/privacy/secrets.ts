@@ -110,10 +110,10 @@ const PROSE = new RegExp(
   "gi",
 );
 
-/** A value that is plainly not the secret itself: a type, a variable, a template, an
- *  already-redacted marker, an env lookup. */
-function isPlaceholder(v: string): boolean {
-  const s = v.replace(/[.,;:!?]+$/, "");
+/** A value that is nothing but a stand-in, from its first character to its last: empty, a
+ *  type's name, a mask or the marker, or one template holding one name (`<token>`,
+ *  `${TOKEN}`, `{{ token }}`, `$TOKEN`, `%TOKEN%`). */
+function isStandIn(s: string): boolean {
   if (!s) return true;
   if (
     /^(?:string|number|boolean|bool|str|int|any|unknown|null|undefined|none|nil|true|false|optional|required|text|varchar|password|secret|token|env|string\[\]|object|bytes)$/i.test(
@@ -122,6 +122,16 @@ function isPlaceholder(v: string): boolean {
   )
     return true;
   if (/^\[?redacted\]?$/i.test(s) || /^\*+$/.test(s) || /^x{3,}$/i.test(s) || /^\.{3}$|^…$/.test(s)) return true;
+  return /^(?:<[A-Za-z_][\w.-]{0,79}>|\$\{[A-Za-z_][\w.]{0,79}\}|\{\{ ?[A-Za-z_][\w.-]{0,79} ?\}\}|\$[A-Za-z_]\w{0,79}|%[A-Za-z_]\w{0,79}%)$/.test(
+    s,
+  );
+}
+
+/** A value that is plainly not the secret itself: a type, a variable, a template, an
+ *  already-redacted marker, an env lookup. */
+function isPlaceholder(v: string): boolean {
+  const s = v.replace(/[.,;:!?]+$/, "");
+  if (isStandIn(s)) return true;
   if (/^[<{$%]/.test(s)) return true; // <your-key>, ${VAR}, {{var}}, $VAR, %VAR%
   if (
     /^(?:process\.env|env|os\.environ|c\.env|this\.env|import\.meta\.env|getenv|config|settings|secrets|args|opts|options|req|request|body|params|input|data|user|self|this)\b/i.test(
@@ -168,20 +178,34 @@ export function hasSecret(text: string): boolean {
   return !!text && redactSecrets(text) !== text;
 }
 
+/** The end of a key that is the name of a header whose whole value is a credential, in
+ *  any case: `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, and a tool's
+ *  own spelling of them (`set_cookie`, `HTTP_COOKIE`, `X-Authorization`). */
+const HEADER_KEY = /(?:authorization|cookie)$/i;
+
 /** Redact every string in a JSON-able value. Keys stay; a string stored directly
  *  under a key that names a secret goes whole, `{"api_key":"[redacted]"}`, with the
- *  exemptions an assignment has: the key is the name, the string its value. */
+ *  exemptions an assignment has: the key is the name, the string its value. So does a
+ *  header's value under its name, and each string of a list of them (`set-cookie`),
+ *  unless it is nothing but a stand-in that the text rules leave as it is: a header
+ *  begins with whatever its first cookie is called, so how it begins says nothing. */
 export function redactDeep<T>(v: T): T {
   return redactUnder(v, undefined);
 }
 
 function redactUnder<T>(v: T, key: string | undefined): T {
-  if (typeof v === "string")
-    return (key !== undefined && isSecretName(key) && !keepsValue(key, v) ? REDACTED : redactSecrets(v)) as T;
-  // An element has no key of its own. A loop, not a callback: one stack frame per level.
+  if (typeof v === "string") {
+    const text = redactSecrets(v);
+    if (key === undefined) return text as T;
+    const whole = HEADER_KEY.test(key) ? !isStandIn(v.trim()) || text !== v : isSecretName(key) && !keepsValue(key, v);
+    return (whole ? REDACTED : text) as T;
+  }
+  // An element has no key of its own, but a header's list of values is the header's.
+  // A loop, not a callback: one stack frame per level.
   if (Array.isArray(v)) {
+    const under = key !== undefined && HEADER_KEY.test(key) ? key : undefined;
     const out: unknown[] = [];
-    for (const x of v) out.push(redactUnder(x, undefined));
+    for (const x of v) out.push(redactUnder(x, under));
     return out as T;
   }
   if (v && typeof v === "object") {
