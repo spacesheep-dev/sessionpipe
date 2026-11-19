@@ -31,6 +31,11 @@ cursor key uses the raw values, not the safe ids.
 - **Append only.** An event is written as `JSON.stringify(event)` followed by `\n`, in one
   `append` call per batch. A later append MUST NOT rewrite earlier bytes. Two processes
   appending to one file MUST NOT tear a line: the writer appends whole lines in one write.
+- **After a cut line.** When the file's last byte is not `\n`, an earlier append was cut
+  short (a full disk, a file-size limit, a killed process). The next append MUST begin
+  with `\n`, in the same write, so the cut line ends there and only its event is lost.
+  Two writers that hold no lock can each take the other's write in progress for a cut
+  line; that leaves a blank line, which a reader skips (§3).
 - **seq.** `nextSeq` reads `<session>.seq`; if it is missing, empty or not a decimal, the
   counter is recovered as one more than the last line of the session file that carries a
   numeric `session.seq`, or 0 when none does. The file is then written with the next
