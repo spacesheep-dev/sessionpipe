@@ -49,9 +49,12 @@ jobs:
         # The suite waits far more than it computes (daemons, sockets, timers): about a
         # fifth of a CPU per worker. Vitest's default is one worker fewer than the CPUs,
         # which is two on a macOS runner, and the step took six minutes there. Six
-        # workers on its three CPUs (four on Windows) keeps them busy. Ubuntu keeps the default.
+        # workers on its three CPUs keeps them busy. Ubuntu and Windows keep the default: with six
+        # on a Windows runner's four CPUs, tests that wait a few milliseconds for something to
+        # happen lost the wait (three different ones in three runs on 2026-11-18), and its legs
+        # were two to three minutes without it.
         env:
-          VITEST_MAX_WORKERS: ${{ matrix.os != 'ubuntu-latest' && '6' || '' }}
+          VITEST_MAX_WORKERS: ${{ matrix.os == 'macos-latest' && '6' || '' }}
       - name: Unit tests with coverage thresholds (vitest)
         run: npm run test:coverage
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
