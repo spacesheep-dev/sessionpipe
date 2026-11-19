@@ -5,6 +5,24 @@ and released in lockstep. This file records protocol-level changes.
 
 ## Unreleased
 
+### For receivers (0.18.0)
+
+Three additions on protocol 1. Every rule a receiver may already rely on still holds.
+
+- **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
+  `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
+  signature MAY accept it. One that only knows tokens answers 401, as before, and the
+  sink pauses. Fixture: `delivery/34`.
+- **A 403 the sender can't act on is retried with backoff** (HTTP.md §2). A 403 with no
+  `max_tier`, or with one at or above the tier the sink sends at, waits on the 5xx
+  ladder (2 s to 30 min). The sink is not paused and its tier does not change. A 403
+  with a `max_tier` below the sink's tier lowers it, as before. Vectors:
+  `sender-403.json`.
+- **`secrets@1` reads structured values** (PRIVACY.md §2). A string stored directly under
+  a key that names a secret (`api_key`, `password`, `*token*` …) arrives as `[redacted]`,
+  in a tool's `input` and `output` and in the data of a type the sender does not know.
+  The tag is unchanged. Vectors: `redaction/secrets.json`, the `deep` list.
+
 ### For receivers (0.13.3)
 
 A hello's `accounts` entries MAY carry `signed_in` (CONTROL.md §2): whether the
