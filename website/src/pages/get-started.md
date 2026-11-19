@@ -64,14 +64,14 @@ or in Docker: `docker run -p 7357:7357 -v sessionpipe:/data ghcr.io/spacesheep-d
 
 <h2 id="sessionpipe-gui">sessionpipe-gui</h2>
 
-A separate open-source project ([repository](https://github.com/spacesheep-dev/sessionpipe-gui)): every session on your machines, live, on one board, with search across your agents' history. The desktop apps for macOS and Linux are on the [home page](/#gui) and in [every release](https://github.com/spacesheep-dev/sessionpipe-gui/releases); they update themselves. On any system with Node 20 or later, Windows included:
+A separate open-source project ([repository](https://github.com/spacesheep-dev/sessionpipe-gui)): every session on your machines, live, on one board, with search across your agents' history. The desktop apps for macOS and Linux are on the [home page](/#gui) and in [every release](https://github.com/spacesheep-dev/sessionpipe-gui/releases); they update themselves. On any system with Node 22.12 or later (or Node 20 from 20.19 on), Windows included:
 
 ```sh
 npm i -g {{gui:tgz}}
 sessionpipe-gui
 ```
 
-It serves the board on `localhost:7373`, with a QR code for your phone. The desktop app needs Node 20 or later too; on first run it starts the GUI's receiver on this machine. The app shows everything; sending from it comes later. For now you answer a prompt or send the next message from a browser, a phone's included, signed with your passkey.
+It serves the board on `localhost:7373`, with a QR code for your phone. The desktop app needs that Node too; on first run it starts the GUI's receiver on this machine. The app shows everything; sending from it comes later. For now you answer a prompt or send the next message from a browser, a phone's included, signed with your passkey.
 
 ## Send to spacesheep
 
