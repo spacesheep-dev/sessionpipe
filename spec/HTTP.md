@@ -76,6 +76,7 @@ the well-known value so a sender learns a lowered cap without a discovery round 
 | 400 | Malformed body, or `{"reason":"unsupported_protocol","supported":[1]}` | Drop the whole batch; log it. |
 | 401 | Bad or missing token | Pause the sink; `doctor` says so. Never retry in a loop. |
 | 403 | `{"reason":"tier_above_max","max_tier":N}`: an event's `tier` exceeds the receiver's maximum | Lower the sink's tier to `max_tier`, re-filter, retry. |
+| 403 | No `max_tier`, or one at or above the tier the sink sends at (an access proxy's "Forbidden" page, say) | Retry with the 5xx backoff below; log the 403. The sink is not paused and its tier is unchanged. |
 | 413 | Batch too large | Halve the batch and retry; a single event over the limit is dropped and logged. |
 | 429 | Too many requests, with `retry-after` | Wait as told, then retry. |
 | 5xx, network error, timeout | Receiver unavailable | Retry with backoff 2 s · 10 s · 60 s · 5 min · 30 min, then every 30 min, forever. |

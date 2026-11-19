@@ -84,14 +84,17 @@ export class HttpSink implements Sink {
       const err = typeof j.reason === "string" ? j.reason : text.slice(0, 200);
       if (r.status === 400) return { ok: false, acknowledged: 0, status: 400, error: err, action: "drop" };
       if (r.status === 401) return { ok: false, acknowledged: 0, status: 401, error: err, action: "pause" };
-      if (r.status === 403)
+      // A 403 lowers the tier only when it names a cap below the one this sink sends at.
+      // Without one (an access proxy's "Forbidden" page), or with a cap that lowers
+      // nothing, the same batch would be refused again: it waits like a 5xx instead.
+      if (r.status === 403 && typeof j.max_tier === "number" && j.max_tier < this.tier)
         return {
           ok: false,
           acknowledged: 0,
           status: 403,
           error: err,
           action: "lower-tier",
-          ...(typeof j.max_tier === "number" ? { max_tier: j.max_tier as Tier } : {}),
+          max_tier: j.max_tier as Tier,
         };
       if (r.status === 413) return { ok: false, acknowledged: 0, status: 413, error: err, action: "split" };
       if (r.status === 429)

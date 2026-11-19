@@ -21,6 +21,10 @@
   the message with a test key it enrolled there, and `{run}` / `{run12}` are the run id.
   A `hello` step posts its `body` as the machine's hello (`POST {control}/hello`, the
   machine's token), so a scenario can say what the machine advertised before a start.
+- `sender-403.json` — what a sender does with a 403 (spec/HTTP.md §2, the two 403 rows):
+  `{ tier, body, expect: { action, max_tier? } }`, the tier the sink sends at, the 403's body,
+  and `lower-tier` to a cap below that tier, or `retry` on the 5xx backoff when there is no cap
+  or it lowers nothing. Run by `packages/cli/test/sink-contract.test.ts`.
 - `remote/<harness>/*.json` — `{ request, response: { status, body }, expect }`, answers **recorded**
   from a harness's own service (scrubbed), for the facts an adapter may ask it for once the person
   turned `remote_titles` on: claude.ai's name for a Claude Code session (spec/ADAPTERS.md, the Facts

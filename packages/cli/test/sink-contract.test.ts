@@ -9,7 +9,17 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { Cursors, type Event, FileSink, Outbox, readConfig, type Sink, StdoutSink, ulid } from "@sessionpipe/core";
+import {
+  Cursors,
+  type Event,
+  FileSink,
+  Outbox,
+  readConfig,
+  type Sink,
+  StdoutSink,
+  type Tier,
+  ulid,
+} from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HttpSink, webhookId } from "../src/http-sink.js";
 import { buildSinks, flush, readBackoff } from "../src/run.js";
@@ -428,11 +438,8 @@ describe("http sink: the response (HTTP.md §2)", () => {
       await rx.close();
     }
   });
-  it("403: lower the tier to the receiver's max_tier; without one, no tier is named", async () => {
-    const rx = await receiver((n) => ({
-      status: 403,
-      body: n === 1 ? { reason: "tier_above_max", max_tier: 1 } : { reason: "tier_above_max" },
-    }));
+  it("403: lower the tier to the receiver's max_tier", async () => {
+    const rx = await receiver(() => ({ status: 403, body: { reason: "tier_above_max", max_tier: 1 } }));
     try {
       expect(await sinkFor(rx.url).send(batch(1))).toEqual({
         ok: false,
@@ -442,9 +449,20 @@ describe("http sink: the response (HTTP.md §2)", () => {
         action: "lower-tier",
         max_tier: 1,
       });
-      const bare = await sinkFor(rx.url).send(batch(1));
-      expect(bare.action).toBe("lower-tier");
-      expect(bare.max_tier).toBeUndefined();
+    } finally {
+      await rx.close();
+    }
+  });
+  const forbidden = JSON.parse(
+    readFileSync(path.resolve(__dirname, "../../../conformance/sender-403.json"), "utf8"),
+  ) as { cases: { name: string; tier: Tier; body: string | object; expect: { action: string; max_tier?: number } }[] };
+  it.each(forbidden.cases)("403 (conformance/sender-403.json): $name", async (c) => {
+    const rx = await receiver(() => ({ status: 403, body: c.body }));
+    try {
+      const res = await new HttpSink({ name: "h", url: rx.url, tier: c.tier, token: "t" }, c.tier).send(batch(1));
+      expect(res).toMatchObject({ ok: false, acknowledged: 0, status: 403, action: c.expect.action });
+      expect(res.max_tier).toBe(c.expect.max_tier);
+      expect(res.error).toBe(typeof c.body === "string" ? c.body : (c.body as { reason: string }).reason);
     } finally {
       await rx.close();
     }
@@ -554,6 +572,25 @@ describe("the drain and its cursors (PROTOCOL.md ground rule 1, HTTP.md §2)", (
       // Nothing more to send: the cursor stays.
       expect((await flush(tmp, cfg, outbox)).s).toBe(0);
       expect(rx.hits).toHaveLength(2);
+    } finally {
+      await rx.close();
+    }
+  });
+  it("a 403 with no max_tier backs off like a 5xx: one POST, then nothing inside the wait (#201)", async () => {
+    const page = "<html><body><h1>Forbidden</h1></body></html>";
+    const rx = await receiver(() => ({ status: 403, headers: { "content-type": "text/html" }, body: page }));
+    try {
+      const outbox = new Outbox(tmp);
+      outbox.append({ harness: "codex", session: "c" }, batch(1, "c"));
+      const cfg = sinks(rx.url, { tier: 1 });
+      expect((await flush(tmp, cfg, outbox)).s).toBe(0);
+      const b = JSON.parse(readFileSync(path.join(tmp, "backoff", "s.json"), "utf8"));
+      expect(b).toMatchObject({ failures: 1, why: `403 ${page}` });
+      expect(readFileSync(path.join(tmp, "log"), "utf8")).toContain(`sink s: 403 ${page} → retry, waits `);
+      // The next run inside the wait leaves the receiver alone, and the cursor where it was.
+      expect((await flush(tmp, cfg, outbox)).s).toBe(0);
+      expect(rx.hits).toHaveLength(1);
+      expect(cursor()).toBeUndefined();
     } finally {
       await rx.close();
     }
