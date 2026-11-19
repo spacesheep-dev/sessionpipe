@@ -9,6 +9,7 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -30,6 +31,25 @@ export interface OutboxRef {
 
 const READ_CHUNK = 1024 * 1024;
 const READ_MAX = 8 * 1024 * 1024;
+
+/** Whether a file ends in the middle of a line: it has bytes and the last is not a
+ *  newline. A file that is missing or empty does not. */
+function endsMidLine(file: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const last = Buffer.from("\n");
+    const size = fstatSync(fd).size;
+    if (size) readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export class Outbox {
   constructor(readonly root: string) {}
@@ -74,10 +94,15 @@ export class Outbox {
     return -1;
   }
 
+  /** An append that was cut short (a full disk, a file-size limit, a killed process) leaves
+   *  a line with no end. The next append starts on a line of its own, so only the cut event
+   *  is lost and not the whole one written after it (OUTBOX.md §2). */
   append(ref: OutboxRef, events: Event[]): void {
     if (!events.length) return;
     mkdirSync(this.dir(ref.harness), { recursive: true, mode: 0o700 });
-    appendFileSync(this.file(ref), `${events.map((e) => JSON.stringify(e)).join("\n")}\n`, { mode: 0o600 });
+    const f = this.file(ref);
+    const lines = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+    appendFileSync(f, endsMidLine(f) ? `\n${lines}` : lines, { mode: 0o600 });
   }
 
   /** Every session file, newest first. */

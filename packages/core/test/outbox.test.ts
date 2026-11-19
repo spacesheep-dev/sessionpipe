@@ -241,12 +241,39 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(r2.offset).toBe(statSync(o.file(ref)).size);
   });
 
+  it("an append after one that was cut short starts on a line of its own, so only the cut event is lost", () => {
+    const o = new Outbox(tmp);
+    o.append(ref, [ev(0)]);
+    const cut = JSON.stringify(ev(1)).slice(0, 40);
+    appendFileSync(o.file(ref), cut);
+    o.append(ref, [ev(2), ev(3)]);
+    o.append(ref, [ev(4)]);
+    const lines = readFileSync(o.file(ref), "utf8").split("\n");
+    expect(lines[1]).toBe(cut);
+    expect(lines.map((l) => l.length > 0)).toEqual([true, true, true, true, true, false]);
+    const r = o.read(ref, 0);
+    expect(r.events.map((e) => e.session.seq)).toEqual([0, 2, 3, 4]);
+    expect(r.offset).toBe(statSync(o.file(ref)).size);
+    // A file that is there and empty, like one that ends a line, gets no blank line.
+    const empty = { harness: "codex", session: "empty" };
+    writeFileSync(o.file(empty), "");
+    o.append(empty, [ev(0)]);
+    o.append(empty, [ev(1)]);
+    expect(
+      readFileSync(o.file(empty), "utf8")
+        .split("\n")
+        .map((l) => l.length > 0),
+    ).toEqual([true, true, false]);
+  });
+
   it("a torn append cut inside a character, with the next append glued on, moves the offset to the line's end, not past it", () => {
     const o = new Outbox(tmp);
     o.append(ref, [ev(0)]);
     const torn = Buffer.from(JSON.stringify({ ...ev(1), data: { text: "café" } }), "utf8");
     appendFileSync(o.file(ref), torn.subarray(0, torn.indexOf(Buffer.from("é")) + 1));
-    o.append(ref, [ev(2), ev(3)]);
+    // Glued on as a writer did before `append` looked at the file's end: such files are
+    // still on disks, and a reader has to get through them.
+    appendFileSync(o.file(ref), `${JSON.stringify(ev(2))}\n${JSON.stringify(ev(3))}\n`);
     const r1 = o.read(ref, 0);
     expect(r1.events.map((e) => e.session.seq)).toEqual([0, 3]);
     expect(r1.offset).toBe(statSync(o.file(ref)).size);
@@ -452,8 +479,13 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(await Promise.all([run("a"), run("b")])).toEqual([0, 0]);
     const shared = { harness: "codex", session: "shared" };
     const o = new Outbox(tmp);
-    const lines = readFileSync(o.file(shared), "utf8").split("\n");
-    expect(lines.pop()).toBe("");
+    // Neither writer holds the session lock here (every real one does), so one can see the
+    // other's line while it is being written, take it for a cut one and start its own with a
+    // newline. That leaves a blank line, which a reader skips (OUTBOX.md §3); no line is torn
+    // and none is lost.
+    const raw = readFileSync(o.file(shared), "utf8");
+    expect(raw.endsWith("\n")).toBe(true);
+    const lines = raw.split("\n").filter(Boolean);
     expect(lines).toHaveLength(600);
     const seen: Record<string, number[]> = { a: [], b: [] };
     for (const l of lines) {
