@@ -32,6 +32,15 @@ describe("secrets@1 vectors", () => {
   }
 });
 
+describe("secrets@1 structured vectors", () => {
+  for (const c of fx.deep as { name: string; in: unknown; out: unknown }[]) {
+    it(`${c.name}: ${JSON.stringify(c.in).slice(0, 50)}`, () => {
+      expect(redactDeep(c.in)).toEqual(c.out);
+      expect(redactDeep(c.out)).toEqual(c.out);
+    });
+  }
+});
+
 describe("secrets@1 adversarial (linear time)", () => {
   const grow = (r: {
     prefix?: string;

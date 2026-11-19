@@ -60,6 +60,9 @@ export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: Filter
   // A turn still running is read for where it is now: its reply keeps the end.
   if (typeof data.assistant === "string")
     data.assistant = event.type === "turn.progress" ? capTail(data.assistant, MAX_SIDE) : cap(data.assistant, MAX_SIDE);
+  // A structured input or output is redacted while it still has its keys: over the cap it
+  // becomes text, where a key that names a secret no longer stands above its value.
+  if (tier > 0) for (const k of ["input", "output"]) if (typeof data[k] === "object") data[k] = redactDeep(data[k]);
   if (data.input !== undefined) data.input = cap(data.input, MAX_IO);
   if (data.output !== undefined) data.output = cap(data.output, MAX_IO);
   if (typeof data.message === "string") data.message = cap(data.message, 200);

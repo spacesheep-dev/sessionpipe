@@ -11,6 +11,8 @@
   trailing line, a blank line, a corrupt line, multibyte text. Run by `packages/core/test/outbox-vectors.test.ts`;
   a second implementation of the client runs the same file.
 - `redaction/secrets.json`, `redaction/pii.json` — `[{ in, out }]` vectors for the rulesets.
+  `secrets.json` also holds `deep` cases for the structured row (spec/PRIVACY.md §2): `in` and
+  `out` are JSON values, and `out` gives itself.
 - `short-id.json` — `{ harness, id, short_id }` vectors for a session's short id (spec/PROTOCOL.md §3):
   what a receiver shows and searches by must reach these.
 - `delivery/*.json` — receiver scenarios: dedup, 413 split, 403 tier, retry, forget, and control
