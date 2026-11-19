@@ -7,9 +7,11 @@
 //
 // Two rules from issue #8: a file that is not plain JSON (a comment, a trailing
 // comma, a write in progress) is never written back — the harness is skipped and
-// the report says why; and a file is written back in its own shape (indent, final
-// newline, a byte-order mark) so uninstall leaves it byte-identical. A file that did not exist before
-// install is reported `created`, and uninstall deletes it once it is empty again.
+// the report says why; and a file is written back in its own shape (indent, line
+// ending, final newline, a byte-order mark). That makes a file laid out the way
+// JSON.stringify lays it out byte-identical after uninstall; one with objects or arrays
+// on a single line keeps its values and loses that layout (#205). A file that did not
+// exist before install is reported `created`, and uninstall deletes it once it is empty again.
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { HookCommand, InstallReport } from "./types.js";

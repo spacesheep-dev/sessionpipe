@@ -767,7 +767,10 @@ async function uninstall(): Promise<void> {
     out(
       `  Outbox and state kept under ${tilde(state)} (delete it yourself, or pass nothing: it prunes after ${readConfig().keep_days ?? 30} days).`,
     );
-  out("  Done. Every config file is byte-identical except for the entries sessionpipe wrote.");
+  // Not "byte-identical": a JSON config is written back whole, with its own indent and
+  // line endings but one item per line, so a file that had `"allow": ["a", "b"]` on one
+  // line comes back with the same values laid out differently (#205).
+  out("  Done. Only sessionpipe's entries are gone; the rest of each config file holds what it held.");
 }
 
 async function sink(): Promise<void> {

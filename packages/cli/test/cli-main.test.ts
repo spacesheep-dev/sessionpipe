@@ -783,7 +783,9 @@ describe.skipIf(process.platform === "win32")("uninstall", () => {
     // A hand-edited config with no number there: the default.
     put(config, { ...cfg(), keep_days: null });
     expect((await run("uninstall")).text).toContain("it prunes after 30 days");
-    expect(text).toContain("Done. Every config file is byte-identical");
+    expect(text).toContain(
+      "Done. Only sessionpipe's entries are gone; the rest of each config file holds what it held.",
+    );
     expect(cfg().harnesses).toEqual({});
     expect(existsSync(path.join(tmp, "data", "sessionpipe-hook"))).toBe(false);
     put(path.join(home, ".claude", "settings.json"), "{broken");
