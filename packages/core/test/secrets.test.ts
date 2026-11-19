@@ -56,11 +56,12 @@ describe("secrets@1 adversarial (linear time)", () => {
     (r.then ?? "") +
     (r.then_repeat ? r.then_repeat.repeat(r.then_times ?? 0) : "") +
     (r.suffix ?? "");
-  for (const a of fx.adversarial as { name: string; recipe: never; max_ms: number }[]) {
+  for (const a of fx.adversarial as { name: string; recipe: never; under?: string; max_ms: number }[]) {
     it(`stays fast on ${a.name}`, () => {
       const s = grow(a.recipe);
       const t0 = Date.now();
-      redactSecrets(s);
+      if (a.under === undefined) redactSecrets(s);
+      else redactDeep({ [a.under]: s });
       expect(Date.now() - t0).toBeLessThan(a.max_ms);
     });
   }

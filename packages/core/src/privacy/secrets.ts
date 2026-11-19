@@ -110,6 +110,15 @@ const PROSE = new RegExp(
   "gi",
 );
 
+/** `s` without the `marks` at its end. A loop from the end, not `/[.,;:!?]+$/`: that is
+ *  tried from every one of them in the string, and a value under a key is as long as a
+ *  tool's output. */
+function untrailed(s: string, marks: string): string {
+  let end = s.length;
+  while (end > 0 && marks.includes(s.charAt(end - 1))) end--;
+  return s.slice(0, end);
+}
+
 /** A value that is nothing but a stand-in, from its first character to its last: empty, a
  *  type's name, a mask or the marker, or one template holding one name (`<token>`,
  *  `${TOKEN}`, `{{ token }}`, `$TOKEN`, `%TOKEN%`). */
@@ -130,7 +139,7 @@ function isStandIn(s: string): boolean {
 /** A value that is plainly not the secret itself: a type, a variable, a template, an
  *  already-redacted marker, an env lookup. */
 function isPlaceholder(v: string): boolean {
-  const s = v.replace(/[.,;:!?]+$/, "");
+  const s = untrailed(v, ".,;:!?");
   if (isStandIn(s)) return true;
   if (/^[<{$%]/.test(s)) return true; // <your-key>, ${VAR}, {{var}}, $VAR, %VAR%
   if (
@@ -147,7 +156,7 @@ function isPlaceholder(v: string): boolean {
 
 /** Does a prose value look like something generated, rather than an English word? */
 function looksSecret(v: string): boolean {
-  const s = v.replace(/[.,;:!?)]+$/, "");
+  const s = untrailed(v, ".,;:!?)");
   if (s.length < 6) return false;
   if (isPlaceholder(s)) return false;
   if (/^https?:\/\//i.test(s)) return false; // a link, handled by URL_CREDENTIALS if it carries one
