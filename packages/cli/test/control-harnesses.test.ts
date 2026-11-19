@@ -24,6 +24,7 @@ import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { kindPath } from "../src/control/route.js";
 import type { ControlConfig, ControlMode } from "../src/control/store.js";
+import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c"; // the thread a new `codex exec` picks
@@ -109,13 +110,7 @@ const runs = (): {
   job?: string | null;
   start?: number;
   end?: number;
-}[] =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l))
-    : [];
+}[] => jsonLines(calls);
 const started = () => runs().filter((r) => r.argv);
 
 function cfg(mode: ControlMode = "safe"): ControlConfig {

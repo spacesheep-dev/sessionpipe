@@ -7,7 +7,7 @@
 // the next turn ended, or when the session did. The Stop names the turn's last words
 // (`last_assistant_message`), so the worker waits for the file to hold them; and a turn
 // the person interrupted, which no hook ends, is told from the file at the next hook.
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Event, Outbox, takeLock } from "@sessionpipe/core";
@@ -23,6 +23,7 @@ import {
   SETTLE_POLL_MS,
   wordsDigest,
 } from "../src/run.js";
+import { jsonLines } from "./helpers/lines.js";
 
 // A terminal session recorded on 2.1.322: a turn with a tool call ("SIX"), a turn of one
 // word ("SEVEN"), and a turn stopped with Esc while its tool ran.
@@ -78,13 +79,7 @@ const job = (event: string, extra: Record<string, unknown> = {}, at = T0) => ({
 });
 const stop = (words: string | undefined, id: string, at = T0) =>
   job("Stop", { prompt_id: id, ...(words === undefined ? {} : { last_assistant_message: words }) }, at);
-const lines = (file: string): Event[] =>
-  existsSync(file)
-    ? readFileSync(file, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l))
-    : [];
+const lines = (file: string): Event[] => jsonLines<Event>(file);
 const sent = () => lines(out);
 const stored = () => lines(new Outbox(tmp).file(ref));
 const turns = (events: Event[]) => events.filter((e) => e.type === "turn.transcript").map((e) => e.data);

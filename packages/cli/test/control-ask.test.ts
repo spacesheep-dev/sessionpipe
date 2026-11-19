@@ -28,6 +28,7 @@ import { frameAsk, frameHandoff } from "../src/control/route.js";
 import type { ControlConfig, ControlMode } from "../src/control/store.js";
 import { waitForMessage } from "../src/control/wait.js";
 import { factsState } from "../src/run.js";
+import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c"; // the thread a new `codex exec` picks
@@ -102,13 +103,7 @@ interface Run {
   chain: string | null;
   launched_by: string | null;
 }
-const runs = (): Run[] =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l) as Run)
-    : [];
+const runs = (): Run[] => jsonLines<Run>(calls);
 
 /** A Claude Code transcript for SID in `cwd`, written ten minutes ago (so not live). */
 function transcript(sid: string, cwd: string): void {

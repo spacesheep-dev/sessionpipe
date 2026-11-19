@@ -142,6 +142,7 @@ describe.runIf(unix)("frames on the socket", () => {
     await make().start();
     const bad = await raw();
     bad.s.write("not json\n");
+    await vi.waitFor(() => expect(bad.closed()).toBe(true), 5000);
     await settle();
     expect(bad.closed()).toBe(true);
     // No newline yet: the daemon waits for the rest of the line.
@@ -154,6 +155,7 @@ describe.runIf(unix)("frames on the socket", () => {
     // A line that never ends is cut off at 64 KiB.
     const flood = await raw();
     flood.s.write("x".repeat(70 * 1024));
+    await vi.waitFor(() => expect(flood.closed()).toBe(true), 5000);
     await settle();
     expect(flood.closed()).toBe(true);
     // Whatever follows the one request a connection carries is ignored.
@@ -174,6 +176,7 @@ describe.runIf(unix)("frames on the socket", () => {
     await settle();
     const second = waitForMessage(SESSION, { env });
     expect(await first).toContain("took over");
+    await vi.waitFor(() => expect(d?.status().waiting).toEqual([SESSION]), 5000);
     await settle();
     expect(d?.status().waiting).toEqual([SESSION]);
     // The old waiter's socket closing doesn't unseat the new one.
@@ -199,6 +202,7 @@ describe.runIf(unix)("frames on the socket", () => {
     const dm = make();
     await dm.start();
     const hook = ask(sock, { op: "permission", session: SESSION, attention: "perm-5f1c0e9a2b7d4c31" }, 5000);
+    await vi.waitFor(() => expect(dm.status().attentions).toHaveLength(1), 5000);
     await settle();
     expect(dm.status().attentions).toHaveLength(1);
     await dm.stop();
@@ -213,6 +217,7 @@ describe.runIf(unix)("frames on the socket", () => {
     await settle();
     const second = ask(sock, { op: "permission", session: SESSION, attention: ATT }, 5000);
     expect(await first).toEqual({ op: "none" });
+    await vi.waitFor(() => expect(d?.status().attentions).toEqual([{ session: SESSION, id: ATT }]), 5000);
     await settle();
     expect(d?.status().attentions).toEqual([{ session: SESSION, id: ATT }]);
     await ask(sock, { op: "event", session: SESSION, event: "PostToolUse" }, 500);

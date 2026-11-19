@@ -23,6 +23,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { type Carried, ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
+import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver, type Queued } from "./helpers/receiver.js";
 
 // Every case runs a stand-in `claude` as a real child process.
@@ -59,19 +60,9 @@ function transcript(sid: string): void {
 }
 
 /** The word each run of the stand-in was asked for, in the order the runs BEGAN. */
-const ran = (): string[] =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => (JSON.parse(l) as { word: string }).word)
-    : [];
+const ran = (): string[] => jsonLines<{ word: string }>(calls).map((l) => l.word);
 /** …and every run's argv, in the same order. */
-const argvs = (): string[][] =>
-  readFileSync(calls, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => (JSON.parse(l) as { argv: string[] }).argv);
+const argvs = (): string[][] => jsonLines<{ argv: string[] }>(calls).map((l) => l.argv);
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const until = async (what: () => boolean, ms = 15_000): Promise<void> => {

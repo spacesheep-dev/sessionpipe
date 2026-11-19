@@ -363,6 +363,7 @@ describe("drain's pace: at most one request a second per machine", () => {
     writeFileSync(path.join(tmp, "locks", "flush.sent"), String(T0 + 3_600_000));
     outbox.append(ref, [ev("turn.started", T0, {}, "s", 0)]);
     const d = drain(tmp, sinks, outbox, ref, { clock: sim.clock });
+    await vi.waitFor(() => expect(sim.timers.map((x) => x.at)).toEqual([T0 + PACE_MS]), 5000);
     await settle();
     expect(sim.timers.map((x) => x.at)).toEqual([T0 + PACE_MS]);
     await sim.wake(T0 + PACE_MS);

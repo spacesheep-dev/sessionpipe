@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // turn.progress: a running turn's words reach a tier-2 sink before the turn ends
 // (a 21-minute turn showed nothing on its receiver for 21 minutes, 2026-10-11).
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { filterEvent } from "@sessionpipe/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { openTurn, PROGRESS_MS, runJob } from "../src/run.js";
+import { jsonLines } from "./helpers/lines.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-progress-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -45,13 +46,8 @@ const job = (event: string, extra: Record<string, unknown> = {}) => ({
   env: { CLAUDE_CONFIG_DIR: tmp },
   at: clock,
 });
-const sent = () =>
-  existsSync(out)
-    ? readFileSync(out, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l))
-    : [];
+// biome-ignore lint/suspicious/noExplicitAny: an event as the sink wrote it, read by its keys
+const sent = () => jsonLines<any>(out);
 const progress = () => sent().filter((e) => e.type === "turn.progress");
 const tool = (id: string) =>
   job("PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" }, tool_response: "ok", tool_use_id: id });

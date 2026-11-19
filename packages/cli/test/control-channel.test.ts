@@ -123,6 +123,12 @@ describe("runChannel", () => {
     expect(h.calls).toEqual([]);
     expect(h.out[0]).toMatchObject({ id: 0, result: { capabilities: { experimental: { "claude/channel": {} } } } });
     h.say({ jsonrpc: "2.0", method: "notifications/initialized" });
+    await vi.waitFor(() => {
+      expect(h.calls[0]).toEqual({
+        sock: "/tmp/sp-test.sock",
+        req: { op: "wait", session: SESSION, pid: process.pid, channel: true },
+      });
+    }, 5000);
     await settle();
     expect(h.calls[0]).toEqual({
       sock: "/tmp/sp-test.sock",
@@ -196,8 +202,9 @@ describe("runChannel", () => {
     const ask = vi.fn(async () => null);
     const done = runChannel(SESSION, input, () => {}, { version: "1", env: {}, registered: () => true, ask });
     input.write('{"method":"notifications/initialized"}\n');
-    await settle(1100);
-    expect(ask.mock.calls.length).toBe(2);
+    // The second park comes a second after the first. Waited for, not slept for: on a busy
+    // runner 1100 ms was sometimes too few, and a longer sleep would see a third.
+    await vi.waitFor(() => expect(ask.mock.calls.length).toBe(2), 5000);
     input.end();
     await done;
   });
@@ -235,6 +242,10 @@ describe.runIf(unix)("runChannel on a real socket", () => {
     const out: string[] = [];
     const done = runChannel(SESSION, input, (l) => out.push(l), { version: "1", registered: () => true });
     input.write('{"method":"notifications/initialized"}\n');
+    await vi.waitFor(
+      () => expect(seen[0]).toEqual({ op: "wait", session: SESSION, pid: process.pid, channel: true }),
+      5000,
+    );
     await settle(150);
     expect(seen[0]).toEqual({ op: "wait", session: SESSION, pid: process.pid, channel: true });
     expect(JSON.parse(out[0]!)).toMatchObject({ params: { content: "hi", meta: { message_id: "01K" } } });
@@ -313,6 +324,7 @@ describe("channelMain", () => {
     const parent = vi.fn(() => ["claude", "--dangerously-load-development-channels", "server:sessionpipe"]);
     const run = channelMain(["channel", "--session", SESSION], o, parent);
     input.write('{"id":1,"method":"ping"}\n');
+    await vi.waitFor(() => expect(o.write).toHaveBeenCalledWith('{"jsonrpc":"2.0","id":1,"result":{}}\n'), 5000);
     await settle();
     expect(o.write).toHaveBeenCalledWith('{"jsonrpc":"2.0","id":1,"result":{}}\n');
     input.end();
@@ -329,6 +341,7 @@ describe("channelMain", () => {
       const o = io(input);
       const run = channelMain([...argv], o, () => ["claude", "--channels", "server:sp"]);
       input.write('{"method":"notifications/initialized"}\n');
+      await vi.waitFor(() => expect(o.errs.join("").includes("didn't take it as a channel")).toBe(!named), 5000);
       await settle();
       expect(o.errs.join("").includes("didn't take it as a channel")).toBe(!named);
       input.end();
