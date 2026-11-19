@@ -211,7 +211,7 @@ export const claudeCode: Adapter = {
               ms,
               ok: true,
               input: s.tool_input,
-              output: s.tool_response,
+              output: toolOutput(s.tool_response),
             }),
           );
         break;
@@ -227,7 +227,7 @@ export const claudeCode: Adapter = {
               ok: false,
               error: errText(s.error ?? s.tool_response),
               input: s.tool_input,
-              output: s.tool_response,
+              output: toolOutput(s.tool_response),
             }),
           );
         break;
@@ -461,6 +461,59 @@ export function claudeLimits(rl: unknown): DataOf<"limits.observed"> | null {
 function prune<T extends Record<string, unknown>>(o: T): T {
   for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
   return o;
+}
+type Json = Record<string, unknown>;
+const isObj = (v: unknown): v is Json => !!v && typeof v === "object" && !Array.isArray(v);
+const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$/i;
+/** A tool's result as `tool.ended.output` carries it, never with a picture's or a file's
+ *  bytes in it, at any size (ADAPTERS.md, Claude Code · Mapping). A Read of a picture is
+ *  what Claude Code says about the picture: its media type, its size and its dimensions.
+ *  Another Read with `file.base64` (a PDF), and an image part of a content list (an MCP
+ *  tool's screenshot), keep everything but the bytes, which become `omitted_bytes`: the
+ *  length of the base64 left out. The hook takes the same bytes out of a payload over
+ *  1 MiB (hook.ts, `withoutPictures`), so a receiver gets the same object either way. */
+function toolOutput(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(withoutImageData);
+  if (!isObj(v)) return v;
+  const file = v.file;
+  if (v.type === "image" && isObj(file)) {
+    const d = isObj(file.dimensions) ? file.dimensions : {};
+    const dimensions = prune({
+      original_width: count(d.originalWidth),
+      original_height: count(d.originalHeight),
+      display_width: count(d.displayWidth),
+      display_height: count(d.displayHeight),
+    });
+    return prune({
+      type: "image",
+      media_type: typeof file.type === "string" && MEDIA_TYPE.test(file.type) ? file.type : undefined,
+      original_size: count(file.originalSize),
+      dimensions: Object.keys(dimensions).length ? dimensions : undefined,
+    });
+  }
+  let out = v;
+  if (isObj(file) && typeof file.base64 === "string") {
+    const { base64, ...rest } = file;
+    out = { ...out, file: { ...rest, omitted_bytes: base64.length } };
+  }
+  if (Array.isArray(v.content)) out = { ...out, content: v.content.map(withoutImageData) };
+  return out;
+}
+/** An image part (`{type: "image", data}` as MCP writes it, `{type: "image", source: {data}}`
+ *  as the Messages API does) without its data. */
+function withoutImageData(part: unknown): unknown {
+  if (!isObj(part) || part.type !== "image") return part;
+  let out = part;
+  if (typeof part.data === "string") {
+    const { data, ...rest } = part;
+    out = { ...rest, omitted_bytes: data.length };
+  }
+  if (isObj(part.source) && typeof part.source.data === "string") {
+    const { data, ...rest } = part.source;
+    out = { ...out, source: { ...rest, omitted_bytes: data.length } };
+  }
+  return out;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Another harness reading this settings file, not Claude Code. Several harnesses

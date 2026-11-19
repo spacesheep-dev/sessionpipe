@@ -24,6 +24,41 @@ const modeOf = (s: Record<string, unknown>): string | undefined => {
   return typeof v === "string" && MODE_SHAPE.test(v) ? v : undefined;
 };
 
+/** What a job keeps of stdin, and the most of it that is parsed for its pictures first. */
+const JOB_STDIN_MAX = 1024 * 1024;
+const STDIN_MAX = 64 * 1024 * 1024;
+
+/** A Claude Code payload over 1 MiB without the pictures' bytes in it: a Read of a
+ *  2560 px picture carries 1-3 MB of base64, and the first 1 MiB of that is JSON no
+ *  adapter can read. `tool_response.file.base64`, and the data of every image part of
+ *  `tool_response.content` (or of the list itself), become `omitted_bytes`, the length
+ *  left out; the adapter's toolOutput (core claude-code.ts) makes the same object of a
+ *  payload under 1 MiB. Anything that is not JSON comes back as it was. */
+function withoutPictures(buf: Buffer): Buffer {
+  let s: unknown;
+  try {
+    s = JSON.parse(buf.toString("utf8"));
+  } catch {
+    return buf;
+  }
+  const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  const r = obj(s) ? s.tool_response : undefined;
+  const omit = (o: Record<string, unknown>, key: string): void => {
+    const v = o[key];
+    if (typeof v !== "string") return;
+    delete o[key];
+    o.omitted_bytes = v.length;
+  };
+  const parts = Array.isArray(r) ? r : obj(r) && Array.isArray(r.content) ? r.content : [];
+  for (const p of parts) {
+    if (!obj(p) || p.type !== "image") continue;
+    omit(p, "data");
+    if (obj(p.source)) omit(p.source, "data");
+  }
+  if (obj(r) && obj(r.file)) omit(r.file, "base64");
+  return Buffer.from(JSON.stringify(s), "utf8");
+}
+
 /** The two streams the hook touches: stdin once, whole; stdout for an answer. */
 export interface HookIO {
   stdin(): Buffer;
@@ -74,7 +109,7 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     if (harness !== "codex" || event !== "notify") {
       try {
         const buf = io.stdin();
-        stdin = buf.subarray(0, 1024 * 1024).toString("utf8");
+        stdin = (picturesIn(buf) ? withoutPictures(buf) : buf).subarray(0, JOB_STDIN_MAX).toString("utf8");
       } catch {}
     }
     // Claude Code's status line (install --status-line) runs on every refresh. It shows
@@ -278,6 +313,19 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     const out: Record<string, string> = {};
     for (const n of names) if (env[n] !== undefined) out[n] = env[n] as string;
     return out;
+  }
+  /** Whether a payload is worth parsing for its pictures' bytes (withoutPictures): a
+   *  Claude Code tool's result over 1 MiB, whole (64 MiB at most), with a picture's
+   *  marks in it, going to a sink that takes tool output. Anything else keeps the cut. */
+  function picturesIn(buf: Buffer): boolean {
+    return (
+      harness === "claude-code" &&
+      (event === "PostToolUse" || event === "PostToolUseFailure") &&
+      buf.length > JOB_STDIN_MAX &&
+      buf.length <= STDIN_MAX &&
+      (buf.indexOf('"base64"') >= 0 || buf.indexOf('"image"') >= 0) &&
+      anySinkAbove(0)
+    );
   }
   function anySinkAbove(tier: number): boolean {
     try {

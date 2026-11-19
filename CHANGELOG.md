@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Three additions on protocol 1. Every rule a receiver may already rely on still holds.
+Four additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -28,6 +28,11 @@ Three additions on protocol 1. Every rule a receiver may already rely on still h
   JavaScript or Python literal). A cookie header written out in text arrives as
   `Cookie: [redacted]`. The tag is unchanged.
   Vectors: `redaction/secrets.json`, the `deep` list.
+- **A Claude Code tool result carries no picture bytes** (ADAPTERS.md, Claude Code). A
+  Read of a picture arrives as `tool.ended.output` `{type: "image", media_type,
+  original_size, dimensions}` at any size, and a PDF's base64 or an image part's `data`
+  as `omitted_bytes`, its length. A Read over 1 MiB that used to be cut now arrives
+  whole. Fixture: `harness/claude-code/post-tool-use-read-image.json`.
 
 ### For receivers (0.13.3)
 

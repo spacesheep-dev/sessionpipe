@@ -1,0 +1,60 @@
+{
+  "harness": "claude-code",
+  "event": "PostToolUse",
+  "recorded": {
+    "at": "2026-11-19T04:28:01.466Z",
+    "harness_version": "2.1.323",
+    "how": "a Read of a 24×16 PNG made for this fixture, in a Claude Code session (an Agent SDK subagent, so the payload carries agent_id) with sessionpipe's hook installed: the job file the hook wrote, paths scrubbed"
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "PostToolUse"
+    ],
+    "stdin": "{\"session_id\":\"65b7832b-4e76-4db5-bb9f-02d941d3ab18\",\"transcript_path\":\"/Users/you/.claude/projects/-Users-you-project/65b7832b-4e76-4db5-bb9f-02d941d3ab18.jsonl\",\"cwd\":\"/Users/you/project\",\"prompt_id\":\"ce7a4b41-166d-44cd-b1e4-9a24054dbab8\",\"permission_mode\":\"bypassPermissions\",\"agent_id\":\"a0aa6dc8fbe7989da\",\"agent_type\":\"workflow-subagent\",\"effort\":{\"level\":\"high\"},\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/tmp/sp-hir-rec/two-colours.png\"},\"tool_response\":{\"type\":\"image\",\"file\":{\"base64\":\"iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAAH0lEQVR42mPQqr9CEH06KEcQMYwaNGrQqEGjBlFmEAB+nXqfD0p0IAAAAABJRU5ErkJggg==\",\"type\":\"image/png\",\"originalSize\":88,\"dimensions\":{\"originalWidth\":24,\"originalHeight\":16,\"displayWidth\":24,\"displayHeight\":16}}},\"tool_use_id\":\"toolu_015NENy3fAbVkg9a8Ytscxb1\",\"duration_ms\":220}\n",
+    "env": {
+      "CLAUDE_CODE_SESSION_ATTENDED": "0",
+      "CLAUDE_PROJECT_DIR": "/Users/you/project"
+    },
+    "cwd": "/Users/you/project"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "tool.ended",
+      "harness": {
+        "name": "claude-code",
+        "event": "PostToolUse"
+      },
+      "session": {
+        "id": "65b7832b-4e76-4db5-bb9f-02d941d3ab18",
+        "cwd": "/Users/you/project",
+        "seq": "*"
+      },
+      "data": {
+        "tool": "Read",
+        "call_id": "toolu_015NENy3fAbVkg9a8Ytscxb1",
+        "turn_id": "ce7a4b41-166d-44cd-b1e4-9a24054dbab8",
+        "agent_id": "a0aa6dc8fbe7989da",
+        "ms": 220,
+        "ok": true,
+        "input": {
+          "file_path": "/tmp/sp-hir-rec/two-colours.png"
+        },
+        "output": {
+          "type": "image",
+          "media_type": "image/png",
+          "original_size": 88,
+          "dimensions": {
+            "original_width": 24,
+            "original_height": 16,
+            "display_width": 24,
+            "display_height": 16
+          }
+        }
+      }
+    }
+  ]
+}

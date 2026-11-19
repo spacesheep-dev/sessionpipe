@@ -152,6 +152,69 @@ describe("claude-code fromHook", () => {
     expect(hook("PostToolUse", { tool_name: 7 })?.events).toEqual([]);
     expect(hook("PreToolUse", { tool_name: "has space" })?.events).toEqual([]);
   });
+  it("tool.ended never carries a picture's or a file's bytes: a Read of a picture is its type, size and dimensions", () => {
+    const b64 = "iVBORw0KGgo".repeat(40);
+    const output = (tool_response: unknown, event = "PostToolUse") =>
+      hook(event, { tool_name: "Read", tool_use_id: "toolu_1", tool_response })?.events[0]?.data.output;
+    const picture = {
+      type: "image",
+      file: {
+        base64: b64,
+        type: "image/png",
+        originalSize: 2_100_000,
+        dimensions: { originalWidth: 2560, originalHeight: 1440, displayWidth: 2000, displayHeight: 1125 },
+      },
+    };
+    const said = {
+      type: "image",
+      media_type: "image/png",
+      original_size: 2_100_000,
+      dimensions: { original_width: 2560, original_height: 1440, display_width: 2000, display_height: 1125 },
+    };
+    expect(output(picture)).toEqual(said);
+    expect(output(picture, "PostToolUseFailure")).toEqual(said);
+    // The same object when the hook took the bytes out of a payload over 1 MiB first.
+    const { base64: _, ...rest } = picture.file;
+    expect(output({ type: "image", file: { ...rest, omitted_bytes: b64.length } })).toEqual(said);
+    // Only what has the shape it should: no media type that is not one, no size that is not a number.
+    expect(
+      output({
+        type: "image",
+        file: { base64: b64, type: "not a type", originalSize: "big", dimensions: { originalWidth: 9 } },
+      }),
+    ).toEqual({ type: "image", dimensions: { original_width: 9 } });
+    expect(output({ type: "image", file: { base64: b64, dimensions: [] } })).toEqual({ type: "image" });
+    // A PDF keeps everything but its bytes.
+    expect(output({ type: "pdf", file: { filePath: "/w/a.pdf", base64: b64, originalSize: 330 } })).toEqual({
+      type: "pdf",
+      file: { filePath: "/w/a.pdf", originalSize: 330, omitted_bytes: b64.length },
+    });
+    // An image part of a content list, as MCP writes it and as the Messages API does; the list itself too.
+    const parts = [
+      { type: "text", text: "a screenshot" },
+      { type: "image", data: b64, mimeType: "image/png" },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+      { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+      { type: "image", source: "nothing to take" },
+      "a string",
+    ];
+    const kept = [
+      parts[0],
+      { type: "image", mimeType: "image/png", omitted_bytes: b64.length },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", omitted_bytes: b64.length } },
+      parts[3],
+      parts[4],
+      "a string",
+    ];
+    expect(output({ content: parts, isError: false })).toEqual({ content: kept, isError: false });
+    expect(output(parts)).toEqual(kept);
+    // Anything else is the harness's own result, as it was.
+    const text = { type: "text", file: { filePath: "/w/README.md", content: "hello\n" } };
+    expect(output(text)).toEqual(text);
+    expect(output({ type: "image", file: "not an object" })).toEqual({ type: "image", file: "not an object" });
+    expect(output("plain")).toBe("plain");
+    expect(output(undefined)).toBeUndefined();
+  });
   it("PermissionRequest: the tool-use id when there is one, else a stable hash of prompt, tool and input", () => {
     const a = hook("PermissionRequest", { prompt_id: "p1", tool_name: "Bash", tool_input: { command: "ls -la" } });
     const b = hook("PermissionRequest", { prompt_id: "p1", tool_name: "Bash", tool_input: { command: "ls -la" } });
