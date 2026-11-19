@@ -179,7 +179,9 @@ export function redactSecrets(text: string): string {
   out = out.replace(PROSE, (m, head: string, q: string, v: string) =>
     !looksSecret(v) || v.includes(REDACTED) ? m : `${head}${q}${REDACTED}${q}`,
   );
-  return out;
+  // Last, each on what the rules above it left: a value they changed is no stand-in any
+  // more, and a jar's string is judged as it will stand.
+  return redactNamed(redactCookies(out));
 }
 
 /** Did redaction change anything? */
@@ -188,16 +190,380 @@ export function hasSecret(text: string): boolean {
 }
 
 /** The end of a key that is the name of a header whose whole value is a credential, in
- *  any case: `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, and a tool's
- *  own spelling of them (`set_cookie`, `HTTP_COOKIE`, `X-Authorization`). */
-const HEADER_KEY = /(?:authorization|cookie)$/i;
+ *  any case: `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, a tool's own
+ *  spelling of them (`set_cookie`, `HTTP_COOKIE`, `X-Authorization`), and `cookies`. */
+const HEADER_KEY = /(?:authorization|cookies?)$/i;
+/** The end of a key, or of a function's name, under which an object is a cookie. */
+const COOKIE_KEY = /cookies?$/i;
+/** What a cookie is written with beside its name and value. Two of them make an object one. */
+const COOKIE_MARKS = ["domain", "path", "expires", "httponly", "secure", "samesite"];
+/** A name that is one word: `DB_PASSWORD`, `Set-Cookie`, `x-api-key`. Not a label. */
+const ONE_WORD = /^[A-Za-z_][\w.-]{0,79}$/;
+
+/** The name a jar's strings go by: no key ends as it does. */
+const JAR = "{cookies}";
+/** What is kept in a jar and is no cookie's value: words in any language, and a link. */
+const JAR_WORDS = /^(?:[\p{L}\p{M}'’.-]+|https?:\/\/.*)$/su;
+
+/** Is this string in a jar a cookie's value: one run of six characters or more that is
+ *  neither a stand-in, nor words, nor a link? */
+function inJar(v: string): boolean {
+  return v.length > 5 && !/\s/.test(v) && !isStandIn(v) && !JAR_WORDS.test(v);
+}
+
+/** Does the string `v` stored under `name` go whole? `text` is `v` after the text rules.
+ *  Under a secret's name it does, with the exemptions an assignment has. Under a header's it
+ *  does unless it is nothing but a stand-in that the text rules leave as it is: a header
+ *  begins with whatever its first cookie is called, so how it begins says nothing. In a jar
+ *  it does when, as the text rules leave it, it is one run of six characters or more that is
+ *  not words: what else is kept under such a key is (`"analytics": "denied"`), and how a
+ *  value begins says nothing here either. */
+function goesWhole(name: string, v: string, text: string): boolean {
+  if (name === JAR) return inJar(text);
+  return HEADER_KEY.test(name) ? !isStandIn(v.trim()) || text !== v : isSecretName(name) && !keepsValue(name, v);
+}
+
+/** The name what is under each of an object's own keys goes by: the key, but
+ *  - under `value`, a cookie's when the object is one (it is stored under a cookie's key, or
+ *    has a name and two of a cookie's attributes), else the one word under its `name`, or
+ *    its `key`, when it has one;
+ *  - under every key, a jar's when the object is a jar of cookies: stored under a cookie's
+ *    key with no `name`, no `value` and none of a cookie's attributes of its own.
+ *  `own` is the object's own keys in lower case, and the keys asked for are too. */
+function childNames(own: Map<string, unknown>, key: string | undefined): (k: string) => string {
+  const cookies = key !== undefined && COOKIE_KEY.test(key);
+  const marks = COOKIE_MARKS.filter((mark) => own.has(mark)).length;
+  if (cookies && !marks && !own.has("name") && !own.has("value")) return () => JAR;
+  const name = typeof own.get("name") === "string" ? own.get("name") : own.get("key");
+  const named = cookies || (typeof name === "string" && marks > 1) ? "cookie" : name;
+  return (k) =>
+    k === "value" && typeof named === "string" && (named === "cookie" || ONE_WORD.test(named)) ? named : k;
+}
+
+/** Is the character at an index one of a class? */
+type Is = (text: string, i: number) => boolean;
+
+/** A class of single characters as a table of the ASCII ones: the readers below look at a
+ *  text one character at a time, and a pattern run on each would be most of their time. */
+function chars(one: RegExp): Is {
+  const ascii = Array.from({ length: 128 }, (_, code) => one.test(String.fromCharCode(code)));
+  return (text, i) => {
+    const code = text.charCodeAt(i);
+    return code < 128 ? ascii[code] === true : one.test(text.charAt(i));
+  };
+}
+
+/** The first index from `from` whose character is not one of `ok`. */
+function run(text: string, from: number, ok: Is): number {
+  let i = from;
+  while (i < text.length && ok(text, i)) i++;
+  return i;
+}
+
+const QUOTES = "\"'`";
+const BACKSLASH = chars(/\\/);
+const NOT_BREAK = chars(/[^\r\n]/);
+const SPACE = chars(/\s/);
+const BLANK = chars(/[ \t]/);
+const WORD = chars(/[\w$]/);
+
+/** Does a string open at `at`? A quote, alone or behind the one, three or seven backslashes
+ *  that JSON inside a JSON string, and so on inward, writes it with. Their number, or -1. */
+function opens(text: string, at: number): number {
+  const n = run(text, at, BACKSLASH) - at;
+  return QUOTES.includes(text.charAt(at + n)) && (n === 0 || n === 1 || n === 3 || n === 7) ? n : -1;
+}
+
+/** Where the string that opened with `n` backslashes and the quote `q` ends, from `from`:
+ *  the index of its closer, which is `q` behind `n` backslashes of its own. The backslashes
+ *  before those escape each other in pairs of `n + 1`, so a quote behind any other number is
+ *  part of the string. The text's length when it never closes; -1 when a line ends first
+ *  and `lines` says a string of this kind does not run over one. */
+function stringEnd(text: string, from: number, n: number, q: string, lines: boolean): number {
+  let i = from;
+  while (i < text.length) {
+    const quote = run(text, i, BACKSLASH);
+    const c = text.charAt(quote);
+    if (c === q && (quote - i) % (2 * (n + 1)) === n) return quote - n;
+    if (c === "\n" && !lines) return -1;
+    i = quote + 1;
+  }
+  return text.length;
+}
+
+/** A cookie header written out. The end of its name behind its closing quote and bracket,
+ *  if it has them, then `:` or `=`; or `,` behind the name's quote
+ *  (`"Cookie", "…"`); or a space and a quote; or curl's `--cookie`, `-b` and a quote, or
+ *  its own "Added cookie" line.
+ *  What follows is read by cookiesEnd: it is one when it begins with `name=value`. */
+const Q = "\\\\{0,3}[\"'`]";
+const COOKIE_AT = new RegExp(
+  `cookies?(?:(?:${Q})?\\]?\\s{0,3}[:=]\\s{0,3}\\$?(?:${Q})?|${Q}\\s{0,3},\\s{0,3}(?:${Q})?|\\s{1,3}\\$?${Q})|(?:added|replaced) cookie\\s{1,3}|(?<![\\w-])(?:--cookie\\s{1,3}\\$?(?:${Q})?|-b\\s{1,3}\\$?${Q})`,
+  "gi",
+);
+const COOKIE_NAME = chars(/[\w!#$*+.^|~\u0080-\uffff-]/);
+const COOKIE_VALUE = chars(/[^\s"'`,;\\]/);
+const COOKIE_DATE = chars(/[^\r\n"'`;\\]/);
+
+const HEADER_NAME = chars(/[\w-]/);
+
+/** Where the header name that runs up to `end` begins (`Set-Cookie`, `X-My-Cookie`). */
+function nameStart(text: string, end: number): number {
+  let i = end;
+  while (i > 0 && end - i < 64 && HEADER_NAME(text, i - 1)) i--;
+  return i;
+}
+
+/** The quote, with its backslashes, that ends just before `at`, or "" when none does. */
+function quoteBefore(text: string, at: number): string {
+  if (!QUOTES.includes(text.charAt(at - 1)) || at < 1) return "";
+  let from = at - 1;
+  while (from > 0 && at - from < 8 && text.charAt(from - 1) === "\\") from--;
+  return text.slice(from, at);
+}
+
+/** Where a cookie's value that starts at `from` ends. In quotes, behind its closing quote,
+ *  or at the line's end when it has none there; but the quote the header itself is written
+ *  in (`within`) closes that, and opens no value (`"sid=" + sid`). Else as far as its
+ *  characters go: a comma or a backslash is one of them when the value goes on behind it,
+ *  a backslash before `r`, `n` or `t` being a line's end written out. `date` is `Expires=`,
+ *  with its comma and spaces. */
+function cookieValueEnd(text: string, from: number, date: boolean, within: string): number {
+  const n = opens(text, from);
+  if (n >= 0 && text.slice(from, from + n + 1) !== within) {
+    const q = text.charAt(from + n);
+    const close = stringEnd(text, from + n + 1, n, q, false);
+    const end = close < 0 ? run(text, from, NOT_BREAK) : Math.min(close + n + 1, text.length);
+    // A value opened behind backslashes is inside a string, and that string's own quote,
+    // behind fewer of them, ends it: it does not run on into what follows the string.
+    for (let i = from + n + 1; n > 0 && i < end; i++) {
+      const quote = run(text, i, BACKSLASH);
+      if (quote < end && text.charAt(quote) === q && quote - i < n) return i;
+      i = quote;
+    }
+    return end;
+  }
+  let i = from;
+  // A value that is JSON written out bare, `prefs={"theme":"dark"}`: to the bracket that
+  // closes it, its strings skipped, or to the line's end, or to the quote that closes the
+  // string the header is in. Its quotes would end it early, and taking the line means no
+  // later value on it is ever read through the same characters.
+  for (let depth = 0; "{[".includes(text.charAt(from)); i++) {
+    const c = text.charAt(i);
+    if (i >= text.length || c === "\n" || c === "\r") return Math.min(i, text.length);
+    const quoted = opens(text, i);
+    if (quoted >= 0) {
+      if (text.slice(i, i + quoted + 1) === within) return i;
+      i = stringEnd(text, i + quoted + 1, quoted, text.charAt(i + quoted), false) + quoted;
+      if (i < quoted) return run(text, from, NOT_BREAK);
+    } else if (c === "\\") i = run(text, i, BACKSLASH) - 1;
+    else if (c === "{" || c === "[") depth++;
+    else if ((c === "}" || c === "]") && --depth === 0) return i + 1;
+  }
+  i = from;
+  for (;;) {
+    i = run(text, i, date ? COOKIE_DATE : COOKIE_VALUE);
+    const c = text.charAt(i);
+    if ((c !== "," && c !== "\\") || !COOKIE_VALUE(text, i + 1)) return i;
+    if (c === "\\" && "rnt".includes(text.charAt(i + 1))) return i;
+    i++;
+  }
+}
+
+/** Where `name=value` that starts at `from` ends, or -1 when none starts there. With
+ *  `bare`, a word alone is taken too: an attribute, `HttpOnly`. */
+function cookiePairEnd(text: string, from: number, bare: boolean, within: string): number {
+  const eq = run(text, from, COOKIE_NAME);
+  if (eq === from) return -1;
+  if (text.charAt(eq) !== "=") return bare ? eq : -1;
+  return cookieValueEnd(text, eq + 1, text.slice(from, eq).toLowerCase() === "expires", within);
+}
+
+/** Where the cookies that start at `from` end, or -1 when none start there: `name=value`,
+ *  then `;` and another, or an attribute (`Path=/`, `HttpOnly`), or `,` and the next cookie
+ *  of a `Set-Cookie` that holds several. Read one character at a time, so it is linear. */
+function cookiesEnd(text: string, from: number, within: string): number {
+  let end = cookiePairEnd(text, from, false, within);
+  while (end >= 0) {
+    const sep = text.charAt(end);
+    if (sep !== ";" && sep !== ",") break;
+    const more = cookiePairEnd(text, run(text, end + 1, BLANK), sep === ";", within);
+    if (more < 0) break;
+    end = more;
+  }
+  return end;
+}
+
+function redactCookies(text: string): string {
+  let out = "";
+  let last = 0;
+  COOKIE_AT.lastIndex = 0;
+  for (let m = COOKIE_AT.exec(text); m; m = COOKIE_AT.exec(text)) {
+    const from = COOKIE_AT.lastIndex;
+    // The quote the header is written in: the one it was just opened with, or the one
+    // before its name (`"Cookie: sid=" + sid`).
+    const within = quoteBefore(text, from) || quoteBefore(text, nameStart(text, m.index));
+    const to = cookiesEnd(text, from, within);
+    if (to < 0) continue;
+    // One pair that holds nothing is none: `name=value` is what a pair is called, and
+    // `sid=` or `sid=${sid}` has no value of its own.
+    const pair = text.slice(from, to);
+    if (/^(?:name|key)=value$/i.test(pair) || isStandIn(pair.slice(pair.indexOf("=") + 1))) continue;
+    out += text.slice(last, from) + REDACTED;
+    last = to;
+    COOKIE_AT.lastIndex = to;
+  }
+  return last ? out + text.slice(last) : text;
+}
+
+/** An object or a list the reading of a text is inside. */
+interface Open {
+  /** A cookie's: it is under a cookie's key, or in a list that is. */
+  cookie: boolean;
+  /** An object's own keys in lower case, each with its string, or null for anything else. */
+  own?: Map<string, unknown>;
+  /** Each of its strings: its key, where it begins and ends in the text, and which of the
+   *  cuts were made inside it. */
+  at?: [string, number, number, number, number][];
+}
+
+/** What a key written bare comes behind. */
+const BEFORE_KEY = "{,";
+/** A word a single quote opens a string right behind: a Python prefix, or a keyword that a
+ *  minifier leaves no space after. Behind any other word it is an apostrophe. */
+const BEFORE_QUOTE = /^(?:[rbfu]{1,2}|return|case|typeof|throw|yield|await|else|in|of|new|delete|void|instanceof)$/i;
+/** A Python string's prefix: with the quote right behind it, it is part of the string. */
+const PREFIX = /^[rbfu]{1,2}$/i;
+/** A key right behind a quote: `name":`. The quote before it opened that key, so the string
+ *  read up to there was none, and the quote it began with stands alone. */
+const KEY_BEHIND = /[\w$-]{1,80}["'`]\s{0,3}:/y;
+
+/** `text` without its `cuts`, each replaced by the marker. One inside another goes with it. */
+function cut(text: string, cuts: [number, number][]): string {
+  let out = "";
+  let last = 0;
+  for (const [from, to] of cuts.sort((a, b) => a[0] - b[0])) {
+    if (from < last) continue;
+    out += text.slice(last, from) + REDACTED;
+    last = to;
+  }
+  return out + text.slice(last);
+}
+
+/** Objects written out in text are read as the walk reads objects: JSON, on one line or
+ *  many, its keys in any order; a JavaScript or Python literal, its keys bare or in single
+ *  quotes or backticks; JSON inside a JSON string, each quote behind its backslashes. Of each object it
+ *  keeps the keys it has itself and the strings under them, and whether it is a cookie's:
+ *  under a cookie's key, or handed to a function or a name that ends as one does
+ *  (`addCookies([…])`, `cookies={…}`). Its strings then go by childName, as in the walk.
+ *  What is still open at the text's end is read as closed there. One pass, no step back. */
+function redactNamed(text: string): string {
+  if (!/value|cookie/i.test(text)) return text;
+  const cuts: [number, number][] = [];
+  const read = (t: string, offset: number, depth: number): void => {
+    const open: Open[] = [];
+    const close = (done: Open | undefined): void => {
+      if (!done?.own || !done.at) return;
+      const key = done.cookie ? "cookie" : undefined;
+      const names = childNames(done.own, key);
+      for (const [k, from, to, first, end] of done.at) {
+        const name = names(k);
+        if (name === k) continue;
+        const v = t.slice(from, to);
+        // As it will stand: with what was cut inside it, when it holds an object of its own.
+        const inner = cuts.slice(first, end).map(([a, b]): [number, number] => [a - offset - from, b - offset - from]);
+        if (goesWhole(name, v, cut(v, inner))) cuts.push([offset + from, offset + to]);
+      }
+    };
+    // The key just read, or the name just called or assigned to, until what it holds begins.
+    let key: string | undefined;
+    let word = "";
+    let wordEnd = -1;
+    let before = "";
+    for (let i = 0; i < t.length; i++) {
+      if (SPACE(t, i)) continue;
+      const c = t.charAt(i);
+      const top = open[open.length - 1];
+      if (WORD(t, i)) {
+        const end = run(t, i, WORD);
+        const after = run(t, end, SPACE);
+        word = t.slice(i, end);
+        wordEnd = end;
+        if (PREFIX.test(word) && QUOTES.includes(t.charAt(end))) {
+          i = end - 1;
+          continue;
+        }
+        if (t.charAt(after) === ":" && top?.own && BEFORE_KEY.includes(before)) {
+          key = word.toLowerCase();
+          i = after;
+          before = ":";
+          continue;
+        }
+        if (top?.own && key !== undefined) top.own.set(key, null);
+        key = undefined;
+        i = end - 1;
+        before = "w";
+        continue;
+      }
+      // A quote opens a string, but for two that are marks of another kind: `"` right
+      // behind a digit (inches), and `'` right behind a word that is no prefix or keyword
+      // (an apostrophe). But for a backtick's, a string ends on its line: a quote with no
+      // partner there is read as a character, and what follows it as it stands.
+      const marks = wordEnd === i && (c === '"' ? /\d$/.test(word) : c === "'" && !BEFORE_QUOTE.test(word));
+      const n = c === "\\" || (QUOTES.includes(c) && !marks) ? opens(t, i) : -1;
+      let to = n < 0 ? -1 : stringEnd(t, i + n + 1, n, t.charAt(i + n), t.charAt(i + n) === "`");
+      KEY_BEHIND.lastIndex = to + n + 1;
+      if (to >= 0 && KEY_BEHIND.test(t)) to = -1;
+      if (to >= 0) {
+        const from = i + n + 1;
+        const after = run(t, to + n + 1, SPACE);
+        if (t.charAt(after) === ":") {
+          key = t.slice(from, to).toLowerCase();
+          i = after;
+          before = ":";
+          continue;
+        }
+        // What the string holds is read too, as a text of its own: an object written out in
+        // it, a code fence, JSON with its quotes behind backslashes.
+        const first = cuts.length;
+        if (depth < 3 && /[{[]|\\["'`]/.test(t.slice(from, to))) read(t.slice(from, to), offset + from, depth + 1);
+        if (top?.own && top.at && key !== undefined) {
+          top.own.set(key, t.slice(from, to));
+          top.at.push([key, from, to, first, cuts.length]);
+        }
+        key = undefined;
+        i = to + n;
+        before = '"';
+      } else if (c === "\\") {
+        i = run(t, i, BACKSLASH) - 1;
+      } else if (c === "{" || c === "[") {
+        if (top?.own && key !== undefined) top.own.set(key, null);
+        const cookie = key !== undefined ? COOKIE_KEY.test(key) : !!top && !top.own && top.cookie;
+        open.push(c === "{" ? { cookie, own: new Map(), at: [] } : { cookie });
+        key = undefined;
+        before = c;
+      } else if (c === "}" || c === "]") {
+        close(open.pop());
+        key = undefined;
+        before = c;
+      } else {
+        // What `addCookies(` is handed, or `cookies =` is given, is as what `"cookies":` holds.
+        key = (c === "(" || c === "=") && before === "w" ? word : undefined;
+        before = c;
+      }
+    }
+    while (open.length) close(open.pop());
+  };
+  read(text, 0, 0);
+  return cuts.length ? cut(text, cuts) : text;
+}
 
 /** Redact every string in a JSON-able value. Keys stay; a string stored directly
  *  under a key that names a secret goes whole, `{"api_key":"[redacted]"}`, with the
  *  exemptions an assignment has: the key is the name, the string its value. So does a
- *  header's value under its name, and each string of a list of them (`set-cookie`),
- *  unless it is nothing but a stand-in that the text rules leave as it is: a header
- *  begins with whatever its first cookie is called, so how it begins says nothing. */
+ *  header's value under its name, and each string of a list of them (`set-cookie`). What
+ *  is under `value` goes by the name beside it (`{"name":"Cookie","value":"…"}`), a
+ *  cookie's value by the header's, and so does everything in a jar of them. */
 export function redactDeep<T>(v: T): T {
   return redactUnder(v, undefined);
 }
@@ -205,9 +571,7 @@ export function redactDeep<T>(v: T): T {
 function redactUnder<T>(v: T, key: string | undefined): T {
   if (typeof v === "string") {
     const text = redactSecrets(v);
-    if (key === undefined) return text as T;
-    const whole = HEADER_KEY.test(key) ? !isStandIn(v.trim()) || text !== v : isSecretName(key) && !keepsValue(key, v);
-    return (whole ? REDACTED : text) as T;
+    return (key !== undefined && goesWhole(key, v, text) ? REDACTED : text) as T;
   }
   // An element has no key of its own, but a header's list of values is the header's.
   // A loop, not a callback: one stack frame per level.
@@ -218,8 +582,14 @@ function redactUnder<T>(v: T, key: string | undefined): T {
     return out as T;
   }
   if (v && typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>);
+    const names = childNames(new Map(entries.map(([k, x]) => [k.toLowerCase(), x])), key);
     const out: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = redactUnder(x, k);
+    for (const [k, x] of entries) {
+      const low = k.toLowerCase();
+      const name = names(low);
+      out[k] = redactUnder(x, name === low ? k : name);
+    }
     return out as T;
   }
   return v;

@@ -21,9 +21,12 @@ Three additions on protocol 1. Every rule a receiver may already rely on still h
 - **`secrets@1` reads structured values** (PRIVACY.md §2). A string stored directly under
   a key that names a secret (`api_key`, `password`, `*token*` …) arrives as `[redacted]`,
   in a tool's `input` and `output` and in the data of a type the sender does not know.
-  So does the value under a key that ends in `authorization` or `cookie`, in any case
-  (`Proxy-Authorization`, `Set-Cookie`, `HTTP_COOKIE`), a string or a list of them. The
-  tag is unchanged.
+  So does the value under a key that ends in `authorization`, `cookie` or `cookies`, in
+  any case (`Proxy-Authorization`, `Set-Cookie`, `HTTP_COOKIE`), a string or a list of
+  them. What is under `value` goes by the one word under `name` or `key` beside it, and a
+  cookie's value goes whole, in an object and in one written out in text (JSON, a
+  JavaScript or Python literal). A cookie header written out in text arrives as
+  `Cookie: [redacted]`. The tag is unchanged.
   Vectors: `redaction/secrets.json`, the `deep` list.
 
 ### For receivers (0.13.3)

@@ -24,6 +24,7 @@ describe("secrets@1 vectors", () => {
     it(`${c.name}: ${(c.in ?? c.template ?? "").slice(0, 50)}`, () => {
       const input = materialise(c);
       expect(redactSecrets(input)).toBe(c.out);
+      expect(redactSecrets(c.out)).toBe(c.out);
       if (c.template)
         for (const part of c.t as unknown as { prefix: string; len: number; abc?: string }[])
           expect(redactSecrets(input)).not.toContain(rnd(part.len, part.abc).slice(-10));
