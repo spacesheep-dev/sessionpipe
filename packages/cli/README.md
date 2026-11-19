@@ -11,7 +11,7 @@ npx sessionpipe install        # writes the hooks, backfills 30 days locally
 sessionpipe tail --tier 1      # watch events, no server needed
 sessionpipe sink add https://your-receiver.example --tier 1 --token <t>
 sessionpipe doctor             # what is wired, hook timing, sink state
-sessionpipe uninstall          # every config file byte-identical again
+sessionpipe uninstall          # removes its own entries, nothing else
 ```
 
 `connect` and `install` refuse to replace a newer global package or hook launcher
