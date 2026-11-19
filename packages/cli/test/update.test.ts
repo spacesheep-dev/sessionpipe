@@ -17,7 +17,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AutoUpdater,
   autoUpdateOff,
@@ -689,9 +689,8 @@ describe("the daemon's auto-update", () => {
     let busy: string | null = "1 message(s) in hand";
     const h = harness({}, { daemon: { busy: () => busy, pauseIntake: () => {}, resumeIntake: () => {} } });
     const done = h.u.tick();
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => expect(h.record().pending).toBe("0.6.0"), { timeout: 5000, interval: 5 });
     expect(h.calls).toEqual(["latest"]);
-    expect(h.record().pending).toBe("0.6.0");
     busy = null;
     await done;
     expect(h.calls).toEqual(["latest", "install 0.6.0", "restart 0.5.0→0.6.0"]);
@@ -775,14 +774,17 @@ describe("the daemon's auto-update", () => {
     expect(same.calls).toEqual([]);
     const h = harness({ onDisk: "0.6.0", busyFor: 2 });
     expect(h.u.restartWhenIdle()).toBe(true);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(h.calls).toEqual(["busy", "busy", "pause", "restart 0.5.0→0.6.0"]);
+    // Two busy looks, a pause, then the restart: wait for the restart, not for a number of ms.
+    await vi.waitFor(() => expect(h.calls).toEqual(["busy", "busy", "pause", "restart 0.5.0→0.6.0"]), {
+      timeout: 5000,
+      interval: 5,
+    });
   });
 
   it("starts with a check about a minute in (shortened here)", async () => {
     const h = harness({ latest: "0.5.0" }, { firstCheckMs: 5, tickMs: 60_000 });
     h.u.start();
-    await new Promise((r) => setTimeout(r, 40));
+    await vi.waitFor(() => expect(h.calls).toEqual(["latest"]), { timeout: 5000, interval: 5 });
     h.u.stop();
     expect(h.calls).toEqual(["latest"]);
   });
