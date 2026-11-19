@@ -1,20 +1,52 @@
 // SPDX-License-Identifier: Apache-2.0
 // files.ts on its own: what the daemon tests can't reach through a receiver — a
 // cwd that isn't its own realpath, a write that fails after the first file landed
-// (nothing kept), a fetch that rejects with something that isn't an Error, sizes.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+// (nothing kept), a disk that is full or a folder that can't be written to, a fetch
+// that rejects with something that isn't an Error, the tries at a file, sizes.
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type Failure,
   FETCH_TIMEOUT_MS,
   type Fetched,
   FileProblem,
   fetchFiles,
   humanSize,
+  limitWords,
+  RETRY_DELAYS_MS,
+  retries,
   withFiles,
   writeFiles,
 } from "../src/control/files.js";
+
+// The one write a test makes fail, with the system's code for why.
+const fsFault = vi.hoisted(() => ({ code: null as string | null }));
+vi.mock("node:fs", async (original) => {
+  const real = await original<typeof import("node:fs")>();
+  const writeFileSync = ((...a: Parameters<typeof real.writeFileSync>) => {
+    if (fsFault.code)
+      throw Object.assign(new Error(`${fsFault.code}: the system's own words, open '${String(a[0])}'`), {
+        code: fsFault.code,
+      });
+    return real.writeFileSync(...a);
+  }) as typeof real.writeFileSync;
+  return { ...real, writeFileSync };
+});
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 let tmp: string;
 const file = (name: string, n = 3): Fetched => ({
@@ -28,6 +60,7 @@ beforeEach(() => {
   tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), "sp-files-")));
 });
 afterEach(() => {
+  fsFault.code = null;
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -70,11 +103,39 @@ describe("writeFiles", () => {
   });
 });
 
+describe("a write the system refuses, in words", () => {
+  it.each([
+    ["EACCES", "this folder can't be written to"],
+    ["EPERM", "this folder can't be written to"],
+    ["EROFS", "this folder can't be written to"],
+    ["ENOSPC", "the disk is full"],
+  ])("%s: %s, and nothing is kept", (code, words) => {
+    writeFiles(tmp, "s0", [file("a.txt")]);
+    fsFault.code = code;
+    expect(() => writeFiles(tmp, "s1", [file("a.txt")])).toThrow(new FileProblem(`couldn't save the files: ${words}`));
+    expect(existsSync(path.join(tmp, ".sessionpipe", "files", "s1"))).toBe(false);
+  });
+  it("any other reason is said as the system said it", () => {
+    writeFiles(tmp, "s0", [file("a.txt")]);
+    fsFault.code = "EIO";
+    expect(() => writeFiles(tmp, "s1", [file("a.txt")])).toThrow(
+      /^couldn't save the files: EIO: the system's own words/,
+    );
+  });
+});
+
 describe("fetchFiles", () => {
-  it("a fetch that rejects with something that isn't an Error still names the file", async () => {
+  it("a fetch that rejects with something that isn't an Error is the network: it names the file, in words", async () => {
     const f = { name: "x.bin", type: "application/octet-stream", size: 1, sha256: "A".repeat(43) };
-    const o = { control: "http://r/c/", token: "t", fetch: (() => Promise.reject("socket hung up")) as typeof fetch };
-    await expect(fetchFiles([f], o)).rejects.toThrow('couldn\'t download "x.bin": socket hung up');
+    const o = {
+      control: "http://r/c/",
+      token: "t",
+      fetch: (() => Promise.reject("socket hung up")) as typeof fetch,
+      retryDelaysMs: [1, 1],
+    };
+    await expect(fetchFiles([f], o)).rejects.toThrow(
+      new FileProblem('couldn\'t download "x.bin": the connection to the receiver kept failing'),
+    );
     expect(FETCH_TIMEOUT_MS).toBe(300_000);
   });
 });
@@ -104,6 +165,139 @@ describe("fetchFiles, told to stop", () => {
     await expect(none).rejects.toThrow(FileProblem);
     await expect(none).rejects.toThrow('stopped before "b.txt" was downloaded');
     expect(asked).toHaveLength(1);
+  });
+});
+
+describe("fetchFiles, stopped in flight by a fetch that rejects with something that isn't an Error", () => {
+  it("still names the file", async () => {
+    const ctl = new AbortController();
+    const f = { name: "c.txt", type: "text/plain", size: 3, sha256: "A".repeat(43) };
+    const stalls: typeof fetch = (_input, init) =>
+      new Promise((_res, rej) => init?.signal?.addEventListener("abort", () => rej("socket hung up")));
+    const got = fetchFiles([f], { control: "http://x/c", token: "t", fetch: stalls, signal: ctl.signal });
+    setTimeout(() => ctl.abort(), 20);
+    await expect(got).rejects.toThrow(new FileProblem('couldn\'t download "c.txt": socket hung up'));
+  });
+});
+
+describe("whether a file is tried again (conformance/control-file-retry.json)", () => {
+  interface Case {
+    name: string;
+    failure: Failure["kind"];
+    status?: number;
+    expect: "retries" | "fails";
+  }
+  const vectors = JSON.parse(
+    readFileSync(path.resolve(here, "../../../conformance/control-file-retry.json"), "utf8"),
+  ) as { cases: Case[] };
+  it("has every kind of failure, and both answers", () => {
+    expect(new Set(vectors.cases.map((c) => c.failure))).toEqual(
+      new Set(["network", "status", "too_long", "too_short", "hash", "timeout", "stopped"]),
+    );
+    expect(vectors.cases.filter((c) => c.expect === "retries")).toHaveLength(5);
+  });
+  it.each(vectors.cases)("$name", (c) => {
+    const f = (c.failure === "status" ? { kind: "status", status: c.status } : { kind: c.failure }) as Failure;
+    expect(retries(f)).toBe(c.expect === "retries");
+  });
+});
+
+describe("the tries at one file", () => {
+  const body = new Uint8Array([1, 2, 3, 4]);
+  const sha = createHash("sha256").update(body).digest("base64url");
+  const f = { name: "shot.png", type: "image/png", size: body.length, sha256: sha };
+  /** A receiver that answers each ask with the next of `answers`: a status, "drop" (the
+   *  connection fails), "stall" (no answer until hung up on), or "ok" (the bytes). */
+  const receiver = (...answers: (number | "drop" | "stall" | "ok" | "swap" | "short" | "long")[]) => {
+    const asked: number[] = [];
+    const fetch = ((_input: unknown, init?: RequestInit): Promise<Response> => {
+      asked.push(Date.now());
+      const a = answers.shift() ?? "ok";
+      if (a === "drop") return Promise.reject(new TypeError("fetch failed"));
+      if (a === "stall")
+        return new Promise((_res, rej) => init?.signal?.addEventListener("abort", () => rej(new Error("aborted"))));
+      if (a === "ok") return Promise.resolve(new Response(body));
+      if (a === "swap") return Promise.resolve(new Response(new Uint8Array([4, 3, 2, 1])));
+      if (a === "short") return Promise.resolve(new Response(body.subarray(0, 3)));
+      if (a === "long") return Promise.resolve(new Response(new Uint8Array(9)));
+      return Promise.resolve(new Response("no", { status: a }));
+    }) as typeof globalThis.fetch;
+    return { asked, fetch };
+  };
+  const opts = (fetch: typeof globalThis.fetch, more: object = {}) => ({
+    control: "http://r/c",
+    token: "t",
+    fetch,
+    retryDelaysMs: [20, 40],
+    ...more,
+  });
+
+  it("two more tries, after 1 s and 4 s by default", () => {
+    expect(RETRY_DELAYS_MS).toEqual([1000, 4000]);
+  });
+  it("a connection that drops and a busy receiver: the third try gets it, after each wait", async () => {
+    const r = receiver("drop", 503, "ok");
+    const [got] = await fetchFiles([f], opts(r.fetch));
+    expect(Buffer.from(got!.bytes)).toEqual(Buffer.from(body));
+    expect(r.asked).toHaveLength(3);
+    expect(r.asked[1]! - r.asked[0]!).toBeGreaterThanOrEqual(15);
+    expect(r.asked[2]! - r.asked[1]!).toBeGreaterThanOrEqual(35);
+  });
+  it("a receiver that keeps failing: three tries, then its status", async () => {
+    const r = receiver(500, 502, 500, "ok");
+    await expect(fetchFiles([f], opts(r.fetch))).rejects.toThrow('couldn\'t download "shot.png": HTTP 500');
+    expect(r.asked).toHaveLength(3);
+  });
+  it("a connection that keeps failing: three tries, then plain words, not the system's", async () => {
+    const r = receiver("drop", "drop", "drop", "ok");
+    const got = fetchFiles([f], opts(r.fetch));
+    await expect(got).rejects.toThrow(
+      new FileProblem('couldn\'t download "shot.png": the connection to the receiver kept failing'),
+    );
+    await expect(got).rejects.not.toThrow("fetch failed");
+    expect(r.asked).toHaveLength(3);
+  });
+  it("a 404, another status, another size or another hash: asked once", async () => {
+    for (const [answer, why] of [
+      [404, "isn't on the receiver"],
+      [403, "HTTP 403"],
+      ["swap", "doesn't match its signed hash"],
+      ["short", "is 3 bytes, not its signed 4"],
+      ["long", "is larger than its signed size (4 bytes)"],
+    ] as const) {
+      const r = receiver(answer, "ok");
+      await expect(fetchFiles([f], opts(r.fetch))).rejects.toThrow(why);
+      expect(r.asked).toHaveLength(1);
+    }
+  });
+  it("the time limit is the file's, every try and wait included: said in words", async () => {
+    // It runs out in the middle of a try…
+    const stalls = receiver("drop", "stall");
+    await expect(fetchFiles([f], opts(stalls.fetch, { timeoutMs: 150 }))).rejects.toThrow(
+      new FileProblem('"shot.png" didn\'t finish downloading within 0.15 seconds'),
+    );
+    expect(stalls.asked).toHaveLength(2);
+    // …or while it waits to try again: no try after it.
+    const waits = receiver("drop", "ok");
+    await expect(fetchFiles([f], opts(waits.fetch, { timeoutMs: 50, retryDelaysMs: [5000] }))).rejects.toThrow(
+      new FileProblem('"shot.png" didn\'t finish downloading within 0.05 seconds'),
+    );
+    expect(waits.asked).toHaveLength(1);
+  });
+  it("told to stop while it waits to try again: no try after it", async () => {
+    const ctl = new AbortController();
+    const r = receiver("drop", "ok");
+    const got = fetchFiles([f], opts(r.fetch, { retryDelaysMs: [5000], signal: ctl.signal }));
+    setTimeout(() => ctl.abort(), 30);
+    await expect(got).rejects.toThrow(new FileProblem('stopped before "shot.png" was downloaded'));
+    expect(r.asked).toHaveLength(1);
+  });
+  it("the limit in words", () => {
+    expect(limitWords(FETCH_TIMEOUT_MS)).toBe("5 minutes");
+    expect(limitWords(60_000)).toBe("1 minute");
+    expect(limitWords(90_000)).toBe("90 seconds");
+    expect(limitWords(1000)).toBe("1 second");
+    expect(limitWords(300)).toBe("0.3 seconds");
   });
 });
 

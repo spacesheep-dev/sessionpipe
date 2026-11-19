@@ -1,0 +1,20 @@
+{
+  "spec": "CONTROL.md §6 `start`, Files",
+  "note": "Whether a machine tries a command's file again after one try at it failed. `failure` is how that try ended: `network` (no answer, or the connection dropped before the last byte), `status` (the receiver answered `status`, not 200), `too_long` or `too_short` (the bytes were not the signed size), `hash` (not the signed SHA-256), `timeout` (the file's one time limit passed) or `stopped` (whoever asked no longer wants it). `expect` is `retries` (the reference daemon tries twice more, after 1 s and 4 s, all inside the file's 5-minute limit) or `fails` (the command is acked `failed`, code `file`).",
+  "cases": [
+    { "name": "the connection dropped: the next try may get through", "failure": "network", "expect": "retries" },
+    { "name": "the receiver failed (500)", "failure": "status", "status": 500, "expect": "retries" },
+    { "name": "a proxy in front of the receiver failed (502)", "failure": "status", "status": 502, "expect": "retries" },
+    { "name": "the receiver is busy (503)", "failure": "status", "status": 503, "expect": "retries" },
+    { "name": "a gateway gave up waiting (504)", "failure": "status", "status": 504, "expect": "retries" },
+    { "name": "the receiver doesn't have it (404): gone or expired, and it stays gone", "failure": "status", "status": 404, "expect": "fails" },
+    { "name": "the token isn't taken (401)", "failure": "status", "status": 401, "expect": "fails" },
+    { "name": "the receiver refuses this machine the file (403)", "failure": "status", "status": 403, "expect": "fails" },
+    { "name": "too many asks (429): the receiver says so, and a second ask makes it worse", "failure": "status", "status": 429, "expect": "fails" },
+    { "name": "longer than its signed size", "failure": "too_long", "expect": "fails" },
+    { "name": "shorter than its signed size", "failure": "too_short", "expect": "fails" },
+    { "name": "another hash: the bytes were changed", "failure": "hash", "expect": "fails" },
+    { "name": "the file's time limit passed: there is no time left to try", "failure": "timeout", "expect": "fails" },
+    { "name": "the turn was stopped", "failure": "stopped", "expect": "fails" }
+  ]
+}

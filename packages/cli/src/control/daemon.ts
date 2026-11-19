@@ -481,8 +481,12 @@ export interface DaemonDeps {
   answerGraceMs?: number;
   /** Close an SDK session idle this long (a held session costs ~300 MB). */
   sdkIdleMs?: number;
-  /** How long one of a start's files may take to download (tests shorten it). */
+  /** How long one of a command's files may take to download, every try included (tests
+   *  shorten it). */
   fileTimeoutMs?: number;
+  /** The waits before a file's second and third tries (files.ts RETRY_DELAYS_MS; tests
+   *  shorten them). */
+  fileRetryMs?: number[];
   /** How long a message waits for a busy window's hooks to say its turn began before it
    *  is looked at again (BUSY_SETTLE_MS; tests shorten it). */
   busySettleMs?: number;
@@ -4139,6 +4143,7 @@ export class ControlDaemon {
         token: r.token,
         fetch: this.deps.fetch,
         timeoutMs: this.deps.fileTimeoutMs,
+        retryDelaysMs: this.deps.fileRetryMs,
         signal: o.signal,
       });
       if (over()) return null;
