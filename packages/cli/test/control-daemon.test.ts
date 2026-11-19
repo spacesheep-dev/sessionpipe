@@ -21,7 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeControl, shortId } from "@sessionpipe/core";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
@@ -197,7 +197,9 @@ process.stdout.write(JSON.stringify({ type: "result", result: "did it: " + a[a.l
 afterEach(async () => {
   await d?.stop();
   d = null;
-  rmSync(tmp, { recursive: true, force: true });
+  // A hook's worker may still be writing its job as the folder goes (ENOTEMPTY on a busy
+  // machine): try again a few times before calling it a failure.
+  rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("routing (CONTROL.md §6)", () => {
@@ -1603,7 +1605,9 @@ describe.runIf(unix)("the built hook talks to the daemon", () => {
       await startDaemon();
       await ask(sock, { op: "event", session: SESSION, event: "UserPromptSubmit" }, 500);
       const q = await rx.send({ session: SESSION, text: "from the phone" });
-      await new Promise((r) => setTimeout(r, 300));
+      // Taken on the next long-poll: wait for the ack, as the turn test above does (300 ms was
+      // not enough once, 2026-11-19, ubuntu/node 22, and the hook printed nothing).
+      await vi.waitFor(() => expect(rx.acks.find((a) => a.id === q.id)?.outcome).toBe("taken"), 5000);
       const out = await runHook("Stop", { session_id: SID, stop_hook_active: false, cwd: project });
       expect(JSON.parse(out)).toMatchObject({ decision: "block" });
       expect(JSON.parse(out).reason).toContain("from the phone");
@@ -1625,7 +1629,8 @@ describe.runIf(unix)("the built hook talks to the daemon", () => {
         .update(`p1|Bash|${JSON.stringify(input.tool_input)}`)
         .digest("hex")
         .slice(0, 16)}`;
-      await new Promise((r) => setTimeout(r, 400));
+      // The answer is for a question the daemon holds: wait until the hook has parked it.
+      await vi.waitFor(() => expect(d?.status().attentions).toEqual([{ session: SESSION, id: att }]), 5000);
       const a = await rx.send({
         kind: "permission.answer",
         session: SESSION,
@@ -1783,6 +1788,7 @@ setTimeout(() => process.stdout.write(JSON.stringify({ type: "result", result: "
   it("busy while a permission prompt waits for an answer", async () => {
     await startDaemon();
     const hook = ask(sock, { op: "permission", session: SESSION, attention: "perm-0123456789abcdef" }, 5000);
+    await vi.waitFor(() => expect(d?.busy()).toMatch(/permission prompt/), 5000);
     await new Promise((r) => setTimeout(r, 100));
     expect(d?.busy()).toMatch(/permission prompt/);
     await ask(sock, { op: "event", session: SESSION, event: "PostToolUse" }, 500);

@@ -8,16 +8,7 @@
 // that none of these leave the daemon stuck, crashed or holding a message it can't
 // finish. The Codex stand-in takes its behaviour from a file beside it, so one fake
 // serves every case.
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +17,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
 import { type AskRequest, ask, askMany, type LocalReply } from "../src/control/local.js";
 import type { ControlConfig } from "../src/control/store.js";
+import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
@@ -97,13 +89,7 @@ interface Run {
   asked_by: string | null;
   chain: string | null;
 }
-const runs = (): Run[] =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l) as Run)
-    : [];
+const runs = (): Run[] => jsonLines<Run>(calls);
 const mode = (m: Mode) => writeFileSync(modeFile, m);
 
 interface Setup {

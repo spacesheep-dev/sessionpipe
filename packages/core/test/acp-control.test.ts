@@ -426,6 +426,7 @@ describe("one agent, driven", () => {
     const h = await open({ closeGraceMs: 50 }, "stubborn");
     h.close();
     h.close();
+    await vi.waitFor(() => expect(h.closed).toBe(true), 5000);
     await new Promise((r) => setTimeout(r, 700));
     expect(h.closed).toBe(true);
     expect(await h.send("pong")).toEqual({ reply: "", error: "Codex was closed" });
@@ -437,6 +438,7 @@ describe("one agent, driven", () => {
     await onPlatform("win32", async () => {
       const w = await open({ closeGraceMs: 50 }, "stubborn");
       w.close();
+      await vi.waitFor(() => expect(w.closed).toBe(true), 5000);
       await new Promise((r) => setTimeout(r, 500));
       expect(w.closed).toBe(true);
     });
@@ -473,6 +475,7 @@ describe("one agent, driven", () => {
       const kill = vi.spyOn(process, "kill");
       try {
         h.close();
+        await vi.waitFor(() => expect(kill.mock.calls.map((c) => c[1])).toEqual(["SIGTERM", "SIGKILL"]), 5000);
         await new Promise((r) => setTimeout(r, 700));
         // SIGTERM after the grace, SIGKILL after six of them, to its own group; nothing after it has gone.
         expect(kill.mock.calls.map((c) => c[1])).toEqual(["SIGTERM", "SIGKILL"]);

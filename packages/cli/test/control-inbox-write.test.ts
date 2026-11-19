@@ -10,7 +10,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { claudeControl } from "@sessionpipe/core";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CONFIRM_MS,
   cleanName,
@@ -250,6 +250,7 @@ describe.runIf(unix)("the one line it writes", () => {
       configDir: dir,
     });
     expect(out).toMatchObject({ written: true });
+    await vi.waitFor(() => expect(lines).toHaveLength(1), 5000);
     await settle();
     expect(lines).toHaveLength(1);
     const j = JSON.parse(lines[0] as string) as { type: string; priority: string; message: { content: string } };
@@ -271,6 +272,7 @@ describe.runIf(unix)("the one line it writes", () => {
         configDir: dir,
       }),
     ).toMatchObject({ written: true });
+    await vi.waitFor(() => expect(lines).toHaveLength(1), 5000);
     await settle();
     expect(lines).toHaveLength(1);
   });
@@ -286,11 +288,13 @@ describe.runIf(unix)("the one line it writes", () => {
       token: "f".repeat(32),
       configDir: dir,
     });
+    await vi.waitFor(() => expect(lines).toHaveLength(2), 5000);
     await settle();
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0] as string)).toEqual({ type: "auth", token: "f".repeat(32) });
     lines.length = 0;
     await writeInbox(rec({ keyFile }), { body: "hello", ...ok, token: "f".repeat(32), configDir: dir });
+    await vi.waitFor(() => expect(lines).toHaveLength(1), 5000);
     await settle();
     expect(lines).toHaveLength(1);
   });

@@ -5,16 +5,7 @@
 // cancelled; a turn in a process the daemon did not start is never signalled, and the
 // ack says who has the session; a session nothing runs in is `expired`. Stand-in
 // `claude` and `codex` binaries run as real child processes, so the stop is a real one.
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { acpControl, claudeControl, type RunResult } from "@sessionpipe/core";
@@ -23,6 +14,7 @@ import { type Carried, ControlDaemon, type DaemonDeps, type SdkHost } from "../s
 import { ask } from "../src/control/local.js";
 import { CANCEL, type CancelView, routeCancel } from "../src/control/route.js";
 import type { ControlConfig, PairedReceiver } from "../src/control/store.js";
+import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver, type Queued } from "./helpers/receiver.js";
 
 const { CANCELLED_NOTE } = acpControl;
@@ -64,13 +56,7 @@ function transcript(sid: string): void {
 }
 
 /** Every run of a stand-in harness, in the order they began. */
-const runs = (): { bin: string; argv: string[]; pid: number }[] =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as { bin: string; argv: string[]; pid: number })
-    : [];
+const runs = () => jsonLines<{ bin: string; argv: string[]; pid: number }>(calls);
 
 const alive = (pid: number): boolean => {
   try {

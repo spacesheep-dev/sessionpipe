@@ -9,7 +9,7 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountId, openPool, type Pool, type PoolDeps, PoolError, vendorOrigins } from "../src/pool/index.js";
 import { poolFile, poolSecretsFile, poolStateFile, readPool, readPoolState } from "../src/pool/store.js";
 import type { PoolLimits } from "../src/pool/types.js";
@@ -421,6 +421,7 @@ describe("managing accounts", () => {
     ]);
     const before = adapter.calls.usage;
     expect(p2.enable(one.id).enabled).toBe(true);
+    await vi.waitFor(() => expect(adapter.calls.usage).toBe(before + 1), 5000);
     await new Promise((r) => setTimeout(r, 5));
     expect(adapter.calls.usage).toBe(before + 1);
     expect(p2.order([three.id, "Work", "one@x.y"]).map((a) => a.id)).toEqual([three.id, two.id, one.id]);
@@ -822,6 +823,7 @@ describe("the listener", () => {
     await pool.setOn(true);
     expect(readPool(env).port).toBe((await pool.start()).port);
     now = T0 + 60_000;
+    await vi.waitFor(() => expect(adapter.calls.usage).toBeGreaterThan(n), 5000);
     await new Promise((r) => setTimeout(r, 60));
     expect(adapter.calls.usage).toBeGreaterThan(n);
   });
@@ -841,10 +843,12 @@ describe("the listener", () => {
     const p2 = open({ pollMs: 25 });
     await p2.setOn(true);
     await p2.start();
+    await vi.waitFor(() => expect(adapter.calls.usage).toBe(n + 1), 5000);
     await new Promise((r) => setTimeout(r, 40));
     expect(adapter.calls.usage).toBe(n + 1);
     expect(readPoolState(env).pins).toEqual({ s1: { account: one.id, used: T0 - 29 * 60_000 } });
     now = T0 + 2 * 60_000;
+    await vi.waitFor(() => expect(adapter.calls.usage).toBe(n + 2), 5000);
     await new Promise((r) => setTimeout(r, 40));
     expect(adapter.calls.usage).toBe(n + 2);
     expect(readPoolState(env).pins).toEqual({});

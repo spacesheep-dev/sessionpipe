@@ -23,6 +23,7 @@ import { askMain } from "../src/ask.js";
 import { ControlDaemon } from "../src/control/daemon.js";
 import { installService, uninstallService } from "../src/control/pair.js";
 import { readControl } from "../src/control/store.js";
+import { jsonLines } from "./helpers/lines.js";
 
 vi.mock("../src/control/pair.js", async (original) => ({
   ...(await original<typeof import("../src/control/pair.js")>()),
@@ -67,13 +68,7 @@ setTimeout(() => {
   chmodSync(fakeCodex, 0o755);
 }
 
-const runs = () =>
-  existsSync(calls)
-    ? readFileSync(calls, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l) as { cwd: string; asked_by: string | null; chain: string | null })
-    : [];
+const runs = () => jsonLines<{ cwd: string; asked_by: string | null; chain: string | null }>(calls);
 
 async function startDaemon(): Promise<ControlDaemon> {
   const daemon = new ControlDaemon(
