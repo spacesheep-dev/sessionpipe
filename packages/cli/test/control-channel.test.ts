@@ -145,8 +145,9 @@ describe("runChannel", () => {
     h.say({ method: "notifications/initialized" });
     h.say("not json");
     h.say({ id: 9, method: "ping" });
-    await settle(60);
-    expect(h.calls).toHaveLength(4);
+    // Three parks with a pause between them: a fixed wait was 60 ms, which a Windows runner
+    // with six workers on four CPUs no longer meets; wait for the fourth call instead.
+    await vi.waitFor(() => expect(h.calls).toHaveLength(4), { timeout: 5000, interval: 10 });
     expect(h.out).toEqual([{ jsonrpc: "2.0", id: 9, result: {} }]);
     h.input.end();
     await h.done;
