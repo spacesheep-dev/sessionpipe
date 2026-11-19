@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The HTTP sink (spec/HTTP.md §2): POST {events} with the protocol header, a bearer
-// token and optional Standard Webhooks signature; errors map to what the sender
+// The HTTP sink (spec/HTTP.md §2): POST {events} with the protocol header and a bearer
+// token, a Standard Webhooks signature, or both; errors map to what the sender
 // does next. The cursor moves only on 202. Retry/backoff is the worker's cadence
 // (each hook run drains the backlog); this class reports, it does not sleep.
 import { createHash, createHmac } from "node:crypto";

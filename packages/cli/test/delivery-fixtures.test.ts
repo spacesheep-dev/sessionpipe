@@ -5,8 +5,9 @@
 // with that status. The receiver here is a fake; a real one is checked by the
 // conformance runner. The fixture's `read` step is the receiver's own; it is made
 // directly, so the forget scenario stays whole.
+import { createHmac } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,7 @@ import { flush } from "../src/run.js";
 
 const DIR = path.resolve(__dirname, "../../../conformance/delivery");
 const TOKEN = "sink_token_for_fixtures";
+const SECRET = `whsec_${Buffer.from("secret_for_fixtures").toString("base64")}`;
 const MAX_TIER = 2;
 const MAX_EVENTS = 50;
 const MAX_BYTES = 262_144;
@@ -35,9 +37,20 @@ interface Fixture {
   steps: Step[];
 }
 
+/** Whether the request carries a Standard Webhooks signature made with `secret` within
+ *  5 minutes of now (HTTP.md §2 `webhook-signature`). */
+function signed(h: IncomingHttpHeaders, raw: string, secret: string): boolean {
+  const [id, ts, sigs] = [h["webhook-id"], h["webhook-timestamp"], h["webhook-signature"]];
+  if (typeof sigs !== "string" || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  const key = Buffer.from(secret.slice(6), "base64");
+  const want = `v1,${createHmac("sha256", key).update(`${id}.${ts}.${raw}`).digest("base64")}`;
+  return sigs.split(" ").includes(want);
+}
+
 /** A receiver that keeps HTTP.md §2 and §5: dedup on (harness, session, seq), the
- *  batch bounds, the tier cap, the protocol header, the bearer token, forget. */
-async function fakeReceiver(): Promise<{ url: string; close: () => Promise<void> }> {
+ *  batch bounds, the tier cap, the protocol header, the bearer token, forget. Given a
+ *  secret it verifies signatures, and takes a signed request with no bearer. */
+async function fakeReceiver(secret?: string): Promise<{ url: string; close: () => Promise<void> }> {
   const store = new Map<string, Map<number, Event>>();
   const server: Server = createServer((req, res) => {
     const answer = (status: number, body: unknown) =>
@@ -54,7 +67,9 @@ async function fakeReceiver(): Promise<{ url: string; close: () => Promise<void>
       raw += d.toString("utf8");
     });
     req.on("end", () => {
-      if (req.headers.authorization !== `Bearer ${TOKEN}`) return answer(401, { reason: "unauthorized" });
+      const bearer = req.headers.authorization;
+      const signedOnly = bearer === undefined && !!secret && signed(req.headers, raw, secret);
+      if (bearer !== `Bearer ${TOKEN}` && !signedOnly) return answer(401, { reason: "unauthorized" });
       if (req.headers["sessionpipe-protocol"] !== "1")
         return answer(400, { reason: "unsupported_protocol", supported: [1] });
       let events: Event[];
@@ -158,18 +173,22 @@ const SENDER: Record<number, (res: DeliveryResult, n: number, body?: Record<stri
   413: (res) => expect(res).toMatchObject({ ok: false, acknowledged: 0, action: "split" }),
 };
 
+/** The sink's credentials for a fixture's `auth`: a wrong bearer, the signature alone, or the bearer. */
+const credentials = (auth?: string): { token?: string; secret?: string } =>
+  auth === "wrong" ? { token: "wrong-token" } : auth === "signed" ? { secret: SECRET } : { token: TOKEN };
+
 const fixtures = readdirSync(DIR)
-  .filter((n) => /^0[1-8]-.*\.json$/.test(n))
+  .filter((n) => /^(0[1-8]|34)-.*\.json$/.test(n))
   .map((n) => JSON.parse(readFileSync(path.join(DIR, n), "utf8")) as Fixture);
 
 let rx: { url: string; close: () => Promise<void> };
 beforeAll(async () => {
-  rx = await fakeReceiver();
+  rx = await fakeReceiver(SECRET);
 });
 afterAll(() => rx.close());
 
 describe("conformance/delivery through the HTTP sink", () => {
-  it("covers the eight sender scenarios of HTTP.md §7", () => {
+  it("covers the nine sender scenarios of HTTP.md §7", () => {
     expect(fixtures.map((f) => f.name)).toEqual([
       "accept",
       "dedup",
@@ -179,9 +198,12 @@ describe("conformance/delivery through the HTTP sink", () => {
       "auth",
       "unknown-type",
       "forget",
+      "auth-signed",
     ]);
   });
 
+  // The receiver here verifies signatures with the sink's secret, so `skip_when: "no secret"`
+  // never applies.
   it.each(fixtures)("$name ($spec)", async (fx) => {
     const skip = /^max_tier == (\d)$/.exec(fx.skip_when ?? "");
     if (skip && Number(skip[1]) === MAX_TIER) return;
@@ -198,13 +220,32 @@ describe("conformance/delivery through the HTTP sink", () => {
       // `headers` cannot be driven through the sink: it pins `sessionpipe-protocol: 1`.
       // The fixture's events carry the foreign protocol too, and that is what refuses.
       const events = (resolve(send.events, run) as Record<string, unknown>[]).map(fill);
-      const token = send.auth === "wrong" ? "wrong-token" : TOKEN;
-      const sink = new HttpSink({ name: fx.name, url: rx.url, tier: 3, token }, 3);
+      const sink = new HttpSink({ name: fx.name, url: rx.url, tier: 3, ...credentials(send.auth) }, 3);
       const res = await sink.send(events);
       expect(res.status).toBe(step.expect.status);
       const check = SENDER[step.expect.status];
       expect(check, `no sender rule for ${step.expect.status}`).toBeDefined();
       check?.(res, events.length, resolve(step.expect.body, run) as Record<string, unknown> | undefined);
+    }
+  });
+
+  it("auth-signed, at a receiver that knows only tokens or with another secret: 401, and the sink pauses", async () => {
+    const plain = await fakeReceiver();
+    try {
+      const fx = fixtures.find((f) => f.name === "auth-signed") as Fixture;
+      const send = fx.steps[0]?.send as NonNullable<Step["send"]>;
+      const other = `whsec_${Buffer.from("another_secret").toString("base64")}`;
+      for (const [url, secret] of [
+        [plain.url, SECRET],
+        [rx.url, other],
+      ] as const) {
+        const events = (resolve(send.events, ulid().slice(-8).toLowerCase()) as Record<string, unknown>[]).map(fill);
+        const res = await new HttpSink({ name: fx.name, url, tier: 3, secret }, 3).send(events);
+        expect(res.status).toBe(401);
+        SENDER[401]?.(res, events.length);
+      }
+    } finally {
+      await plain.close();
     }
   });
 
