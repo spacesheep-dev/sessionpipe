@@ -76,6 +76,22 @@ describe("installClaudeShaped", () => {
     uninstallClaudeShaped(file, ["Stop"]);
     expect(readFileSync(file, "utf8")).toBe(before);
   });
+  // What uninstall's own words promise (#205): every value that was there is there again,
+  // a foreign hook on our event included. The layout is another matter: this file's lists
+  // sit on one line, and a file is written back one item per line.
+  it("a file with its lists on one line holds every value it held after install and uninstall", () => {
+    const before =
+      '{\n  "permissions": { "allow": ["Read", "Bash(ls)"] },\n' +
+      '  "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "echo bye" }] }] }\n}\n';
+    writeFileSync(file, before);
+    expect(installClaudeShaped(file, "claude-code", ["Stop"], cmd, OPTS).changed).toBe(true);
+    expect(JSON.parse(readFileSync(file, "utf8")).hooks.Stop).toHaveLength(2);
+    uninstallClaudeShaped(file, ["Stop"]);
+    const after = readFileSync(file, "utf8");
+    expect(JSON.parse(after)).toEqual(JSON.parse(before));
+    expect(after.startsWith('{\n  "permissions"')).toBe(true);
+    expect(after.endsWith("}\n")).toBe(true);
+  });
   it("writes the top-level keys a harness demands, once", () => {
     const o = { ...OPTS, top: { version: 1 } };
     expect(installClaudeShaped(file, "cursor", ["stop"], cmd, o)).toEqual({ file, changed: true, created: true });
