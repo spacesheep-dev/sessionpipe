@@ -178,6 +178,98 @@ describe("secrets@1 edges", () => {
       `postgres://admin:${REDACTED}@db.example:5432/app`,
     );
   });
+  it("URL query credentials: only the value goes, from a listed name, 16 characters or more", () => {
+    const v = "AbCdEfGhIjKlMnOp";
+    for (const name of ["k", "key", "sig", "signature", "X-Amz-Signature", "X-Goog-Signature", "KEY"])
+      expect(redactSecrets(`https://example.com/a?${name}=${v}#top`), name).toBe(
+        `https://example.com/a?${name}=${REDACTED}#top`,
+      );
+    expect(redactSecrets(`https://example.com/a?x=1&k=${v}/+=%2F~-._`)).toBe(`https://example.com/a?x=1&k=${REDACTED}`);
+    expect(redactSecrets(`(https://example.com/a?sig=${"a".repeat(600)})`)).toBe(
+      `(https://example.com/a?sig=${REDACTED})`,
+    );
+    same(`https://example.com/a?k=${v.slice(1)}`);
+    same(`https://example.com/a?kid=${v}&monkey=${v}&sk=${v}`);
+    same(`https://example.com/a#k=${v}`);
+    expect(redactSecrets(`?k=${v}&e=1`)).toBe(`?k=${REDACTED}&e=1`);
+    same(`a lone & k=${v}`);
+    // A secret's name in a query is an assignment's: its value goes at any length.
+    for (const name of ["token", "access_token", "api_key", "apikey"])
+      expect(redactSecrets(`https://example.com/a?${name}=short&n=1`), name).toBe(
+        `https://example.com/a?${name}=${REDACTED}&n=1`,
+      );
+  });
+  it("URL query credentials: read last, in what the other rules leave", () => {
+    const v = "c838de6c19464815fe85fa9831196c35";
+    // A value the other rules take whole goes with the link in it, in either form.
+    expect(redactSecrets(`API_KEY=https://example.com/f?k=${v}`)).toBe(`API_KEY=${REDACTED}`);
+    expect(redactSecrets(`{"name":"api_key","value":"https://example.com/f?k=${v}"}`)).toBe(
+      `{"name":"api_key","value":"${REDACTED}"}`,
+    );
+    expect(redactSecrets(`Cookie: next=/f?k=${v}; theme=dark`)).toBe(`Cookie: ${REDACTED}`);
+    // A link the other rules leave keeps everything but its key.
+    expect(redactSecrets(`the token was https://example.com/f?k=${v}`)).toBe(
+      `the token was https://example.com/f?k=${REDACTED}`,
+    );
+    expect(redactSecrets(`{"cookies":{"next":"https://example.com/f?k=${v}"}}`)).toBe(
+      `{"cookies":{"next":"https://example.com/f?k=${REDACTED}"}}`,
+    );
+  });
+  it("URL query credentials: a k or key value that reads as words stays, anything else goes", () => {
+    const words = [
+      "wireless+bluetooth+headphones",
+      "open-source-dashboard-libraries",
+      "value_of_the_long_param_name",
+      "Wireless%20Bluetooth%20Headphones",
+      "top-10-dashboards-2026",
+      "internationalization",
+      "release.notes.for.version.2026",
+      "a".repeat(600),
+    ];
+    for (const w of words) {
+      same(`https://example.com/s?k=${w}`);
+      same(`https://example.com/s?x=1&KEY=${w}#top`);
+      // The other names keep the plain rule: a word value of 16 or more goes.
+      expect(redactSecrets(`https://example.com/s?sig=${w}`), w).toBe(`https://example.com/s?sig=${REDACTED}`);
+    }
+    // The punctuation at a value's end is taken off before it is read: a sentence's full
+    // stop leaves words as words, and a key with one still goes, with it.
+    same("see https://example.com/s?key=open-source-dashboard-libraries.");
+    same("https://example.com/s?k=wireless+bluetooth+headphones...");
+    expect(redactSecrets("see https://example.com/s?k=c838de6c19464815fe85fa9831196c35.")).toBe(
+      `see https://example.com/s?k=${REDACTED}`,
+    );
+    expect(redactSecrets(`https://example.com/s?k=${".".repeat(20)}`)).toBe(`https://example.com/s?k=${REDACTED}`);
+    const keys = [
+      "c838de6c19464815fe85fa9831196c35", // hex: letters and digits in one piece
+      "KO2Kk4KVUuuyKfN0AbCdEf", // base64url: mixed case in one piece
+      "550e8400-e29b-41d4-a716-446655440000", // a UUID
+      "1795139368424000000", // a number of more than four digits
+      "AbCdEfGhIjKlMnOp",
+      "iphone15-pro-max-case", // unclear: redacted
+      "wireless+bluetooth+headphoneS", // words until the last character
+      "wireless++bluetooth+headphones", // an empty piece
+      "open-source-dashboard-libraries-", // an empty last piece
+      "%20wireless%20bluetooth", // an empty first piece
+      "wireless%2Bbluetooth%2Bheadphones", // %2B is no separator
+      "top-10000-dashboards", // five digits
+      "WIRELESS-BLUETOOTH", // capitals only
+      "wireless/bluetooth/headphones", // `/` is no separator
+    ];
+    for (const v of keys) {
+      expect(redactSecrets(`https://example.com/s?k=${v}`), v).toBe(`https://example.com/s?k=${REDACTED}`);
+      expect(redactSecrets(`https://example.com/s?e=1&amp;Key=${v}&n=2`), v).toBe(
+        `https://example.com/s?e=1&amp;Key=${REDACTED}&n=2`,
+      );
+    }
+    expect(redactSecrets("https://example.com/f.png?e=1795139368424&k=c838de6c19464815fe85fa9831196c35")).toBe(
+      `https://example.com/f.png?e=1795139368424&k=${REDACTED}`,
+    );
+    for (const w of [...words, ...keys]) {
+      const once = redactSecrets(`https://example.com/s?k=${w}&key=${w}`);
+      expect(redactSecrets(once), w).toBe(once);
+    }
+  });
   it("isSecretName", () => {
     for (const n of ["STRIPE_KEY", "DB_PASSWORD", "apiKey", "client-secret", "creds", "AWS_SECRET_ACCESS_KEY"])
       expect(isSecretName(n), n).toBe(true);
