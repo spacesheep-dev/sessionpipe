@@ -54,14 +54,20 @@ for (const c of cases) {
   const times = [];
   for (let i = 0; i < runs; i++) {
     const t0 = process.hrtime.bigint();
+    // A hook that never ends is the worst a harness can meet, and once held a CI leg for
+    // half an hour with nothing to read: a run gets thirty seconds, and says it ran out.
     const r = spawnSync(process.execPath, [hook, "claude-code", "PostToolUse"], {
       input: c.input,
       env: c.env,
       encoding: "utf8",
+      timeout: 30_000,
+      killSignal: "SIGKILL",
     });
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    if (r.status !== 0) {
-      console.error(`hook exited ${r.status}: ${r.stderr}`);
+    if (r.error || r.status !== 0) {
+      console.error(
+        `hook (${c.name}), run ${i + 1} of ${runs}: ${r.error ? `${r.error.code ?? r.error.message} after ${ms.toFixed(0)} ms` : `exited ${r.status}`}: ${r.stderr ?? ""}`,
+      );
       process.exit(1);
     }
     times.push(ms);
