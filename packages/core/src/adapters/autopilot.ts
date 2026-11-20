@@ -21,7 +21,7 @@ import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readClaude } from "../readers/transcripts.js";
-import { formatJson, OURS, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
+import { editJson, OURS, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
 import type {
   Adapter,
   HookCommand,
@@ -130,7 +130,7 @@ export const autopilot: Adapter = {
     if (!changed) return [{ file, changed: false }];
     settings.hooks = hooks;
     return [
-      writeBack(file, formatJson(settings, f), f.existed) ?? {
+      writeBack(file, editJson(settings, f), f.existed) ?? {
         file,
         changed: true,
         created: !f.existed,
@@ -159,8 +159,8 @@ export const autopilot: Adapter = {
     if (!changed) return [{ file, changed: false }];
     if (!Object.keys(hooks).length) delete settings.hooks;
     if (opts.created?.includes(file) && !Object.keys(settings).length)
-      return [removeEmptied(file, formatJson(settings, f))];
-    return [writeBack(file, formatJson(settings, f)) ?? { file, changed: true }];
+      return [removeEmptied(file, editJson(settings, f))];
+    return [writeBack(file, editJson(settings, f)) ?? { file, changed: true }];
   },
 
   installed(cmd, env = process.env, opts: InstallOptions = {}) {

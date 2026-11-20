@@ -7,14 +7,18 @@
 //
 // Two rules from issue #8: a file that is not plain JSON (a comment, a trailing
 // comma, a write in progress) is never written back — the harness is skipped and
-// the report says why; and a file is written back in its own shape (indent, line
-// ending, final newline, a byte-order mark). That makes a file laid out the way
-// JSON.stringify lays it out byte-identical after uninstall; one with objects or arrays
-// on a single line keeps its values and loses that layout (#205). A file that did not
-// exist before install is reported `created`, and uninstall deletes it once it is empty again.
+// the report says why; and a file is written back in its own shape. Only our entries
+// go into its text and come out again (json-text.ts, #205), so after uninstall every
+// other byte is as it was, one exception aside: an empty `hooks` object or event list
+// that our entries went into goes with them, as uninstall cannot tell it from one
+// install made. A file that did not exist before install is reported `created`, and
+// uninstall deletes it once it is empty again.
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { editJson } from "./json-text.js";
 import type { HookCommand, InstallReport } from "./types.js";
+
+export { editJson, formatJson } from "./json-text.js";
 
 export interface ClaudeShapedOptions {
   /** Which events take a `matcher` (tool and permission events). */
@@ -92,15 +96,6 @@ export function readJsonFile(file: string): JsonFile {
     finalNewline: /\r?\n$/.test(raw),
     bom,
   };
-}
-
-/** Serialise in the file's own shape. */
-export function formatJson(
-  value: unknown,
-  f: { indent: string; eol: string; finalNewline: boolean; bom?: boolean },
-): string {
-  const text = JSON.stringify(value, null, f.indent).replace(/\n/g, f.eol);
-  return (f.bom ? "\uFEFF" : "") + (f.finalNewline ? text + f.eol : text);
 }
 
 /** Back-compat helper for callers that only read. */
@@ -220,7 +215,7 @@ export function installClaudeShaped(
       }
   if (changed) {
     settings.hooks = hooks;
-    const bad = writeBack(file, formatJson(settings, f), f.existed);
+    const bad = writeBack(file, editJson(settings, f), f.existed);
     if (bad) return bad;
   }
   return { file, changed, created: !f.existed && changed };
@@ -249,8 +244,8 @@ export function uninstallClaudeShaped(
   }
   if (!changed) return { file, changed: false };
   if (!Object.keys(hooks).length) delete settings.hooks;
-  if (opts.created && !Object.keys(settings).length) return removeEmptied(file, formatJson(settings, f));
-  return writeBack(file, formatJson(settings, f)) ?? { file, changed: true };
+  if (opts.created && !Object.keys(settings).length) return removeEmptied(file, editJson(settings, f));
+  return writeBack(file, editJson(settings, f)) ?? { file, changed: true };
 }
 
 export function installedClaudeShaped(

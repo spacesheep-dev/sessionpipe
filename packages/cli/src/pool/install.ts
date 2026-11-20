@@ -5,9 +5,9 @@
 // (so it keeps the first-party context window behind a custom base URL). Only `pool on`
 // writes it and `pool off` removes it (DESIGN decision 3). The rules are
 // claude-shaped.ts's: a file that isn't plain JSON is skipped and the report says why;
-// a file is written back in its own indent, line ending and final newline; off removes
-// exactly our keys and an `env` object that is empty without them, and deletes a file
-// we created once it is empty.
+// only our keys go into the file's text and come out of it, with core's writer, so every
+// other byte stays as it was; off removes exactly our keys and an `env` object that is
+// empty without them, and deletes a file we created once it is empty.
 //
 // "Ours" means our port or our token, never any loopback address: claude-code-router,
 // LiteLLM and bb's pooler all live on 127.0.0.1 too, and a value we did not write is
@@ -17,10 +17,10 @@
 // followed to its target and the report names where the token went, and a config dir
 // anyone else can write to is skipped.
 //
-// JSON.stringify has one layout, so a file with an inline array would come back from
-// `off` reformatted. `keep` names a directory where the bytes of a file `on` changes are
-// kept (0600, under the state dir); `off` writes them back when the file still means the
-// same thing without our keys, so the person gets their file as it was.
+// `keep` names a directory where the bytes of a file `on` changes are kept (0600, under
+// the state dir); `off` writes them back when the file still means the same thing without
+// our keys. It came before the writer kept a file's layout, and stays for the one layout
+// an edit cannot give back: a file that was `{ }`, spaces inside, which `on` filled.
 
 import { createHash } from "node:crypto";
 import {
@@ -35,7 +35,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type { InstallReport } from "@sessionpipe/core";
+import { editJson, type InstallReport } from "@sessionpipe/core";
 
 export const POOL_ENV_KEYS = [
   "ANTHROPIC_BASE_URL",
@@ -110,11 +110,6 @@ function readJsonFile(file: string): JsonFile {
     shape: { indent: m?.[1] ?? "  ", eol: raw.includes("\r\n") ? "\r\n" : "\n", finalNewline: /\r?\n$/.test(raw) },
     raw,
   };
-}
-
-function formatJson(value: unknown, f: Shape): string {
-  const text = JSON.stringify(value, null, f.indent).replace(/\n/g, f.eol);
-  return f.finalNewline ? text + f.eol : text;
 }
 
 const settingsIn = (dir: string) => path.join(dir, "settings.json");
@@ -195,7 +190,7 @@ export function installPoolEnv(dirs: readonly string[], o: Ours): InstallReport[
       writeFileSync(kept(o.keep, file), f.raw, { mode: 0o600 });
     }
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, formatJson(settings, f.shape));
+    writeFileSync(file, editJson(settings, { ...f.shape, raw: f.raw }));
     // Claude Code's own file is 0644; with our bearer in it, it is ours to tighten.
     try {
       chmodSync(file, 0o600);
@@ -223,9 +218,9 @@ export function uninstallPoolEnv(dirs: readonly string[], o: Ours & { created?: 
       return { file, changed: true, note: "removed (sessionpipe created it)" };
     }
     // The original bytes, when the file still says the same thing without our keys;
-    // otherwise the person edited it since, and their edits win over their layout.
+    // otherwise the person edited it since, and the file as they left it, less our keys, stays.
     const original = o.keep ? kept(o.keep, file) : null;
-    let text = formatJson(settings, f.shape);
+    let text = editJson(settings, { ...f.shape, raw: f.raw });
     if (original && existsSync(original)) {
       const raw = readFileSync(original, "utf8");
       try {

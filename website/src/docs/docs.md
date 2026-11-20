@@ -28,10 +28,10 @@ outbox. Nothing is sent until a sink exists. `--<harness>` hooks one even if it 
 
 {{usage uninstall}}
 
-Removes the hook entries sessionpipe wrote and nothing else: every other value in a config
-file stays. A JSON file is written back with its own indent and line endings but one item
-per line, so a list that sat on one line may come back spread over several. The outbox
-stays under the state folder and is pruned after 30 days.
+Removes the hook entries sessionpipe wrote and nothing else: every other byte of a config
+file stays as it was, its layout included. One thing goes with them: an empty `hooks`
+object or event list that sessionpipe's entries went into, which uninstall cannot tell
+from one install made. The outbox stays under the state folder and is pruned after 30 days.
 
 ### Destinations
 

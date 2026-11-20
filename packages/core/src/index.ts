@@ -3,6 +3,7 @@
 export const PROTOCOL_VERSION = 1 as const;
 export * as claudePool from "./adapters/claude-code-pool.js";
 export * from "./adapters/index.js";
+export { editJson } from "./adapters/json-text.js";
 export {
   assertConfigWritable,
   type Config,

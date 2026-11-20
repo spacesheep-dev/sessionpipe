@@ -22,7 +22,7 @@ import { isInjected, readClaude } from "../readers/transcripts.js";
 import type { DataOf, HarnessAccount } from "../types.js";
 import { isAutopilotPayload } from "./autopilot.js";
 import {
-  formatJson,
+  editJson,
   installClaudeShaped,
   installedClaudeShaped,
   OURS,
@@ -427,7 +427,7 @@ function statusLine(file: string, want: boolean, cmd?: HookCommand): InstallRepo
   if (want) f.value.statusLine = { type: "command", command, refreshInterval: LINE_REFRESH_S };
   else delete f.value.statusLine;
   return (
-    writeBack(file, formatJson(f.value, f), f.existed) ?? {
+    writeBack(file, editJson(f.value, f), f.existed) ?? {
       file,
       changed: true,
       note: want ? "status line written (account limits)" : "status line removed",
