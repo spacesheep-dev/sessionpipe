@@ -38,12 +38,19 @@ interface Kid {
   span: Span;
 }
 
-const STRING = /"[^"\\]*(?:\\.[^"\\]*)*"/y;
 const LITERAL = /[^\s,:\]}]+/y;
-const past = (re: RegExp, t: string, i: number): number => {
-  re.lastIndex = i;
-  re.test(t);
-  return re.lastIndex;
+/** The index past the number, `true`, `false` or `null` that starts at `i`. */
+const pastLiteral = (t: string, i: number): number => {
+  LITERAL.lastIndex = i;
+  LITERAL.test(t);
+  return LITERAL.lastIndex;
+};
+/** The index past the string that opens at `i`: a backslash takes the next character with
+ *  it. Read a character at a time, and it ends because JSON.parse found the string whole. */
+const pastString = (t: string, i: number): number => {
+  let j = i + 1;
+  while (t[j] !== '"') j += t[j] === "\\" ? 2 : 1;
+  return j + 1;
 };
 
 /** Every value's span in a text, in one pass over it. The text must be one JSON.parse has
@@ -61,7 +68,7 @@ export function scan(t: string): Span {
     else if (c === "}" || c === "]") open.pop()!.end = ++i;
     else if (parent?.obj && key === undefined) {
       at = i;
-      i = keyEnd = past(STRING, t, i);
+      i = keyEnd = pastString(t, i);
       key = JSON.parse(t.slice(at, i)) as string;
     } else {
       const span: Span = { start: i, end: i, obj: c === "{", kids: c === "{" || c === "[" ? [] : null };
@@ -72,7 +79,7 @@ export function scan(t: string): Span {
       if (span.kids) {
         open.push(span);
         i++;
-      } else i = span.end = past(c === '"' ? STRING : LITERAL, t, i);
+      } else i = span.end = c === '"' ? pastString(t, i) : pastLiteral(t, i);
     }
   }
   return root!;

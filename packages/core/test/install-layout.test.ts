@@ -44,6 +44,8 @@ const envIn = (h: string): NodeJS.ProcessEnv => ({
   CODEX_HOME: path.join(h, ".codex"),
   GEMINI_CLI_HOME: path.join(h, ".gemini"),
   XDG_CONFIG_HOME: path.join(h, ".config"),
+  // Devin's config is under %APPDATA% on Windows: the same folder there.
+  APPDATA: path.join(h, ".config"),
   GROK_HOME: path.join(h, ".grok"),
 });
 beforeEach(() => {
