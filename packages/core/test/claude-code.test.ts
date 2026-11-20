@@ -179,9 +179,6 @@ describe("claude-code fromHook", () => {
     };
     expect(output(picture)).toEqual(said);
     expect(output(picture, "PostToolUseFailure")).toEqual(said);
-    // The same object when the hook took the bytes out of a payload over 1 MiB first.
-    const { base64: _, ...rest } = picture.file;
-    expect(output({ type: "image", file: { ...rest, omitted_bytes: b64.length } })).toEqual(said);
     // Only what has the shape it should: no media type that is not one, no size that is not a number.
     expect(
       output({

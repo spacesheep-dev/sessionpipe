@@ -37,6 +37,34 @@ export function capTail(v: string, max: number): string {
   return v.length > max ? `…${v.slice(v.length - max + 1)}` : v;
 }
 
+/** The caps on an event's text, the same at every tier, in place. */
+function capText(type: string, data: Record<string, unknown>): void {
+  if (typeof data.user === "string") data.user = cap(data.user, MAX_SIDE);
+  // A turn still running is read for where it is now: its reply keeps the end.
+  if (typeof data.assistant === "string")
+    data.assistant = type === "turn.progress" ? capTail(data.assistant, MAX_SIDE) : cap(data.assistant, MAX_SIDE);
+  if (data.input !== undefined) data.input = cap(data.input, MAX_IO);
+  if (data.output !== undefined) data.output = cap(data.output, MAX_IO);
+  if (typeof data.message === "string") data.message = cap(data.message, 200);
+  // What an ask asked, and what came back (PROTOCOL.md §4 delegation.*): the daemon cuts
+  // them too, but the cap is this function's promise.
+  if (type === "delegation.started" && typeof data.text === "string") data.text = cap(data.text, 200);
+  if (type === "delegation.ended" && typeof data.reply === "string") data.reply = cap(data.reply, MAX_SIDE);
+}
+
+/** An event's data with its text cut the way filterEvent cuts it for every sink, and every
+ *  other value cut at the input and output cap too: what the outbox keeps of an event too
+ *  long to be one line it can read back (outbox.ts). Its data is already redacted, so a sink
+ *  is sent exactly what the whole event would have given it. A field the filter leaves
+ *  whole (an adapter cuts each of those far shorter) is cut rather than left to stop the
+ *  session's drain. */
+export function fitText(type: string, data: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...data };
+  capText(type, out);
+  for (const k of Object.keys(out)) out[k] = cap(out[k], MAX_IO);
+  return out;
+}
+
 export interface FilterOptions {
   /** The person's home directory, for pii@1's `~` rewrite. */
   home?: string;
@@ -56,20 +84,10 @@ export function filterEvent(event: Event, tier: Tier, pii: boolean, opts: Filter
   const keys = allowedKeys(event.type, tier);
   if (keys === null) data = { ...event.data };
   else for (const k of keys) if (event.data[k] !== undefined) data[k] = event.data[k];
-  if (typeof data.user === "string") data.user = cap(data.user, MAX_SIDE);
-  // A turn still running is read for where it is now: its reply keeps the end.
-  if (typeof data.assistant === "string")
-    data.assistant = event.type === "turn.progress" ? capTail(data.assistant, MAX_SIDE) : cap(data.assistant, MAX_SIDE);
   // A structured input or output is redacted while it still has its keys: over the cap it
   // becomes text, where a key that names a secret no longer stands above its value.
   if (tier > 0) for (const k of ["input", "output"]) if (typeof data[k] === "object") data[k] = redactDeep(data[k]);
-  if (data.input !== undefined) data.input = cap(data.input, MAX_IO);
-  if (data.output !== undefined) data.output = cap(data.output, MAX_IO);
-  if (typeof data.message === "string") data.message = cap(data.message, 200);
-  // What an ask asked, and what came back (PROTOCOL.md §4 delegation.*): the daemon cuts
-  // them too, but the cap is this function's promise.
-  if (event.type === "delegation.started" && typeof data.text === "string") data.text = cap(data.text, 200);
-  if (event.type === "delegation.ended" && typeof data.reply === "string") data.reply = cap(data.reply, MAX_SIDE);
+  capText(event.type, data);
 
   const rulesets: string[] = [];
   let out: Event = {

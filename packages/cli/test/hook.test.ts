@@ -17,7 +17,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AG_STALE_PRETOOL, claudeCode } from "@sessionpipe/core";
+import { AG_STALE_PRETOOL, claudeCode, type Event, filterEvent, Outbox } from "@sessionpipe/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn(), unref: vi.fn() }));
@@ -30,6 +30,7 @@ vi.mock("node:child_process", async (orig) => ({
 }));
 
 import { hookMain } from "../src/hook.js";
+import { claimJob, runJob } from "../src/run.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let state: string;
@@ -46,6 +47,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   rmSync(state, { recursive: true, force: true });
 });
 
@@ -153,16 +155,72 @@ describe("the hook writes one job and spawns the worker", () => {
     expect(timing()[0]).not.toHaveProperty("control_wait_ms");
   });
 
-  it("stdin is read once and capped at 1 MiB", async () => {
-    const big = Buffer.alloc(2 * 1024 * 1024, "x");
-    await run(["claude-code", "UserPromptSubmit"], big);
-    expect(jobs()[0]?.stdin).toHaveLength(1024 * 1024);
-  });
+  // Issue #200: a payload over 1 MiB used to be cut there, mid-JSON, and its event was
+  // dropped as one the adapter did not claim. It is handed on whole now; the outbox cuts
+  // its text the way the filter cuts it for every sink (core outbox.ts).
+  const MiB = 1024 * 1024;
+  /** One sink, at `tier`, for the hook and the worker both. */
+  const sinkAt = (tier: number) => {
+    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier }] }));
+    vi.stubEnv("SESSIONPIPE_CONFIG", config);
+  };
+  /** The hook's one job, claimed and run as its worker would, its events not drained. */
+  async function worked() {
+    const file = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
+    const claimed = claimJob(file) as NonNullable<ReturnType<typeof claimJob>>;
+    const r = await runJob(claimed.job, { state, claimed: claimed.file, drain: false });
+    return { ...r, stored: new Outbox(state).read({ harness: "claude-code", session: SID }, 0).events };
+  }
+  const log = () => readFileSync(path.join(state, "log"), "utf8");
 
-  it("a Read of a big picture is not cut: its bytes are left out, the rest of the payload goes whole", async () => {
-    // A 2560 px picture is 1-3 MB of base64; the first 1 MiB of that is JSON no adapter reads.
-    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] })); // every tool event a job
-    const b64 = "A".repeat(3 * 1024 * 1024);
+  it("stdin is read once; up to 1 MiB it rides in the job's JSON, past that after it, as it came", async () => {
+    const small = claude({ prompt: "x".repeat(MiB - 100) });
+    await run(["claude-code", "UserPromptSubmit"], small);
+    expect(jobs()[0]?.stdin).toBe(small);
+    rmSync(path.join(state, "jobs"), { recursive: true });
+    const big = claude({ prompt: 'é\n"'.repeat(MiB) });
+    await run(["claude-code", "UserPromptSubmit"], big);
+    const file = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
+    const text = readFileSync(file, "utf8");
+    expect(text.slice(text.indexOf("\n") + 1)).toBe(big);
+    expect(JSON.parse(text.slice(0, text.indexOf("\n")))).toMatchObject({ event: "UserPromptSubmit", stdin: "" });
+    expect(claimJob(file)?.job).toMatchObject({ harness: "claude-code", event: "UserPromptSubmit", stdin: big });
+  }, 30_000);
+
+  it("a 2 MiB prompt makes its turn.started and turn.progress, the prompt cut as the filter cuts it", async () => {
+    const prompt = "a pasted log line\n".repeat((2 * MiB) / 18);
+    const env = { CLAUDE_CONFIG_DIR: path.join(state, "claude") };
+    sinkAt(2);
+    await run(
+      ["claude-code", "UserPromptSubmit"],
+      claude({ transcript_path: path.join(state, "t.jsonl"), cwd: state, prompt_id: "p1", prompt }),
+      env,
+    );
+    const r = await worked();
+    expect(r.events.map((e) => e.type)).toEqual(["turn.started", "turn.progress"]);
+    expect(r.events[0]?.data).toMatchObject({ turn_id: "p1", prompt_chars: prompt.length });
+    expect(r.stored).toEqual(r.events);
+    expect(filterEvent(r.stored[1] as Event, 2, false)?.data.user).toBe(prompt.slice(0, 20_000));
+    expect(log()).toContain("claude-code UserPromptSubmit: turn.started,turn.progress");
+  }, 30_000);
+
+  it("a Write of a 2 MiB file makes its tool.ended, and a sink is sent its input cut as before", async () => {
+    const content = 'const s = "a line of the file";\n'.repeat((2 * MiB) / 32);
+    const input = { file_path: path.join(state, "a.ts"), content };
+    sinkAt(3);
+    await run(
+      ["claude-code", "PostToolUse"],
+      claude({ tool_name: "Write", tool_use_id: "toolu_w", tool_input: input, tool_response: { type: "create" } }),
+    );
+    const r = await worked();
+    expect(r.events).toHaveLength(1);
+    expect(r.events[0]).toMatchObject({ type: "tool.ended", data: { tool: "Write", call_id: "toolu_w", ok: true } });
+    const sent = filterEvent(r.stored[0] as Event, 3, false)?.data.input;
+    expect(sent).toBe(`${JSON.stringify(input).slice(0, 64 * 1024)}…`);
+    expect(sent).toEqual(filterEvent(r.events[0] as Event, 3, false)?.data.input);
+  }, 30_000);
+
+  it("a Read of a big picture is handed on whole; the adapter leaves its bytes out as for a small one", async () => {
     const dimensions = { originalWidth: 2560, originalHeight: 1920, displayWidth: 2000, displayHeight: 1500 };
     const payload = (base64: string) =>
       claude({
@@ -173,127 +231,39 @@ describe("the hook writes one job and spawns the worker", () => {
         tool_response: { type: "image", file: { base64, type: "image/jpeg", originalSize: 2_400_000, dimensions } },
         tool_use_id: "toolu_1",
       });
-    await run(["claude-code", "PostToolUse"], payload(b64));
-    const all = jobs();
-    expect(all).toHaveLength(1);
-    const stdin = all[0]?.stdin as string;
-    expect(stdin.length).toBeLessThan(4096);
-    expect(JSON.parse(stdin).tool_response.file).toEqual({
-      type: "image/jpeg",
-      originalSize: 2_400_000,
-      dimensions,
-      omitted_bytes: b64.length,
-    });
-    const ended = claudeCode.fromHook({ argv: ["claude-code", "PostToolUse"], stdin, cwd: "/", env: {} })?.events;
-    expect(ended).toHaveLength(1);
-    expect(ended?.[0]).toMatchObject({ type: "tool.ended", data: { tool: "Read", call_id: "toolu_1", ok: true } });
-    // The same event the adapter makes of the same Read with a small picture, bytes and all.
+    sinkAt(1);
+    await run(["claude-code", "PostToolUse"], payload("A".repeat(3 * MiB)));
+    const r = await worked();
     const small = claudeCode.fromHook({
       argv: ["claude-code", "PostToolUse"],
       stdin: payload("AAAA"),
       cwd: "/",
       env: {},
     });
-    expect(ended?.[0]?.data.output).toEqual(small?.events[0]?.data.output);
-    expect(ended?.[0]?.data.output).toEqual({
-      type: "image",
-      media_type: "image/jpeg",
-      original_size: 2_400_000,
-      dimensions: { original_width: 2560, original_height: 1920, display_width: 2000, display_height: 1500 },
-    });
+    expect(r.events[0]?.data.output).toEqual(small?.events[0]?.data.output);
+    expect(readFileSync(new Outbox(state).file({ harness: "claude-code", session: SID })).length).toBeLessThan(4096);
   }, 30_000);
 
-  it("an image part's data is left out too, in a content list or a list of parts; other parts stay", async () => {
-    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] })); // every tool event a job
-    const b64 = "B".repeat(1024 * 1024);
-    const parts = [
-      { type: "text", text: "a screenshot" },
-      { type: "image", data: b64, mimeType: "image/png" },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: b64 } },
-      { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
-      "a string",
-    ];
-    const kept = [
-      parts[0],
-      { type: "image", mimeType: "image/png", omitted_bytes: b64.length },
-      { type: "image", source: { type: "base64", media_type: "image/png", omitted_bytes: b64.length } },
-      parts[3],
-      "a string",
-    ];
-    await run(["claude-code", "PostToolUse"], claude({ tool_name: "mcp__s__shot", tool_response: { content: parts } }));
-    await run(["claude-code", "PostToolUse"], claude({ tool_name: "mcp__s__shot", tool_response: parts }));
-    const [a, b] = jobs().map((j) => JSON.parse(j.stdin).tool_response);
-    expect(a).toEqual({ content: kept });
-    expect(b).toEqual(kept);
-    // What the adapter makes of these is what it makes of the same parts with their data.
-    const output = (stdin: string) =>
-      claudeCode.fromHook({ argv: ["claude-code", "PostToolUse"], stdin, cwd: "/", env: {} })?.events[0]?.data.output;
-    expect(output(jobs()[0]?.stdin as string)).toEqual(
-      output(claude({ tool_name: "mcp__s__shot", tool_response: { content: parts } })),
+  it("a payload over 1 MiB that is not JSON is dropped with a log line that names its size", async () => {
+    sinkAt(1);
+    await run(["claude-code", "PostToolUse"], `{"session_id":"${SID}", ${"x".repeat(2 * MiB)}`);
+    const r = await worked();
+    expect(r.events).toEqual([]);
+    expect(log()).toContain(
+      `claude-code PostToolUse: the payload (${2 * MiB + 54} bytes) could not be read as JSON; event dropped`,
     );
+    expect(log()).not.toContain("did not claim");
   }, 30_000);
 
-  it("anything else over 1 MiB is cut as before, and only a payload with a picture's marks is parsed", async () => {
-    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] })); // every tool event a job
-    const MiB = 1024 * 1024;
-    const parse = vi.spyOn(JSON, "parse");
-    const parsedBig = () => parse.mock.calls.filter(([t]) => String(t).length > MiB).length;
-    const pic = (n: number) => ({ type: "image", file: { base64: "C".repeat(n), type: "image/png" } });
-    // A 2 MiB Write has no picture to leave out: it is cut without being parsed.
-    await run(
-      ["claude-code", "PostToolUse"],
-      claude({ tool_name: "Write", tool_input: { file_path: "/w/a.txt", content: "x".repeat(2 * MiB) } }),
+  it("past 64 MiB the job carries only the payload's size, and the log names it", async () => {
+    sinkAt(0);
+    const big = Buffer.alloc(64 * MiB + 1, "x");
+    await run(["claude-code", "UserPromptSubmit"], big);
+    expect(jobs()[0]).toMatchObject({ stdin: "", omitted_bytes: 64 * MiB + 1 });
+    expect((await worked()).events).toEqual([]);
+    expect(log()).toContain(
+      `claude-code UserPromptSubmit: the payload (${64 * MiB + 1} bytes) could not be read, too big for the hook to hand on; event dropped`,
     );
-    // Only a tool's result has a picture in it, and only Claude Code's payloads are looked into.
-    await run(["claude-code", "PreToolUse"], claude({ tool_response: pic(2 * MiB) }));
-    await run(["gemini-cli", "AfterTool"], claude({ tool_response: pic(2 * MiB) }));
-    expect(parsedBig()).toBe(0);
-    // These have a picture's marks, so they are parsed, and there is nothing in them to leave out:
-    // JSON that is no payload, a file that is no object beside an empty content list, not JSON at all.
-    await run(["claude-code", "PostToolUse"], JSON.stringify(["image", "y".repeat(2 * MiB)]));
-    await run(
-      ["claude-code", "PostToolUseFailure"],
-      claude({ tool_response: { type: "image", file: "z".repeat(2 * MiB), content: [] } }),
-    );
-    await run(["claude-code", "PostToolUse"], `"base64" ${"w".repeat(2 * MiB)}`);
-    expect(parsedBig()).toBe(3);
-    const cut = jobs().map((j) => j.stdin);
-    expect(cut.map((s) => s.length)).toEqual([MiB, MiB, MiB, MiB, MiB, MiB]);
-    expect(cut[0]?.startsWith(`{"session_id":"${SID}","tool_name":"Write"`)).toBe(true);
-    expect(cut[1]).toContain('"base64":"CCCC');
-    expect(cut[2]).toContain('"base64":"CCCC');
-  }, 30_000);
-
-  it("a PostToolUseFailure's picture is left out the same way", async () => {
-    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] })); // every tool event a job
-    await run(
-      ["claude-code", "PostToolUseFailure"],
-      claude({ tool_response: [{ type: "image", data: "E".repeat(2 * 1024 * 1024) }] }),
-    );
-    expect(JSON.parse(jobs()[0]?.stdin as string).tool_response).toEqual([
-      { type: "image", omitted_bytes: 2 * 1024 * 1024 },
-    ]);
-  }, 30_000);
-
-  it("stdin past 64 MiB is not parsed, so a picture's bytes are not left out of it: it is cut", async () => {
-    writeFileSync(config, JSON.stringify({ sinks: [{ name: "a", url: "stdout", tier: 1 }] })); // every tool event a job
-    const parse = vi.spyOn(JSON, "parse");
-    const base64 = "D".repeat(64 * 1024 * 1024);
-    await run(["claude-code", "PostToolUse"], claude({ tool_response: { type: "image", file: { base64 } } }));
-    expect(parse.mock.calls.filter(([t]) => String(t).length > 1024 * 1024)).toHaveLength(0);
-    const stdin = jobs()[0]?.stdin as string;
-    expect(stdin).toHaveLength(1024 * 1024);
-    expect(stdin).toContain('"base64":"DDDD');
-  }, 30_000);
-
-  it("with no sink that takes tool output, a picture is not parsed: the event is only a heartbeat", async () => {
-    const parse = vi.spyOn(JSON, "parse");
-    const base64 = "F".repeat(2 * 1024 * 1024);
-    await run(["claude-code", "PostToolUse"], claude({ tool_response: { type: "image", file: { base64 } } }));
-    expect(parse.mock.calls.filter(([t]) => String(t).length > 1024 * 1024)).toHaveLength(0);
-    const stdin = jobs()[0]?.stdin as string;
-    expect(stdin).toHaveLength(1024 * 1024);
-    expect(stdin.startsWith(`{"session_id":"${SID}"`)).toBe(true);
   }, 30_000);
 
   it("a stdin that cannot be read is an empty one", async () => {

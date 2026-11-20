@@ -28,7 +28,7 @@ const env = {
   SESSIONPIPE_NO_WORKER: "1",
 };
 // Two cases: a small tool event with no sink (the bulk of what a harness fires), and
-// an 8 MiB Write with no picture in it while a sink takes tool output (cut, never parsed).
+// an 8 MiB Write while a sink takes tool output (handed on as it came, never parsed).
 const small = JSON.stringify({
   session_id: "bench-0000",
   hook_event_name: "PostToolUse",

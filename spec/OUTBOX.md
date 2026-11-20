@@ -20,7 +20,7 @@ Under the state directory (`$SESSIONPIPE_STATE`, else `$XDG_STATE_HOME/sessionpi
 | `outbox/<harness>/<session>.seq` | the next `session.seq`, as decimal text |
 | `cursors/<sink>.json` | one sink's byte offsets into session files: `{"<harness>/<session>": <offset>}` |
 | `locks/<name>.lock` | a lock: `"<pid> <16 hex>"` |
-| `jobs/<id>.json` | a hook's job for the worker (hook and worker only; not read by anything else) |
+| `jobs/<id>.json` | a hook's job for the worker (hook and worker only; not read by anything else); a payload over 1 MiB follows the job's JSON line, after its `\n`, as it came |
 
 `<harness>`, `<session>` and `<sink>` in a file name are the **safe id** of the value:
 every character outside `A-Za-z0-9_.-` replaced by `_`, cut to 160 characters. The
@@ -31,6 +31,13 @@ cursor key uses the raw values, not the safe ids.
 - **Append only.** An event is written as `JSON.stringify(event)` followed by `\n`, in one
   `append` call per batch. A later append MUST NOT rewrite earlier bytes. Two processes
   appending to one file MUST NOT tear a line: the writer appends whole lines in one write.
+- **A line a reader can read.** A line longer than 2 796 202 UTF-16 code units (8 MiB / 3:
+  as UTF-8 it might not fit the largest read, §3) would stop every read of its session at
+  it. Such an event is written with its `data` cut as the filter cuts it for every sink
+  (`user`, `assistant`, `input`, `output`, `message`, a delegation's `text` and `reply`), and
+  every other value of `data` whose JSON is longer than 64 KiB cut to that, as text, with
+  `…`. Its strings are already redacted, so each sink is sent what the whole event would
+  have given it. An event that fits is written as it is.
 - **After a cut line.** When the file's last byte is not `\n`, an earlier append was cut
   short (a full disk, a file-size limit, a killed process). The next append MUST begin
   with `\n`, in the same write, so the cut line ends there and only its event is lost.

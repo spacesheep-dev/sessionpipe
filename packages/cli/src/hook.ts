@@ -24,40 +24,16 @@ const modeOf = (s: Record<string, unknown>): string | undefined => {
   return typeof v === "string" && MODE_SHAPE.test(v) ? v : undefined;
 };
 
-/** What a job keeps of stdin, and the most of it that is parsed for its pictures first. */
-const JOB_STDIN_MAX = 1024 * 1024;
+/** The most of stdin a job takes. A payload is handed on whole, never cut: the first part
+ *  of a JSON payload is no payload at all. The outbox cuts an event's text the way the
+ *  filter would (core outbox.ts), so a big paste or a Write of a big file still makes its
+ *  event; past this bound the job carries only the payload's size, for the log. */
 const STDIN_MAX = 64 * 1024 * 1024;
-
-/** A Claude Code payload over 1 MiB without the pictures' bytes in it: a Read of a
- *  2560 px picture carries 1-3 MB of base64, and the first 1 MiB of that is JSON no
- *  adapter can read. `tool_response.file.base64`, and the data of every image part of
- *  `tool_response.content` (or of the list itself), become `omitted_bytes`, the length
- *  left out; the adapter's toolOutput (core claude-code.ts) makes the same object of a
- *  payload under 1 MiB. Anything that is not JSON comes back as it was. */
-function withoutPictures(buf: Buffer): Buffer {
-  let s: unknown;
-  try {
-    s = JSON.parse(buf.toString("utf8"));
-  } catch {
-    return buf;
-  }
-  const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-  const r = obj(s) ? s.tool_response : undefined;
-  const omit = (o: Record<string, unknown>, key: string): void => {
-    const v = o[key];
-    if (typeof v !== "string") return;
-    delete o[key];
-    o.omitted_bytes = v.length;
-  };
-  const parts = Array.isArray(r) ? r : obj(r) && Array.isArray(r.content) ? r.content : [];
-  for (const p of parts) {
-    if (!obj(p) || p.type !== "image") continue;
-    omit(p, "data");
-    if (obj(p.source)) omit(p.source, "data");
-  }
-  if (obj(r) && obj(r.file)) omit(r.file, "base64");
-  return Buffer.from(JSON.stringify(s), "utf8");
-}
+/** The most of a payload the job's JSON holds. Its every quote and newline is escaped in
+ *  there, which doubles the hook's time for a 20 MiB Write (some 80 ms more); a bigger
+ *  payload follows the job's line as it came, and the worker reads it from there (run.ts
+ *  claimJob). */
+const INLINE_MAX = 1024 * 1024;
 
 /** The two streams the hook touches: stdin once, whole; stdout for an answer. */
 export interface HookIO {
@@ -106,10 +82,18 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
   try {
     if (!harness || !event) throw new Error("usage: hook <harness> <event>");
     let stdin = "";
+    /** A payload over INLINE_MAX, as it came. */
+    let raw: Buffer | undefined;
+    /** The length of a payload too big to hand on, which the worker's log line names. */
+    let omitted: number | undefined;
     if (harness !== "codex" || event !== "notify") {
       try {
         const buf = io.stdin();
-        stdin = (picturesIn(buf) ? withoutPictures(buf) : buf).subarray(0, JOB_STDIN_MAX).toString("utf8");
+        if (buf.length > STDIN_MAX) omitted = buf.length;
+        else {
+          stdin = buf.toString("utf8");
+          if (buf.length > INLINE_MAX) raw = buf;
+        }
       } catch {}
     }
     // Claude Code's status line (install --status-line) runs on every refresh. It shows
@@ -141,6 +125,7 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       event,
       argv: [harness, event, ...rest],
       stdin,
+      ...(omitted !== undefined ? { omitted_bytes: omitted } : {}),
       cwd: process.cwd(),
       env: pick([
         // Where a harness keeps its config and its sessions, so a job swept by a worker
@@ -177,7 +162,11 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       "jobs",
       `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`,
     );
-    writeFileSync(jobFile, JSON.stringify(job), { mode: 0o600 });
+    writeFileSync(
+      jobFile,
+      raw ? Buffer.concat([Buffer.from(`${JSON.stringify({ ...job, stdin: "" })}\n`), raw]) : JSON.stringify(job),
+      { mode: 0o600 },
+    );
     if (!env.SESSIONPIPE_NO_WORKER) {
       const worker = path.join(path.dirname(fileURLToPath(import.meta.url)), "worker.js");
       const p = spawn(process.execPath, [worker, jobFile], { detached: true, stdio: "ignore", windowsHide: true, env });
@@ -313,19 +302,6 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     const out: Record<string, string> = {};
     for (const n of names) if (env[n] !== undefined) out[n] = env[n] as string;
     return out;
-  }
-  /** Whether a payload is worth parsing for its pictures' bytes (withoutPictures): a
-   *  Claude Code tool's result over 1 MiB, whole (64 MiB at most), with a picture's
-   *  marks in it, going to a sink that takes tool output. Anything else keeps the cut. */
-  function picturesIn(buf: Buffer): boolean {
-    return (
-      harness === "claude-code" &&
-      (event === "PostToolUse" || event === "PostToolUseFailure") &&
-      buf.length > JOB_STDIN_MAX &&
-      buf.length <= STDIN_MAX &&
-      (buf.indexOf('"base64"') >= 0 || buf.indexOf('"image"') >= 0) &&
-      anySinkAbove(0)
-    );
   }
   function anySinkAbove(tier: number): boolean {
     try {

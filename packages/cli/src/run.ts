@@ -120,6 +120,9 @@ export interface Job {
   /** How many times the session's lock held this job out (a fresh worker starts for
    *  it each time, up to MAX_TRIES; after that a sweep picks it up). */
   tries?: number;
+  /** The length of a payload too big for the hook to hand on (hook.ts STDIN_MAX); `stdin`
+   *  is then empty. */
+  omitted_bytes?: number;
 }
 
 export const MAX_TRIES = 10;
@@ -145,7 +148,12 @@ export function claimJob(file: string): { job: Job; file: string } | null {
     return null;
   }
   try {
-    return { job: JSON.parse(readFileSync(claimed, "utf8")) as Job, file: claimed };
+    // A big payload follows the job's line as it came (hook.ts INLINE_MAX); JSON.stringify
+    // never writes a newline of its own, so the first one ends the job.
+    const text = readFileSync(claimed, "utf8");
+    const nl = text.indexOf("\n");
+    if (nl < 0) return { job: JSON.parse(text) as Job, file: claimed };
+    return { job: { ...(JSON.parse(text.slice(0, nl)) as Job), stdin: text.slice(nl + 1) }, file: claimed };
   } catch {
     releaseJob(claimed);
     return null;
@@ -406,15 +414,21 @@ export async function runJob(
   // lands, and the log is the only thing on the machine that can say so.
   if (!r || !r.session.id) {
     let keys: string[] = [];
+    /** The size of a payload nothing could read: too big for the hook to hand on, or not JSON. */
+    let unread = job.omitted_bytes;
     try {
       // Some hooks pass JSON in argv instead of stdin. Only the top-level names
       // belong in this default log: values can contain prompts, paths or secrets.
       const payload: unknown = JSON.parse(job.argv.find((a) => a.startsWith("{")) ?? job.stdin);
       if (payload && typeof payload === "object" && !Array.isArray(payload)) keys = Object.keys(payload);
-    } catch {}
+    } catch {
+      if (job.stdin) unread = Buffer.byteLength(job.stdin);
+    }
     log(
       state,
-      `${job.harness} ${job.event}: the ${job.harness} adapter did not claim this payload; event dropped; keys: ${keys.join(", ") || "(none)"}`,
+      unread !== undefined
+        ? `${job.harness} ${job.event}: the payload (${unread} bytes) could not be read${job.omitted_bytes !== undefined ? ", too big for the hook to hand on" : " as JSON"}; event dropped`
+        : `${job.harness} ${job.event}: the ${job.harness} adapter did not claim this payload; event dropped; keys: ${keys.join(", ") || "(none)"}`,
     );
     return { events: [], delivered: {} };
   }
