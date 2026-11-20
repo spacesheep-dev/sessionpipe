@@ -9,11 +9,24 @@
 // (CONTROL.md §6 `start`), and keeps the process for the next message (`api` mode).
 // Which agents, and how each is launched, is the ACP registry's word
 // (github.com/agentclientprotocol/registry, 2026-10-22); only one already installed
-// here is ever run. Shapes measured against codex-acp 2.2.2 on 2026-10-22.
+// here is ever run. Shapes measured against codex-acp 2.2.2 on 2026-10-22. A message's
+// pictures go as `image` content blocks after its text, to an agent whose `initialize`
+// says `promptCapabilities.image: true` (agentclientprotocol.com/protocol/content).
 import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { CANCELLED_NOTE, deniedNote, findBinary, JOB_TIMEOUT_MS, type Mode, shimNote, spawnable } from "./headless.js";
+import { pathToFileURL } from "node:url";
+import { PICTURE_TYPES, type Picture, type PictureLimits, picturesFor } from "../control/pictures.js";
+import {
+  CANCELLED_NOTE,
+  deniedNote,
+  findBinary,
+  JOB_TIMEOUT_MS,
+  type Mode,
+  pictureBytes,
+  shimNote,
+  spawnable,
+} from "./headless.js";
 
 // What a cancelled turn's reply ends with, for the daemon's other way of stopping one.
 export { CANCELLED_NOTE };
@@ -184,10 +197,51 @@ function toolName(call: Json | null, titles: Map<string, string>): string | null
   return t ? t.slice(0, 80) : null;
 }
 
+/** What an ACP agent is given as `image` blocks (spec/ADAPTERS.md, *Agents driven through
+ *  ACP*): the protocol names no type or size, and the agent hands the picture to whatever
+ *  model it runs, so these are what the strictest service behind the registry's agents,
+ *  Claude, takes on every platform: PNG, JPEG, GIF or WebP, at most 3 750 000 bytes (5 MB
+ *  once base64-encoded, its smallest limit, on Amazon Bedrock) and 3000 px a side (safe
+ *  past 20 pictures in a request, which an agent that keeps them in its history reaches);
+ *  and in one message, pictures while their base64 stays within 10 000 000 characters,
+ *  under the lower request limits. Anything else is listed in the text only. */
+export const ACP_PICTURES: PictureLimits = {
+  types: PICTURE_TYPES,
+  maxBytes: 3_750_000,
+  maxSide: 3000,
+  maxBase64: 10_000_000,
+};
+
+/** An ACP `image` content block: the picture's bytes in base64, its type, and its file. */
+export interface AcpImage {
+  type: "image";
+  mimeType: string;
+  data: string;
+  uri: string;
+}
+
+/** The `image` blocks for a message's pictures: those an agent takes (ACP_PICTURES), in
+ *  order, each read again and only if it is still the picture that was saved. */
+export function acpImages(pictures: readonly Picture[]): AcpImage[] {
+  const out: AcpImage[] = [];
+  for (const p of picturesFor(pictures, ACP_PICTURES)) {
+    const b = pictureBytes(p);
+    if (b)
+      out.push({
+        type: "image",
+        mimeType: p.type,
+        data: Buffer.from(b).toString("base64"),
+        uri: pathToFileURL(p.path).href,
+      });
+  }
+  return out;
+}
+
 /** A session the daemon holds (the shape of daemon.ts's SdkSession, plus the agent's own id). */
 export interface AcpHeld {
-  /** Deliver one message; resolves with the agent's reply when the turn ends. */
-  send(text: string): Promise<{ reply: string; error?: string }>;
+  /** Deliver one message; resolves with the agent's reply when the turn ends. Its
+   *  pictures go as `image` blocks too where the agent said it takes them. */
+  send(text: string, pictures?: readonly Picture[]): Promise<{ reply: string; error?: string; native?: number }>;
   interrupt(): Promise<void>;
   close(): void;
   readonly busy: boolean;
@@ -293,11 +347,14 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
 
   // The turn in flight: its reply as it grows, and what it was refused.
   // `message`: the id of the chunk before, null for one that had none, undefined before any.
-  let turn: { text: string; message?: string | null; denied: string[]; count: number } | null = null;
+  // `acted`: it wrote something, called a tool or asked to: a prompt it then refused was
+  // not refused before it did anything.
+  let turn: { text: string; message?: string | null; denied: string[]; count: number; acted?: true } | null = null;
   const titles = new Map<string, string>();
   const onUpdate = (u: Json | null) => {
     if (!u) return;
     const kind = str(u.sessionUpdate);
+    if (kind === "tool_call" && turn) turn.acted = true;
     if (kind === "tool_call" && str(u.toolCallId) && str(u.title)) {
       if (titles.size >= 200) titles.clear();
       titles.set(str(u.toolCallId), str(u.title));
@@ -311,6 +368,7 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
     if (turn.message !== undefined && mid !== turn.message && turn.text.trim())
       turn.text = `${turn.text.trimEnd()}\n\n`;
     turn.message = mid;
+    turn.acted = true;
     turn.text += str(c.text);
     o.onText?.(turn.text);
   };
@@ -320,6 +378,7 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
       return;
     }
     const pick = permissionChoice(params?.options, o.mode);
+    if (turn) turn.acted = true;
     if (!pick?.kind.startsWith("allow")) {
       const name = toolName(obj(params?.toolCall), titles);
       if (turn) {
@@ -416,7 +475,8 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
   const open = o.openTimeoutMs ?? 60_000;
   const meta = o.meta ? { _meta: o.meta } : {};
 
-  function held(session: string): AcpHeld {
+  /** `images`: the agent's `promptCapabilities.image` is true. */
+  function held(session: string, images: boolean): AcpHeld {
     let busy = false;
     let lastUsed = now();
     return {
@@ -431,51 +491,83 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
       get closed() {
         return closed || !!gone;
       },
-      async send(text) {
-        if (closed) return { reply: "", error: `${label} was closed` };
-        busy = true;
-        lastUsed = now();
-        const t = { text: "", denied: [], count: 0 };
-        turn = t;
-        const limit = o.timeoutMs ?? JOB_TIMEOUT_MS;
-        let timedOut = false;
-        const timer = setTimeout(() => {
-          timedOut = true;
-          notify("session/cancel", { sessionId: session });
-          setTimeout(close, 5000).unref();
-        }, limit);
-        timer.unref();
-        try {
-          const res = obj(
-            await request("session/prompt", { sessionId: session, prompt: [{ type: "text", text }] }, limit + 10_000),
-          );
-          const stop = str(res?.stopReason);
-          const words = t.text.trim() || `(${label} finished without a written reply.)`;
-          const refused = deniedNote(t.denied, t.count);
-          if (stop === "end_turn" || stop === "max_tokens") return { reply: words + refused };
-          if (stop === "refusal") return { reply: `${words}\n\n(${label} refused the request.)${refused}` };
-          if (stop === "cancelled")
-            return timedOut
-              ? {
-                  reply: "",
-                  error: `${label} was still working after ${Math.round(limit / 60_000)} minutes, so it was stopped`,
-                }
-              : { reply: `${words}\n\n${CANCELLED_NOTE}${refused}` };
-          return { reply: "", error: `${label} ended the turn with ${stop || "no stop reason"}` };
-        } catch (e) {
-          return { reply: "", error: (e as Error).message };
-        } finally {
-          clearTimeout(timer);
-          turn = null;
-          busy = false;
-          lastUsed = now();
-        }
+      async send(text, pictures = []) {
+        let native = 0;
+        const r = await turnOf(text, pictures, (n) => {
+          native = n;
+        });
+        // How many of its pictures went as image blocks, where it had any.
+        return pictures.length ? { ...r, native } : r;
       },
       async interrupt() {
         notify("session/cancel", { sessionId: session });
       },
       close,
     };
+    /** One turn; `sent` hears how many pictures went with the message that it answered. */
+    async function turnOf(
+      text: string,
+      pictures: readonly Picture[],
+      sent: (n: number) => void,
+    ): Promise<{ reply: string; error?: string }> {
+      if (closed) return { reply: "", error: `${label} was closed` };
+      busy = true;
+      lastUsed = now();
+      // An agent that doesn't say it takes images is sent the text alone, as always.
+      const blocks = images ? acpImages(pictures) : [];
+      sent(blocks.length);
+      const t: NonNullable<typeof turn> = { text: "", denied: [], count: 0 };
+      turn = t;
+      const limit = o.timeoutMs ?? JOB_TIMEOUT_MS;
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        notify("session/cancel", { sessionId: session });
+        setTimeout(close, 5000).unref();
+      }, limit);
+      timer.unref();
+      const prompt = (withPictures: boolean) =>
+        request(
+          "session/prompt",
+          { sessionId: session, prompt: [{ type: "text", text }, ...(withPictures ? blocks : [])] },
+          limit + 10_000,
+        );
+      try {
+        let answer: unknown;
+        try {
+          answer = await prompt(blocks.length > 0);
+        } catch (e) {
+          // Refused with its pictures before it did anything (an image it can't take after
+          // all): the text alone, once, which is what it would have had before. A turn that
+          // wrote, ran or asked anything, a turn out of time, an agent gone: as it stands.
+          if (!blocks.length || t.acted || timedOut || gone) throw e;
+          log(`${label} refused the message with its pictures (${(e as Error).message}); sent again as text alone`);
+          sent(0);
+          answer = await prompt(false);
+        }
+        const res = obj(answer);
+        const stop = str(res?.stopReason);
+        const words = t.text.trim() || `(${label} finished without a written reply.)`;
+        const refused = deniedNote(t.denied, t.count);
+        if (stop === "end_turn" || stop === "max_tokens") return { reply: words + refused };
+        if (stop === "refusal") return { reply: `${words}\n\n(${label} refused the request.)${refused}` };
+        if (stop === "cancelled")
+          return timedOut
+            ? {
+                reply: "",
+                error: `${label} was still working after ${Math.round(limit / 60_000)} minutes, so it was stopped`,
+              }
+            : { reply: `${words}\n\n${CANCELLED_NOTE}${refused}` };
+        return { reply: "", error: `${label} ended the turn with ${stop || "no stop reason"}` };
+      } catch (e) {
+        return { reply: "", error: (e as Error).message };
+      } finally {
+        clearTimeout(timer);
+        turn = null;
+        busy = false;
+        lastUsed = now();
+      }
+    }
   }
 
   return (async (): Promise<AcpStart> => {
@@ -493,6 +585,8 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
         ),
       );
       const caps = obj(init?.agentCapabilities);
+      // Only an explicit yes: a capability left out is one the agent doesn't have.
+      const images = obj(caps?.promptCapabilities)?.image === true;
       const info = obj(init?.agentInfo);
       log(
         `${label}: ${str(info?.name) || "agent"} ${str(info?.version)} (ACP ${String(init?.protocolVersion ?? "?")})`,
@@ -511,12 +605,12 @@ export function startAcp(o: AcpOptions): Promise<AcpStart> {
           return { unsupported: `${label} can't reopen a session once it has been closed (no session/load)` };
         }
         await request("session/load", { sessionId: o.load, cwd: o.cwd, mcpServers: [], ...meta }, open);
-        return { held: held(o.load) };
+        return { held: held(o.load, images) };
       }
       const res = obj(await request("session/new", { cwd: o.cwd, mcpServers: [], ...meta }, open));
       const session = str(res?.sessionId);
       if (!session) throw new Error(`${label} opened a session without naming it`);
-      return { held: held(session) };
+      return { held: held(session, images) };
     } catch (e) {
       close();
       return { failed: `${(e as Error).message}${signIn}` };

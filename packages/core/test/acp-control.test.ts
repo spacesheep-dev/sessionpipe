@@ -8,6 +8,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACP_AGENTS,
@@ -21,6 +22,7 @@ import {
   startAcp,
 } from "../src/adapters/acp-control.js";
 import { drivableHarnesses, HELLO_HARNESSES_MAX } from "../src/adapters/index.js";
+import { type Picture, pictureFacts } from "../src/control/index.js";
 
 const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sp-acp-")));
 const project = path.join(tmp, "project");
@@ -82,7 +84,7 @@ async function handle(m) {
     return reply(m.id, {
       protocolVersion: 1,
       agentInfo: { name: "@agentclientprotocol/codex-acp", title: "Codex", version: "2.2.2" },
-      agentCapabilities: { loadSession: how !== "noload", promptCapabilities: { embeddedContext: true, image: true } },
+      agentCapabilities: { loadSession: how !== "noload", promptCapabilities: how === "noimage" ? { embeddedContext: true } : how === "imagefalse" ? { image: false } : { embeddedContext: true, image: true } },
       authMethods: how === "auth" ? [{ id: "chat-gpt", name: "ChatGPT", description: "Use ChatGPT to authenticate" }] : how === "provider" ? [{ id: "goose-provider", name: "Configure Provider" }] : how === "authbare" ? [{ id: "x" }, "junk"] : [],
     });
   }
@@ -106,6 +108,8 @@ async function handle(m) {
   if (m.method !== "session/prompt") return;
   const text = m.params.prompt[0].text;
   const word = text.split(/\\s/)[0];
+  // Pictures come after the text, as image blocks.
+  const images = m.params.prompt.filter((b) => b.type === "image");
   const done = (stopReason) => reply(m.id, stopReason === undefined ? {} : { stopReason, usage: null });
   update({ sessionUpdate: "session_info_update", _meta: { codex: { threadStatus: { type: "active" } } } });
   switch (word) {
@@ -130,6 +134,15 @@ async function handle(m) {
     case "many": { for (let i = 0; i < 25; i++) await permission("tool" + i); chunk("many"); return done("end_turn"); }
     case "fsreq": { const r = await ask("fs/read_text_file", { sessionId: ${JSON.stringify(SESSION)}, path: "/x" }); chunk("fs: " + JSON.stringify(r.error)); return done("end_turn"); }
     case "refuse": chunk("No."); return done("refusal");
+    // An agent that turns a message's pictures down: at once, after it began, by leaving,
+    // or once the turn is cancelled. The words alone it answers.
+    case "picky": if (images.length) return out({ jsonrpc: "2.0", id: m.id, error: { code: -32602, message: "Invalid params", data: "image/webp is not supported" } }); chunk("words only"); return done("end_turn");
+    case "pickylate": if (images.length) { chunk("Looking"); return out({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "the model refused the image" } }); } return done("end_turn");
+    case "pickytool": if (images.length) { update({ sessionUpdate: "tool_call", toolCallId: "v", status: "pending" }); return out({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "too big" } }); } return done("end_turn");
+    case "pickyask": if (images.length) { await permission("look"); return out({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "too big" } }); } return done("end_turn");
+    case "pickydie": if (images.length) return process.exit(3); return done("end_turn");
+    case "pickyslow": if (images.length) { cancelled = () => out({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: "cancelled while reading the image" } }); return; } return done("end_turn");
+    case "look": chunk("I see " + images.length + " picture(s)"); return done("end_turn");
     case "max": return done("max_tokens");
     case "weird": return done("max_turn_requests");
     case "nostop": return done(undefined);
@@ -595,6 +608,115 @@ describe("one agent, driven", () => {
     expect(await startAcp(base({ bin: path.join(tmp, "no-such-agent") }))).toMatchObject({
       failed: expect.stringMatching(/^couldn't start Codex: spawn .* ENOENT/),
     });
+  });
+});
+
+describe("a message's pictures (CONTROL.md §6 `start`, Pictures)", () => {
+  /** A picture saved where the daemon would have, its name with a space and an accent. */
+  const picture = (name: string, w: number, h: number): Picture => {
+    const b = Buffer.alloc(33);
+    Buffer.from("\x89PNG\r\n\x1a\n\0\0\0\rIHDR", "latin1").copy(b);
+    b.writeUInt32BE(w, 16);
+    b.writeUInt32BE(h, 20);
+    const dir = path.join(project, ".sessionpipe", "files", "s1", "n1");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, name);
+    writeFileSync(file, b);
+    return { ...pictureFacts("image/png", b)!, path: file, size: b.length };
+  };
+  type Block = { type: string; text?: string; mimeType?: string; data?: string; uri?: string };
+  const prompts = () =>
+    runs()
+      .filter((r) => r.method === "session/prompt")
+      .map((r) => (r.params as { prompt: Block[] }).prompt);
+
+  it("an agent that takes images: the text first, then each picture it takes as an image block, in order", async () => {
+    const log: string[] = [];
+    const h = await open({ log: (l) => log.push(l) });
+    const a = picture("shot é 1.png", 396, 132);
+    const b = picture("shot é 2.png", 20, 30);
+    const huge = picture("huge.png", 3001, 10);
+    expect(await h.send("look at these", [a, huge, b])).toEqual({ reply: "I see 2 picture(s)", native: 2 });
+    const [prompt] = prompts();
+    expect(prompt).toEqual([
+      { type: "text", text: "look at these" },
+      {
+        type: "image",
+        mimeType: "image/png",
+        data: readFileSync(a.path).toString("base64"),
+        uri: pathToFileURL(a.path).href,
+      },
+      {
+        type: "image",
+        mimeType: "image/png",
+        data: readFileSync(b.path).toString("base64"),
+        uri: pathToFileURL(b.path).href,
+      },
+    ]);
+    // None it takes, or none at all: the text alone, as before.
+    expect(await h.send("look again", [huge])).toEqual({ reply: "I see 0 picture(s)", native: 0 });
+    expect(await h.send("look once more")).toEqual({ reply: "I see 0 picture(s)" });
+    expect(prompts().slice(1)).toEqual([
+      [{ type: "text", text: "look again" }],
+      [{ type: "text", text: "look once more" }],
+    ]);
+  });
+
+  it("a picture gone between save and turn is left out; the text still goes", async () => {
+    const h = await open();
+    const a = picture("gone.png", 10, 10);
+    rmSync(a.path);
+    expect(await h.send("look", [a])).toEqual({ reply: "I see 0 picture(s)", native: 0 });
+    expect(prompts()).toEqual([[{ type: "text", text: "look" }]]);
+  });
+
+  it("an agent that doesn't say it takes images, or says it doesn't: the text alone, after a reopen too", async () => {
+    for (const how of ["noimage", "imagefalse"]) {
+      const h = await open({}, how);
+      expect(await h.send("look", [picture("a.png", 10, 10)])).toEqual({ reply: "I see 0 picture(s)", native: 0 });
+      const r = await startAcp(base({ env: { ...process.env, FAKE_ACP: how }, load: SESSION }));
+      if (!("held" in r)) throw new Error(JSON.stringify(r));
+      held.push(r.held);
+      expect(await r.held.send("look", [picture("b.png", 10, 10)])).toEqual({
+        reply: "I see 0 picture(s)",
+        native: 0,
+      });
+    }
+    expect(prompts()).toEqual(Array.from({ length: 4 }, () => [{ type: "text", text: "look" }]));
+  });
+
+  it("refused with its pictures before it did anything: the same message once more as text alone", async () => {
+    const log: string[] = [];
+    const h = await open({ log: (l) => log.push(l) });
+    // It went as text alone in the end: none of its pictures went natively.
+    expect(await h.send("picky one", [picture("a.png", 10, 10)])).toEqual({ reply: "words only", native: 0 });
+    const [first, second] = prompts();
+    expect(first?.map((x) => x.type)).toEqual(["text", "image"]);
+    expect(second).toEqual([{ type: "text", text: "picky one" }]);
+    expect(log).toContain(
+      "Codex refused the message with its pictures (Invalid params: image/webp is not supported); sent again as text alone",
+    );
+    // Without pictures the same refusal is the turn's own answer: nothing is sent again.
+    expect(await h.send("err")).toEqual({ reply: "", error: "boom" });
+    expect(prompts()).toHaveLength(3);
+  });
+
+  it("refused after it wrote, called a tool or asked, after its time, or by leaving: as it stands, never sent twice", async () => {
+    const h = await open();
+    const a = picture("a.png", 10, 10);
+    expect(await h.send("pickylate", [a])).toEqual({ reply: "", error: "the model refused the image", native: 1 });
+    expect(await h.send("pickytool", [a])).toEqual({ reply: "", error: "too big", native: 1 });
+    expect(await h.send("pickyask", [a])).toEqual({ reply: "", error: "too big", native: 1 });
+    expect(prompts()).toHaveLength(3);
+    const slow = await open({ timeoutMs: 200 });
+    expect(await slow.send("pickyslow", [a])).toEqual({
+      reply: "",
+      error: "cancelled while reading the image",
+      native: 1,
+    });
+    const dies = await open();
+    expect((await dies.send("pickydie", [a])).error).toMatch(/^Codex exited \(code 3\)/);
+    expect(prompts()).toHaveLength(5);
   });
 });
 
