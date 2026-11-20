@@ -68,7 +68,10 @@ const flush = (from: number, to: number) =>
       .map((l) => `${l}\n`)
       .join(""),
   );
+/** Each job is a hook event of its own, as a hook names it (run.ts jobKey). */
+let hooked = 0;
 const job = (event: string, extra: Record<string, unknown> = {}, at = T0) => ({
+  id: `settle-${hooked++}`,
   harness: "claude-code",
   event,
   argv: ["claude-code", event],

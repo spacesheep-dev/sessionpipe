@@ -85,7 +85,10 @@ afterEach(() => {
 });
 const config = (c: Record<string, unknown>) =>
   writeFileSync(process.env.SESSIONPIPE_CONFIG as string, JSON.stringify({ harnesses: {}, ...c }));
+/** Each job is a hook event of its own, as a hook names it (run.ts jobKey). */
+let hooked = 0;
 const job = (event = "Stop") => ({
+  id: `edge-${hooked++}`,
   harness: "fake",
   event,
   argv: ["fake", event],

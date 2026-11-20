@@ -574,7 +574,7 @@ names and meanings as `doctor --json`:
 | `sinks` | Array of `{name, url, tier, max_tier, pii, tools, control, paused, pending_sessions}`. `tier` is the configured tier; the effective tier is `min(tier, max_tier ?? 3)`. `max_tier` and `paused` are `null` when unset. `tools` is which tool events the sink is sent (`all`, `main`, `beat`), its default resolved. No token or secret is included. |
 | `timing` | `{n, p50, p95}` from the last 100 local hook timings, in milliseconds; `null` when unavailable. |
 | `update` | Doctor's update summary: `{auto, off, last_check, latest, last_error, pending, updated, failed}`. `auto` is boolean; absent details are `null`. |
-| `jobs` | Number of entries waiting in the local jobs directory; zero when absent. |
+| `jobs` | Hook events waiting in the local jobs directory, counted among its first 1000 entries (so 1000 can mean more); zero when absent. |
 
 `pending_sessions` counts outbox session files with bytes beyond that sink's cursor,
 including paused sinks; it counts files, not individual events. Empty collections

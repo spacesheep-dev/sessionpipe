@@ -5,11 +5,12 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
+  opendirSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -109,6 +110,9 @@ declare const __SESSIONPIPE_VERSION__: string;
 const VERSION = typeof __SESSIONPIPE_VERSION__ === "string" ? __SESSIONPIPE_VERSION__ : "0.0.0";
 
 export interface Job {
+  /** The hook event this job is, as its hook named it: the same in every copy of the job.
+   *  A job an older hook wrote has none. */
+  id?: string;
   harness: string;
   event: string;
   argv: string[];
@@ -147,6 +151,12 @@ export function claimJob(file: string): { job: Job; file: string } | null {
   } catch {
     return null;
   }
+  // A claim's age counts from here (sweepJobs gives back one older than any worker
+  // lives). A rename keeps the file's own time, the moment its hook wrote it: a job that
+  // had waited a minute for its turn was taken back from the worker running it by the
+  // next sweep, each of the two put it back when the session was busy, and one job was
+  // two, then four (9 627 hook events were 152 800 files, 2026-11-20).
+  stampClaim(claimed);
   try {
     // A big payload follows the job's line as it came (hook.ts INLINE_MAX); JSON.stringify
     // never writes a newline of its own, so the first one ends the job.
@@ -159,11 +169,79 @@ export function claimJob(file: string): { job: Job; file: string } | null {
     return null;
   }
 }
+/** Mark a claim as held now. False only when it is no longer there to mark: a time that
+ *  cannot be set (a share that keeps none, a file another program holds open) leaves the
+ *  claim this worker's, and its job is run. */
+function stampClaim(claimed: string): boolean {
+  try {
+    const now = new Date();
+    utimesSync(claimed, now, now);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ENOENT";
+  }
+}
+/** Whether the job is still this worker's to run or to put back: a claim a sweep gave
+ *  back (its worker was held up for longer than any worker lives: a machine asleep, a
+ *  disk that stalled) is another worker's job now. The claim is marked as held again, so
+ *  a sweep leaves it for another minute. A job run without a claim (a test, a hook with
+ *  no worker) is its caller's. */
+const holdsClaim = (claimed: string | undefined): boolean => claimed === undefined || stampClaim(claimed);
+
+/** How many of its hook events a session remembers having run: the newest, and those
+ *  whose copies keep coming (a copy that is dropped is the newest again). */
+export const RAN_KEPT = 64;
+/** One hook event: the same for every copy of its job, since a job put back keeps what
+ *  its hook wrote. The name its hook gave it; for a job an older hook wrote, which has
+ *  none, its time and payload together (two hook events of one session are not alike to
+ *  the millisecond and the byte). Nothing for a job that says neither. */
+export function jobKey(job: Job): string | undefined {
+  if (typeof job.id === "string" && job.id) return job.id.slice(0, 40);
+  if (typeof job.at !== "number") return undefined;
+  return createHash("sha256")
+    .update([job.at, job.harness, job.event, ...job.argv, job.stdin].join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+}
+const ranKeys = (mem: Record<string, unknown>): string[] =>
+  Array.isArray(mem.ran) ? mem.ran.filter((k): k is string => typeof k === "string") : [];
+/** `key`, newest of the hook events a session has run. */
+const ranWith = (mem: Record<string, unknown>, key: string): string[] =>
+  [key, ...ranKeys(mem).filter((k) => k !== key)].slice(0, RAN_KEPT);
 export function releaseJob(claimed: string | undefined): void {
   if (!claimed) return;
   try {
     unlinkSync(claimed);
   } catch {}
+}
+
+/** How many names of the jobs folder one sweep reads. A folder that holds no more is read
+ *  whole and its jobs are taken oldest first, as ever. One that has grown past it costs a
+ *  sweep the same as a small one: every worker sweeps, and when a session's jobs had
+ *  outrun its lock for a day (152 800 files, 2026-11-20) 800 workers each listing and
+ *  sorting all of them held one another, and every hook on the machine, for minutes. */
+export const SWEEP_READ = 1024;
+
+/** The first `most` names in a state's jobs folder, in the folder's own order (no order
+ *  at all); none when there is no folder, or it cannot be read. Never the whole of a
+ *  folder that holds more: see SWEEP_READ. */
+export function jobNames(state: string, most: number): string[] {
+  const names: string[] = [];
+  try {
+    const dir = opendirSync(jobsDir(state), { bufferSize: Math.min(Math.max(most, 1), 1024) });
+    try {
+      while (names.length < most) {
+        const e = dir.readSync();
+        if (!e) break;
+        names.push(e.name);
+      }
+    } finally {
+      dir.closeSync();
+    }
+  } catch {
+    return [];
+  }
+  return names;
 }
 
 /** Jobs another worker left behind: a claim whose worker is gone (or older than any
@@ -178,12 +256,7 @@ export async function sweepJobs(
   o: DrainLife = {},
 ): Promise<number> {
   const jobs = jobsDir(state);
-  let names: string[] = [];
-  try {
-    names = readdirSync(jobs);
-  } catch {
-    return 0;
-  }
+  const names = jobNames(state, SWEEP_READ);
   const queued = names.filter((n) => n.endsWith(".json"));
   for (const n of names) {
     const m = /^(.*\.json)\.(\d+)\.running$/.exec(n);
@@ -252,9 +325,27 @@ export function factsState(state: string): FactsState {
       const next = { ...cur, ...patch };
       if (JSON.stringify(next) === JSON.stringify(cur)) return;
       mkdirSync(path.dirname(file(h, s)), { recursive: true, mode: 0o700 });
-      writeFileSync(file(h, s), JSON.stringify(next), { mode: 0o600 });
+      writeWhole(file(h, s), JSON.stringify(next));
     },
   };
+}
+
+/** Write a small file so that it is whole or as it was: beside it, then into its place.
+ *  A session's facts hold its transcript cursor, and facts cut short by a full disk or a
+ *  kill read as none, so the next turn's end sent every turn again. Every job that makes
+ *  an event writes them now (the hook events it ran). Where the swap is refused (another
+ *  program holds the file open on Windows), it is written in place, as it always was. */
+function writeWhole(file: string, text: string): void {
+  const beside = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(beside, text, { mode: 0o600 });
+    renameSync(beside, file);
+  } catch {
+    try {
+      unlinkSync(beside);
+    } catch {}
+    writeFileSync(file, text, { mode: 0o600 });
+  }
 }
 
 export function buildSinks(sinks: SinkConfig[], o: { locked?: (name: string) => void } = {}): Sink[] {
@@ -481,7 +572,12 @@ export async function runJob(
   // The control daemon learns each session's turn state and folder from its events (a
   // message for a session mid-turn waits for its Stop; a pending permission prompt
   // closes when the tool runs). A local round trip, and nothing when no daemon runs.
-  if (!claudeEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
+  const key = jobKey(job);
+  // A copy of a hook event already run told the daemon when it ran: a Stop or a prompt
+  // from minutes ago does not set a session's turn back. Read without the session's lock,
+  // to spare the daemon the word; what is run is decided under it, below.
+  const told = !!key && ranKeys(factsState(state).get(job.harness, id)).includes(key);
+  if (!claudeEnd && !told) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
   // Hooks of one session fire close together (parallel subagents, issue #9): poll
@@ -493,11 +589,24 @@ export async function runJob(
     await new Promise((res) => setTimeout(res, 50));
     release = takeLock(state, ref);
   }
+  /** The job went back to the queue while this worker was held up: it is another's now. */
+  const givenBack = (): { events: Event[]; delivered: Record<string, number> } => {
+    log(
+      state,
+      `${job.harness} ${job.event}: its job went back to the queue while this worker was held up; left to the worker that has it (${shortId(job.harness, id)})`,
+    );
+    return { events: [], delivered: {} };
+  };
   if (!release) {
+    if (!holdsClaim(opts.claimed)) return givenBack();
     log(state, `${job.harness} ${job.event}: session ${id} locked for ${lockWait / 1000} s, re-queued`);
     const requeued = enqueueJob(state, { ...job, tries: (job.tries ?? 0) + 1 });
     releaseJob(opts.claimed);
     return { events: [], delivered: {}, requeued };
+  }
+  if (!holdsClaim(opts.claimed)) {
+    release();
+    return givenBack();
   }
   const events: Event[] = [];
   const clock = opts.clock ?? REAL_CLOCK;
@@ -507,6 +616,21 @@ export async function runJob(
   try {
     const facts = factsState(state);
     const mem = facts.get(job.harness, id);
+    // A hook event just run is not run again. Its job can be in the queue twice (a worker
+    // held up past its claim and the one that took the job over; a worker killed between
+    // writing the events and letting go of the claim; the copies an older sessionpipe made
+    // of a job two workers both put back), and every run of it comes here, under the
+    // session's lock, where the first one wrote the event down as run. The session
+    // remembers RAN_KEPT of them: a copy that comes up later than that is sent again.
+    if (key && ranKeys(mem).includes(key)) {
+      facts.save(job.harness, id, { ran: ranWith(mem, key) });
+      releaseJob(opts.claimed);
+      log(
+        state,
+        `${job.harness} ${job.event}: a copy of a hook event already run; dropped (${shortId(job.harness, id)})`,
+      );
+      return { events: [], delivered: {} };
+    }
     // `claude mcp list` fires SessionEnd with a fresh id but no SessionStart or
     // transcript. Check under the session lock, before creating facts or a seq:
     // any existing outbox, facts or transcript is enough to preserve a real end.
@@ -669,6 +793,11 @@ export async function runJob(
           );
           facts.save(job.harness, id, { progress_at: at, progress_sig: sig });
         }
+        // A look that found nothing new is a look all the same, and the next is PROGRESS_MS
+        // away. A session waiting on its own subagents says nothing for hours while each
+        // of their tool calls lands here: unstamped, every one of them read its whole
+        // transcript again under the session's lock, and its jobs fell behind for good.
+        else facts.save(job.harness, id, { progress_at: at });
       }
     }
     // The turn running now, by its prompt's id, until it ends (for `absorbed`).
@@ -749,6 +878,9 @@ export async function runJob(
       }
     }
     outbox.append(ref, events.map(atRest));
+    // Written down as run only once its events are in the outbox: a worker that ends
+    // before this line leaves a job that is run again, never one that is skipped.
+    if (key && events.length) facts.save(job.harness, id, { ran: ranWith(facts.get(job.harness, id), key) });
     releaseJob(opts.claimed);
     log(
       state,

@@ -17,7 +17,20 @@ import path from "node:path";
 import { Outbox, takeLock } from "@sessionpipe/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aliasFile, readAliases, receiverIdOf, writeAliases } from "../src/control/aliases.js";
-import { claimJob, enqueueJob, hasJobs, jobsDir, log, runJob, sweepJobs, versionLine } from "../src/run.js";
+import {
+  claimJob,
+  enqueueJob,
+  hasJobs,
+  jobKey,
+  jobNames,
+  jobsDir,
+  log,
+  RAN_KEPT,
+  runJob,
+  SWEEP_READ,
+  sweepJobs,
+  versionLine,
+} from "../src/run.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-run-"));
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
@@ -121,6 +134,111 @@ describe("runJob", () => {
     expect(readdirSync(jobsDir(tmp))).toEqual([]);
     const { events } = new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100);
     expect(events.some((e) => e.type === "session.ended")).toBe(true);
+  });
+  // A rename keeps a file's own time, so a claim's age was its job's age: a job that had
+  // waited over a minute was taken back from the worker running it by the next sweep, and
+  // both ran it (its events twice) or both put it back (one job became two).
+  it("a job that waited a minute for its turn is not taken back from the worker that claimed it", async () => {
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const { utimesSync } = await import("node:fs");
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(f, old, old);
+    const c = claimJob(f);
+    expect(Date.now() - statSync(c?.file as string).mtimeMs).toBeLessThan(10_000);
+    expect(await sweepJobs(tmp, 0)).toBe(0);
+    expect(readdirSync(jobsDir(tmp))).toEqual([path.basename(c?.file as string)]);
+    const { events } = await runJob(c?.job as Parameters<typeof runJob>[0], { state: tmp, claimed: c?.file as string });
+    expect(events.map((e) => e.type)).toEqual(["session.ended"]);
+    expect(readdirSync(jobsDir(tmp))).toEqual([]);
+  });
+  it("a worker whose claim a sweep gave back stands down: it neither runs the job nor puts a second copy back", async () => {
+    const { renameSync } = await import("node:fs");
+    const ref = { harness: "codex", session: "race-1" };
+    // Held up past any worker's life, its claim went back to the queue for another worker.
+    const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
+    const c = claimJob(f);
+    renameSync(c?.file as string, f);
+    const ran = await runJob(c?.job as Parameters<typeof runJob>[0], { state: tmp, claimed: c?.file as string });
+    expect(ran).toEqual({ events: [], delivered: {} });
+    expect(readFileSync(path.join(tmp, "log"), "utf8")).toContain(
+      "codex SessionEnd: its job went back to the queue while this worker was held up; left to the worker that has it",
+    );
+    expect(new Outbox(tmp).read(ref, 0, 100).events).toEqual([]);
+    expect(readdirSync(jobsDir(tmp))).toEqual([path.basename(f)]);
+    // The session's lock is free again for the worker that has the job now.
+    const free = takeLock(tmp, ref);
+    expect(free).not.toBeNull();
+    // The same with the session busy: nothing is re-queued.
+    try {
+      const held = await runJob(c?.job as Parameters<typeof runJob>[0], {
+        state: tmp,
+        claimed: c?.file as string,
+        lockWaitMs: 120,
+      });
+      expect(held).toEqual({ events: [], delivered: {} });
+      expect(readdirSync(jobsDir(tmp))).toEqual([path.basename(f)]);
+    } finally {
+      free?.();
+    }
+  });
+  // The same hook event can be in the queue twice: a worker held up past its claim and
+  // the one that took its job over, a worker that ended between writing the events and
+  // letting go of the claim, the copies an older sessionpipe left behind. Each run of it
+  // comes under the session's lock, and only the first writes its events.
+  it("a hook event is run once: a copy of its job is dropped, and so is its claim", async () => {
+    const j = job("SessionEnd", { reason: "exit" });
+    // A job an older hook wrote is told by its time and payload together.
+    expect(jobKey(j)).toMatch(/^[0-9a-f]{16}$/);
+    expect(jobKey({ ...j, tries: 7 })).toBe(jobKey(j));
+    expect(jobKey({ ...j, at: j.at + 1 })).not.toBe(jobKey(j));
+    expect((await runJob(j, { state: tmp })).events.map((e) => e.type)).toEqual(["session.ended"]);
+    const c = claimJob(enqueueJob(tmp, { ...j, tries: 3 }));
+    const again = await runJob(c?.job as Parameters<typeof runJob>[0], { state: tmp, claimed: c?.file as string });
+    expect(again).toEqual({ events: [], delivered: {} });
+    expect(readdirSync(jobsDir(tmp))).toEqual([]);
+    expect(new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100).events).toHaveLength(1);
+    expect(readFileSync(path.join(tmp, "log"), "utf8")).toContain(
+      "codex SessionEnd: a copy of a hook event already run; dropped",
+    );
+    // The same payload at another moment is another hook event.
+    expect((await runJob({ ...j, at: j.at + 1 }, { state: tmp })).events).toHaveLength(1);
+  });
+  it("a job is told by the name its hook gave it: two alike to the byte are two hook events, a copy is one", async () => {
+    const j = job("SessionEnd", { reason: "exit" });
+    expect(jobKey({ ...j, id: "mwp38apb-ou02in" })).toBe("mwp38apb-ou02in");
+    expect(jobKey({ ...j, id: "x".repeat(90) })).toBe("x".repeat(40));
+    expect(jobKey({ ...j, id: "" })).toBe(jobKey(j));
+    expect((await runJob({ ...j, id: "one" }, { state: tmp })).events).toHaveLength(1);
+    expect((await runJob({ ...j, id: "two" }, { state: tmp })).events).toHaveLength(1);
+    expect((await runJob({ ...j, id: "one", tries: 4 }, { state: tmp })).events).toHaveLength(0);
+    expect(new Outbox(tmp).read({ harness: "codex", session: "race-1" }, 0, 100).events).toHaveLength(2);
+  });
+  it("a job that names no time is never taken for a copy", async () => {
+    const j = { ...job("SessionEnd", { reason: "exit" }), at: undefined } as unknown as Parameters<typeof runJob>[0];
+    expect(jobKey(j)).toBeUndefined();
+    expect((await runJob(j, { state: tmp })).events).toHaveLength(1);
+    expect((await runJob(j, { state: tmp })).events).toHaveLength(1);
+  });
+  it("a session remembers the last hook events it ran, and one whose copies keep coming stays remembered", async () => {
+    const base = Date.now();
+    const run = async (i: number) =>
+      (await runJob({ ...job("SessionEnd", { reason: "exit" }), at: base + i }, { state: tmp, drain: false })).events
+        .length;
+    for (let i = 0; i < RAN_KEPT; i++) expect(await run(i)).toBe(1);
+    // The oldest it remembers: a copy is dropped, and is the newest again.
+    expect(await run(0)).toBe(0);
+    expect(await run(RAN_KEPT)).toBe(1);
+    expect(await run(0)).toBe(0);
+    // The one that was oldest then has been forgotten: its copy would run.
+    expect(await run(1)).toBe(1);
+    // What is kept is a list of words, whatever the file held before.
+    const facts = path.join(tmp, "facts", "codex", "race-1.json");
+    const kept = JSON.parse(readFileSync(facts, "utf8"));
+    expect(kept.ran).toHaveLength(RAN_KEPT);
+    writeFileSync(facts, JSON.stringify({ ...kept, ran: [7, null, ...kept.ran.slice(0, 2)] }));
+    expect(await run(1)).toBe(0);
+    writeFileSync(facts, JSON.stringify({ ...kept, ran: "not a list" }));
+    expect(await run(1)).toBe(1);
   });
   it("a claim a live worker holds is left alone", async () => {
     const f = enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));
@@ -405,6 +523,34 @@ describe("sessions the control daemon named (control/aliases.ts)", () => {
   });
 
   it.runIf(process.platform !== "win32")(
+    "a copy of a hook event already run does not tell the daemon again: a Stop from before does not end the turn running now",
+    async () => {
+      mkdirSync(tmp, { recursive: true }); // the last test's cleanup took it
+      const sock = path.join(tmp, "control.sock");
+      const got: string[] = [];
+      const server = net.createServer((c) =>
+        c.once("data", (d) => {
+          got.push(JSON.parse(d.toString("utf8").split("\n")[0] as string).event);
+          c.end(`${JSON.stringify({ op: "ok" })}\n`);
+        }),
+      );
+      await new Promise<void>((r) => server.listen(sock, () => r()));
+      vi.stubEnv("SESSIONPIPE_SOCKET", sock);
+      try {
+        const stop = { ...job("Stop"), id: "stop-1" };
+        expect((await runJob(stop, { state: tmp })).events.length).toBeGreaterThan(0);
+        await runJob({ ...job("UserPromptSubmit", { prompt: "next" }), id: "prompt-2" }, { state: tmp });
+        expect(got).toEqual(["Stop", "UserPromptSubmit"]);
+        expect((await runJob({ ...stop, tries: 2 }, { state: tmp })).events).toEqual([]);
+        expect(got).toEqual(["Stop", "UserPromptSubmit"]);
+      } finally {
+        vi.unstubAllEnvs();
+        await new Promise<void>((r) => server.close(() => r()));
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
     "every harness tells the daemon, with the session's own folder; Antigravity's folder is kept",
     async () => {
       mkdirSync(tmp, { recursive: true }); // the last test's cleanup took it
@@ -540,6 +686,44 @@ describe("claims and sweeps, the edges", () => {
     expect(await sweepJobs(path.join(tmp, "nowhere"))).toBe(0);
     enqueueJob(tmp, job("Stop"));
     expect(hasJobs(tmp)).toBe(true);
+  });
+  it("the jobs folder's first names, never more than asked for; none when there is no folder", () => {
+    expect(jobNames(path.join(tmp, "nowhere"), 10)).toEqual([]);
+    const made = [0, 1, 2, 3, 4].map(() => path.basename(enqueueJob(tmp, job("Stop"))));
+    expect(jobNames(tmp, 10).sort()).toEqual(made.slice().sort());
+    expect(jobNames(tmp, 5)).toHaveLength(5);
+    const three = jobNames(tmp, 3);
+    expect(three).toHaveLength(3);
+    expect(made).toEqual(expect.arrayContaining(three));
+    expect(jobNames(tmp, 0)).toEqual([]);
+  });
+  // Every worker sweeps, and a sweep listed and sorted the whole folder: with 152 800 jobs
+  // waiting (2026-11-20) 800 workers held one another on that listing for minutes. A sweep
+  // now reads SWEEP_READ names at most, and a folder holding more is still emptied.
+  it("a folder that holds more jobs than a sweep reads is emptied all the same, twenty a sweep", async () => {
+    const state = path.join(tmp, "behind");
+    mkdirSync(jobsDir(state), { recursive: true });
+    const all = SWEEP_READ + 45;
+    const { utimesSync } = await import("node:fs");
+    const old = new Date(Date.now() - 10_000);
+    for (let i = 0; i < all; i++) {
+      const f = path.join(jobsDir(state), `${(1000 + i).toString(36)}-behind.json`);
+      writeFileSync(
+        f,
+        JSON.stringify({ harness: "no-such-harness", event: "Stop", argv: [], stdin: "{}", cwd: tmp, env: {}, at: 1 }),
+      );
+      utimesSync(f, old, old);
+    }
+    let ran = 0;
+    let sweeps = 0;
+    for (let n = await sweepJobs(state, 0); n > 0; n = await sweepJobs(state, 0)) {
+      expect(n).toBeLessThanOrEqual(20);
+      ran += n;
+      sweeps++;
+    }
+    expect(ran).toBe(all);
+    expect(sweeps).toBe(Math.ceil(all / 20));
+    expect(readdirSync(jobsDir(state))).toEqual([]);
   });
   it("a sweep leaves a job younger than olderThanMs to the worker its hook spawned", async () => {
     enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));

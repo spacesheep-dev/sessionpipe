@@ -52,6 +52,7 @@ afterEach(() => {
 });
 
 type Job = {
+  id: string;
   harness: string;
   event: string;
   argv: string[];
@@ -141,6 +142,10 @@ describe("the hook writes one job and spawns the worker", () => {
     });
     expect(Object.keys(job?.env ?? {})).toHaveLength(7);
     const jobFile = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
+    // The job says which hook event it is, by the name its file was given: every copy of
+    // it says the same (run.ts jobKey).
+    expect(job?.id).toMatch(/^[0-9a-z]+-[0-9a-z]+$/);
+    expect(path.basename(jobFile)).toBe(`${job?.id}.json`);
     expect(spawned.spawn).toHaveBeenCalledWith(process.execPath, [path.resolve(here, "../src/worker.js"), jobFile], {
       detached: true,
       stdio: "ignore",
