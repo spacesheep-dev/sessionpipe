@@ -767,9 +767,9 @@ async function uninstall(): Promise<void> {
     out(
       `  Outbox and state kept under ${tilde(state)} (delete it yourself, or pass nothing: it prunes after ${readConfig().keep_days ?? 30} days).`,
     );
-  // Not "byte-identical": a JSON config is written back whole, with its own indent and
-  // line endings but one item per line, so a file that had `"allow": ["a", "b"]` on one
-  // line comes back with the same values laid out differently (#205).
+  // Not "byte-identical": only our entries go into a JSON config's text and come out
+  // again (#205), but an empty `hooks` object or event list they went into goes with them,
+  // as uninstall cannot tell it from one install made.
   out("  Done. Only sessionpipe's entries are gone; the rest of each config file holds what it held.");
 }
 

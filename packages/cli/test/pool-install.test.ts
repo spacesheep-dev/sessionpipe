@@ -126,7 +126,8 @@ describe("installPoolEnv", () => {
       file: real,
       changed: true,
     });
-    expect(readFileSync(real, "utf8")).toBe('{\n  "a": 1\n}\n');
+    // The file as it was, layout and all (#205).
+    expect(readFileSync(real, "utf8")).toBe('{"a":1}\n');
   });
   it("M1: never touches values someone else set, loopback or not, a non-object env, or a file that isn't plain JSON", () => {
     put(
@@ -286,13 +287,11 @@ describe("what the soak found", () => {
       permissions: { allow: ["Bash", "Read"] },
       model: "opus",
     });
-    // Without a keep dir, as before: valid, same meaning, JSON.stringify's layout.
+    // Without a keep dir: only our keys went into the text and came out again (#205).
     installPoolEnv([dir("inline")], o);
+    expect(readFileSync(file("inline"), "utf8")).toContain('"permissions": { "allow": ["Bash", "Read"] },');
     uninstallPoolEnv([dir("inline")], o);
-    expect(JSON.parse(readFileSync(file("inline"), "utf8"))).toEqual({
-      permissions: { allow: ["Bash", "Read"] },
-      model: "opus",
-    });
+    expect(readFileSync(file("inline"), "utf8")).toBe(original);
   });
   it("F7: a file created in a config dir reached through a symlink is removed again by off", () => {
     if (!posix) return;

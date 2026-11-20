@@ -16,7 +16,7 @@ import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
 import { readAntigravity } from "../readers/transcripts.js";
-import { formatJson, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
+import { editJson, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
 import type {
   Adapter,
   BackfillRow,
@@ -69,7 +69,7 @@ export const antigravity: Adapter = {
     if (JSON.stringify(hooks[HOOK_NAME]) === JSON.stringify(e)) return [{ file, changed: false }];
     hooks[HOOK_NAME] = e;
     return [
-      writeBack(file, formatJson(hooks, f), f.existed) ?? {
+      writeBack(file, editJson(hooks, f), f.existed) ?? {
         file,
         changed: true,
         created: !f.existed,
@@ -85,8 +85,8 @@ export const antigravity: Adapter = {
     const hooks = f.value;
     if (!(HOOK_NAME in hooks)) return [{ file, changed: false }];
     delete hooks[HOOK_NAME];
-    if (opts.created?.includes(file) && !Object.keys(hooks).length) return [removeEmptied(file, formatJson(hooks, f))];
-    return [writeBack(file, formatJson(hooks, f)) ?? { file, changed: true }];
+    if (opts.created?.includes(file) && !Object.keys(hooks).length) return [removeEmptied(file, editJson(hooks, f))];
+    return [writeBack(file, editJson(hooks, f)) ?? { file, changed: true }];
   },
   installed(cmd, env = process.env) {
     const file = hooksFile(env);
