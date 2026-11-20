@@ -2,17 +2,22 @@
 // The `sdk` delivery mode (CONTROL.md §6) against a stand-in Agent SDK: how the SDK is
 // found (beside sessionpipe, or where SESSIONPIPE_AGENT_SDK points), what a session
 // is started with, and how its streaming results become replies, errors and a close.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { type Picture, pictureFacts } from "@sessionpipe/core/control";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSdk } from "../src/control/sdk.js";
 
 type Msg = { type: string; result?: unknown; is_error?: boolean };
-type Prompt = AsyncIterable<{ message: { content: string } }>;
+type Prompt = AsyncIterable<{ message: { content: string | { type: string; text?: string }[] } }>;
 
 /** What the stand-in `query` was asked for, and what it was told to do. */
-const seen = vi.hoisted(() => ({ options: [] as Record<string, unknown>[], calls: [] as string[] }));
+const seen = vi.hoisted(() => ({
+  options: [] as Record<string, unknown>[],
+  calls: [] as string[],
+  contents: [] as unknown[],
+}));
 
 /** The stand-in SDK: one result per message, with a few words that mean trouble. */
 function fakeQuery(p: { prompt: Prompt; options: Record<string, unknown> }) {
@@ -23,7 +28,10 @@ function fakeQuery(p: { prompt: Prompt; options: Record<string, unknown> }) {
       // A result nobody asked for (an init turn of the SDK's own): nothing waits for it.
       if ((p.options.allowedTools as string[] | undefined)?.[0] === "stray") yield { type: "result", result: "stray" };
       for await (const m of p.prompt) {
-        const text = m.message.content;
+        const c = m.message.content;
+        seen.contents.push(c);
+        // Blocks: the pictures said by their type, then the words.
+        const text = typeof c === "string" ? c : c.map((b) => (b.type === "text" ? b.text : `[${b.type}]`)).join(" ");
         if (text === "fail") yield { type: "result", result: "it broke", is_error: true };
         else if (text === "silent") yield { type: "result", result: "   " };
         else if (text === "crash") throw new Error("stream died");
@@ -80,6 +88,7 @@ export function query(p) {
   (globalThis as { __spSdkSeen?: typeof seen }).__spSdkSeen = seen;
   seen.options.length = 0;
   seen.calls.length = 0;
+  seen.contents.length = 0;
   log.length = 0;
 });
 afterEach(() => {
@@ -209,6 +218,37 @@ describe("loadSdk", () => {
     seen.options[0]!.throwOnClose = true;
     expect(() => s.close()).not.toThrow();
     expect(seen.calls).toEqual(["close"]);
+  });
+
+  it("a message's pictures: image blocks before the words; none it takes, or none at all, the text alone", async () => {
+    const dir = path.join(tmp, "files é");
+    mkdirSync(dir, { recursive: true });
+    const picture = (name: string, w: number): Picture => {
+      const b = Buffer.alloc(33);
+      Buffer.from("\x89PNG\r\n\x1a\n\0\0\0\rIHDR", "latin1").copy(b);
+      b.writeUInt32BE(w, 16);
+      b.writeUInt32BE(10, 20);
+      const file = path.join(dir, name);
+      writeFileSync(file, b);
+      return { ...pictureFacts("image/png", b)!, path: file, size: b.length };
+    };
+    const host = await loadSdk({ claudeBin: null, log: () => {} });
+    const s = host!.start({ session: "sid", cwd: tmp, permission: "safe" });
+    const a = picture("a b.png", 20);
+    const wide = picture("wide.png", 3001);
+    // One of the two went as a block; the counts are what the daemon logs.
+    expect(await s.send("look", [wide, a])).toEqual({ reply: "reply: [image] look", native: 1 });
+    expect(seen.contents[0]).toEqual([
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: readFileSync(a.path).toString("base64") },
+      },
+      { type: "text", text: "look" },
+    ]);
+    expect(await s.send("wide", [wide])).toEqual({ reply: "reply: wide", native: 0 });
+    expect(await s.send("plain")).toEqual({ reply: "reply: plain" });
+    expect(seen.contents.slice(1)).toEqual(["wide", "plain"]);
+    s.close();
   });
 
   it("a result nobody asked for is let go; the next message still gets its own", async () => {

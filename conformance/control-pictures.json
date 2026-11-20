@@ -501,6 +501,78 @@
       "expect": true
     },
     {
+      "harness": "claude-code-sdk",
+      "why": "a PNG",
+      "picture": {
+        "type": "image/png",
+        "width": 396,
+        "height": 132,
+        "size": 2000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "an animated GIF",
+      "picture": {
+        "type": "image/gif",
+        "width": 300,
+        "height": 200,
+        "size": 4000,
+        "animated": true
+      },
+      "expect": true
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "3000 px a side, the most",
+      "picture": {
+        "type": "image/png",
+        "width": 3000,
+        "height": 3000,
+        "size": 3000000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "3001 px high",
+      "picture": {
+        "type": "image/png",
+        "width": 1000,
+        "height": 3001,
+        "size": 3000000,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "a retina screenshot, 3024 px wide",
+      "picture": {
+        "type": "image/png",
+        "width": 3024,
+        "height": 1964,
+        "size": 2500000,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "one byte over 3 750 000",
+      "picture": {
+        "type": "image/jpeg",
+        "width": 1000,
+        "height": 1000,
+        "size": 3750001,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
       "harness": "claude-code",
       "why": "a PNG: `claude -p` and the in-place lanes take the list only",
       "picture": {
@@ -680,6 +752,37 @@
       "expect": [
         1,
         2
+      ]
+    },
+    {
+      "harness": "claude-code-sdk",
+      "why": "the same total",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 1,
+          "animated": false
+        }
+      ],
+      "expect": [
+        0,
+        1
       ]
     },
     {

@@ -9,8 +9,8 @@
 // Measured (P1 spike 4, Claude Code 2.1.286): first token 1.5 s cold, 1.1 s warm;
 // zero turns while idle; but ~300 MB resident per held session, so the daemon
 // closes one that has been idle for ten minutes and a later message resumes it.
-import { withoutLineage } from "@sessionpipe/core";
-import type { RunLevel, StartPermission } from "@sessionpipe/core/control";
+import { claudeControl, withoutLineage } from "@sessionpipe/core";
+import type { Picture, RunLevel, StartPermission } from "@sessionpipe/core/control";
 import type { SdkHost, SdkSession } from "./daemon.js";
 
 /** Each level (CONTROL.md §3.1) as the SDK's `permissionMode`. Never bypassPermissions.
@@ -106,12 +106,19 @@ export async function loadSdk(o: {
         }
       })();
       return {
-        send(text: string) {
+        send(text: string, pictures: readonly Picture[] = []) {
           busy = true;
           lastUsed = Date.now();
+          // Its pictures first, then the words, as Claude reads them best; with none (or
+          // none it takes), the text alone, as always.
+          const images = claudeControl.claudeImages(pictures);
+          const content = images.length ? [...images, { type: "text", text }] : text;
+          // How many of its pictures went as image blocks, where it had any.
+          const counted = (r: { reply: string; error?: string }) =>
+            pictures.length ? { ...r, native: images.length } : r;
           return new Promise((resolve) => {
-            waiting.push({ resolve });
-            queue.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null });
+            waiting.push({ resolve: (r) => resolve(counted(r)) });
+            queue.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
             wake?.();
           });
         },
