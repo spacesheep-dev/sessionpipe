@@ -1147,7 +1147,11 @@ describe.runIf(unix)("a turn in a process the daemon did not start", () => {
     const kill = vi.spyOn(process, "kill");
     const stop = await cancel(SESSION);
     expect(await rx.waitAck(stop.id)).toMatchObject({ outcome: "unsupported", detail: CANCEL.open });
-    expect(acksOf(stop.id)).toEqual(["unsupported"]);
+    // One answer, and no other. A receiver that hands the Stop out again before that
+    // answer has landed is given the same one again (the daemon's recentAcks; it runs
+    // nothing twice), so how many times it was said is the poll loop's timing: on a busy
+    // CI leg it was said twice (2026-11-20).
+    expect([...new Set(acksOf(stop.id))]).toEqual(["unsupported"]);
     // Only ever asked whether a pid is alive (signal 0).
     expect(kill.mock.calls.every((c) => c[1] === 0)).toBe(true);
     kill.mockRestore();
