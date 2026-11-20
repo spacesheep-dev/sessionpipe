@@ -46,6 +46,7 @@ import {
   npmDo,
   prefixOf,
   REGISTRY_LATEST,
+  steadyDir,
   unwritable,
 } from "../src/update.js";
 
@@ -336,6 +337,81 @@ describe.runIf(posix)("the install's edges", () => {
   });
 });
 
+describe("where a command this copy runs starts", () => {
+  const where = () =>
+    execCapture([process.execPath, "-e", "process.stdout.write(process.cwd())"], {
+      env: process.env,
+      timeoutMs: 30_000,
+    });
+  /** What a process is told in a folder it cannot read. */
+  const lost = (): string => {
+    throw Object.assign(new Error("EPERM: operation not permitted, uv_cwd"), { code: "EPERM", syscall: "uv_cwd" });
+  };
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("nowhere of its own while this process can say where it is; the home folder when it cannot; nowhere when there is no home folder to start in", () => {
+    expect(steadyDir()).toBeUndefined();
+    expect(steadyDir(() => tmp, tmp)).toBeUndefined();
+    expect(steadyDir(lost)).toBe(os.homedir());
+    expect(steadyDir(lost, tmp)).toBe(tmp);
+    expect(steadyDir(lost, path.join(tmp, "gone"))).toBeUndefined();
+    writeFileSync(path.join(tmp, "a-file"), "");
+    expect(steadyDir(lost, path.join(tmp, "a-file"))).toBeUndefined();
+    vi.spyOn(os, "homedir").mockImplementation(() => {
+      throw new Error("no home folder for this account");
+    });
+    expect(steadyDir(lost)).toBeUndefined();
+  });
+
+  // Listing a folder and entering it are two permissions, and a command needs the second.
+  it.runIf(posix && process.getuid?.() !== 0)(
+    "a home folder that can be listed but not entered is not one to start in",
+    () => {
+      const shut = path.join(tmp, "shut");
+      mkdirSync(shut);
+      chmodSync(shut, 0o444);
+      try {
+        expect(steadyDir(lost, shut)).toBeUndefined();
+      } finally {
+        chmodSync(shut, 0o755);
+      }
+    },
+  );
+
+  it("a command starts where this process is; when that cannot be told, in the home folder", async () => {
+    expect(realpathSync((await where()).stdout)).toBe(realpathSync(process.cwd()));
+    const home = path.join(tmp, "home");
+    mkdirSync(home);
+    vi.spyOn(os, "homedir").mockReturnValue(home);
+    vi.spyOn(process, "cwd").mockImplementation(lost);
+    const r = await where();
+    vi.restoreAllMocks();
+    expect(r).toMatchObject({ code: 0, stderr: "" });
+    expect(realpathSync(r.stdout)).toBe(home);
+  });
+
+  // What `sessionpipe update` met in a terminal that could not read its own folder: npm
+  // asks where it is first, and stopped there. A folder deleted under the process is the
+  // same to the command that starts in it (Windows does not let go of a folder in use).
+  it.runIf(posix)("typed in a folder that is gone, a command still runs", async () => {
+    const was = process.cwd();
+    const gone = path.join(tmp, "gone");
+    mkdirSync(gone);
+    process.chdir(gone);
+    rmSync(gone, { recursive: true });
+    try {
+      expect(() => process.cwd()).toThrow(/uv_cwd/);
+      const r = await where();
+      expect(r).toMatchObject({ code: 0, stderr: "" });
+      expect(realpathSync(r.stdout)).toBe(realpathSync(os.homedir()));
+    } finally {
+      process.chdir(was);
+    }
+  });
+});
+
 describe("one npm command, and an install into a prefix by its name", () => {
   /** npm and the copy on disk stood in for: what each was run with, and what it answers. */
   function standIn(answer: (argv: string[]) => Partial<ExecResult> = () => ({})) {
@@ -418,6 +494,45 @@ describe("one npm command, and an install into a prefix by its name", () => {
         stderr: `npm error code ETARGET\nnpm error notarget No matching version found for sessionpipe@9.9.9.\n${LOG}\n`,
       }),
     ).toBe("npm error code ETARGET npm error notarget No matching version found for sessionpipe@9.9.9.");
+    // npm stopped on an error nothing caught (it could not be told which folder it was in):
+    // what was thrown is the line under the caret, not the brace and node's version the
+    // dump ends with.
+    const dump = (thrown: string[]) =>
+      [
+        "/usr/local/lib/node_modules/npm/lib/cli/validate-engines.js:31",
+        "    throw err",
+        "    ^",
+        "",
+        ...thrown,
+        "",
+        "Node.js v23.6.1",
+        "",
+      ].join("\n");
+    expect(
+      await failing({
+        stderr: dump([
+          "Error: EPERM: operation not permitted, uv_cwd",
+          "    at process.wrappedCwd (node:internal/bootstrap/switches/does_own_process_state:142:28)",
+          "    at new Config (/usr/local/lib/node_modules/npm/node_modules/@npmcli/config/lib/index.js:71:19) {",
+          "  errno: -1,",
+          "  code: 'EPERM',",
+          "  syscall: 'uv_cwd'",
+          "}",
+        ]),
+      }),
+    ).toBe("Error: EPERM: operation not permitted, uv_cwd");
+    // Whatever was thrown, named or not, and as Windows ends its lines.
+    expect(await failing({ stderr: dump(["Http2Error", "    at connect (node:http2:1:1)"]) })).toBe("Http2Error");
+    expect(await failing({ stderr: dump(["a string was thrown"]).replaceAll("\n", "\r\n") })).toBe(
+      "a string was thrown",
+    );
+    // An earlier line that only looks like an error is not what stopped it.
+    expect(await failing({ stderr: `Error: something said earlier\n${dump(["TypeError: fetch failed"])}` })).toBe(
+      "TypeError: fetch failed",
+    );
+    // A dump with nothing under its caret, or with no caret, keeps its last two lines.
+    expect(await failing({ stderr: dump([]) })).toBe("    ^ Node.js v23.6.1");
+    expect(await failing({ stderr: "Killed\nNode.js v23.6.1\n" })).toBe("Killed Node.js v23.6.1");
     // Wherever that line is, and with blank lines between: the last two that say something.
     expect(await failing({ stderr: `npm warn old lockfile\n${LOG}\n\nnpm error code E404\n\n` })).toBe(
       "npm warn old lockfile npm error code E404",
