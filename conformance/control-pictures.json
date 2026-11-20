@@ -417,6 +417,90 @@
       "expect": true
     },
     {
+      "harness": "acp",
+      "why": "a PNG",
+      "picture": {
+        "type": "image/png",
+        "width": 396,
+        "height": 132,
+        "size": 2000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
+      "harness": "acp",
+      "why": "an animated GIF",
+      "picture": {
+        "type": "image/gif",
+        "width": 300,
+        "height": 200,
+        "size": 4000,
+        "animated": true
+      },
+      "expect": true
+    },
+    {
+      "harness": "acp",
+      "why": "3 750 000 bytes, the most",
+      "picture": {
+        "type": "image/jpeg",
+        "width": 3000,
+        "height": 2000,
+        "size": 3750000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
+      "harness": "acp",
+      "why": "one byte more",
+      "picture": {
+        "type": "image/jpeg",
+        "width": 3000,
+        "height": 2000,
+        "size": 3750001,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
+      "harness": "acp",
+      "why": "3000 px a side, the most",
+      "picture": {
+        "type": "image/png",
+        "width": 3000,
+        "height": 3000,
+        "size": 1000000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
+      "harness": "acp",
+      "why": "3001 px wide",
+      "picture": {
+        "type": "image/png",
+        "width": 3001,
+        "height": 100,
+        "size": 1000000,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
+      "harness": "acp",
+      "why": "a phone's picture, shrunk to a 2560 px long edge",
+      "picture": {
+        "type": "image/jpeg",
+        "width": 2560,
+        "height": 1920,
+        "size": 900000,
+        "animated": false
+      },
+      "expect": true
+    },
+    {
       "harness": "claude-code",
       "why": "a PNG: `claude -p` and the in-place lanes take the list only",
       "picture": {
@@ -442,6 +526,162 @@
     }
   ],
   "messages": [
+    {
+      "harness": "acp",
+      "why": "two at the most, 5 000 000 characters each: both",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        }
+      ],
+      "expect": [
+        0,
+        1
+      ]
+    },
+    {
+      "harness": "acp",
+      "why": "a third after those: left in the list",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3,
+          "animated": false
+        }
+      ],
+      "expect": [
+        0,
+        1
+      ]
+    },
+    {
+      "harness": "acp",
+      "why": "exactly the total: 4 000 000 + 4 000 000 + 2 000 000 characters",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3000000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3000000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 1500000,
+          "animated": false
+        }
+      ],
+      "expect": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "harness": "acp",
+      "why": "4 characters past it: that one and every one after stay",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3000000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3000000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 1500001,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3,
+          "animated": false
+        }
+      ],
+      "expect": [
+        0,
+        1
+      ]
+    },
+    {
+      "harness": "acp",
+      "why": "one the agent doesn't take counts for nothing",
+      "pictures": [
+        {
+          "type": "image/png",
+          "width": 9000,
+          "height": 10,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        },
+        {
+          "type": "image/png",
+          "width": 100,
+          "height": 100,
+          "size": 3750000,
+          "animated": false
+        }
+      ],
+      "expect": [
+        1,
+        2
+      ]
+    },
     {
       "harness": "codex",
       "why": "Codex reads the files itself: no total",

@@ -2,13 +2,16 @@
 // A command's pictures, passed natively where a harness takes them (CONTROL.md §6 `start`,
 // Pictures; ADAPTERS.md): which file is a picture, which pictures each harness takes
 // (conformance/control-pictures.json), a saved picture checked again before a run, and
-// what Codex is handed: its `--image` arguments on `exec` and `exec resume`.
+// what each harness is handed: Codex's `--image` arguments on `exec` and `exec resume`,
+// an ACP agent's `image` blocks.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { ACP_PICTURES, acpImages } from "../src/adapters/acp-control.js";
 import { CODEX_PICTURES, codexArgs, codexPictures, codexRefusedPictures } from "../src/adapters/codex-control.js";
 import { pictureBytes, pictureThere } from "../src/adapters/headless.js";
 import {
@@ -31,6 +34,7 @@ const V = JSON.parse(readFileSync(new URL("../../../conformance/control-pictures
 /** Each harness's limits, or null for one with no way but the text. */
 const LIMITS: Record<string, PictureLimits | null> = {
   codex: CODEX_PICTURES,
+  acp: ACP_PICTURES,
   "claude-code": null,
   antigravity: null,
 };
@@ -275,5 +279,31 @@ describe("Codex: each picture its own --image, on exec and exec resume", () => {
     expect(codexRefusedPictures({ code: 2, stdout: '{"type":"thread.started"}\n', stderr: old })).toBe(false);
     expect(codexRefusedPictures({ code: 2, stdout: " \n", stderr: old })).toBe(true);
     expect(codexRefusedPictures({ code: 0, stderr: "" })).toBe(false);
+  });
+});
+
+describe("image blocks: an ACP agent's", () => {
+  it("ACP: its type, its bytes in base64 and its file's URL, in order; those it doesn't take left out", () => {
+    const a = saved("a b é.png", "a PNG");
+    const g = saved("anim.gif", "an animated GIF");
+    const large: Picture = { ...a, size: 3_750_001 };
+    const gone = saved("gone.webp", "a lossy WebP");
+    rmSync(gone.path);
+    expect(acpImages([g, large, gone, a])).toEqual([
+      {
+        type: "image",
+        mimeType: "image/gif",
+        data: bytesOf("an animated GIF").toString("base64"),
+        uri: pathToFileURL(g.path).href,
+      },
+      {
+        type: "image",
+        mimeType: "image/png",
+        data: bytesOf("a PNG").toString("base64"),
+        uri: pathToFileURL(a.path).href,
+      },
+    ]);
+    expect(pathToFileURL(a.path).href).toContain("a%20b%20%C3%A9.png");
+    expect(acpImages([])).toEqual([]);
   });
 });

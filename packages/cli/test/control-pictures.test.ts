@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // A command's pictures, handed over natively as well as listed in the text (CONTROL.md §6
 // `start`, Pictures): Codex's `--image` on a start and a resume, and a Codex that has no
-// such flag run again without it; nothing new for Antigravity or `claude -p`. The log's
-// counts on each. Stand-in `codex` and `agy` record what they were given; the receiver is
-// the fake one, so the files travel the whole way. The project's folder has a space and
-// an accent in its name.
+// such flag run again without it; nothing new for Antigravity; an ACP agent's `image`
+// blocks on a start, a message to the session it holds, and a reopen; nothing new for
+// `claude -p`. The log's counts on each. Stand-in `codex`, `agy` and ACP agent record what
+// they were given; the receiver is the fake one, so the files travel the whole way. The
+// project's folder has a space and an accent in its name.
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { type RunResult, runHeadless } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
@@ -383,6 +385,53 @@ describe.runIf(unix)("Antigravity: the list alone, as before", { timeout: 30_000
       "stream-json",
     ]);
     expect(said()).toEqual(["pictures: 0 natively (agy takes none), 1 in the list only"]);
+  });
+});
+
+describe.runIf(unix)("an ACP agent that takes images", { timeout: 30_000 }, () => {
+  it("a start, a message to the session it holds, and one after a reopen: each picture an image block after the text", async () => {
+    await startDaemon();
+    const shot = await rx.upload("shot é.png", "image/png", png(396, 132));
+    const notes = await rx.upload("notes.pdf", "application/pdf", Buffer.from("%PDF-1.7\n"));
+    const q = await rx.send({
+      kind: "start",
+      session: `goose:${RECV}`,
+      cwd: project,
+      text: "look",
+      files: [shot, notes],
+    });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "api", reply: "I see 1 picture(s)." });
+    expect(ran("acp")[0]!.blocks).toEqual([
+      { type: "text" },
+      { type: "image", mimeType: "image/png", uri: pathToFileURL(startFile("shot é.png")).href, bytes: 40 },
+    ]);
+    // Held: the next message goes through the same process.
+    const big = await rx.upload("big.png", "image/png", png(3001, 10));
+    const small = await rx.upload("small.png", "image/png", png(5, 5));
+    const q2 = await rx.send({ session: `goose:${RECV}`, text: "and these", files: [big, small] });
+    expect(await rx.waitAck(q2.id)).toMatchObject({ outcome: "delivered", reply: "I see 1 picture(s)." });
+    expect(ran("acp")[1]!.blocks).toEqual([
+      { type: "text" },
+      { type: "image", mimeType: "image/png", uri: pathToFileURL(promptFile(q2.cmd, "small.png")).href, bytes: 40 },
+    ]);
+    // A message without files: the text alone.
+    const q3 = await rx.send({ session: `goose:${RECV}`, text: "and nothing" });
+    expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "delivered", reply: "I see 0 picture(s)." });
+    // Another daemon, which holds nothing: the session is reopened, and the pictures go too.
+    await d?.stop();
+    await startDaemon();
+    const q4 = await rx.send({ session: `goose:${RECV}`, text: "once more", files: [small] });
+    expect(await rx.waitAck(q4.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "resume",
+      reply: "I see 1 picture(s).",
+    });
+    expect(ran("acp")[3]!.blocks?.[1]).toMatchObject({ uri: pathToFileURL(promptFile(q4.cmd, "small.png")).href });
+    expect(said()).toEqual([
+      "pictures: 1 natively (image blocks), 0 in the list only",
+      "pictures: 1 natively (image blocks), 1 in the list only",
+      "pictures: 1 natively (image blocks), 0 in the list only",
+    ]);
   });
 });
 

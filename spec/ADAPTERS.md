@@ -307,6 +307,20 @@ What the daemon says and reads, in the protocol's own names:
   asks for them, and a session started from a phone should have what one started at
   the terminal has.
 - `session/prompt` with one `text` block; its response's `stopReason` ends the turn.
+  The message's pictures (CONTROL.md §6 `start`, **Pictures**) follow it as `image`
+  blocks (`mimeType`, `data` in base64, `uri` the saved file's `file://` URL), only to an
+  agent whose `initialize` answered `agentCapabilities.promptCapabilities.image: true`
+  (agentclientprotocol.com/protocol/initialization: a capability left out is not
+  there). The protocol names no type or size, and an agent hands the picture to the
+  model it runs, so it is given what the strictest service behind the registry's agents
+  takes on every platform, Claude's: a PNG, JPEG, GIF or WebP of at most 3 750 000 bytes
+  and 3000 px a side (safe past 20 pictures in a request, which an agent that keeps its
+  history reaches), and in one message pictures in order while their base64 together
+  stays within 10 000 000 characters (the rest stay in the list). An agent has done
+  nothing in the turn until it sends a `text` `agent_message_chunk`, a `tool_call`, or a
+  `session/request_permission`; one that answers such a prompt with an error before any
+  of those, while the turn is in its time and the process is still there, is sent the
+  same message as text alone, once.
 - `session/update`: `agent_message_chunk` whose `content` is `text` is the reply;
   `tool_call` and `tool_call_update` name what ran (for the reply's list of refusals);
   every other kind is ignored.
