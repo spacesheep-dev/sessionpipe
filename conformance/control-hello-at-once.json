@@ -1,0 +1,13 @@
+{
+  "spec": "CONTROL.md §2 (a hello at once)",
+  "note": "Whether a running machine says hello at once when the person changes its settings at the machine, rather than leaving its receivers to learn it from the next hello. `change` is what was done while the daemon ran: `paired` (a second receiver paired), `folders` (`control folders`), `mode` (`control mode`), `name` (`--rename-machine`), `ask` (`ask off`), `unpaired` (one of two receivers removed), `nothing` (the same settings read again). `expect` is `hello` (one goes out now, and a newly paired receiver is among those it reaches) or `none`. The reference daemon says a hello it sends at once to every receiver it is paired with.",
+  "cases": [
+    { "name": "a receiver paired while the daemon runs learns at once what the machine takes", "change": "paired", "expect": "hello" },
+    { "name": "a new folder list is said at once", "change": "folders", "expect": "hello" },
+    { "name": "a new mode is said at once", "change": "mode", "expect": "hello" },
+    { "name": "a new name is said at once, so the receiver shows one machine", "change": "name", "expect": "hello" },
+    { "name": "asking turned off is said at once", "change": "ask", "expect": "hello" },
+    { "name": "a receiver removed tells the others nothing new", "change": "unpaired", "expect": "none" },
+    { "name": "the same settings read again say nothing", "change": "nothing", "expect": "none" }
+  ]
+}

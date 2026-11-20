@@ -186,6 +186,9 @@ window whose `resets_at` has passed has reset) and MUST NOT send it on as an eve
 is a hello's reading, for the receiver's own page. A daemon MUST send a hello **at once** when the pool changes (on or off,
 an account added, removed, reordered, enabled or disabled, a status change), as it does
 for its folders, so the receiver's page follows the machine rather than its own guess.
+It MUST also send one at once to a receiver paired while it runs, as it does to every
+receiver when it starts: until its first hello a receiver doesn't know what the machine
+takes (`files`, `prompt_files`, its folders) and would send it a command the old way.
 A hello without `pool` is a daemon that predates the pool: a receiver MUST NOT offer
 pool controls for it. Whether a receiver may ask anything of the pool is §6 `pool`; the
 hello is a reading, never a promise.

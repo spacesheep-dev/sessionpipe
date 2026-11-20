@@ -1148,10 +1148,15 @@ export class ControlDaemon {
       const s = this.sdkSessions.get(session)!;
       if (!s.busy && !sameRun(run, cfg.mode)) this.letGoHeld(session, s);
     }
-    for (const r of cfg.receivers) if (!known.has(r.control + r.machine)) void this.pollLoop(r);
+    const paired = cfg.receivers.filter((r) => !known.has(r.control + r.machine));
+    for (const r of paired) void this.pollLoop(r);
+    // A receiver paired while the daemon runs is greeted as one is at start: until its first
+    // hello it doesn't know what this machine takes (files with a message, its folders).
     // `control folders`, `control mode`, `ask on|off` or a `--rename-machine` changed what a
     // hello says: say it now, so the receiver doesn't wait up to ten minutes for the next one.
-    if (this.running && JSON.stringify([cfg.folders, cfg.mode, cfg.name, askOn(cfg)]) !== told) void this.helloAll();
+    // Either way every receiver hears it: a hello says the same thing twice harmlessly.
+    const changed = JSON.stringify([cfg.folders, cfg.mode, cfg.name, askOn(cfg)]) !== told;
+    if (this.running && (paired.length > 0 || changed)) void this.helloAll();
   }
 
   status(): Status {

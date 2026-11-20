@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Nine additions on protocol 1. Every rule a receiver may already rely on still holds.
+Ten additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -64,6 +64,13 @@ Nine additions on protocol 1. Every rule a receiver may already rely on still ho
   `image` blocks). The signed command does not change, and a native way the harness
   refuses before it has done anything never fails a message the text alone would have
   delivered: the machine sends it again as text. Vectors: `control-pictures.json`.
+- **A receiver paired while the machine runs gets a hello at once** (CONTROL.md §2). It
+  used to wait for the next one, up to ten minutes, and until then did not know that the
+  machine takes `files` and `prompt_files`, or its folders. A machine MUST now send a
+  hello at once to a receiver paired while its daemon runs, as it does to every
+  receiver when the daemon starts. The reference daemon sends that hello to every
+  receiver it is paired with, so the others may see one that says nothing new. Vectors:
+  `control-hello-at-once.json`.
 
 ### For receivers (0.13.3)
 
