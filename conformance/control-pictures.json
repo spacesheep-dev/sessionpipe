@@ -1,0 +1,337 @@
+{
+  "about": "Which of a command's files is a picture, and which pictures each harness takes natively besides the text's list (spec/CONTROL.md §6 `start`, Pictures; spec/ADAPTERS.md). `facts`: a file's signed type and its bytes (base64, as much of the file as the header needs), and the picture facts read from them, or null for a file the text lists and nothing more. `takes`: a picture as saved, and whether the harness is given it natively; `acp` is an agent whose initialize says promptCapabilities.image: true, `claude-code-sdk` a session held through the Agent SDK, `claude-code` claude -p and the in-place lanes. `messages`: several pictures of one message, and the indexes of those the harness is given, in order.",
+  "facts": [
+    {
+      "name": "a PNG",
+      "type": "image/png",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAYwAAACECAYAAAAAAAAA",
+      "expect": {
+        "type": "image/png",
+        "width": 396,
+        "height": 132,
+        "animated": false
+      }
+    },
+    {
+      "name": "its type in capitals",
+      "type": "IMAGE/PNG",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAAAAAA",
+      "expect": {
+        "type": "image/png",
+        "width": 1,
+        "height": 1,
+        "animated": false
+      }
+    },
+    {
+      "name": "a PNG of no width",
+      "type": "image/png",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAAAAAAKCAYAAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a PNG cut inside its header",
+      "type": "image/png",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAo=",
+      "expect": null
+    },
+    {
+      "name": "a PNG whose first chunk isn't IHDR",
+      "type": "image/png",
+      "bytes": "iVBORw0KGgoAAAANaUNDUAAAAAAAAAAAAAAAAA==",
+      "expect": null
+    },
+    {
+      "name": "PNG bytes sent as a JPEG",
+      "type": "image/jpeg",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "JPEG bytes sent as a PNG",
+      "type": "image/png",
+      "bytes": "/9j/wAARCAAKAAoDASIAAhEBAxEB",
+      "expect": null
+    },
+    {
+      "name": "a JPEG: JFIF, then a baseline frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD/wAARCAHgAoADASIAAhEBAxEB",
+      "expect": {
+        "type": "image/jpeg",
+        "width": 640,
+        "height": 480,
+        "animated": false
+      }
+    },
+    {
+      "name": "a progressive JPEG, fill bytes and a lone marker before its frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD///8B/9D/wgARCAesC9ADASIAAhEBAxEB",
+      "expect": {
+        "type": "image/jpeg",
+        "width": 3024,
+        "height": 1964,
+        "animated": false
+      }
+    },
+    {
+      "name": "a JPEG whose Huffman table (C4) comes before its frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/xAAEAAD/wQARCAAeABQDASIAAhEBAxEB",
+      "expect": {
+        "type": "image/jpeg",
+        "width": 20,
+        "height": 30,
+        "animated": false
+      }
+    },
+    {
+      "name": "a JPEG whose scan starts before any frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD/2gAIAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a JPEG that ends before any frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==",
+      "expect": null
+    },
+    {
+      "name": "a JPEG with no frame at all",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAA=",
+      "expect": null
+    },
+    {
+      "name": "a JPEG cut inside its frame",
+      "type": "image/jpeg",
+      "bytes": "/9j/4AAQSkZJRgABAQAAAQABAAD/wAARCAHg",
+      "expect": null
+    },
+    {
+      "name": "a JPEG with a byte that is no marker",
+      "type": "image/jpeg",
+      "bytes": "/9gA4AAEAAA=",
+      "expect": null
+    },
+    {
+      "name": "too short to be a JPEG",
+      "type": "image/jpeg",
+      "bytes": "/9g=",
+      "expect": null
+    },
+    {
+      "name": "a GIF of one frame, with a colour table and an extension",
+      "type": "image/gif",
+      "bytes": "R0lGODlhLAHIAIAAAAAAAAAAACH5BAAAAAAALAAAAAABAAEAAAICTAEAOw==",
+      "expect": {
+        "type": "image/gif",
+        "width": 300,
+        "height": 200,
+        "animated": false
+      }
+    },
+    {
+      "name": "a GIF87a with a frame's own colour table",
+      "type": "image/gif",
+      "bytes": "R0lGODdhCAAJAAAAACwAAAAAAQABAIAAAAAAAAACAkwBADs=",
+      "expect": {
+        "type": "image/gif",
+        "width": 8,
+        "height": 9,
+        "animated": false
+      }
+    },
+    {
+      "name": "an animated GIF",
+      "type": "image/gif",
+      "bytes": "R0lGODlhMgAoAIAAAAAAAAAAACH5BAAAAAAALAAAAAABAAEAAAICTAEAIfkEAAAAAAAsAAAAAAEAAQAAAgJMAQAh+QQAAAAAACwAAAAAAQABAAACAkwBADs=",
+      "expect": {
+        "type": "image/gif",
+        "width": 50,
+        "height": 40,
+        "animated": true
+      }
+    },
+    {
+      "name": "a GIF cut inside its first frame's data",
+      "type": "image/gif",
+      "bytes": "R0lGODlhBQAGAAAAACwAAAAAAQABAAACAkw=",
+      "expect": {
+        "type": "image/gif",
+        "width": 5,
+        "height": 6,
+        "animated": false
+      }
+    },
+    {
+      "name": "a GIF cut inside an extension, before any frame",
+      "type": "image/gif",
+      "bytes": "R0lGODlhBQAGAAAAACH5BAA=",
+      "expect": null
+    },
+    {
+      "name": "a GIF cut inside its first image descriptor",
+      "type": "image/gif",
+      "bytes": "R0lGODlhBQAGAAAAACwAAAAAAQ==",
+      "expect": null
+    },
+    {
+      "name": "a GIF with a block that is neither",
+      "type": "image/gif",
+      "bytes": "R0lGODlhBQAGAAAAAJk7",
+      "expect": null
+    },
+    {
+      "name": "a GIF with no frame",
+      "type": "image/gif",
+      "bytes": "R0lGODlhBQAGAAAAADs=",
+      "expect": null
+    },
+    {
+      "name": "too short to be a GIF",
+      "type": "image/gif",
+      "bytes": "R0lGODlhAQA=",
+      "expect": null
+    },
+    {
+      "name": "a lossy WebP",
+      "type": "image/webp",
+      "bytes": "UklGRh4AAABXRUJQVlA4IBIAAAAwAQCdASoABAADAAAAAAAAAAA=",
+      "expect": {
+        "type": "image/webp",
+        "width": 1024,
+        "height": 768,
+        "animated": false
+      }
+    },
+    {
+      "name": "a lossless WebP",
+      "type": "image/webp",
+      "bytes": "UklGRhYAAABXRUJQVlA4TAoAAAAv/8mPAQAAAAAA",
+      "expect": {
+        "type": "image/webp",
+        "width": 2560,
+        "height": 1600,
+        "animated": false
+      }
+    },
+    {
+      "name": "an extended WebP",
+      "type": "image/webp",
+      "bytes": "UklGRhgAAABXRUJQVlA4WAoAAAAQAAAAnw8AtwsAAAA=",
+      "expect": {
+        "type": "image/webp",
+        "width": 4000,
+        "height": 3000,
+        "animated": false
+      }
+    },
+    {
+      "name": "an animated WebP",
+      "type": "image/webp",
+      "bytes": "UklGRhgAAABXRUJQVlA4WAoAAAASAAAAPwAAPwAAAAA=",
+      "expect": {
+        "type": "image/webp",
+        "width": 64,
+        "height": 64,
+        "animated": true
+      }
+    },
+    {
+      "name": "a lossy WebP without its start code",
+      "type": "image/webp",
+      "bytes": "UklGRh4AAABXRUJQVlA4IBIAAAAwAQAAAAAKAAoAAAAAAAAAAAA=",
+      "expect": null
+    },
+    {
+      "name": "a lossless WebP without its signature",
+      "type": "image/webp",
+      "bytes": "UklGRhYAAABXRUJQVlA4TAoAAAAuCUACAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a WebP whose first chunk is none of the three",
+      "type": "image/webp",
+      "bytes": "UklGRh4AAABXRUJQQUxQSBIAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "expect": null
+    },
+    {
+      "name": "RIFF that isn't WebP",
+      "type": "image/webp",
+      "bytes": "UklGRhYAAABXQVZFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "expect": null
+    },
+    {
+      "name": "too short to be a WebP",
+      "type": "image/webp",
+      "bytes": "UklGRgQAAABXRUJQ",
+      "expect": null
+    },
+    {
+      "name": "an SVG",
+      "type": "image/svg+xml",
+      "bytes": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIvPg==",
+      "expect": null
+    },
+    {
+      "name": "a HEIC",
+      "type": "image/heic",
+      "bytes": "AAAAGGZ0eXBoZWljAAAAAAAAAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a PDF",
+      "type": "application/pdf",
+      "bytes": "JVBERi0xLjcK",
+      "expect": null
+    },
+    {
+      "name": "a type that names an object's own key: __proto__",
+      "type": "__proto__",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a type that names an object's own key: constructor",
+      "type": "constructor",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAAAAAAAA",
+      "expect": null
+    },
+    {
+      "name": "a type that names an object's own key: toString",
+      "type": "toString",
+      "bytes": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAAAAAAAA",
+      "expect": null
+    }
+  ],
+  "takes": [
+    {
+      "harness": "claude-code",
+      "why": "a PNG: `claude -p` and the in-place lanes take the list only",
+      "picture": {
+        "type": "image/png",
+        "width": 396,
+        "height": 132,
+        "size": 2000,
+        "animated": false
+      },
+      "expect": false
+    },
+    {
+      "harness": "antigravity",
+      "why": "a PNG: agy takes text only",
+      "picture": {
+        "type": "image/png",
+        "width": 396,
+        "height": 132,
+        "size": 2000,
+        "animated": false
+      },
+      "expect": false
+    }
+  ],
+  "messages": []
+}

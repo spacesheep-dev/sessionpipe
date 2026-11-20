@@ -700,8 +700,10 @@ receiver's message `id` is not signed), with the same rules (real directories, t
 message's folder new, each file created exclusively, `0600`), and appends the same
 **Attached files** block to the text, with paths relative to `cwd`, inside the frame.
 All of it happens before the message is delivered, in every mode: for `resume`, `fork`
-and `sdk` the block is part of the message the run gets; for `waiter` and `turn` the
-files are on disk before the waiter or the Stop hook hands the text over. A file that
+and `sdk` the block is part of the message the run gets, and a harness that takes
+pictures natively gets the message's pictures that way as well (§6 `start`,
+**Pictures**); for `waiter` and `turn` the files are on disk before the waiter or the
+Stop hook hands the text over. A file that
 fails is acked `failed` with code `file`, nothing written for it is kept, and the
 message is not delivered.
 
@@ -982,8 +984,8 @@ it queues them; that limit is its policy, the machine's is the gate.
 
 **Files.** A `start` with `files` is handled only after every check in §5 passed and
 the nonce is recorded, and the same way for every harness the machine can start: the
-files land in `cwd` before the run, and nothing about them is the harness's. Before
-the session starts, the machine:
+files land in `cwd` before the run, and the text lists them. Before the session
+starts, the machine:
 
 1. Downloads each file (one after another is fine) with
    `GET {control}/files/{sha256}` and the machine's token. It MUST stop reading a
@@ -1021,6 +1023,39 @@ reference daemon: `"notes.pdf" didn't finish downloading within 5 minutes`, `cou
 download "notes.pdf": the connection to the receiver kept failing`, `couldn't save the
 files: this folder can't be written to`, `… the disk is full`), nothing that
 was written for it is kept, and **no session starts**.
+
+**Pictures.** The list in the text is how every harness learns of a command's files,
+and it is never left out. A harness that has a way of its own to take a picture (an
+argument, a content block) is also given the command's pictures that way, in the same
+run or turn as the text, on a `start` and on a `prompt` alike. The command on the wire
+does not change: this is how the machine hands over what it saved.
+
+- A file is a **picture** when its signed `type` is `image/png`, `image/jpeg`,
+  `image/gif` or `image/webp` (in any case) **and** its bytes are that format, with a
+  width and a height that its header states. Its name says nothing. Any other file, and
+  one whose bytes are another format or whose header is cut short, is listed in the
+  text only ([control-pictures.json](../conformance/control-pictures.json), `facts`).
+- A harness is given the pictures it takes (the types, sizes and counts in its
+  ADAPTERS.md row), in the command's order, by the path the machine saved each at. A
+  picture is given only if it is still there as saved when the machine builds the run's
+  arguments or sends the turn (a file, not a link, of the same length; one sent as bytes
+  is read then, once, and must still be that picture): one that is gone or changed is
+  listed in the text only. A harness sent the pictures' bytes in the message takes them
+  in order while their base64 together stays within its limit; the first that would pass
+  it, and every one after, are listed in the text only. Which pictures each harness takes
+  is in [control-pictures.json](../conformance/control-pictures.json), `takes` (one
+  picture) and `messages` (several in one message).
+- Where the harness has no such way, does not say it takes pictures (an ACP agent whose
+  `initialize` has no `promptCapabilities.image: true`), or takes none of the pictures,
+  the run gets exactly what it got before there were pictures: the text with its list.
+- A native way that is refused **before the harness has done anything** MUST NOT fail a
+  message the text alone would have delivered: the machine sends the same message once
+  more with the text alone (an older Codex without `--image` exits with a usage error; an
+  ACP agent answers `session/prompt` with an error before writing, running or asking
+  anything in that turn; how each shows that it has done nothing is in its ADAPTERS.md
+  row). A refusal after the turn began (the model's service turning a picture down) is
+  that turn's own failure and may stay in the session's history, so a machine gives each
+  harness only pictures that every service behind it takes.
 
 ### `pool`
 
@@ -1306,6 +1341,14 @@ send → delivered time.
 - `conformance/control-file-retry.json` — whether a file is tried again after a try at
   it failed (§6 `start`, *Files*): after the network or a `5xx`, and never after a
   `404`, another status, a wrong length or hash, the file's time limit or a stop.
+- `conformance/control-pictures.json` — which of a command's files is a picture, and
+  which pictures each harness is given natively besides the text's list (§6 `start`,
+  *Pictures*): `facts`, a file's signed type and its bytes, and the width, height and
+  animation its header states, or none (another type, bytes of another format, a header
+  cut short); `takes`, a picture as saved and whether Codex, an ACP agent that takes
+  images, a session held through the Agent SDK, `claude -p` or Antigravity is given it;
+  `messages`, several pictures of one message and which of them a harness sent the bytes
+  is given, within its limit for the whole message.
 - `conformance/transcripts/claude-code/stop-hook-ask.jsonl` — an ask handed to a live
   session at its Stop (§13): the paragraph that names the message, by which the daemon
   finds the answer, and which a reader gives back in its plain form.
