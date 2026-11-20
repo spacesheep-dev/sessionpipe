@@ -4,8 +4,19 @@
 // its own output takes. Which binary, which flags and how the answer is read are the
 // harness's own (`<harness>-control.ts`); what is the same for all of them is here.
 import { spawn } from "node:child_process";
-import { accessSync, constants, readFileSync, statSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
+import { type Picture, pictureFacts } from "../control/pictures.js";
 import { withoutLineage } from "../launched-by.js";
 
 /** A headless turn still running after this is stopped. */
@@ -333,4 +344,44 @@ export function runFailure(label: string, res: RunResult): string | null {
   if (res.error) return `couldn't start ${label}: ${res.error}`;
   if (res.timedOut) return `${label} was still working after 30 minutes, so it was stopped`;
   return null;
+}
+
+/** A saved picture is still what was saved, when a run's arguments are built: a file (not
+ *  a symlink put in its place) of the same length. A picture that is gone or changed is
+ *  left out of the native way; the text still lists it (spec/CONTROL.md §6, *Pictures*). */
+export function pictureThere(p: Picture): boolean {
+  try {
+    const st = lstatSync(p.path);
+    return st.isFile() && st.size === p.size;
+  } catch {
+    return false;
+  }
+}
+
+/** A saved picture's bytes, for a harness that takes them inline: from one open of its
+ *  path, which follows no link and waits on nothing (O_NOFOLLOW, O_NONBLOCK: a FIFO put in
+ *  its place opens at once and is refused), and only if what is open is a regular file of
+ *  the saved length whose header is still that picture's. Null otherwise. Windows has
+ *  neither flag (fs.constants leaves them out), so there a link put in the picture's place
+ *  is followed; it has no FIFO in its file system to wait on. */
+export function pictureBytes(p: Picture): Uint8Array | null {
+  let fd: number;
+  try {
+    fd = openSync(p.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size !== p.size) return null;
+    const b = Buffer.alloc(p.size);
+    let got = 0;
+    for (let n = 1; n && got < p.size; got += n) n = readSync(fd, b, got, p.size - got, got);
+    const f = got === p.size ? pictureFacts(p.type, b) : null;
+    return f?.width === p.width && f.height === p.height ? b : null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
 }

@@ -75,6 +75,13 @@
 - `control-file-retry.json` — whether a machine tries a command's file again after a try at it
   failed (spec/CONTROL.md §6 `start`, *Files*): `{ failure, status?, expect }`, how the try
   ended and `retries` or `fails`. Run by `packages/cli/test/control-files.test.ts`.
+- `control-pictures.json` — which of a command's files is a picture, and which pictures each harness
+  is given natively besides the text's list (spec/CONTROL.md §6 `start`, *Pictures*; spec/ADAPTERS.md):
+  `facts` is `{ name, type, bytes, expect }`, a file's signed type, its bytes in base64 (as much as
+  its header needs) and `{ type, width, height, animated }` or null for a file the text lists and
+  nothing more; `takes` is `{ harness, why, picture, expect }`, a picture as saved and whether that
+  harness (`codex`, `acp` for an agent that says it takes images, `claude-code-sdk`, `claude-code`,
+  `antigravity`) is given it. Run by `packages/core/test/pictures.test.ts`.
 - `control-marks.json` — what a machine names a message by when it hands it to a live session
   (spec/CONTROL.md §6 `prompt`): `{ id, mark, channel }`, the receiver's unsigned `id`, the mark
   it makes for a frame and for a channel's tag, and null for every id that is not a whole ULID.
