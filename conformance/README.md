@@ -79,6 +79,10 @@
 - `control-file-retry.json` — whether a machine tries a command's file again after a try at it
   failed (spec/CONTROL.md §6 `start`, *Files*): `{ failure, status?, expect }`, how the try
   ended and `retries` or `fails`. Run by `packages/cli/test/control-files.test.ts`.
+- `control-hello-at-once.json` — whether a running machine says hello at once when the person
+  changes its settings at the machine (spec/CONTROL.md §2): `{ change, expect }`, what was done
+  (a receiver paired or removed, the folders, mode, name or asking changed, or nothing) and
+  `hello` or `none`. Run by `packages/cli/test/control-poll.test.ts`.
 - `control-pictures.json` — which of a command's files is a picture, and which pictures each harness
   is given natively besides the text's list (spec/CONTROL.md §6 `start`, *Pictures*; spec/ADAPTERS.md):
   `facts` is `{ name, type, bytes, expect }`, a file's signed type, its bytes in base64 (as much as

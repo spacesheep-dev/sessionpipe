@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Fake time and HTTP handlers only: the existing receiver signs the messages,
 // but never listens on TCP. The daemon uses its real local IPC socket.
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DayKey, Passkey } from "../../core/test/helpers/authenticator.js";
 import { ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
@@ -12,6 +13,7 @@ import type { ControlConfig } from "../src/control/store.js";
 import { FakeReceiver } from "./helpers/receiver.js";
 
 const MINUTE = 60_000;
+const here = path.dirname(fileURLToPath(import.meta.url));
 const SID = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
 let tmp: string;
 let rx: FakeReceiver;
@@ -365,6 +367,71 @@ describe("the machine's token", () => {
     await start();
     expect(state().last_error).toContain("from its store (locked?)");
     expect(log).toHaveBeenCalledWith(`${rx.url}: can't read this machine's token from its store; retrying`);
+  });
+});
+
+describe("a hello at once (CONTROL.md §2; conformance/control-hello-at-once.json)", () => {
+  interface Case {
+    name: string;
+    change: "paired" | "folders" | "mode" | "name" | "ask" | "unpaired" | "nothing";
+    expect: "hello" | "none";
+  }
+  const vectors = JSON.parse(
+    readFileSync(path.resolve(here, "../../../conformance/control-hello-at-once.json"), "utf8"),
+  ) as { cases: Case[] };
+  const second = () => ({
+    ...config.receivers[0]!,
+    url: "https://second.test",
+    control: "https://second.test/control",
+    machine: "second",
+  });
+  const greeted = () => hello.mock.calls.map(([u]) => new URL(String(u)).host);
+
+  it("has every change, and both answers", () => {
+    expect(vectors.cases.map((c) => c.change).sort()).toEqual(
+      ["ask", "folders", "mode", "name", "nothing", "paired", "unpaired"].sort(),
+    );
+    expect(vectors.cases.filter((c) => c.expect === "none")).toHaveLength(2);
+  });
+
+  it.each(vectors.cases)("$name", async (c) => {
+    hello.mockResolvedValue(new Response(null, { status: 204 }));
+    if (c.change === "unpaired") config.receivers.push(second());
+    await start();
+    expect(hello).toHaveBeenCalledTimes(config.receivers.length);
+    hello.mockClear();
+    const next: ControlConfig = {
+      paired: { ...config, receivers: [...config.receivers, second()] },
+      folders: { ...config, folders: [tmp, path.join(tmp, "elsewhere")] },
+      mode: { ...config, mode: "auto" as const },
+      name: { ...config, name: "box-two" },
+      ask: { ...config, ask: false },
+      unpaired: { ...config, receivers: config.receivers.slice(0, 1) },
+      nothing: structuredClone(config),
+    }[c.change];
+    daemon.reload(next);
+    // No time passes: this is the reload's own hello, not the one every ten minutes.
+    await vi.advanceTimersByTimeAsync(0);
+    if (c.expect === "none") expect(hello).not.toHaveBeenCalled();
+    else expect(greeted()).toEqual(next.receivers.map((r) => new URL(r.control).host));
+  });
+
+  it("a receiver paired while the daemon runs is told what the machine takes, as one is at start", async () => {
+    hello.mockResolvedValue(new Response(null, { status: 204 }));
+    await start();
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    hello.mockClear();
+    daemon.reload({ ...config, receivers: [...config.receivers, second()] });
+    await vi.advanceTimersByTimeAsync(0);
+    const [, init] = hello.mock.calls.find(([u]) => new URL(String(u)).host === "second.test") ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      name: "testbox",
+      folders: [tmp],
+      mode: "safe",
+      files: true,
+      prompt_files: true,
+    });
+    expect(daemon.status().receivers[1]).toMatchObject({ machine: "second", polling: true });
   });
 });
 
