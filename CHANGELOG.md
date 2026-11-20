@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Eight additions on protocol 1. Every rule a receiver may already rely on still holds.
+Nine additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -57,6 +57,13 @@ Eight additions on protocol 1. Every rule a receiver may already rely on still h
   `session.backfill` then carries no `turns`. A receiver dedups them on `(harness,
   session, seq)` like any event. `install` and `connect` still send metadata only.
   Fixture: `delivery/35`.
+- **A command's pictures reach a harness as pictures where it takes them** (CONTROL.md
+  §6, *Pictures*). The files are saved and listed in the text as before; a harness with
+  its own way to take a picture also gets the PNG, JPEG, GIF and WebP files it takes
+  that way (Codex's `--image`, an ACP agent's `image` blocks, an Agent SDK session's
+  `image` blocks). The signed command does not change, and a native way the harness
+  refuses before it has done anything never fails a message the text alone would have
+  delivered: the machine sends it again as text. Vectors: `control-pictures.json`.
 
 ### For receivers (0.13.3)
 
