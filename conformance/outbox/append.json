@@ -1,0 +1,161 @@
+{
+  "$comment": "spec/OUTBOX.md §2, \"A line a reader can read\": what an append writes for an event too long to be one line. A value of `data` given as {\"repeat\": S, \"times\": N} is the string S repeated N times, at any depth; anything else is as written. `expect` names keys of the written line's `data`: `length` is the string's length in UTF-16 code units, `starts` and `ends` its first and last character. A key under `whole` is written as it was given. Every written line is at most 2 796 202 code units, and a reader reads the event back (§3).",
+  "cases": [
+    {
+      "name": "a tool's input of megabytes is cut as the filter cuts it",
+      "type": "tool.ended",
+      "data": {
+        "tool": "Write",
+        "ok": true,
+        "input": {
+          "repeat": "a",
+          "times": 3000000
+        },
+        "output": "done"
+      },
+      "expect": {
+        "input": {
+          "length": 65537,
+          "starts": "a",
+          "ends": "…"
+        }
+      },
+      "whole": [
+        "tool",
+        "ok",
+        "output"
+      ]
+    },
+    {
+      "name": "a prompt and a reply of megabytes",
+      "type": "turn.transcript",
+      "data": {
+        "turn": 0,
+        "user": {
+          "repeat": "u",
+          "times": 1500000
+        },
+        "assistant": {
+          "repeat": "a",
+          "times": 1500000
+        }
+      },
+      "expect": {
+        "user": {
+          "length": 20001,
+          "starts": "u",
+          "ends": "…"
+        },
+        "assistant": {
+          "length": 20001,
+          "starts": "a",
+          "ends": "…"
+        }
+      },
+      "whole": [
+        "turn"
+      ]
+    },
+    {
+      "name": "a turn still running keeps the end of its reply",
+      "type": "turn.progress",
+      "data": {
+        "turn": 0,
+        "user": "hi",
+        "assistant": {
+          "repeat": "a",
+          "times": 3000000
+        }
+      },
+      "expect": {
+        "assistant": {
+          "length": 20000,
+          "starts": "…",
+          "ends": "a"
+        }
+      },
+      "whole": [
+        "turn",
+        "user"
+      ]
+    },
+    {
+      "name": "three bytes a character: the limit is counted in code units, the read in bytes",
+      "type": "turn.transcript",
+      "data": {
+        "turn": 0,
+        "user": {
+          "repeat": "€",
+          "times": 2800000
+        },
+        "assistant": "ok"
+      },
+      "expect": {
+        "user": {
+          "length": 20001,
+          "starts": "€",
+          "ends": "…"
+        }
+      },
+      "whole": [
+        "turn",
+        "assistant"
+      ]
+    },
+    {
+      "name": "any other value over 64 KiB is cut to that, as text",
+      "type": "x.custom",
+      "data": {
+        "blob": {
+          "repeat": "b",
+          "times": 3000000
+        },
+        "tree": {
+          "leaf": {
+            "repeat": "c",
+            "times": 70000
+          }
+        },
+        "n": 7
+      },
+      "expect": {
+        "blob": {
+          "length": 65537,
+          "starts": "b",
+          "ends": "…"
+        },
+        "tree": {
+          "length": 65537,
+          "starts": "{",
+          "ends": "…"
+        }
+      },
+      "whole": [
+        "n"
+      ]
+    },
+    {
+      "name": "an event that fits is written as it is",
+      "type": "tool.ended",
+      "data": {
+        "tool": "Write",
+        "ok": true,
+        "input": {
+          "repeat": "a",
+          "times": 100000
+        }
+      },
+      "expect": {
+        "input": {
+          "length": 100000,
+          "starts": "a",
+          "ends": "a"
+        }
+      },
+      "whole": [
+        "tool",
+        "ok"
+      ]
+    }
+  ]
+}

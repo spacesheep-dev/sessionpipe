@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { safeId } from "./paths.js";
+import { fitText } from "./privacy/filter.js";
 import type { Event } from "./types.js";
 
 export interface OutboxRef {
@@ -31,6 +32,18 @@ export interface OutboxRef {
 
 const READ_CHUNK = 1024 * 1024;
 const READ_MAX = 8 * 1024 * 1024;
+/** The longest line an append writes, in UTF-16 units: each is at most three bytes of
+ *  UTF-8, so a line this long, with its newline, is always within READ_MAX. */
+const LINE_MAX = Math.floor(READ_MAX / 3);
+
+/** An event as its outbox line. One longer than LINE_MAX (a paste of megabytes, a Write
+ *  of a big file) would stop every read of its session at it, so it goes with its text
+ *  cut the way the filter cuts it for every sink anyway: the event still arrives, and no
+ *  sink is sent less than it would have been. */
+function lineOf(e: Event): string {
+  const line = JSON.stringify(e);
+  return line.length > LINE_MAX ? JSON.stringify({ ...e, data: fitText(e.type, e.data) }) : line;
+}
 
 /** Whether a file ends in the middle of a line: it has bytes and the last is not a
  *  newline. A file that is missing or empty does not. */
@@ -101,7 +114,7 @@ export class Outbox {
     if (!events.length) return;
     mkdirSync(this.dir(ref.harness), { recursive: true, mode: 0o700 });
     const f = this.file(ref);
-    const lines = `${events.map((e) => JSON.stringify(e)).join("\n")}\n`;
+    const lines = `${events.map(lineOf).join("\n")}\n`;
     appendFileSync(f, endsMidLine(f) ? `\n${lines}` : lines, { mode: 0o600 });
   }
 

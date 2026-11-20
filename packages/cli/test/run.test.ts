@@ -216,20 +216,22 @@ describe("runJob", () => {
     for (const value of [...Object.values(payload), "ignored", "private-stdin"]) expect(text).not.toContain(value);
   });
 
-  it.each([
-    "",
-    "null",
-    "[]",
-    '["private-array-value"]',
-    '"private-string-value"',
-    "42",
-    "{ private-invalid-json",
-    "{}",
-  ])("logs no keys or values for an unclaimed non-object or invalid payload: %s", async (stdin) => {
-    await runJob({ ...job("SessionStart"), stdin }, { state: tmp });
+  it.each(["", "null", "[]", '["private-array-value"]', '"private-string-value"', "42", "{}"])(
+    "logs no keys or values for an unclaimed non-object payload: %s",
+    async (stdin) => {
+      await runJob({ ...job("SessionStart"), stdin }, { state: tmp });
+      const text = readFileSync(path.join(tmp, "log"), "utf8");
+      expect(text).toContain("codex SessionStart:");
+      expect(text).toContain("keys: (none)");
+      expect(text).not.toContain("private-");
+    },
+  );
+
+  // Issue #200: a payload that is not JSON was logged as one the adapter did not claim.
+  it("logs the size of a payload that is not JSON, never its text", async () => {
+    await runJob({ ...job("SessionStart"), stdin: "{ private-invalid-json" }, { state: tmp });
     const text = readFileSync(path.join(tmp, "log"), "utf8");
-    expect(text).toContain("codex SessionStart:");
-    expect(text).toContain("keys: (none)");
+    expect(text).toContain("codex SessionStart: the payload (22 bytes) could not be read as JSON; event dropped");
     expect(text).not.toContain("private-");
   });
 

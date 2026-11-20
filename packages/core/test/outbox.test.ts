@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Cursors, Outbox, processAlive, takeLock, takeNamedLock } from "../src/outbox.js";
+import { filterEvent } from "../src/privacy/filter.js";
 import type { Event } from "../src/types.js";
 import { isUlid, ulid } from "../src/ulid.js";
 
@@ -306,6 +307,45 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     expect(r.events.map((e) => e.session.seq)).toEqual([0]);
     expect(r.offset).toBe(first);
   });
+
+  // Issue #200: so no one event can be such a line, a paste of megabytes or a Write of a
+  // big file is appended with its text cut the way every sink is sent it anyway.
+  it("an event too long for a line goes with its text cut as the filter cuts it, and reads back", () => {
+    const o = new Outbox(tmp);
+    // Three bytes of UTF-8 to each UTF-16 unit, the most there can be: 12 MiB a field.
+    const text = "€".repeat(4 * 1024 * 1024);
+    const at = "2026-11-19T00:00:00.000Z";
+    const events: Event[] = [
+      {
+        ...ev(0),
+        type: "tool.ended",
+        tier: 3,
+        data: { tool: "Write", ok: false, input: { file_path: "/a", content: text }, output: text, error: text },
+      },
+      { ...ev(1), type: "turn.transcript", tier: 3, data: { turn: 0, user: text, assistant: text, at } },
+      { ...ev(2), type: "turn.progress", tier: 3, data: { turn: 1, user: "hi", assistant: text, at } },
+      ev(3),
+    ];
+    o.append(ref, events);
+    const file = readFileSync(o.file(ref));
+    const lines: Buffer[] = [];
+    for (let i = 0, nl = file.indexOf(0x0a); nl >= 0; i = nl + 1, nl = file.indexOf(0x0a, i))
+      lines.push(file.subarray(i, nl));
+    expect(lines).toHaveLength(4);
+    for (const l of lines) expect(l.length).toBeLessThan(1024 * 1024);
+    // An event that fits is written as it always was.
+    expect(lines[3]?.toString()).toBe(JSON.stringify(events[3]));
+    const back = o.read(ref, 0).events;
+    expect(back.map((e) => e.session.seq)).toEqual([0, 1, 2, 3]);
+    // Every sink is sent what the whole event would have given it...
+    const sent = (e: Event | undefined) => filterEvent(e as Event, 3, false) as Event;
+    const errorless = (e: Event) => ({ ...e, data: { ...e.data, error: undefined } });
+    expect(errorless(sent(back[0]))).toEqual(errorless(sent(events[0])));
+    for (const i of [1, 2, 3]) expect(sent(back[i])).toEqual(sent(events[i]));
+    expect(sent(back[2])?.data.assistant).toBe(`…${text.slice(-19_999)}`);
+    // ...and a field the filter leaves whole, which no adapter makes this long, is cut too.
+    expect(back[0]?.data.error).toBe(`${text.slice(0, 64 * 1024)}…`);
+  }, 60_000);
 
   it("sessions(): none without an outbox, a stray file in it is skipped, newest first", () => {
     const o = new Outbox(tmp);

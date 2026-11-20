@@ -475,8 +475,8 @@ const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{
  *  what Claude Code says about the picture: its media type, its size and its dimensions.
  *  Another Read with `file.base64` (a PDF), and an image part of a content list (an MCP
  *  tool's screenshot), keep everything but the bytes, which become `omitted_bytes`: the
- *  length of the base64 left out. The hook takes the same bytes out of a payload over
- *  1 MiB (hook.ts, `withoutPictures`), so a receiver gets the same object either way. */
+ *  length of the base64 left out. The hook hands on every payload it takes whole, so
+ *  this is the one place they are left out. */
 function toolOutput(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(withoutImageData);
   if (!isObj(v)) return v;
