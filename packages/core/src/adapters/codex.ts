@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
-import { codexInjected, readCodex } from "../readers/transcripts.js";
+import { codexInjected, codexWords, readCodex } from "../readers/transcripts.js";
 import type { DataOf } from "../types.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped, writeBack } from "./claude-shaped.js";
 import * as toml from "./codex-config.js";
@@ -490,13 +490,10 @@ export function codexFacts(file: string): SessionFacts {
     | undefined;
   if (ctx?.payload?.model) out.model = ctx.payload.model;
   for (const j of H) {
-    const p = j.payload as { type?: string; role?: string; content?: { type?: string; text?: string }[] } | undefined;
+    const p = j.payload as { type?: string; role?: string; content?: unknown } | undefined;
     if (j.type !== "response_item" || !p || p.type !== "message" || p.role !== "user") continue;
-    const text = (p.content ?? [])
-      .filter((b) => b && b.type === "input_text" && typeof b.text === "string")
-      .map((b) => b.text as string)
-      .join("\n")
-      .trim();
+    // A picture's wrapper lines are Codex's, not the ask (codexWords).
+    const text = codexWords(p.content);
     if (!text || codexInjected(text)) continue;
     const line = text.split("\n")[0] as string; // trimmed, so its first line is its first non-blank one
     out.title = line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line;

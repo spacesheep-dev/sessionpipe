@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // A command's pictures, passed natively where a harness takes them (CONTROL.md §6 `start`,
 // Pictures; ADAPTERS.md): which file is a picture, which pictures each harness takes
-// (conformance/control-pictures.json), and a saved picture checked again before a run.
+// (conformance/control-pictures.json), a saved picture checked again before a run, and
+// what Codex is handed: its `--image` arguments on `exec` and `exec resume`.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { CODEX_PICTURES, codexArgs, codexPictures, codexRefusedPictures } from "../src/adapters/codex-control.js";
 import { pictureBytes, pictureThere } from "../src/adapters/headless.js";
 import {
   base64Length,
@@ -28,6 +30,7 @@ const V = JSON.parse(readFileSync(new URL("../../../conformance/control-pictures
 
 /** Each harness's limits, or null for one with no way but the text. */
 const LIMITS: Record<string, PictureLimits | null> = {
+  codex: CODEX_PICTURES,
   "claude-code": null,
   antigravity: null,
 };
@@ -182,5 +185,95 @@ describe("a saved picture, checked again before a run", () => {
     // No longer a picture at all.
     writeFileSync(p.path, Buffer.alloc(b.length));
     expect(pictureBytes(p)).toBeNull();
+  });
+});
+
+describe("Codex: each picture its own --image, on exec and exec resume", () => {
+  const T = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
+  const one = ["/w/.sessionpipe/files/s/a shot é.png"];
+  const several = ["/w/.sessionpipe/files/s/1.png", "/w/.sessionpipe/files/s/2.jpg", "/w/.sessionpipe/files/s/3.webp"];
+
+  it("no pictures: the arguments as they always were", () => {
+    expect(codexArgs({ permission: "safe", prompt: "P", cwd: "/w", pictures: [] })).toEqual(
+      codexArgs({ permission: "safe", prompt: "P", cwd: "/w" }),
+    );
+    expect(codexArgs({ permission: "safe", prompt: "P", resume: T, pictures: [] })).toEqual(
+      codexArgs({ permission: "safe", prompt: "P", resume: T }),
+    );
+  });
+
+  it("one picture, a path with a space and an accent, one argument: exec", () => {
+    expect(codexArgs({ permission: "safe", prompt: "what is this?", cwd: "/w", model: "m-1", pictures: one })).toEqual([
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-C",
+      "/w",
+      "-s",
+      "workspace-write",
+      "-m",
+      "m-1",
+      "--image",
+      "/w/.sessionpipe/files/s/a shot é.png",
+      "--",
+      "what is this?",
+    ]);
+  });
+
+  it("several, in order, after every other flag and before --: exec resume", () => {
+    expect(codexArgs({ permission: "auto", prompt: "-and these", resume: T, pictures: several })).toEqual([
+      "exec",
+      "resume",
+      "--json",
+      "--skip-git-repo-check",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'approval_policy="on-request"',
+      "-c",
+      'approvals_reviewer="auto_review"',
+      "--image",
+      several[0],
+      "--image",
+      several[1],
+      "--image",
+      several[2],
+      "--",
+      T,
+      "-and these",
+    ]);
+  });
+
+  it("the pictures Codex is given: those it takes, still there, in order, by path", () => {
+    const a = saved("a.png", "a PNG");
+    const anim = saved("anim.gif", "an animated GIF");
+    const b = saved("b.webp", "a lossy WebP");
+    const gone = saved("gone.jpg", "a JPEG: JFIF, then a baseline frame");
+    rmSync(gone.path);
+    const big: Picture = { ...a, width: 4801, height: 6400 };
+    expect(codexPictures([b, anim, gone, big, a])).toEqual([b.path, a.path]);
+    expect(codexPictures([])).toEqual([]);
+  });
+
+  it("a path with a comma is never an --image: Codex would split it and read another file", () => {
+    const a = saved("a.png", "a PNG");
+    const comma = saved("x,README.png", "a PNG");
+    expect(pictureThere(comma)).toBe(true);
+    expect(codexPictures([comma, a])).toEqual([a.path]);
+    // A comma in the session's folder leaves out every picture in it.
+    expect(codexPictures([{ ...a, path: "/w/one,two/.sessionpipe/files/s/a.png" }])).toEqual([]);
+  });
+
+  it("an older Codex's refusal of --image, and nothing else", () => {
+    const old =
+      "error: unexpected argument '--image' found\n\nUsage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]\n";
+    expect(codexRefusedPictures({ code: 2, stderr: old })).toBe(true);
+    expect(codexRefusedPictures({ code: 1, stderr: old })).toBe(false);
+    expect(codexRefusedPictures({ code: 2, stderr: "error: unexpected argument '--imagez' found" })).toBe(false);
+    expect(codexRefusedPictures({ code: 2 })).toBe(false);
+    // It had begun: a thread was named on stdout.
+    expect(codexRefusedPictures({ code: 2, stdout: '{"type":"thread.started"}\n', stderr: old })).toBe(false);
+    expect(codexRefusedPictures({ code: 2, stdout: " \n", stderr: old })).toBe(true);
+    expect(codexRefusedPictures({ code: 0, stderr: "" })).toBe(false);
   });
 });

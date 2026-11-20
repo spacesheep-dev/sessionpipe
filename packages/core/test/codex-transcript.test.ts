@@ -2,10 +2,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { codex, codexFacts } from "../src/adapters/codex.js";
 import { codexReplayBoundary } from "../src/adapters/codex-rollout.js";
-import { codexInjected, readCodex } from "../src/readers/transcripts.js";
+import { codexInjected, codexPictureTag, codexWords, readCodex } from "../src/readers/transcripts.js";
 
 // Codex writes the AGENTS.md it read into the session as a "user" message (measured on
 // codex-cli 0.160.0, 2026-10-04): a turn and a title built from it named the
@@ -230,5 +231,44 @@ describe("a forked Codex subagent rollout", () => {
       started_at: Date.parse("2026-10-09T23:47:06.489Z"),
       last_at: Date.parse("2026-10-09T23:47:11.000Z"),
     });
+  });
+});
+
+// A session started or resumed with a picture (`codex exec --image`, recorded on codex-cli
+// 0.171.0, 2026-11-19, before its request went out): Codex writes the ask as an
+// `<image name=[Image #1] path="…">` line, the picture, `</image>`, then the words.
+const PICTURES = fileURLToPath(
+  new URL("../../../conformance/transcripts/codex/picture-attached.jsonl", import.meta.url),
+);
+
+describe("a Codex rollout whose asks carry pictures (conformance/transcripts/codex/picture-attached.jsonl)", () => {
+  it("the title is the person's words, not Codex's wrapper or the picture's path", () => {
+    expect(codexFacts(PICTURES)).toMatchObject({
+      cwd: "/home/user/my project é",
+      harness_version: "0.171.0",
+      title: "What single word is written in the picture?",
+      title_source: "first-ask",
+    });
+  });
+
+  it("the transcript's asks are the words alone, start and resume", () => {
+    const r = readCodex(readFileSync(PICTURES, "utf8").split("\n"), 0);
+    expect(r.turns).toEqual([]);
+    expect(r.open?.user).toBe("What single word is written in the picture?\n\nAnd in this one?");
+    expect(JSON.stringify(r)).not.toContain(".sessionpipe/files");
+  });
+
+  it("only Codex's own wrapper lines are dropped, whole", () => {
+    expect(codexPictureTag('<image name=[Image #1] path="/w/a b é.png">')).toBe(true);
+    expect(codexPictureTag("<image name=[Image #12]>")).toBe(true);
+    expect(codexPictureTag("</image>")).toBe(true);
+    expect(codexPictureTag("<image>")).toBe(false);
+    expect(codexPictureTag('<image name=[Image #1] path="/w/a.png"> what is this?')).toBe(false);
+    expect(codexPictureTag(" </image>")).toBe(false);
+    expect(codexPictureTag("<image name=[Image one]>")).toBe(false);
+    // A person who writes the tag in the middle of their words keeps it.
+    expect(codexWords([{ type: "input_text", text: "is </image> a tag?" }])).toBe("is </image> a tag?");
+    expect(codexWords("plain words")).toBe("plain words");
+    expect(codexWords([{ type: "input_text", text: "</image>" }, { type: "input_image" }, "junk", null])).toBe("");
   });
 });

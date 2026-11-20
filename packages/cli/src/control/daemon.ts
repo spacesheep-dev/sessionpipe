@@ -58,6 +58,7 @@ import {
   MODEL_MAX,
   MODEL_RE,
   narrower,
+  type Picture,
   parseSessionRef,
   type RunLevel,
   type StartPermission,
@@ -68,7 +69,7 @@ import type { Pool } from "../pool/index.js";
 import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { closerOf, questionOver } from "./attention.js";
-import { fetchFiles, withFiles, writeFiles } from "./files.js";
+import { fetchFiles, picturesOf, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
@@ -164,7 +165,18 @@ interface Driver {
   label: string;
   cmd: string;
   bin: () => string | null;
-  args: (o: { permission: RunLevel; prompt: string; cwd: string; resume?: string; model?: string }) => string[];
+  args: (o: {
+    permission: RunLevel;
+    prompt: string;
+    cwd: string;
+    resume?: string;
+    model?: string;
+    pictures?: readonly string[];
+  }) => string[];
+  /** Where the harness takes pictures as arguments (CONTROL.md §6, *Pictures*): which
+   *  saved pictures it is given, by path, and whether a run refused those arguments
+   *  before it did anything (an older one without them), to be made again without. */
+  pictures?: { take: (pictures: readonly Picture[]) => string[]; refused: (res: RunResult) => boolean };
   /** The levels a start may ask for here, and the one it gets by default (CONTROL.md §2). */
   levels: (mode: ControlMode) => StartPermission[];
   defaultLevel: (mode: ControlMode) => RunLevel;
@@ -173,6 +185,13 @@ interface Driver {
   reading: () => Reading & { warnings?: string[] };
   login?: (bin: string) => Promise<Login>;
   loginHint?: string;
+}
+
+/** A driven run's arguments, and where they carry pictures, the same without them and
+ *  how to tell that the harness refused them (CONTROL.md §6, *Pictures*). */
+interface DrivenArgs {
+  args: string[];
+  fallback: { args: string[]; refused: (res: RunResult) => boolean; count: number } | null;
 }
 
 /** One harness's entry in the hello's `start` (CONTROL.md §2). */
@@ -325,8 +344,9 @@ export interface Carried {
 /** A session the daemon holds: through the Agent SDK (sdk.ts; a fake in tests), or an
  *  ACP agent it runs (core's acp-control.ts), which says so in `mode`. */
 export interface SdkSession {
-  /** Deliver one message; resolves with the agent's reply when the turn ends. */
-  send(text: string): Promise<{ reply: string; error?: string }>;
+  /** Deliver one message; resolves with the agent's reply when the turn ends. Its saved
+   *  pictures go natively too where the session takes them (CONTROL.md §6, *Pictures*). */
+  send(text: string, pictures?: readonly Picture[]): Promise<{ reply: string; error?: string; native?: number }>;
   interrupt(): Promise<void>;
   close(): void;
   readonly busy: boolean;
@@ -678,6 +698,10 @@ export class ControlDaemon {
   /** The mode each held ACP agent was opened in, and its word for each mode: what its
    *  process was given and how its permission requests are answered (sameRun). */
   private readonly heldRuns = new Map<string, HeldRun>();
+  /** A prompt's saved pictures, by message id, from when they are written until its
+   *  delivery is over: what a harness that takes pictures natively is given besides the
+   *  text (CONTROL.md §6, *Pictures*). */
+  private readonly pictures = new Map<string, Picture[]>();
   private readonly nonces: NonceStore;
   private readonly acks: AckOutbox;
   private readonly recentAcks = new Map<string, { ack: Ack; at: number }>();
@@ -1992,13 +2016,18 @@ export class ControlDaemon {
         if (cmd.files) {
           this.finish(r, m.id, { outcome: "taken" });
           const mine = run as OwnRun;
-          const text = await this.orStopped(
+          const got = await this.orStopped(
             mine,
             this.attached(r, m.id, cmd, ref, now.folder, { message: cmd.nonce, signal: mine.ctl.signal }),
           );
-          if (text === STOPPED) return this.finish(r, m.id, this.stoppedAck(null), sent);
-          if (text === null) return;
-          return await this.prompt(r, m.id, { ...cmd, text }, now, sent);
+          if (got === STOPPED) return this.finish(r, m.id, this.stoppedAck(null), sent);
+          if (got === null) return;
+          this.pictures.set(m.id, got.pictures);
+          try {
+            return await this.prompt(r, m.id, { ...cmd, text: got.text }, now, sent);
+          } finally {
+            this.pictures.delete(m.id);
+          }
         }
         return await this.prompt(r, m.id, cmd, now, sent);
       };
@@ -2154,6 +2183,7 @@ export class ControlDaemon {
         cmd: "codex",
         bin: () => this.deps.codex?.() ?? null,
         args: ({ cwd, resume, ...o }) => codexControl.codexArgs(resume ? { ...o, resume } : { ...o, cwd }),
+        pictures: { take: codexControl.codexPictures, refused: codexControl.codexRefusedPictures },
         levels: codexControl.offeredLevels,
         defaultLevel: codexControl.defaultLevel,
         models: () => this.deps.codexModels?.() ?? codexControl.codexModels(this.deps.env ?? process.env),
@@ -3020,6 +3050,7 @@ export class ControlDaemon {
           text: channel === null ? this.inPlace(r, text, id) : this.framed(r, text, false),
           id,
         });
+        this.picturesListed(id, "in place; Claude Code opens them");
         this.scheduleHello();
         if (channel !== null && !(await this.tookIt(started!, cmd.session, from, channelMark(id)))) {
           this.mutedChannels.add(channel);
@@ -3040,6 +3071,7 @@ export class ControlDaemon {
         const p: TurnPending = { receiver: r, msgId: id, text, session: cmd.session, queuedAt: sent, iat: cmd.iat };
         this.letGo(this.runOf(id));
         l.turnQueue.push(p);
+        this.picturesListed(id, "in place; Claude Code opens them");
         // In the order they were sent, whenever each got here: a later poll can bring a
         // message signed before one that is already waiting for this session's Stop.
         l.turnQueue.sort((a, b) => a.iat - b.iat);
@@ -3059,7 +3091,7 @@ export class ControlDaemon {
         // A session the daemon holds: a Stop is its own interrupt, not the end of a run.
         this.letGo(this.runOf(id));
         this.finish(r, id, { outcome: "taken" });
-        const out = await this.sendHeld(cmd.session, s, this.framed(r, text, false));
+        const out = await this.sendHeld(id, cmd.session, s, this.framed(r, text, false), this.pictures.get(id));
         return this.finish(
           r,
           id,
@@ -3108,6 +3140,7 @@ export class ControlDaemon {
           return this.prompt(r, id, cmd, place, sent, { ...o, noInbox: true });
         }
         this.deps.log(`${id.slice(-8)}: into ${key.slice(0, 24)}'s own inbox (${declare}), pid ${rec.pid}`);
+        this.picturesListed(id, "in place; Claude Code opens them");
         this.letGo(this.runOf(id));
         this.park(key, id);
         if (!(await this.tookIt(started, key, from, messageMark(id))))
@@ -3147,8 +3180,15 @@ export class ControlDaemon {
   /** One message through a held session; one whose process left, or that no longer runs as
    *  the machine's mode says (reload), is let go of, so the next message reopens the session
    *  instead of finding it closed. */
-  private async sendHeld(session: string, s: SdkSession, text: string): Promise<{ reply: string; error?: string }> {
-    const out = await s.send(text);
+  private async sendHeld(
+    id: string,
+    session: string,
+    s: SdkSession,
+    text: string,
+    pictures: readonly Picture[] = [],
+  ): Promise<{ reply: string; error?: string }> {
+    const out = await s.send(text, pictures);
+    this.picturesSaid(id, pictures.length, out.native ?? 0, "image blocks");
     const run = this.heldRuns.get(session);
     if (s.closed) this.letGoHeld(session, s, true);
     else if (run && !sameRun(run, this.cfg.mode)) this.letGoHeld(session, s);
@@ -3266,13 +3306,15 @@ export class ControlDaemon {
       const target = alias?.id ?? place.target ?? ref.id;
       const recorded = alias ? startOptionsOf(alias) : null;
       const o = this.capped(this.laterOptions(ref.harness, recorded), cmd);
-      const args = drv.args({
-        permission: o.permission,
-        prompt: this.framed(r, cmd.text as string, false),
-        cwd: place.folder,
-        resume: target,
-        ...(o.model ? { model: o.model } : {}),
-      });
+      const args = (pictures?: string[]) =>
+        drv.args({
+          permission: o.permission,
+          prompt: this.framed(r, cmd.text as string, false),
+          cwd: place.folder,
+          resume: target,
+          ...(o.model ? { model: o.model } : {}),
+          ...(pictures ? { pictures } : {}),
+        });
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} resume ${target.slice(0, 8)} (${o.permission}) in ${place.folder}`);
       await this.drive(
         r,
@@ -3280,7 +3322,7 @@ export class ControlDaemon {
         ref,
         drv,
         ready.bin,
-        args,
+        this.withPictures(id, drv, this.pictures.get(id), args),
         place.folder,
         sent,
         target,
@@ -3289,6 +3331,35 @@ export class ControlDaemon {
         this.childEnv(r, cmd),
       );
     });
+  }
+
+  /** What the log says of a run's pictures (CONTROL.md §6, *Pictures*): how many went
+   *  natively and how many are in the text's list only, as counts, never names or bytes.
+   *  Nothing for a run that had none. */
+  private picturesSaid(id: string, all: number, native: number, how: string): void {
+    if (all) this.deps.log(`${id.slice(-8)}: pictures: ${native} natively (${how}), ${all - native} in the list only`);
+  }
+
+  /** The same, for a message whose pictures went to a lane with no way but the text. */
+  private picturesListed(id: string, how: string): void {
+    this.picturesSaid(id, this.pictures.get(id)?.length ?? 0, 0, how);
+  }
+
+  /** A driven run's arguments with the saved pictures the harness takes natively, and
+   *  the same without them for when it refuses them; with none it takes, the arguments
+   *  are what they were before there were pictures, and there is nothing to fall back to. */
+  private withPictures(
+    id: string,
+    drv: Driver,
+    pictures: readonly Picture[] | undefined,
+    args: (pictures?: string[]) => string[],
+  ): DrivenArgs {
+    const way = drv.pictures;
+    const all = pictures?.length ?? 0;
+    const paths = way && all ? way.take(pictures as readonly Picture[]) : [];
+    this.picturesSaid(id, all, paths.length, way ? `${drv.cmd} --image` : `${drv.cmd} takes none`);
+    if (!way || !paths.length) return { args: args(), fallback: null };
+    return { args: args(paths), fallback: { args: args(), refused: way.refused, count: all } };
   }
 
   /** Run one Codex or Antigravity turn and ack it: `progress` as its answer grows, then
@@ -3301,7 +3372,8 @@ export class ControlDaemon {
     ref: { harness: string; id: string },
     drv: Driver,
     bin: string,
-    args: string[],
+    /** The arguments, and what to run instead if their pictures are refused (withPictures). */
+    args: DrivenArgs,
     cwd: string,
     sent: number,
     asked: string | null,
@@ -3325,15 +3397,27 @@ export class ControlDaemon {
       name();
     };
     const run = this.runOf(id);
-    const res = await this.owning(`${ref.harness}:${ref.id}`, () =>
-      this.ownRun(run, bin, args, {
+    const go = (a: string[]) =>
+      this.ownRun(run, bin, a, {
         cwd,
         env: { ...jobEnv(this.deps.env), ...extra },
         timeoutMs: JOB_TIMEOUT_MS,
         onLine,
         keep: () => false,
-      }),
-    );
+      });
+    const res = await this.owning(`${ref.harness}:${ref.id}`, async () => {
+      const first = await go(args.args);
+      // Pictures as arguments that this harness refused before it did anything (an older
+      // one without them): the same run with the list in the text alone, which is what it
+      // got before there were pictures (CONTROL.md §6, *Pictures*).
+      const fb = args.fallback;
+      if (!fb || first.stopped || reading.lines || !fb.refused(first)) return first;
+      this.deps.log(
+        `${id.slice(-8)}: ${drv.cmd} doesn't take pictures as arguments (${(first.stderr as string).trim().split("\n")[0]}); run again with the list in the text alone`,
+      );
+      this.picturesSaid(id, fb.count, 0, `${drv.cmd} refused --image`);
+      return go(fb.args);
+    });
     // A runner that doesn't stream hands the whole output over at the end.
     if (!reading.lines && res.stdout) for (const l of res.stdout.split("\n")) if (l.trim()) onLine(l);
     stream.close();
@@ -3448,6 +3532,7 @@ export class ControlDaemon {
       this.deps.log(
         `${id.slice(-8)}: claude -p (${narrow ?? o.permission}) --resume ${target}${mode === "fork" ? " --fork-session" : ""} in ${place.folder}`,
       );
+      this.picturesListed(id, "claude -p takes none; Claude Code opens them");
       const stream = this.answerStream(r, id);
       // place() refuses a Claude Code session with no transcript, so there is one.
       const own = (place.transcript as Transcript).file;
@@ -3886,9 +3971,10 @@ export class ControlDaemon {
       }
       this.recordStart(ref.id, o);
       this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
-      if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
-      if (text === null) return;
+      const got = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
+      if (got === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if (got === null) return;
+      const text = got.text;
       if (this.deps.sdk) {
         // A session the daemon will hold: from here a Stop is that session's interrupt.
         this.letGo(run);
@@ -3904,7 +3990,9 @@ export class ControlDaemon {
             ...(Object.keys(extra).length ? { env: extra } : {}),
           });
           this.sdkSessions.set(cmd.session, s);
-          return s.send(this.framed(r, text, true));
+          const sent = await s.send(this.framed(r, text, true), got.pictures);
+          this.picturesSaid(id, got.pictures.length, sent.native ?? 0, "image blocks");
+          return sent;
         });
         return this.finish(
           r,
@@ -3927,6 +4015,7 @@ export class ControlDaemon {
       /* v8 ignore next -- startChoice() offered this level from these same caps */
       const args = "args" in built ? built.args : [];
       const stream = this.answerStream(r, id);
+      this.picturesSaid(id, got.pictures.length, 0, "claude -p takes none; Claude Code opens them");
       const res = await this.ownRun(run, c.bin, args, {
         cwd,
         env: { ...claudeEnv(undefined, this.deps.env), ...this.childEnv(r, cmd) },
@@ -3987,17 +4076,20 @@ export class ControlDaemon {
       if (ready === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
       if ("failed" in ready) return this.finish(r, id, { outcome: "failed", detail: ready.failed });
       this.finish(r, id, { outcome: "taken", applied: this.applied(o) });
-      const text = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
-      if (text === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
-      if (text === null) return;
-      const args = drv.args({
-        permission: o.permission,
-        prompt: this.framed(r, text, true),
-        cwd,
-        ...(o.model ? { model: o.model } : {}),
-      });
+      const got = await this.orStopped(run, this.attached(r, id, cmd, ref, cwd, { signal: run.ctl.signal }));
+      if (got === STOPPED) return this.finish(r, id, UNSTARTED_ACK, sent);
+      if (got === null) return;
+      const args = (pictures?: string[]) =>
+        drv.args({
+          permission: o.permission,
+          prompt: this.framed(r, got.text, true),
+          cwd,
+          ...(o.model ? { model: o.model } : {}),
+          ...(pictures ? { pictures } : {}),
+        });
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} new session for ${known(ref.id)} (${o.permission}) in ${cwd}`);
-      await this.drive(r, id, ref, drv, ready.bin, args, cwd, sent, null, o, o, this.childEnv(r, cmd));
+      const both = this.withPictures(id, drv, got.pictures, args);
+      await this.drive(r, id, ref, drv, ready.bin, both, cwd, sent, null, o, o, this.childEnv(r, cmd));
     });
   }
 
@@ -4023,8 +4115,8 @@ export class ControlDaemon {
     const found = this.deps.acp?.(ref.harness) ?? null;
     if (!found) return this.finish(r, id, { outcome: "failed", detail: `${label} isn't installed on this machine` });
     this.finish(r, id, { outcome: "taken" });
-    const text = await this.attached(r, id, cmd, ref, cwd);
-    if (text === null) return;
+    const got = await this.attached(r, id, cmd, ref, cwd);
+    if (got === null) return;
     this.deps.log(`${id.slice(-8)}: ${found.bin} new session for ${known(ref.id)} (${this.cfg.mode}) in ${cwd}`);
     const stream = this.answerStream(r, id);
     const out = await this.slot(async () => {
@@ -4036,7 +4128,7 @@ export class ControlDaemon {
       this.sdkSessions.set(cmd.session, opened.held);
       this.heldRuns.set(cmd.session, run);
       this.setAlias(ref.harness, ref.id, opened.held.session, cwd, null);
-      return this.sendHeld(cmd.session, opened.held, this.framed(r, text, true));
+      return this.sendHeld(id, cmd.session, opened.held, this.framed(r, got.text, true), got.pictures);
     });
     stream.close();
     this.finish(
@@ -4074,7 +4166,13 @@ export class ControlDaemon {
           if ("failed" in opened) return { reply: "", error: opened.failed };
           this.sdkSessions.set(cmd.session, opened.held);
           this.heldRuns.set(cmd.session, run);
-          return this.sendHeld(cmd.session, opened.held, this.framed(r, cmd.text as string, false));
+          return this.sendHeld(
+            id,
+            cmd.session,
+            opened.held,
+            this.framed(r, cmd.text as string, false),
+            this.pictures.get(id),
+          );
         }),
       );
       stream.close();
@@ -4123,7 +4221,10 @@ export class ControlDaemon {
    *  download, and its one final ack is already out. A download that carried on was
    *  acked a second time when it failed (`failed`, code `file`, after `delivered`), and
    *  when it succeeded wrote its files into the folder of a session that was never
-   *  created. */
+   *  created.
+   *
+   *  With the text, the saved files that are pictures (CONTROL.md §6, *Pictures*), for a
+   *  harness that takes them natively as well. */
   private async attached(
     r: Caller,
     id: string,
@@ -4131,11 +4232,11 @@ export class ControlDaemon {
     ref: { id: string },
     cwd: string,
     o: { message?: string; signal?: AbortSignal } = {},
-  ): Promise<string | null> {
+  ): Promise<{ text: string; pictures: Picture[] } | null> {
     const text = cmd.text as string;
-    if (!cmd.files) return text;
+    if (!cmd.files) return { text, pictures: [] };
     /* v8 ignore next -- an ask or a relay carries no files; the receiver's token is what fetches them */
-    if (isSink(r)) return text;
+    if (isSink(r)) return { text, pictures: [] };
     const over = (): boolean => !!o.signal?.aborted || !this.inflight.has(id);
     try {
       const got = await fetchFiles(cmd.files, {
@@ -4151,7 +4252,7 @@ export class ControlDaemon {
       this.deps.log(
         `${id.slice(-8)}: ${got.length} file(s) saved in ${cwd}/.sessionpipe/files/${ref.id}${o.message ? `/${o.message}` : ""}`,
       );
-      return withFiles(text, got, rel);
+      return { text: withFiles(text, got, rel), pictures: picturesOf(cwd, got, rel) };
     } catch (e) {
       if (over()) return null;
       // fetchFiles and writeFiles throw nothing but a FileProblem, and its message is the detail.
