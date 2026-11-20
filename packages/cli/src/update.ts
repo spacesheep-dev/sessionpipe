@@ -7,7 +7,8 @@
 // a dev build is somebody's deliberate choice of code, and npm installing over it
 // would be wrong or impossible: for those `globalPrefix` is null and nothing happens.
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
+import { accessSync, constants, existsSync, opendirSync, readFileSync, realpathSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { viaNpx } from "./runtime.js";
 
@@ -145,6 +146,27 @@ export interface ExecResult {
 }
 export type Exec = (argv: string[], o: { env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<ExecResult>;
 
+/** Where a command this copy runs starts when the folder this one was typed in cannot be
+ *  told: the home folder. npm asks where it is before anything else and stops when it
+ *  cannot be told (a terminal macOS has not let into Desktop, a folder deleted under the
+ *  shell), so an update typed there never reached the registry. Nothing, and the folder
+ *  is inherited as ever, when this process can say where it is, and when there is no home
+ *  folder a command could be started in (one to open and to enter). */
+export function steadyDir(here: () => string = () => process.cwd(), home?: string): string | undefined {
+  try {
+    here();
+    return undefined;
+  } catch {}
+  try {
+    const dir = home ?? os.homedir();
+    opendirSync(dir).closeSync();
+    accessSync(dir, constants.X_OK);
+    return dir;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Run a command to the end, keeping the tail of its output. */
 export const execCapture: Exec = (argv, o) =>
   new Promise((resolve) => {
@@ -152,9 +174,11 @@ export const execCapture: Exec = (argv, o) =>
     let stdout = "";
     let stderr = "";
     const keep = (s: string, b: Buffer) => (s + b.toString("utf8")).slice(-16_000);
+    const cwd = steadyDir();
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(cmd, rest, {
+        ...(cwd ? { cwd } : {}),
         env: o.env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
@@ -205,18 +229,19 @@ export type InstallResult =
     }
   | { ok: false; ms: number; error: string; stage: "prefix" | "npm" | "verify" };
 
-/** npm's last words, without the line that only says where its own log is. */
-const lastLine = (r: ExecResult): string =>
-  (
-    r.error ||
-    r.stderr
-      .trim()
-      .split("\n")
-      .filter((l) => l && !/A complete log of this run can be found in/.test(l))
-      .slice(-2)
-      .join(" ") ||
-    `exit ${r.code}`
-  ).slice(0, 300);
+/** npm's last words, without the line that only says where its own log is. A program
+ *  that stopped on an error nothing caught ends with a stack, the error's fields and
+ *  node's version: what was thrown is the line under the caret, further up. */
+const lastLine = (r: ExecResult): string => {
+  const said = r.stderr
+    .trim()
+    .split("\n")
+    .filter((l) => l.trim() && !/A complete log of this run can be found in/.test(l));
+  const end = said.length - 1;
+  const caret = /^Node\.js v\d/.test(said[end] ?? "") ? said.map((l) => /^\s*\^+\s*$/.test(l)).lastIndexOf(true) : -1;
+  const thrown = caret >= 0 && caret + 1 < end ? said[caret + 1]?.trim() : undefined;
+  return (r.error || thrown || said.slice(-2).join(" ") || `exit ${r.code}`).slice(0, 300);
+};
 
 /** The version of the copy on disk (which may not be the one running). */
 export async function installedVersion(o: {
