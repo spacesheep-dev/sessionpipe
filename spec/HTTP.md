@@ -172,7 +172,9 @@ as though it never existed.
 ## 7. Delivery scenarios (conformance)
 
 The runner sends and expects, in this order; each is a fixture under
-`conformance/delivery/`:
+`conformance/delivery/`. A fixture's `skip_when` says when the runner skips it:
+`max_tier == N` or `max_tier < N`, compared with the `max_tier` of the receiver's
+well-known file (§1), or `no secret`, when the runner was given no sink secret.
 
 | Scenario | Send | Expect |
 |----------|------|--------|
@@ -186,6 +188,7 @@ The runner sends and expects, in this order; each is a fixture under
 | unknown-type | `type: "x.y"` | 202, stored, retrievable |
 | forget | `session.forgotten`, then a read | 202, then nothing |
 | seq-gap | a batch with gaps in `seq` and a `tool.started` with no `tool.ended` (a thinned sink, PROTOCOL.md §4), then one of its events again | 202, `accepted` = n; then 202, `duplicates` = 1 |
+| backfill-transcript | a `session.backfill`, then `turn.transcript` 0 and 1, in one batch (a backfill that sends a session's words, PROTOCOL.md §4), then the same batch again; skipped at a receiver whose `max_tier` is below 2 (`skip_when: "max_tier < 2"`) | 202, `accepted` = 3; then 202, `duplicates` = 3 |
 | control | a queued prompt, a poll, an ack | 200 with the message; 204 after the ack |
 | control-expired | a message that expires unpolled | 204 |
 | control-double-ack | the same ack twice | 202, 202 |

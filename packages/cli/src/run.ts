@@ -366,6 +366,45 @@ export function closedTurns(
   // The last turn may still be growing.
   return { turns: read.turns.slice(0, -1), line: read.tail.start, waiting };
 }
+
+/** One exchange of a transcript as its turn.transcript, numbered `turn`: what a worker
+ *  sends after a live turn, and `sessionpipe backfill` for a turn no hook reported. */
+export const transcriptTurn = (t: Turn, turn: number, harnessEvent: string): AdapterEvent => ({
+  type: "turn.transcript",
+  harnessEvent,
+  data: {
+    turn,
+    user: t.user,
+    assistant: t.assistant,
+    at: new Date(t.at).toISOString(),
+    ...(t.injected ? { injected: true as const } : {}),
+  },
+});
+
+/** The session's transcript cursor once `sent`, the first turns of `read`, went out
+ *  numbered up to `next`: `line` (where the next read starts), the next turn's number, and
+ *  the last turn sent, when it is the last of the file, by its prompt's id and a digest of
+ *  its last words (what a hook that comes late knows it went out by). */
+export function cursorPast(read: TranscriptRead, sent: Turn[], line: number, next: number): Record<string, unknown> {
+  const last = sent[sent.length - 1] as Turn;
+  return {
+    transcript_line: line,
+    transcript_turns: next,
+    ...(sent.length === read.turns.length && last.id && read.tail?.said !== undefined
+      ? { transcript_sent: `${last.id}:${wordsDigest(read.tail.said)}` }
+      : {}),
+  };
+}
+
+/** An event as the outbox keeps it: its strings redacted at rest (advisory
+ *  GHSA-8f6f-c3c9-j5p6). The tier-3 fields stay, with their secrets already gone;
+ *  filterEvent runs the same idempotent pass again per sink. */
+export const atRest = (e: Event): Event => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) });
+
+/** A sink that is not paused takes events of `tier`, under its receiver's cap. */
+export const sinkAt = (sinks: readonly SinkConfig[], tier: number): boolean =>
+  sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= tier);
+
 /** What session.attended is read from, the desktop app's link included, and session.launched_by
  *  and delegated_by (hook.ts picks all five): the job's own, never the worker's. */
 const JOB_OWN_ENV = [
@@ -530,8 +569,7 @@ export async function runJob(
         session: { ...session, seq: outbox.nextSeq(ref) },
         now: at,
       });
-    const wantsTranscript = cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 2);
-    const transcript = wantsTranscript ? r.transcript : undefined;
+    const transcript = sinkAt(cfg.sinks, 2) ? r.transcript : undefined;
     const ending = r.events.some((e) => e.type === "turn.ended" || e.type === "session.ended");
     const starting = r.events.some((e) => e.type === "turn.started");
     // A message sent while a turn runs is absorbed by that turn, and Claude Code reports
@@ -580,33 +618,13 @@ export async function runJob(
           );
           facts.save(job.harness, id, { open_turn: null });
         }
-        out.push(
-          stamp({
-            type: "turn.transcript",
-            harnessEvent: job.event,
-            data: {
-              turn: turnNo++,
-              user: t.user,
-              assistant: t.assistant,
-              at: new Date(t.at).toISOString(),
-              ...(t.injected ? { injected: true as const } : {}),
-            },
-          }),
-        );
+        out.push(stamp(transcriptTurn(t, turnNo++, job.event)));
       }
       const last = turns[turns.length - 1];
-      if (last)
-        facts.save(job.harness, id, {
-          // With a turn left alone the cursor stops after the last one sent: the rows
-          // between it and the next turn are no message.
-          transcript_line: held < 0 ? c.line : last.endLine + 1,
-          transcript_turns: turnNo,
-          // The last turn sent, when it is the last of the file, by its prompt's id and a
-          // digest of its last words: what `gone` above knows it by.
-          ...(turns.length === read.turns.length && last.id && read.tail?.said !== undefined
-            ? { transcript_sent: `${last.id}:${wordsDigest(read.tail.said)}` }
-            : {}),
-        });
+      // With a turn left alone the cursor stops after the last one sent: the rows between
+      // it and the next turn are no message. `transcript_sent` is what `gone` above knows
+      // the last turn by.
+      if (last) facts.save(job.harness, id, cursorPast(read, turns, held < 0 ? c.line : last.endLine + 1, turnNo));
       // The words a turn's end was waiting for are in (or nothing waits): the wait is over.
       if (!waiting && cur.transcript_due != null) facts.save(job.harness, id, { transcript_due: null });
       return { events: out, waiting };
@@ -698,10 +716,7 @@ export async function runJob(
                 if (facts.get(job.harness, id).transcript_due !== final) return;
                 late = turnEvents(transcript, how);
                 if (late.events.length) {
-                  outbox.append(
-                    ref,
-                    late.events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
-                  );
+                  outbox.append(ref, late.events.map(atRest));
                   log(
                     state,
                     `${job.harness} ${job.event}: ${late.events.map((e) => e.type).join(",")}, once the transcript held it (${shortId(job.harness, id)})`,
@@ -725,12 +740,7 @@ export async function runJob(
     }
     // Tier 1: the account's limits, when the turn left new numbers in the transcript
     // (Codex's rollout; Claude Code's come from its status line, through fromHook).
-    if (
-      adapter.limits &&
-      r.transcript &&
-      ending &&
-      cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1)
-    ) {
+    if (adapter.limits && r.transcript && ending && sinkAt(cfg.sinks, 1)) {
       const limits = adapter.limits(r.transcript);
       const sig = limits && JSON.stringify(limits);
       if (limits && sig !== facts.get(job.harness, id).limits_sig) {
@@ -738,13 +748,7 @@ export async function runJob(
         facts.save(job.harness, id, { limits_sig: sig });
       }
     }
-    // At rest the outbox holds redacted strings (advisory GHSA-8f6f-c3c9-j5p6): the
-    // tier-3 fields stay, with their secrets already gone; filterEvent runs the same
-    // idempotent pass again per sink.
-    outbox.append(
-      ref,
-      events.map((e) => ({ ...e, session: redactDeep(e.session), data: redactDeep(e.data) })),
-    );
+    outbox.append(ref, events.map(atRest));
     releaseJob(opts.claimed);
     log(
       state,
@@ -792,7 +796,7 @@ export async function appendObserved(
   opts: { now?: number; lockWaitMs?: number } = {},
 ): Promise<Event | null> {
   const cfg = readConfig();
-  if (!cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1)) return null;
+  if (!sinkAt(cfg.sinks, 1)) return null;
   const outbox = new Outbox(state);
   const ref = { harness, session: id };
   let release = takeLock(state, ref);
@@ -819,7 +823,7 @@ export async function appendObserved(
         now,
       },
     );
-    outbox.append(ref, [{ ...e, session: redactDeep(e.session), data: redactDeep(e.data) }]);
+    outbox.append(ref, [atRest(e)]);
   } finally {
     release();
   }

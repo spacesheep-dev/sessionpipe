@@ -105,7 +105,7 @@ const CHILD_TURNS = [
 describe("a forked Codex subagent rollout", () => {
   it("reads only the child's complete reply with its real timestamp and original line numbers", () => {
     const file = rolloutFile(FORK);
-    expect(codex.readTranscript!(file, 0)).toEqual({ turns: CHILD_TURNS, line: 46 });
+    expect(codex.readTranscript!(file, 0)).toEqual({ turns: CHILD_TURNS, line: 46, ended: true });
     // A subagent's rollout is part of its parent's session, so backfill skips it. The
     // same rollout as a fork the person made (no `source.subagent`) is backfilled with
     // the child's own facts, not the parent's.
@@ -115,6 +115,8 @@ describe("a forked Codex subagent rollout", () => {
     const fork = rolloutFile([JSON.stringify(meta), ...FORK.slice(1)]);
     const rows = codex.backfill!(0, { CODEX_HOME: path.dirname(path.dirname(fork)) });
     expect(rows).toHaveLength(1);
+    // The rollout it was read from, for the words a tier-2 backfill sends.
+    expect(rows[0]?.transcript).toBe(fork);
     expect(rows[0]?.session).toEqual({
       id: "11111111-1111-4111-8111-111111111111",
       cwd: "/synthetic/child",
@@ -145,12 +147,16 @@ describe("a forked Codex subagent rollout", () => {
   it.each(["forked_from_id", "source"])("recognizes a fork using only %s", (key) => {
     const meta = JSON.parse(FORK[0]!);
     delete meta.payload[key === "source" ? "forked_from_id" : "source"];
-    expect(readCodex([JSON.stringify(meta), ...FORK.slice(1)], 0)).toEqual({ turns: CHILD_TURNS, line: 46 });
+    expect(readCodex([JSON.stringify(meta), ...FORK.slice(1)], 0)).toEqual({
+      turns: CHILD_TURNS,
+      line: 46,
+      ended: true,
+    });
   });
 
   it("reconstructs the boundary when a saved cursor is inside the parent's replay", () => {
-    expect(readCodex(FORK, 12)).toEqual({ turns: CHILD_TURNS, line: 46 });
-    expect(readCodex(FORK, 37)).toEqual({ turns: CHILD_TURNS, line: 46 });
+    expect(readCodex(FORK, 12)).toEqual({ turns: CHILD_TURNS, line: 46, ended: true });
+    expect(readCodex(FORK, 37)).toEqual({ turns: CHILD_TURNS, line: 46, ended: true });
     expect(readCodex(FORK, 46)).toEqual({ turns: [], line: 46 });
   });
 
@@ -163,7 +169,7 @@ describe("a forked Codex subagent rollout", () => {
       started_at: Date.parse("2026-10-09T23:47:06.489Z"),
       last_at: Date.parse("2026-10-09T23:47:06.489Z"),
     });
-    expect(readCodex(FORK, 37)).toEqual({ turns: CHILD_TURNS, line: 46 });
+    expect(readCodex(FORK, 37)).toEqual({ turns: CHILD_TURNS, line: 46, ended: true });
   });
 
   it("keeps a later real child ask and holds the cursor until its reply arrives", () => {
@@ -207,7 +213,7 @@ describe("a forked Codex subagent rollout", () => {
     const complete = [...prefix, ...FORK.slice(37)];
     expect(codexFacts(rolloutFile(complete))).toMatchObject({ model: "child-model" });
     expect(codexFacts(rolloutFile(complete)).title).toBeUndefined();
-    expect(readCodex(complete, 0)).toEqual({ turns: [{ ...CHILD_TURNS[0], endLine: 45 }], line: 47 });
+    expect(readCodex(complete, 0)).toEqual({ turns: [{ ...CHILD_TURNS[0], endLine: 45 }], line: 47, ended: true });
   });
 
   it("keeps current child facts when the boundary falls between the sampled windows", () => {

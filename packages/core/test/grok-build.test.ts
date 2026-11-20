@@ -390,6 +390,14 @@ describe("grok-build: the transcript", () => {
     expect(r.turns[0]?.assistant).toBe("ready");
   });
 
+  it("ended at turn_completed, and not once words of another turn follow it", () => {
+    const turn = [said("user", "Build it"), said("agent", "Starting the build.")];
+    expect(readGrok(turn, 0).ended).toBeUndefined();
+    expect(readGrok([...turn, line({ sessionUpdate: "tool_call", toolCallId: "c1" })], 0).ended).toBeUndefined();
+    expect(readGrok([...turn, done("p-1"), ""], 0).ended).toBe(true);
+    expect(readGrok([...turn, done("p-1"), said("user", "And the docs?")], 0).ended).toBeUndefined();
+  });
+
   it("reads the file the hook named, and nothing from one that is not there", () => {
     const file = path.join(home, "updates.jsonl");
     writeFileSync(file, `${[said("user", "hi"), said("agent", "hello"), done("p-1")].join("\n")}\n`);

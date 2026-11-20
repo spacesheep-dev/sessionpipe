@@ -38,7 +38,9 @@ the receiver (it doesn't have to be this machine). That one approval is the whol
 setup: the hooks for every agent and every Claude Code account here, a sink at tier 2,
 signed messages from your devices, the keys in your keychain when this session has one
 unlocked, a background daemon that keeps running after you log out, and the last 30
-days backfilled. It asks nothing else; run it again and it only fixes what's missing.
+days backfilled (what the files say of each session; `sessionpipe backfill --days N`
+sends their words as well). It asks nothing else; run it again and it only fixes what's
+missing.
 The daemon keeps sessionpipe up to date by itself, installing a new release once a day
 at most and only when it's idle (`sessionpipe update off` stops that; see
 [the CLI's README](packages/cli/README.md#updates)).
@@ -55,8 +57,8 @@ npx sessionpipe install
 ```
 
 That detects the harnesses on your machine, writes their hooks, and backfills the
-last 30 days of sessions into a local outbox. Nothing is sent anywhere until you add
-a sink:
+last 30 days of sessions into a local outbox, without their words. Nothing is sent
+anywhere until you add a sink:
 
 ```sh
 sessionpipe sink add https://your-receiver.example --tier 1

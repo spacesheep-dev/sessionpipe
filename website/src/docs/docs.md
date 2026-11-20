@@ -97,7 +97,14 @@ each, in the order to run them. It exits 1 when there is a command to run and 0 
 
 {{usage backfill}}
 
-Reads the last N days of sessions from the agents' own files into the outbox.
+Reads the last N days of sessions from the agents' own files into the outbox, each as a
+`session.backfill`. With a sink at tier 2 or higher it also queues the words no hook sent of
+Claude Code, Codex and Grok Build sessions (a Codex Desktop thread, a session from before the
+hooks), one `turn.transcript` per exchange, secrets removed, and remembers where it stopped: run
+it again and only what is new goes. The other agents' backfill has no transcript to read, so
+their sessions get no words this way. A session's last turn goes once its file says the turn
+ended and has been quiet for ten minutes, or once nothing has written it for a day; a turn a
+hook still holds open waits for its end. `install` and `connect` backfill without the words.
 
 {{usage replay}}
 

@@ -399,7 +399,7 @@ export const codex: Adapter = {
       const facts = codexFacts(f);
       if (!facts.started_at || !facts.last_at) continue;
       const { started_at, last_at, first_ask: _fa, harness_version: _hv, ...rest } = facts;
-      rows.push({ session: { id: m[1], ...rest }, started_at, last_at });
+      rows.push({ session: { id: m[1], ...rest }, started_at, last_at, transcript: f });
     }
     return rows;
   },

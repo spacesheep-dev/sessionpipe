@@ -1,0 +1,191 @@
+{
+  "name": "backfill-transcript",
+  "spec": "PROTOCOL.md §4 turn.transcript; HTTP.md §2 Idempotency",
+  "skip_when": "max_tier < 2",
+  "steps": [
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.backfill",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "started_at": "2026-10-01T09:00:00.000Z",
+              "last_at": "2026-10-01T09:20:00.000Z"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.transcript",
+            "time": "*",
+            "tier": 2,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 1
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "turn": 0,
+              "user": "Fix the build",
+              "assistant": "Done: the missing import is back.",
+              "at": "2026-10-01T09:00:00.000Z"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.transcript",
+            "time": "*",
+            "tier": 2,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 2
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "turn": 1,
+              "user": "And the docs?",
+              "assistant": "Updated.",
+              "at": "2026-10-01T09:15:00.000Z"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": 3,
+          "duplicates": 0
+        }
+      }
+    },
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "session.backfill",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "started_at": "2026-10-01T09:00:00.000Z",
+              "last_at": "2026-10-01T09:20:00.000Z"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.transcript",
+            "time": "*",
+            "tier": 2,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 1
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "turn": 0,
+              "user": "Fix the build",
+              "assistant": "Done: the missing import is back.",
+              "at": "2026-10-01T09:00:00.000Z"
+            }
+          },
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "turn.transcript",
+            "time": "*",
+            "tier": 2,
+            "harness": {
+              "name": "conformance",
+              "event": "backfill"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 2
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "turn": 1,
+              "user": "And the docs?",
+              "assistant": "Updated.",
+              "at": "2026-10-01T09:15:00.000Z"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": 0,
+          "duplicates": 3
+        }
+      }
+    }
+  ]
+}

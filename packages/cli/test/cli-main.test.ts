@@ -6,6 +6,7 @@
 // cli.test.ts proves the same binary from outside; this is where its branches live.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -14,7 +15,9 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -532,6 +535,51 @@ describe.skipIf(process.platform === "win32")("install", () => {
     const third = await run("install", "--claude-code", "--backfill", "0");
     expect(third.text).toContain("= claude-code: ");
     expect(third.text).not.toContain("Backfill:");
+  });
+
+  it("with a tier-2 sink it queues no words, and says which command sends them", async () => {
+    const id = "aaaaaaaa-0000-4000-8000-000000000021";
+    const file = path.join(home, ".claude", "projects", "-proj", `${id}.jsonl`);
+    const at = new Date(Date.now() - 3_600_000).toISOString();
+    put(
+      file,
+      [
+        { type: "user", promptId: "p1", timestamp: at, message: { content: "Fix the build" } },
+        { type: "assistant", timestamp: at, message: { content: [{ type: "text", text: "Done." }] } },
+      ]
+        .map((r) => `${JSON.stringify(r)}\n`)
+        .join(""),
+    );
+    utimesSync(file, new Date(at), new Date(at));
+    const { lines } = await run(
+      "install",
+      "--claude-code",
+      "--sink",
+      `file:${path.join(tmp, "t2.jsonl")}`,
+      "--tier",
+      "2",
+    );
+    const at2 = lines.indexOf("  ✓ Backfill: 1 session from the last 30 days queued as session.backfill");
+    expect(lines[at2 + 1]).toBe(
+      "    Their words stay here: `sessionpipe backfill --days 30` sends a tier-2 sink the prompts and replies of these sessions, secrets removed.",
+    );
+    const queued = new Outbox(state).read({ harness: "claude-code", session: id }, 0).events;
+    expect(queued.map((e) => e.type)).toEqual(["session.backfill"]);
+    expect(factsState(state).get("claude-code", id)).not.toHaveProperty("transcript_turns");
+
+    // Of two sessions, one whose row names no transcript: the line counts the other.
+    vi.spyOn(claudeCode, "backfill").mockReturnValue([
+      { session: { id: "aaaaaaaa-0000-4000-8000-000000000022" }, started_at: 1, last_at: 2, transcript: file },
+      { session: { id: "aaaaaaaa-0000-4000-8000-000000000023" }, started_at: 1, last_at: 2 },
+    ]);
+    expect((await run("install", "--claude-code")).lines).toContain(
+      "    Their words stay here: `sessionpipe backfill --days 30` sends a tier-2 sink the prompts and replies of 1 of them, secrets removed.",
+    );
+    // No session with words to read, or none at all: nothing to say.
+    for (const rows of [[{ session: { id: "aaaaaaaa-0000-4000-8000-000000000024" }, started_at: 1, last_at: 2 }], []]) {
+      vi.spyOn(claudeCode, "backfill").mockReturnValue(rows);
+      expect((await run("install", "--claude-code")).text).not.toContain("Their words stay here");
+    }
   });
 
   it("a settings file it can't read is skipped and said so; a single session backfills in the singular", async () => {
@@ -1163,8 +1211,14 @@ describe.skipIf(process.platform === "win32")("connect", () => {
     put(path.join(home, ".claude-odd", "settings.json"), {});
     vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
     writeConfig({ sinks: [{ name: "rx", url: `${rx.url}/`, tier: 1, token: "key" }], harnesses: {} } as never);
-    const rows = [{ session: { id: "aaaaaaaa-0000-4000-8000-000000000009", cwd: home }, started_at: 1, last_at: 2 }];
+    // The session's transcript is on disk: connect still sends only what the files say of it.
+    const transcript = path.join(home, "t.jsonl");
+    put(transcript, `${JSON.stringify({ type: "user", promptId: "p1", message: { content: "Hi" } })}\n`);
+    const rows = [
+      { session: { id: "aaaaaaaa-0000-4000-8000-000000000009", cwd: home }, started_at: 1, last_at: 2, transcript },
+    ];
     vi.spyOn(claudeCode, "backfill").mockReturnValue(rows);
+    const reads = vi.spyOn(claudeCode, "readTranscript");
     vi.mocked(bestStore).mockReturnValue("keychain");
     vi.mocked(moveSinkSecrets).mockReturnValue({ moved: ["rx"], kept: [] });
     vi.mocked(moveControlSecrets).mockReturnValue({ moved: [], kept: ["https://x"] });
@@ -1210,6 +1264,13 @@ describe.skipIf(process.platform === "win32")("connect", () => {
     expect(text).toContain("✓ Sink rx: tier 2 (was 1) — sends tier 1 + your prompts");
     expect(text).toContain("✓ Keys: in the macOS Keychain (left in the file: https://x)");
     expect(text).toContain("✓ Backfill: 1 session from the last 30 days");
+    expect(text).toContain(
+      "    Their words stay here: `sessionpipe backfill --days 30` sends a tier-2 sink the prompts and replies of these sessions, secrets removed.",
+    );
+    expect(reads).not.toHaveBeenCalled();
+    expect(
+      new Outbox(state).read({ harness: "claude-code", session: rows[0]!.session.id }, 0).events.map((e) => e.type),
+    ).toEqual(["session.backfill"]);
     expect(text).toContain(`Done: lab reports to ${host} and takes messages you sign on a device it trusts.`);
     expect(cfg().sinks[0]).toMatchObject({ tier: 2, max_tier: 3, well_known_at: expect.any(String) });
   });
@@ -2637,6 +2698,474 @@ describe.skipIf(process.platform === "win32")("tail, backfill, forget, replay", 
     expect((await run("backfill")).lines).toEqual([
       "  ✓ Backfill: 0 sessions from the last 30 days queued as session.backfill",
     ]);
+  });
+
+  // Issue #123: a session no hook reported (a Codex Desktop thread, a Claude Code session
+  // from before the hooks) sends its words on an explicit `backfill`, to a tier-2 sink.
+  describe("backfill: the words no hook sent", () => {
+    const TOKEN = `ghp_${"a1B2".repeat(9)}`;
+    const SID = "bbbbbbbb-0000-4000-8000-000000000001";
+    const HOUR = 3_600_000;
+    const age = (file: string, ago: number) => utimesSync(file, new Date(Date.now() - ago), new Date(Date.now() - ago));
+    /** Turns appended to a Claude Code transcript, each row timed `ago` ms before now, and
+     *  the file last written then too. */
+    function appendClaude(file: string, turns: [string, string][], ago = HOUR): string {
+      mkdirSync(path.dirname(file), { recursive: true });
+      const timestamp = new Date(Date.now() - ago).toISOString();
+      for (const [user, said] of turns) {
+        const promptId = `p-${Math.random().toString(36).slice(2, 8)}`;
+        const rows = [
+          { type: "user", promptId, timestamp, message: { content: user } },
+          { type: "assistant", timestamp, message: { content: [{ type: "text", text: said }] } },
+        ];
+        appendFileSync(file, rows.map((r) => `${JSON.stringify(r)}\n`).join(""));
+      }
+      age(file, ago);
+      return file;
+    }
+    const claudeFile = (id: string) => path.join(home, ".claude", "projects", "-proj", `${id}.jsonl`);
+    /** A Codex rollout under this home, each turn closed by the `task_complete` Codex writes
+     *  (`open`: the last one not yet); `subagent` makes it a subagent's thread. */
+    function rollout(
+      id: string,
+      turns: [string, string][],
+      o: { ago?: number; subagent?: boolean; open?: boolean } = {},
+    ): string {
+      const ago = o.ago ?? HOUR;
+      const timestamp = new Date(Date.now() - ago).toISOString();
+      const file = path.join(home, ".codex", "sessions", "2026", "11", "19", `rollout-2026-11-19T10-00-00-${id}.jsonl`);
+      const msg = (role: string, kind: string, text: string) => ({
+        type: "response_item",
+        timestamp,
+        payload: { type: "message", role, content: [{ type: kind, text }] },
+      });
+      const meta = { id, cwd: home, ...(o.subagent ? { source: { subagent: { thread_spawn: {} } } } : {}) };
+      const done = { type: "event_msg", timestamp, payload: { type: "task_complete" } };
+      const rows = [
+        { type: "session_meta", timestamp, payload: meta },
+        ...turns.flatMap(([u, a]) => [msg("user", "input_text", u), msg("assistant", "output_text", a), done]),
+      ];
+      if (o.open) rows.pop();
+      put(file, rows.map((r) => `${JSON.stringify(r)}\n`).join(""));
+      age(file, ago);
+      return file;
+    }
+    type Queued = { type: string; session: { id: string; seq: number }; data: Record<string, unknown> };
+    const outboxOf = (harness: string, session: string) =>
+      new Outbox(state).read({ harness, session }, 0).events as unknown as Queued[];
+    const shape = (es: Queued[]) => es.map((e) => [e.type, e.session.seq, e.data.turn]);
+    const sinkFile = (name: string) => path.join(tmp, `${name}.jsonl`);
+    const delivered = (name: string): Queued[] =>
+      existsSync(sinkFile(name))
+        ? readFileSync(sinkFile(name), "utf8")
+            .trim()
+            .split("\n")
+            .map((l) => JSON.parse(l) as Queued)
+        : [];
+    const sinks = (...tiers: number[]) =>
+      writeConfig({
+        sinks: tiers.map((tier) => ({ name: `t${tier}`, url: `file:${sinkFile(`t${tier}`)}`, tier })),
+        harnesses: {},
+      } as never);
+    const words = (turns: number, sessions: number) =>
+      `  ✓ Words: ${turns} turn${turns === 1 ? "" : "s"} of ${sessions} session${sessions === 1 ? "" : "s"} queued as turn.transcript, secrets removed`;
+
+    it("a Claude Code session: its session.backfill, then each turn numbered from the cursor, redacted, once", async () => {
+      sinks(2, 1);
+      const file = appendClaude(claudeFile(SID), [
+        ["Fix the build", "Done."],
+        [`Use ${TOKEN} for the push`, "Pushed."],
+      ]);
+      expect((await run("backfill", "--claude-code")).lines).toEqual([
+        "  ✓ Backfill: 1 session from the last 30 days queued as session.backfill",
+        words(2, 1),
+      ]);
+      const queued = outboxOf("claude-code", SID);
+      expect(shape(queued)).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+        ["turn.transcript", 2, 1],
+      ]);
+      expect(queued[1]?.data).toMatchObject({ user: "Fix the build", assistant: "Done." });
+      expect(queued[2]?.data.user).toBe("Use [redacted] for the push");
+      // Redacted before it is written: the outbox never holds the token.
+      expect(readFileSync(new Outbox(state).file({ harness: "claude-code", session: SID }), "utf8")).not.toContain(
+        TOKEN,
+      );
+      expect(factsState(state).get("claude-code", SID)).toMatchObject({ transcript_turns: 2, backfilled: true });
+
+      // Again: the file has not changed since, so it is not read and nothing is queued.
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      expect((await run("backfill", "--claude-code")).lines).toEqual([
+        "  ✓ Backfill: 0 sessions from the last 30 days queued as session.backfill",
+        words(0, 0),
+      ]);
+      expect(reads).not.toHaveBeenCalled();
+      expect(outboxOf("claude-code", SID)).toHaveLength(3);
+
+      // A turn more, written since: it is read from the cursor on and goes as turn 2.
+      appendClaude(file, [["And the docs?", "Updated."]], HOUR / 2);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      expect(reads).toHaveBeenCalledOnce();
+      expect(reads.mock.calls[0]?.[1]).toBe(4);
+      expect(shape(outboxOf("claude-code", SID)).slice(3)).toEqual([["turn.transcript", 3, 2]]);
+
+      // The drain filters per sink: the tier-2 sink gets the words, the tier-1 sink only
+      // the session.backfill.
+      await vi.waitFor(() => expect(delivered("t2")).toHaveLength(4));
+      expect(delivered("t2").map((e) => e.data.turn)).toEqual([undefined, 0, 1, 2]);
+      expect(readFileSync(sinkFile("t2"), "utf8")).not.toContain(TOKEN);
+      await vi.waitFor(() => expect(delivered("t1")).toHaveLength(1));
+      expect(delivered("t1")[0]?.type).toBe("session.backfill");
+    });
+
+    it("Codex rollouts: a quiet one sends its turns, a fresh one waits for its last turn to settle, a subagent's sends nothing", async () => {
+      sinks(2);
+      const quiet = "cccccccc-0000-4000-8000-000000000001";
+      const fresh = "cccccccc-0000-4000-8000-000000000002";
+      const sub = "cccccccc-0000-4000-8000-000000000003";
+      rollout(quiet, [
+        ["Plan the release", "Here is the plan."],
+        [`The key is ${TOKEN}`, "Noted."],
+      ]);
+      const live = rollout(fresh, [["Still going", "Working on it"]], { ago: 0 });
+      rollout(sub, [["Subtask", "Done"]], { subagent: true });
+      // Quiet an hour, but the file never says its turn ended: it waits for the day.
+      const unsaid = "cccccccc-0000-4000-8000-000000000004";
+      const untold = rollout(unsaid, [["Deploy it", "Deploying."]], { open: true });
+      expect((await run("backfill", "--codex")).lines).toEqual([
+        "  ✓ Backfill: 3 sessions from the last 30 days queued as session.backfill",
+        words(2, 1),
+      ]);
+      expect(shape(outboxOf("codex", unsaid))).toEqual([["session.backfill", 0, undefined]]);
+      expect(shape(outboxOf("codex", quiet))).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+        ["turn.transcript", 2, 1],
+      ]);
+      expect(outboxOf("codex", quiet)[2]?.data).toMatchObject({ user: "The key is [redacted]", assistant: "Noted." });
+      // Written a moment ago, with no hook to say its turn ended: nothing yet.
+      expect(shape(outboxOf("codex", fresh))).toEqual([["session.backfill", 0, undefined]]);
+      expect(outboxOf("codex", sub)).toEqual([]);
+
+      // Once it has been quiet a while, the next backfill takes its turn; a day on, the one
+      // whose file never said goes too.
+      age(live, HOUR);
+      expect((await run("backfill", "--codex")).lines[1]).toBe(words(1, 1));
+      expect(shape(outboxOf("codex", fresh))).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+      ]);
+      age(untold, 25 * HOUR);
+      expect((await run("backfill", "--codex")).lines[1]).toBe(words(1, 1));
+      expect(outboxOf("codex", unsaid)[1]?.data).toMatchObject({ turn: 0, user: "Deploy it", assistant: "Deploying." });
+      expect(outboxOf("codex", sub)).toEqual([]);
+    });
+
+    // The reviewer's case: a turn quiet for more than ten minutes partway through (a long
+    // tool run, an approval nobody answered) is not over, and goes once, whole, when it is.
+    it("a Claude Code turn quiet mid-tool waits, then goes whole", async () => {
+      sinks(2);
+      const file = claudeFile(SID);
+      const at = new Date(Date.now() - 15 * 60_000).toISOString();
+      const rows = (...r: object[]) => {
+        appendFileSync(file, r.map((x) => `${JSON.stringify({ timestamp: at, ...x })}\n`).join(""));
+        age(file, 15 * 60_000);
+      };
+      const reply = (stop: string, content: object[]) => ({
+        type: "assistant",
+        message: { stop_reason: stop, content },
+      });
+      mkdirSync(path.dirname(file), { recursive: true });
+      rows(
+        { type: "user", promptId: "p1", message: { content: "Run the build" } },
+        reply("tool_use", [{ type: "text", text: "Starting the build." }]),
+        reply("tool_use", [{ type: "tool_use", id: "c1", name: "Bash", input: {} }]),
+      );
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(0, 0));
+      expect(factsState(state).get("claude-code", SID)).not.toHaveProperty("transcript_line");
+      rows(
+        { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "c1", content: "ok" }] } },
+        reply("end_turn", [{ type: "text", text: "The build finished green." }]),
+      );
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      const sent = outboxOf("claude-code", SID).filter((e) => e.type === "turn.transcript");
+      expect(sent.map((e) => [e.data.turn, e.data.user, e.data.assistant])).toEqual([
+        [0, "Run the build", "Starting the build.\n\nThe build finished green."],
+      ]);
+    });
+
+    it("a Codex turn quiet mid-tool waits, then goes whole", async () => {
+      sinks(2);
+      const id = "cccccccc-0000-4000-8000-000000000009";
+      const file = rollout(id, [["Run the build", "Starting the build."]], { ago: 15 * 60_000, open: true });
+      const at = new Date(Date.now() - 15 * 60_000).toISOString();
+      const rows = (...r: object[]) => {
+        appendFileSync(file, r.map((x) => `${JSON.stringify({ timestamp: at, ...x })}\n`).join(""));
+        age(file, 15 * 60_000);
+      };
+      rows({
+        type: "response_item",
+        payload: { type: "function_call", name: "shell", call_id: "c1", arguments: "{}" },
+      });
+      expect((await run("backfill", "--codex")).lines[1]).toBe(words(0, 0));
+      rows(
+        { type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "ok" } },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "The build finished green." }],
+          },
+        },
+        { type: "event_msg", payload: { type: "task_complete" } },
+      );
+      expect((await run("backfill", "--codex")).lines[1]).toBe(words(1, 1));
+      const sent = outboxOf("codex", id).filter((e) => e.type === "turn.transcript");
+      expect(sent.map((e) => [e.data.turn, e.data.user, e.data.assistant])).toEqual([
+        [0, "Run the build", "Starting the build.\n\nThe build finished green."],
+      ]);
+    });
+
+    it("an open turn no Stop ever ended goes after a day; a file whose time went back is read again", async () => {
+      sinks(2);
+      const file = appendClaude(
+        claudeFile(SID),
+        [
+          ["One", "First."],
+          ["Two", "Second."],
+        ],
+        25 * HOUR,
+      );
+      // A terminal killed mid-turn: the hooks' open turn never closed.
+      factsState(state).save("claude-code", SID, { open_turn: "p-gone" });
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(2, 1));
+      const stamp = factsState(state).get("claude-code", SID).backfill_mtime;
+      expect(stamp).toBe(statSync(file).mtimeMs);
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(0, 0));
+      expect(reads).not.toHaveBeenCalled();
+      // Written again, then its time set back before the stamp (restored from a copy).
+      appendClaude(file, [["Three", "Third."]], 26 * HOUR);
+      expect(statSync(file).mtimeMs).toBeLessThan(stamp as number);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      expect(shape(outboxOf("claude-code", SID)).at(-1)).toEqual(["turn.transcript", 3, 2]);
+    });
+
+    /** A Claude Code turn that stopped at a tool call nobody has answered, written `ago` ms back. */
+    function waitingOnTool(file: string, ago: number, before: [string, string][] = []): string {
+      mkdirSync(path.dirname(file), { recursive: true });
+      const timestamp = new Date(Date.now() - ago).toISOString();
+      const said = (stop: string, content: object[]) => ({
+        type: "assistant",
+        timestamp,
+        message: { stop_reason: stop, content },
+      });
+      const rows = [
+        ...before.flatMap(([u, a], i) => [
+          { type: "user", promptId: `p${i}`, timestamp, message: { content: u } },
+          said("end_turn", [{ type: "text", text: a }]),
+        ]),
+        { type: "user", promptId: "p-open", timestamp, message: { content: "Deploy" } },
+        said("tool_use", [{ type: "text", text: "I will deploy." }]),
+        said("tool_use", [{ type: "tool_use", id: "c1", name: "Bash", input: {} }]),
+      ];
+      appendFileSync(file, rows.map((r) => `${JSON.stringify(r)}\n`).join(""));
+      age(file, ago);
+      return file;
+    }
+    const turnsOf = (harness: string, id: string) =>
+      outboxOf(harness, id)
+        .filter((e) => e.type === "turn.transcript")
+        .map((e) => [e.data.turn, e.data.user, e.data.assistant]);
+
+    it("a turn a hook holds open is not sent in part, however long it has waited on its tool", async () => {
+      sinks(2);
+      const file = waitingOnTool(claudeFile(SID), 25 * HOUR, [["Before", "Done before."]]);
+      factsState(state).save("claude-code", SID, { open_turn: "p-open" });
+      // The turn before it is over and goes. The open one is its own worker's to send, whole.
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      expect(turnsOf("claude-code", SID)).toEqual([[0, "Before", "Done before."]]);
+      // A day old, it is settled as it stands: not read again until it is written.
+      expect(factsState(state).get("claude-code", SID).backfill_mtime).toBe(statSync(file).mtimeMs);
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(0, 0));
+      expect(reads).not.toHaveBeenCalled();
+    });
+
+    it("with no hook holding it, a turn the file never ended goes after a day, and not an hour before", async () => {
+      sinks(2);
+      const file = waitingOnTool(claudeFile(SID), 23 * HOUR);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(0, 0));
+      expect(factsState(state).get("claude-code", SID)).not.toHaveProperty("backfill_mtime");
+      age(file, 25 * HOUR);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      expect(turnsOf("claude-code", SID)).toEqual([[0, "Deploy", "I will deploy."]]);
+    });
+
+    it("a file held back is read again when only time has passed", async () => {
+      sinks(2);
+      appendClaude(claudeFile(SID), [["Fix the build", "Done."]], 5 * 60_000);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(0, 0));
+      expect(factsState(state).get("claude-code", SID)).not.toHaveProperty("backfill_mtime");
+      // Ten minutes on, the same file untouched: its turn is over now.
+      const later = Date.now() + 10 * 60_000;
+      const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+      try {
+        expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      } finally {
+        clock.mockRestore();
+      }
+      expect(turnsOf("claude-code", SID)).toEqual([[0, "Fix the build", "Done."]]);
+    });
+
+    it("an exchange of megabytes is one line its session's outbox reads past", async () => {
+      sinks(2);
+      appendClaude(claudeFile(SID), [
+        ["x".repeat(9 * 1024 * 1024), "Big."],
+        ["Small", "Done."],
+      ]);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(2, 1));
+      const queued = outboxOf("claude-code", SID);
+      expect(shape(queued)).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+        ["turn.transcript", 2, 1],
+      ]);
+      // Cut as the filter cuts it for every sink: the outbox line is one a reader can read.
+      expect(String(queued[1]?.data.user)).toHaveLength(20_001);
+      expect(queued[2]?.data).toMatchObject({ user: "Small", assistant: "Done." });
+    });
+
+    it("no words for a sink capped below tier 2 or paused", async () => {
+      appendClaude(claudeFile(SID), [["Fix the build", "Done."]]);
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      for (const sink of [
+        { name: "capped", url: `file:${sinkFile("capped")}`, tier: 3, max_tier: 1 },
+        { name: "paused", url: `file:${sinkFile("paused")}`, tier: 2, paused: true },
+      ]) {
+        writeConfig({ sinks: [sink], harnesses: {} } as never);
+        expect((await run("backfill", "--claude-code")).lines).toHaveLength(1);
+      }
+      expect(reads).not.toHaveBeenCalled();
+      expect(outboxOf("claude-code", SID).map((e) => e.type)).toEqual(["session.backfill"]);
+    });
+
+    it("a credential in the session's title, its folder and a reply is gone from the outbox", async () => {
+      sinks(2);
+      const file = appendClaude(claudeFile(SID), [["Ship it", `The token was ${TOKEN}; rotate it.`]]);
+      vi.spyOn(claudeCode, "backfill").mockReturnValue([
+        {
+          session: { id: SID, title: `Push with ${TOKEN}`, cwd: `/work/${TOKEN}/app` },
+          started_at: 1000,
+          last_at: 2000,
+          transcript: file,
+        },
+      ]);
+      expect((await run("backfill", "--claude-code")).lines[1]).toBe(words(1, 1));
+      const raw = readFileSync(new Outbox(state).file({ harness: "claude-code", session: SID }), "utf8");
+      expect(raw.split("\n").filter(Boolean)).toHaveLength(2);
+      expect(raw).not.toContain(TOKEN);
+      expect(outboxOf("claude-code", SID)[1]?.data.assistant).toBe("The token was [redacted]; rotate it.");
+    });
+
+    it("`titles on` renames and reads no transcript, at tier 2 too", async () => {
+      sinks(2);
+      const file = appendClaude(claudeFile(SID), [["Fix the build", "Done."]]);
+      vi.spyOn(claudeCode, "backfill").mockReturnValue([
+        { session: { id: SID, title: "Old" }, started_at: 1000, last_at: 2000, transcript: file },
+      ]);
+      vi.spyOn(claudeCode, "remoteFacts").mockResolvedValue({ title: "From claude.ai", title_source: "harness" });
+      factsState(state).save("claude-code", SID, { backfilled: true, sent_title: "Old" });
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      expect((await run("titles", "on")).text).toContain("1 named there, 1 sent again under that name");
+      expect(reads).not.toHaveBeenCalled();
+      const queued = outboxOf("claude-code", SID) as (Queued & { session: { title?: string } })[];
+      expect(queued.map((e) => [e.type, e.session.title])).toEqual([["session.backfill", "From claude.ai"]]);
+    });
+
+    it("below tier 2 a backfill is what it was: the session.backfill alone, with its turns, and no file read", async () => {
+      sinks(1);
+      const file = appendClaude(claudeFile(SID), [["Fix the build", "Done."]]);
+      vi.spyOn(claudeCode, "backfill").mockReturnValue([
+        { session: { id: SID }, started_at: 1000, last_at: 2000, turns: 1, transcript: file },
+      ]);
+      const reads = vi.spyOn(claudeCode, "readTranscript");
+      expect((await run("backfill", "--claude-code")).lines).toEqual([
+        "  ✓ Backfill: 1 session from the last 30 days queued as session.backfill",
+      ]);
+      expect(reads).not.toHaveBeenCalled();
+      const queued = outboxOf("claude-code", SID);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({
+        type: "session.backfill",
+        session: { id: SID, seq: 0 },
+        data: { started_at: new Date(1000).toISOString(), last_at: new Date(2000).toISOString(), turns: 1 },
+      });
+    });
+
+    it("at tier 2: no `turns` beside the words; a session busy, renamed by the daemon, or gone is left alone; an open turn waits", async () => {
+      sinks(2);
+      const [counted, busy, aliased, gone, open] = [1, 2, 3, 4, 5].map(
+        (n) => `dddddddd-0000-4000-8000-00000000000${n}`,
+      ) as [string, string, string, string, string];
+      const rows = [counted, busy, aliased, open].map((id) => ({
+        session: { id },
+        started_at: 1000,
+        last_at: 2000,
+        turns: 2,
+        transcript: appendClaude(claudeFile(id), [
+          ["One", "First."],
+          ["Two", "Second."],
+        ]),
+      }));
+      rows.push({ session: { id: gone }, started_at: 1000, last_at: 2000, turns: 2, transcript: claudeFile(gone) });
+      // A made-up row that names no transcript: its words cannot go, so its `turns` stays.
+      const bare = "dddddddd-0000-4000-8000-000000000006";
+      vi.spyOn(claudeCode, "backfill").mockReturnValue([
+        ...rows,
+        { session: { id: bare }, started_at: 1000, last_at: 2000, turns: 2 } as (typeof rows)[number],
+      ]);
+      put(path.join(state, "control", "aliases.json"), { "claude-code:cmd-1": { id: aliased, cwd: home, at: "" } });
+      // A hook says a turn of this one is running: its last turn may still grow.
+      factsState(state).save("claude-code", open, { open_turn: "p-running" });
+      const release = takeLock(state, { harness: "claude-code", session: busy }) as () => void;
+      try {
+        expect((await run("backfill", "--claude-code")).lines).toEqual([
+          "  ✓ Backfill: 5 sessions from the last 30 days queued as session.backfill",
+          words(3, 2),
+        ]);
+      } finally {
+        release();
+      }
+      const counts = outboxOf("claude-code", counted);
+      expect(shape(counts)).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+        ["turn.transcript", 2, 1],
+      ]);
+      // A receiver counts the turns it accepts: `turns` as well would count them twice.
+      expect(counts[0]?.data).not.toHaveProperty("turns");
+      expect(outboxOf("claude-code", busy)).toEqual([]);
+      expect(shape(outboxOf("claude-code", aliased))).toEqual([["session.backfill", 0, undefined]]);
+      expect(shape(outboxOf("claude-code", gone))).toEqual([["session.backfill", 0, undefined]]);
+      // Words that cannot go this run leave `turns` where it was.
+      expect(outboxOf("claude-code", aliased)[0]?.data.turns).toBe(2);
+      expect(outboxOf("claude-code", bare)[0]?.data.turns).toBe(2);
+      expect(outboxOf("claude-code", gone)[0]?.data).not.toHaveProperty("turns");
+      expect(shape(outboxOf("claude-code", open))).toEqual([
+        ["session.backfill", 0, undefined],
+        ["turn.transcript", 1, 0],
+      ]);
+      // The busy one goes the next time; the open one keeps its last turn while the turn runs.
+      expect((await run("backfill", "--claude-code")).lines).toEqual([
+        "  ✓ Backfill: 1 session from the last 30 days queued as session.backfill",
+        words(2, 1),
+      ]);
+      expect(shape(outboxOf("claude-code", busy))).toEqual(shape(counts));
+      expect(outboxOf("claude-code", open)).toHaveLength(2);
+    });
   });
 
   it("forget asks every sink to delete the session and drops its outbox", async () => {
