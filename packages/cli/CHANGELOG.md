@@ -1,5 +1,58 @@
 # sessionpipe
 
+## 0.18.0
+
+### Minor Changes
+
+- d5ab1c1: Autopilot: sessions report under their own name, `sessionpipe install --autopilot`
+  
+  - A new adapter, `autopilot`, for Directionally Local's Autopilot. `sessionpipe install` writes one entry per event, each with the id `sessionpipe`, into Autopilot's global hook settings (`~/.config/autopilot/settings.json`, `$XDG_CONFIG_HOME` when set), and reports the session, its turns and tools, a permission prompt that is waiting, compactions and the session end; at tier 2, the conversation from the Claude Code-format transcript Autopilot writes beside each session. `/hooks disable sessionpipe` in Autopilot switches them off, and `sessionpipe status` says so.
+  - Autopilot's session ids hold a `_`, which the protocol's ids don't allow (#279): the adapter writes it as `.`.
+  - Autopilot imports Claude Code's hooks switched off. If the person switches sessionpipe's Claude Code entry on there, that entry now tells an Autopilot payload apart and reports nothing; the Autopilot adapter reports it.
+  - Recorded on a build of Autopilot with directionally-local/autopilot#1272 (`StopFailure`, `PreCompact.trigger`, versioned payloads), not yet released; `PreCompact` still waits for a recorded payload.
+- c53d7df: `sessionpipe backfill` sends the words of sessions no hook reported (#123)
+  
+  - A session whose turns no hook ever reported (a Codex Desktop thread, a Claude Code session from before the hooks were installed) used to reach a receiver only as one `session.backfill`, with no words. `sessionpipe backfill`, with a sink at tier 2 or higher, for Claude Code, Codex and Grok Build sessions (the harnesses whose backfill names a transcript), now also queues one `turn.transcript` per exchange its transcript holds that was never sent, numbered from the session's transcript cursor as a live turn's are, and redacted the same way before it is written. Each event is filtered per sink as any other, so a sink below tier 2 gets what it got before.
+  - The cursor is saved, so a second `backfill` sends nothing again, and a transcript not written since a backfill read it to its end, or found it a day old, is not read again until it is written. A session a hook is busy with is left for the next run. A session's last turn waits until it is over: its file says the turn ended (Claude Code: a reply that waits on no tool; Codex: `task_complete`; Grok Build: `turn_completed`), the file has been quiet for ten minutes and no hook holds a turn open; or nothing has written the file for a day. A turn a hook holds open goes only once its file says it ended, however long it waits, so its own worker and the backfill never each send a part of it.
+  - `sessionpipe install` and `sessionpipe connect` still backfill metadata only; with a tier-2 sink and a session whose words a backfill can read, each now says that `sessionpipe backfill --days N` sends them.
+  - `spec/PROTOCOL.md` widens who sends `turn.transcript`, and `conformance/delivery/35-backfill-transcript.json` is the receiver's scenario for it.
+- 8c61f63: Claude Code: a session says the reasoning effort its latest turn ran at
+  
+  - `session.effort` is new and optional, tier 0 like `model` (#210). The Claude Code adapter takes it from the hook payload's `effort.level`, and from the newest assistant line of the transcript that says one, so a change made with `/effort` shows on the next event. A payload or transcript that says nothing sends nothing, and a receiver reads absent as unknown.
+  - It is a bare word of at most 40 characters, as `submitted_by` is: tier 0 is not redacted, so a value of any other shape is not sent. `spec/PROTOCOL.md` §3 and `spec/PRIVACY.md` say so.
+
+### Patch Changes
+
+- 4aab723: A prompt, a Write or a tool result over 1 MiB makes its event again
+  
+  - The hook kept only the first 1 MiB of a payload, so a bigger one was cut mid-JSON and its event dropped with a log line saying the adapter did not claim it (#200). The hook now hands on the whole payload, up to 64 MiB, and an event too long for one outbox line is written with its text cut the way every sink is sent it anyway, so no sink gets less than before and no session's drain stops at it. A payload that cannot be read (over 64 MiB, or not JSON) is still dropped, and the log line now says how many bytes it was. `spec/OUTBOX.md` §2 and `spec/ADAPTERS.md` say so.
+- 1b755ff: Control: a receiver paired while the daemon runs gets its hello at once, so it knows what the computer takes without waiting up to ten minutes
+- 42c02c5: Install and uninstall change only sessionpipe's entries in a JSON config's text (#205)
+  
+  - A JSON config used to be written back whole, one item per line, so a list or object on one line came back spread over several. Now install puts only sessionpipe's entries into the file's text and uninstall takes only them out, on all seven JSON harnesses, Claude Code's status line and `pool on`/`off`: a file with lists on one line, tabs, CRLF or a byte-order mark comes back byte-identical. An empty `hooks` object or event list that sessionpipe's entries went into still goes with them, as before.
+- e32222b: Control: a picture sent with a message reaches Codex, an ACP agent and an Agent SDK session as a picture, not only as a path
+  
+  - The daemon still saves every file in the session's folder and lists it in the text. A harness that has its own way to take a picture now gets the pictures that way too, in the same run: Codex as `--image <path>` on `codex exec` and `codex exec resume`, an ACP agent that says `promptCapabilities.image` as `image` blocks after the text, and a Claude Code session held through the Agent SDK as `image` blocks before the words. `claude -p` and Antigravity get the list, as before: Claude Code opens the pictures itself, and `agy` has no way to take one.
+  - A file is a picture when its type is PNG, JPEG, GIF or WebP and its bytes are that format with a width and height in their header; a PDF, or a file that only says it is a PNG, is listed and nothing more. Each harness gets only what it takes: Codex a still picture of up to 30 000 patches whose path has no comma (Codex splits `--image` on commas); an ACP agent and the Agent SDK up to 3 750 000 bytes and 3000 px a side each, and in one message pictures while their base64 stays within 10 000 000 characters. A picture gone or changed before it is handed over is left out. The daemon's log says, for each run with pictures, how many went natively and how many stayed in the list.
+  - A native way refused before the harness has done anything never fails a message the text alone would have delivered: a Codex older than `--image` is run again at once without it, and an ACP agent that refuses the pictures before writing, running or asking anything is sent the text alone. With no pictures, every harness gets exactly what it got before.
+  - Codex's title and transcript text for a session given a picture are the person's words: the `<image name=[Image #1] path="…">` and `</image>` lines Codex writes around a picture are left out.
+  - `spec/CONTROL.md` §6 has the rule (*Pictures*), `spec/ADAPTERS.md` each harness's way and limits, `conformance/control-pictures.json` the cases, and `conformance/transcripts/codex/picture-attached.jsonl` a rollout recorded on Codex 0.171.0.
+- d2ec15d: Claude Code: a Read of a big picture reaches the board, and tool output carries no picture bytes
+  
+  - The hook used to cut a payload over 1 MiB, and a 2560 px picture's base64 is 1–3 MB, so the Read never showed as finished and a held permission question after it could stay open. A tool's result over 1 MiB with a picture in it now goes without the picture's bytes.
+  - `tool.ended.output` for a picture Read is `{type: "image", media_type, original_size, dimensions}` at any size. A picture Read's base64, a PDF's bytes and an image part's data in a tool's content list are left out (`omitted_bytes`): they no longer sit in the outbox or go to a sink. `spec/ADAPTERS.md` has the mapping, and `conformance/harness/claude-code/post-tool-use-read-image.json` the recorded payload.
+- 1f120e2: Control: a file sent with a message gets through a moment's trouble, and a failure says what happened in plain words
+  
+  - When the connection drops or the receiver answers with a 5xx, the daemon tries a picture or file twice more, after 1 s and 4 s, inside the file's 5-minute limit; a 404, another status, a wrong size or hash still fails at once.
+  - A failure says what happened: `"shot.png" didn't finish downloading within 5 minutes`, `couldn't download "shot.png": the connection to the receiver kept failing`, `couldn't save the files: this folder can't be written to`, `couldn't save the files: the disk is full`. `spec/CONTROL.md` §6 has the rule, and `conformance/control-file-retry.json` the cases.
+- 5bf06a4: A sink added with `--secret` and no `--token` signs each batch and sends no bearer, and the spec now says that is a valid sink: `spec/HTTP.md` §2 makes `authorization` OPTIONAL on a signed request, and a receiver that verifies the signature MAY accept it (`conformance/delivery/34-auth-signed.json`); one that does not answers 401 and the sink pauses, as before. `sessionpipe sink` now lists `--secret` in its usage line, as `sink add --help` did (#199).
+- 4750e26: HTTP sink: a 403 the sink cannot act on backs off like a 5xx
+  
+  - A 403 with no `max_tier` (an access proxy's "Forbidden" page), or with a `max_tier` at or above the tier the sink already sends at, now waits on the 2 s … 30 min backoff and the log names the 403, instead of the same batch being sent again on every run (#201). Only a 403 whose `max_tier` is below the sink's tier lowers it. `spec/HTTP.md` §2 has a row for it.
+- 494bd1e: Uninstall says what it does: only sessionpipe's entries are removed and every other value stays
+  
+  - `sessionpipe uninstall`, the README and the docs promised every config file "byte-identical". That holds for a TOML config and for a JSON file laid out one item per line. A JSON file with a list or object on a single line keeps its values but comes back spread over several lines (#205). The words now say that; nothing about what is written changed.
+
 ## 0.17.0
 
 ### Minor Changes
