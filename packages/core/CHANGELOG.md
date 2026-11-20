@@ -1,5 +1,62 @@
 # @sessionpipe/core
 
+## 0.18.0
+
+### Minor Changes
+
+- c53d7df: `sessionpipe backfill` sends the words of sessions no hook reported (#123)
+  
+  - A session whose turns no hook ever reported (a Codex Desktop thread, a Claude Code session from before the hooks were installed) used to reach a receiver only as one `session.backfill`, with no words. `sessionpipe backfill`, with a sink at tier 2 or higher, for Claude Code, Codex and Grok Build sessions (the harnesses whose backfill names a transcript), now also queues one `turn.transcript` per exchange its transcript holds that was never sent, numbered from the session's transcript cursor as a live turn's are, and redacted the same way before it is written. Each event is filtered per sink as any other, so a sink below tier 2 gets what it got before.
+  - The cursor is saved, so a second `backfill` sends nothing again, and a transcript not written since a backfill read it to its end, or found it a day old, is not read again until it is written. A session a hook is busy with is left for the next run. A session's last turn waits until it is over: its file says the turn ended (Claude Code: a reply that waits on no tool; Codex: `task_complete`; Grok Build: `turn_completed`), the file has been quiet for ten minutes and no hook holds a turn open; or nothing has written the file for a day. A turn a hook holds open goes only once its file says it ended, however long it waits, so its own worker and the backfill never each send a part of it.
+  - `sessionpipe install` and `sessionpipe connect` still backfill metadata only; with a tier-2 sink and a session whose words a backfill can read, each now says that `sessionpipe backfill --days N` sends them.
+  - `spec/PROTOCOL.md` widens who sends `turn.transcript`, and `conformance/delivery/35-backfill-transcript.json` is the receiver's scenario for it.
+- 8c61f63: Claude Code: a session says the reasoning effort its latest turn ran at
+  
+  - `session.effort` is new and optional, tier 0 like `model` (#210). The Claude Code adapter takes it from the hook payload's `effort.level`, and from the newest assistant line of the transcript that says one, so a change made with `/effort` shows on the next event. A payload or transcript that says nothing sends nothing, and a receiver reads absent as unknown.
+  - It is a bare word of at most 40 characters, as `submitted_by` is: tier 0 is not redacted, so a value of any other shape is not sent. `spec/PROTOCOL.md` §3 and `spec/PRIVACY.md` say so.
+- 97cdab6: Core reads the proto (RFC 0001, step 2). Its types are the generated ones (`packages/core/gen/v1.ts`, same names and shapes); the filter's tables, which event types exist, the tier each is first carried at, the data keys each tier carries and the session keys, come from the proto's `tier` and `at_tier` options instead of hand-kept copies. The Zod source is gone, and `zod` with it from every package. `sessionpipe-core/schema` now exports the protocol's JSON Schemas as objects (`SCHEMAS`), a dependency-free checker for them (`validate`, `problems`, `dataSchema`) and the registry (`KNOWN_TYPES`, `TYPE_TIER`, `HARNESS_NAMES`, `PROTOCOL`) instead of Zod schemas. Nothing on the wire changes; the tier goldens hold the filter's output byte for byte.
+
+### Patch Changes
+
+- 4aab723: A prompt, a Write or a tool result over 1 MiB makes its event again
+  
+  - The hook kept only the first 1 MiB of a payload, so a bigger one was cut mid-JSON and its event dropped with a log line saying the adapter did not claim it (#200). The hook now hands on the whole payload, up to 64 MiB, and an event too long for one outbox line is written with its text cut the way every sink is sent it anyway, so no sink gets less than before and no session's drain stops at it. A payload that cannot be read (over 64 MiB, or not JSON) is still dropped, and the log line now says how many bytes it was. `spec/OUTBOX.md` §2 and `spec/ADAPTERS.md` say so.
+- 42c02c5: Install and uninstall change only sessionpipe's entries in a JSON config's text (#205)
+  
+  - A JSON config used to be written back whole, one item per line, so a list or object on one line came back spread over several. Now install puts only sessionpipe's entries into the file's text and uninstall takes only them out, on all seven JSON harnesses, Claude Code's status line and `pool on`/`off`: a file with lists on one line, tabs, CRLF or a byte-order mark comes back byte-identical. An empty `hooks` object or event list that sessionpipe's entries went into still goes with them, as before.
+- e32222b: Control: a picture sent with a message reaches Codex, an ACP agent and an Agent SDK session as a picture, not only as a path
+  
+  - The daemon still saves every file in the session's folder and lists it in the text. A harness that has its own way to take a picture now gets the pictures that way too, in the same run: Codex as `--image <path>` on `codex exec` and `codex exec resume`, an ACP agent that says `promptCapabilities.image` as `image` blocks after the text, and a Claude Code session held through the Agent SDK as `image` blocks before the words. `claude -p` and Antigravity get the list, as before: Claude Code opens the pictures itself, and `agy` has no way to take one.
+  - A file is a picture when its type is PNG, JPEG, GIF or WebP and its bytes are that format with a width and height in their header; a PDF, or a file that only says it is a PNG, is listed and nothing more. Each harness gets only what it takes: Codex a still picture of up to 30 000 patches whose path has no comma (Codex splits `--image` on commas); an ACP agent and the Agent SDK up to 3 750 000 bytes and 3000 px a side each, and in one message pictures while their base64 stays within 10 000 000 characters. A picture gone or changed before it is handed over is left out. The daemon's log says, for each run with pictures, how many went natively and how many stayed in the list.
+  - A native way refused before the harness has done anything never fails a message the text alone would have delivered: a Codex older than `--image` is run again at once without it, and an ACP agent that refuses the pictures before writing, running or asking anything is sent the text alone. With no pictures, every harness gets exactly what it got before.
+  - Codex's title and transcript text for a session given a picture are the person's words: the `<image name=[Image #1] path="…">` and `</image>` lines Codex writes around a picture are left out.
+  - `spec/CONTROL.md` §6 has the rule (*Pictures*), `spec/ADAPTERS.md` each harness's way and limits, `conformance/control-pictures.json` the cases, and `conformance/transcripts/codex/picture-attached.jsonl` a rollout recorded on Codex 0.171.0.
+- 87441b9: Outbox: the event written after an append that was cut short is no longer lost with it
+  
+  - An append cut short by a full disk, a file-size limit or a killed process left a line with no end. The next event was written onto that line, and every reader dropped the two together: no log line, and a gap in `seq` at the receiver. An append now looks at the file's last byte and starts on a new line when it is not a newline, so only the cut event is lost (#202). `spec/OUTBOX.md` §2 says so.
+- d2ec15d: Claude Code: a Read of a big picture reaches the board, and tool output carries no picture bytes
+  
+  - The hook used to cut a payload over 1 MiB, and a 2560 px picture's base64 is 1–3 MB, so the Read never showed as finished and a held permission question after it could stay open. A tool's result over 1 MiB with a picture in it now goes without the picture's bytes.
+  - `tool.ended.output` for a picture Read is `{type: "image", media_type, original_size, dimensions}` at any size. A picture Read's base64, a PDF's bytes and an image part's data in a tool's content list are left out (`omitted_bytes`): they no longer sit in the outbox or go to a sink. `spec/ADAPTERS.md` has the mapping, and `conformance/harness/claude-code/post-tool-use-read-image.json` the recorded payload.
+- c410cf4: secrets@1: a link reaches a sink without the key in its query
+  
+  - In a URL's query, the value of `k`, `key`, `sig`, `signature`, `X-Amz-Signature` or `X-Goog-Signature` (any case, 16 characters or more) is replaced, so a board's picture link, a spacesheep signed link or a pre-signed storage link arrives as `…?e=1795139368424&k=[redacted]`. The name, the other parameters and the rest of the URL stay; a short value (`?page=2&k=short`) stays. A `?token=` or `&api_key=` was already an assignment's, and still is.
+  - A `k` or `key` value that reads as words stays, as a search or a docs link carries it (`?k=wireless+bluetooth+headphones`, `?key=top-10-dashboards-2026.`): without the punctuation at its end, split on `+`, `-`, `_`, `.` and `%20`, every piece is lowercase letters, one capital then lowercase letters, or one to four digits. A hex or base64 key, a UUID or a long number still goes.
+  - The link is read after the other rules, so a link that is a secret's whole value goes whole (`API_KEY=[redacted]`). `spec/PRIVACY.md` §2 has the row, and `conformance/redaction/secrets.json` the cases.
+- f31fc51: secrets@1: named values and cookies, in structured data and in text
+  
+  - What is under `value` goes by the name beside it: `{"name":"DB_PASSWORD","value":"…"}` and `{"name":"Cookie","value":"…"}` are read as a secret's name and a header's name are.
+  - A cookie's value is replaced whole: an object under a key that ends in `cookie` or `cookies`, one with a `name` and two of a cookie's attributes (`domain`, `path`, `expires`, `httpOnly`, `secure`, `sameSite`), and what is not words in a jar of them (`cookies: { sid: "…" }`).
+  - An object written out in text is read the same way: JSON on one line or many with its keys in any order, a JavaScript or Python literal, an object held in a string, JSON inside a JSON string.
+  - A cookie header written out is replaced up to its last pair or attribute: `Cookie: sid=…; theme=dark` becomes `Cookie: [redacted]`, in a request as it was sent, a `curl -H` or `-b`, JSON text, a call or an assignment. Code that builds one from pieces (`"sid=" + sid`) is left as it is.
+  - `spec/PRIVACY.md` §2 has the four rows, and `conformance/redaction/secrets.json` the cases.
+- 556a8c0: secrets@1: a header's value is redacted under its name in structured data
+  
+  - Under a key that ends in `authorization` or `cookie`, in any case (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `set_cookie`, `HTTP_COOKIE`, `X-Authorization`), a string is replaced whole, and so is each string of a list (`"set-cookie": ["…", "…"]`). A value that is nothing but a stand-in stays: empty, `[redacted]`, `<token>`, `${TOKEN}`. `spec/PRIVACY.md` §2 has the row, and `conformance/redaction/secrets.json` the cases.
+- 30cb488: secrets@1: a string stored under a key that names a secret is redacted in structured data too
+  
+  - `redactDeep({ api_key: "…" })` gives `{ api_key: "[redacted]" }`, with the exemptions an assignment has: a placeholder, a value already redacted, and a count such as `max_tokens: "4096"`. The filter walks a tool's structured `input` and `output` before it cuts them to 64 KB, so the rule holds at any size. `spec/PRIVACY.md` §2 has the row, and `conformance/redaction/secrets.json` the cases (#206).
+
 ## 0.17.0
 
 ### Minor Changes
