@@ -34,7 +34,11 @@
   `packages/core/test/claude-code.test.ts`.
 - `transcripts/<harness>/*.jsonl` — transcript files as the harness writes them, scrubbed, for what
   a reader must keep and skip (spec/ADAPTERS.md, the Transcript row). Read by
-  `packages/core/test/transcripts.test.ts`; `packages/cli/test/turn-settle.test.ts` writes
+  `packages/core/test/transcripts.test.ts`; `codex/picture-attached.jsonl` (a rollout recorded on
+  codex-cli 0.171.0 with a picture on its start and on its resume; Codex's own instructions are
+  replaced by a note of their length, the folders by neutral ones) by
+  `packages/core/test/codex-transcript.test.ts`, for the title and the asks without Codex's picture
+  wrapper; `packages/cli/test/turn-settle.test.ts` writes
   `interrupted-turn.jsonl` out a flush at a time, as Claude Code does, for when a turn is whole,
   and `packages/cli/test/delivered-turns.test.ts` replays `stop-hook-delivery.jsonl`,
   `subagent-handback.jsonl` and `copy-of-session.jsonl` a hook at a time, for whose words a

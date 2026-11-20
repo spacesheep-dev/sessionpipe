@@ -5,17 +5,19 @@
 // for the next message), and its JSONL output read as it streams. Codex picks a new
 // session's id itself (the first line, `thread.started`), so the daemon names it after
 // the command that started it (CONTROL.md §6 `start`). Shapes measured on codex-cli
-// 0.160.0, 2026-10-04.
+// 0.160.0, 2026-10-04; `--image` on 0.171.0, 2026-11-19.
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PICTURE_TYPES, type Picture, type PictureLimits, picturesFor } from "../control/pictures.js";
 import { MODEL_RE, type RunLevel, type StartPermission } from "../control/verify.js";
 import {
   findBinary,
   jobEnv,
   type Login,
   type Mode,
+  pictureThere,
   probe,
   type Reading,
   type RunResult,
@@ -78,29 +80,71 @@ export const offeredLevels = (mode: Mode): StartPermission[] =>
 export const defaultLevel = (mode: Mode): RunLevel => mode;
 
 /** One headless turn. A new session runs in `cwd` (`-C`); a resume names the thread.
- *  The model is its own argument after `-m`. The prompt goes after `--`, so a message
- *  that starts with a dash is never a flag. */
+ *  The model is its own argument after `-m`. Each picture is its own `--image <path>`,
+ *  in order, after every other flag (`codex exec` reads `--image` as a list, which the
+ *  next flag or `--` ends). The prompt goes after `--`, so a message that starts with a
+ *  dash is never a flag. With no pictures the arguments are what they always were. */
 export function codexArgs(o: {
   permission: RunLevel;
   prompt: string;
   cwd?: string;
   resume?: string;
   model?: string;
+  pictures?: readonly string[];
 }): string[] {
   const common = ["--json", "--skip-git-repo-check"];
   const model = o.model ? ["-m", o.model] : [];
+  const images = (o.pictures ?? []).flatMap((p) => ["--image", p]);
   if (o.resume)
-    return ["exec", "resume", ...common, ...codexModeFlags(o.permission, true), ...model, "--", o.resume, o.prompt];
+    return [
+      "exec",
+      "resume",
+      ...common,
+      ...codexModeFlags(o.permission, true),
+      ...model,
+      ...images,
+      "--",
+      o.resume,
+      o.prompt,
+    ];
   return [
     "exec",
     ...common,
     ...(o.cwd ? ["-C", o.cwd] : []),
     ...codexModeFlags(o.permission),
     ...model,
+    ...images,
     "--",
     o.prompt,
   ];
 }
+
+/** What Codex takes as `--image` (spec/ADAPTERS.md, Codex, Control): PNG, JPEG, WebP and
+ *  GIF, as OpenAI's image input takes them — a still picture only (it takes no animated
+ *  GIF) — of at most 30 000 patches of 32 × 32 px. Codex sends a picture as it is
+ *  (`detail: "original"`, measured on 0.171.0 with a 4000 × 2000 PNG: no resizing), and
+ *  OpenAI refuses one over 30 000 patches at that detail rather than shrink it. No count
+ *  or size of its own below a command's ten files of 25 MiB: OpenAI takes up to 1 500
+ *  pictures and 512 MB in one request. */
+export const CODEX_PICTURES: PictureLimits = { types: PICTURE_TYPES, maxPatches: 30_000, still: true };
+
+/** The saved pictures a Codex run is given as `--image`, by path, in order: those Codex
+ *  takes, still there as saved when the arguments are built, and whose path has no comma.
+ *  Codex splits each `--image` value on commas (0.171.0, exec and exec resume alike):
+ *  `/w/b,c.png` is read as `/w/b` and a relative `c.png`, so a file named `x,README.png`
+ *  would attach another file of the folder. A path with a comma (in the file's name or the
+ *  session's folder) stays in the text's list only. */
+export const codexPictures = (pictures: readonly Picture[]): string[] =>
+  picturesFor(pictures, CODEX_PICTURES)
+    .filter((p) => !p.path.includes(",") && pictureThere(p))
+    .map((p) => p.path);
+
+/** A Codex that has no `--image` for this command (one older than the flag) says so the
+ *  way its argument parser says everything, before it starts anything: exit 2, nothing on
+ *  stdout, and `error: unexpected argument '--image' found` on stderr (0.171.0's words for
+ *  an argument it doesn't know). The run is made again without the pictures. */
+export const codexRefusedPictures = (res: RunResult): boolean =>
+  res.code === 2 && !res.stdout?.trim() && /unexpected argument '--image'/.test(res.stderr ?? "");
 
 /** The models a hello offers for Codex (CONTROL.md §2 `start`): the slugs Codex's own
  *  picker lists, from `$CODEX_HOME/models_cache.json` (visibility `list`; hidden ones,

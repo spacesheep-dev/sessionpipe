@@ -8,11 +8,12 @@
 // tried twice more, inside the file's one time limit. Any other problem: nothing is
 // kept, and the session doesn't start or the message isn't delivered, with the reason
 // in plain words. The same for every harness and every delivery mode:
-// the files are in `cwd` before the run, and nothing about them is the harness's.
+// the files are in `cwd` before the run, and listed in its text. A harness with its own
+// way to take a picture is given the pictures that way too (picturesOf, §6 *Pictures*).
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ControlFile } from "@sessionpipe/core/control";
+import { type ControlFile, type Picture, pictureFacts } from "@sessionpipe/core/control";
 
 /** One file's download may take this long (25 MiB on a slow link). */
 export const FETCH_TIMEOUT_MS = 5 * 60_000;
@@ -257,4 +258,16 @@ export function humanSize(n: number): string {
 export function withFiles(text: string, files: Fetched[], rel: string[]): string {
   const lines = files.map((f, i) => `- ${rel[i]} (${f.file.type}, ${humanSize(f.file.size)})`);
   return `${text}\n\nAttached files (saved in this folder):\n${lines.join("\n")}`;
+}
+
+/** The saved files that are pictures (core's pictureFacts: by their signed type and their
+ *  bytes), in order, each at its absolute path under `cwd`: what a harness that takes
+ *  pictures natively may be given besides the text's list. */
+export function picturesOf(cwd: string, files: Fetched[], rel: string[]): Picture[] {
+  const out: Picture[] = [];
+  files.forEach((f, i) => {
+    const facts = pictureFacts(f.file.type, f.bytes);
+    if (facts) out.push({ ...facts, path: path.join(cwd, rel[i] as string), size: f.bytes.length });
+  });
+  return out;
 }

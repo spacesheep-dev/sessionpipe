@@ -345,6 +345,21 @@ export function codexInjected(text: string): boolean {
   return /^<[a-z_-]+>/i.test(text) || /^# AGENTS\.md instructions\b/i.test(text);
 }
 
+/** The lines Codex wraps a picture it was given in (`--image`, measured on 0.171.0): an
+ *  `input_text` part `<image name=[Image #1] path="…">` before the picture and one
+ *  `</image>` after it. Codex's, not the person's: they name a local path and say nothing. */
+export function codexPictureTag(text: string): boolean {
+  return /^<image name=\[Image #\d+\][^>]*>$/.test(text) || text === "</image>";
+}
+
+/** A Codex message's words: its text parts, without the lines Codex wraps a picture in. */
+export function codexWords(content: unknown): string {
+  const parts = Array.isArray(content)
+    ? content.filter((b) => !(typeof b?.text === "string" && b.type === "input_text" && codexPictureTag(b.text)))
+    : content;
+  return textParts(parts, ["input_text", "output_text"]).trim();
+}
+
 /** Codex rollout: {type:"response_item", payload:{type:"message", role, content:[{type:"input_text"|"output_text", text}]}}. */
 export function readCodex(lines: string[], from: number): TranscriptRead {
   const msgs: Msg[] = [];
@@ -363,7 +378,7 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
     if (j.type === "event_msg" && p?.type === "task_complete") ended = true;
     if (j.type !== "response_item" || !p || p.type !== "message") continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
-    const text = textParts(p.content, ["input_text", "output_text"]).trim();
+    const text = codexWords(p.content);
     if (!text) continue;
     if (p.role === "user") {
       if (codexInjected(text)) continue; // Codex's own injections, not the person's words
