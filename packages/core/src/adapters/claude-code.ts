@@ -153,6 +153,10 @@ export const claudeCode: Adapter = {
     if (notClaudeCode(String(id), s)) return null;
     const session: HookResult["session"] = { id: String(id), cwd: typeof s.cwd === "string" ? s.cwd : input.cwd };
     if (typeof s.model === "string") session.model = s.model;
+    // Recent payloads say the turn's effort (`"effort":{"level":"high"}`), which `/effort`
+    // changes mid-session; older ones say nothing, and nothing is sent.
+    const effort = harnessWord((s.effort as { level?: unknown } | null | undefined)?.level);
+    if (effort) session.effort = effort;
     if (typeof s.agent_id === "string" && event.startsWith("Subagent") === false && s.agent_id)
       session.parent_id = null;
     const turn_id = typeof s.prompt_id === "string" ? s.prompt_id : undefined;
@@ -903,6 +907,9 @@ export function claudeFacts(
       break;
     }
   }
+  // Each assistant line says the effort it ran at; the newest one is the session's now.
+  const effort = [...T].reverse().find((j) => j.type === "assistant" && harnessWord(j.effort))?.effort;
+  if (effort) out.effort = String(effort);
   const meta = [...T].reverse().find((j) => j.version) ?? H.find((j) => j.version);
   if (meta?.version) out.harness_version = String(meta.version);
   const times = H.concat(T)

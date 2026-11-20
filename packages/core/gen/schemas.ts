@@ -131,6 +131,10 @@ export const SCHEMAS = {
           "delegated_by": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+          },
+          "effort": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
           }
         },
         "required": [
@@ -866,6 +870,10 @@ export const SCHEMAS = {
                 "delegated_by": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+                },
+                "effort": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
                 }
               },
               "required": [

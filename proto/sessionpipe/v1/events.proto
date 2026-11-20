@@ -123,6 +123,10 @@ message Session {
   // child's environment says so. On every event of the child. Lineage across
   // harnesses, as `parent_id` is within one; never authority, never a subagent.
   string delegated_by = 15 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // The reasoning effort the harness reports for the session's latest turn, in the
+  // harness's own word (Claude Code: low, medium, high, xhigh, max). Absent = unknown. A
+  // bare word: tier 0 is not redacted, so the shape is the only guard.
+  string effort = 16 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"];
 }
 
 // What ran on the event before it left the machine.

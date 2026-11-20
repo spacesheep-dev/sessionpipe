@@ -503,6 +503,7 @@ export async function runJob(
       machine: machineName(cfg, os.hostname()),
       ...(cwdRaw ? { cwd: tilde(cwdRaw) } : {}),
       ...(r.session.model ? { model: r.session.model } : {}),
+      ...(r.session.effort ? { effort: r.session.effort } : {}),
       ...(r.session.launched_by ? { launched_by: r.session.launched_by } : {}),
       ...(r.session.delegated_by ? { delegated_by: r.session.delegated_by } : {}),
     };
