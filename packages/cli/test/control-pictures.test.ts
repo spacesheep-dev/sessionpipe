@@ -2,17 +2,29 @@
 // A command's pictures, handed over natively as well as listed in the text (CONTROL.md §6
 // `start`, Pictures): Codex's `--image` on a start and a resume, and a Codex that has no
 // such flag run again without it; nothing new for Antigravity; an ACP agent's `image`
-// blocks on a start, a message to the session it holds, and a reopen; nothing new for
+// blocks on a start, a message to the session it holds, and a reopen; the Agent SDK's
+// pictures on a start and on a message to the session it holds; nothing new for
 // `claude -p`. The log's counts on each. Stand-in `codex`, `agy` and ACP agent record what
 // they were given; the receiver is the fake one, so the files travel the whole way. The
 // project's folder has a space and an accent in its name.
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { type RunResult, runHeadless } from "@sessionpipe/core";
+import type { Picture } from "@sessionpipe/core/control";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { ControlDaemon, type DaemonDeps } from "../src/control/daemon.js";
+import { ControlDaemon, type DaemonDeps, type SdkHost } from "../src/control/daemon.js";
 import type { ControlConfig } from "../src/control/store.js";
 import { jsonLines } from "./helpers/lines.js";
 import { FakeReceiver } from "./helpers/receiver.js";
@@ -432,6 +444,74 @@ describe.runIf(unix)("an ACP agent that takes images", { timeout: 30_000 }, () =
       "pictures: 1 natively (image blocks), 1 in the list only",
       "pictures: 1 natively (image blocks), 0 in the list only",
     ]);
+  });
+});
+
+describe.runIf(unix)("a Claude Code session held through the Agent SDK", { timeout: 30_000 }, () => {
+  it("a start and a message to it: the pictures go with the text; a message without files has none", async () => {
+    const SID = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
+    const sent: { text: string; pictures: readonly Picture[] | undefined }[] = [];
+    const host: SdkHost = {
+      start: () => ({
+        send: (text, pictures) => {
+          sent.push({ text, pictures });
+          return Promise.resolve({ reply: `I was given ${pictures?.length ?? 0} picture(s).` });
+        },
+        interrupt: async () => {},
+        close: () => {},
+        busy: false,
+        lastUsed: Date.now(),
+      }),
+    };
+    await startDaemon({
+      sdk: host,
+      claude: () => ({ bin: "claude", caps: { hasMode: true, modes: ["dontAsk"], promptsNone: false, fork: true } }),
+    });
+    const shot = await rx.upload("shot.png", "image/png", png(10, 10));
+    const pdf = await rx.upload("notes.pdf", "application/pdf", Buffer.from("%PDF-1.7\n"));
+    const q = await rx.send({
+      kind: "start",
+      session: `claude-code:${SID}`,
+      cwd: project,
+      text: "look",
+      files: [pdf, shot],
+    });
+    expect(await rx.waitAck(q.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "sdk",
+      reply: "I was given 1 picture(s).",
+    });
+    const saved = path.join(project, ".sessionpipe", "files", SID, "shot.png");
+    expect(sent[0]!.pictures).toEqual([
+      { type: "image/png", width: 10, height: 10, animated: false, path: saved, size: 40 },
+    ]);
+    // Its transcript, so the next message finds the session; held, it goes in place.
+    const dir = path.join(tmp, "claude-config", "projects", project.replace(/[^a-zA-Z0-9]/g, "-"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, `${SID}.jsonl`),
+      `${JSON.stringify({ type: "user", cwd: project, message: { content: "look" } })}\n`,
+    );
+    const two = await rx.upload("two.png", "image/png", png(20, 20));
+    const q2 = await rx.send({ session: `claude-code:${SID}`, text: "and this", files: [two] });
+    expect(await rx.waitAck(q2.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "sdk",
+      reply: "I was given 1 picture(s).",
+    });
+    expect(sent[1]!.pictures?.map((p) => p.path)).toEqual([
+      path.join(project, ".sessionpipe", "files", SID, (JSON.parse(q2.cmd) as { nonce: string }).nonce, "two.png"),
+    ]);
+    const q3 = await rx.send({ session: `claude-code:${SID}`, text: "and nothing" });
+    expect(await rx.waitAck(q3.id)).toMatchObject({ outcome: "delivered", reply: "I was given 0 picture(s)." });
+    expect(sent[2]!.pictures).toEqual([]);
+    // The stand-in reports none as sent natively: the daemon logs what the session said.
+    expect(said()).toEqual([
+      "pictures: 0 natively (image blocks), 1 in the list only",
+      "pictures: 0 natively (image blocks), 1 in the list only",
+    ]);
+    expect(existsSync(saved)).toBe(true);
+    expect(readFileSync(saved)).toEqual(Buffer.from(png(10, 10)));
   });
 });
 

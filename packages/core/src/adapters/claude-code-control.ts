@@ -10,6 +10,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PICTURE_TYPES, type Picture, type PictureLimits, picturesFor } from "../control/pictures.js";
 import { levelRank, type RunLevel, START_PERMISSIONS, type StartPermission } from "../control/verify.js";
 import { withoutLineage } from "../launched-by.js";
 import { reducePii } from "../privacy/pii.js";
@@ -19,6 +20,7 @@ import {
   JOB_TIMEOUT_MS,
   type Login,
   type Mode,
+  pictureBytes,
   probe,
   type RunOptions,
   type RunResult,
@@ -30,6 +32,46 @@ export { JOB_TIMEOUT_MS, type Login, type Mode, type RunResult };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A transcript someone else wrote this recently is in use. */
 const LIVE_WRITE_MS = 90_000;
+
+/** What a session held through the Agent SDK is given as `image` blocks (spec/ADAPTERS.md,
+ *  Claude Code, Pictures): PNG, JPEG, GIF or WebP, at most 3 750 000 bytes (5 MB once
+ *  base64-encoded, the API's smallest limit, on Amazon Bedrock) and 3000 px a side. A held
+ *  session sends every picture again with each later turn, and once a request holds more
+ *  than 20 the API holds each to a stricter limit on its sides; the docs say within
+ *  3000 px is safe on every platform, and one refused there would fail that turn and
+ *  every turn after it. In one message, pictures while their base64 stays within
+ *  10 000 000 characters: under the lower request limits, and the transcript's first
+ *  user message stays inside the 16 MB line its title is read from. Anything else is
+ *  listed in the text, and Claude Code opens it from there, as it always has. `claude -p`
+ *  and the in-place lanes have no way to take a picture but the text. */
+export const CLAUDE_SDK_PICTURES: PictureLimits = {
+  types: PICTURE_TYPES,
+  maxBytes: 3_750_000,
+  maxSide: 3000,
+  maxBase64: 10_000_000,
+};
+
+/** A user message's `image` block, base64 (platform.claude.com/docs/en/build-with-claude/vision). */
+export interface ClaudeImage {
+  type: "image";
+  source: { type: "base64"; media_type: string; data: string };
+}
+
+/** The `image` blocks for a message's pictures through the Agent SDK: those it takes
+ *  (CLAUDE_SDK_PICTURES), in order, each read again and only if it is still the picture
+ *  that was saved. */
+export function claudeImages(pictures: readonly Picture[]): ClaudeImage[] {
+  const out: ClaudeImage[] = [];
+  for (const p of picturesFor(pictures, CLAUDE_SDK_PICTURES)) {
+    const b = pictureBytes(p);
+    if (b)
+      out.push({
+        type: "image",
+        source: { type: "base64", media_type: p.type, data: Buffer.from(b).toString("base64") },
+      });
+  }
+  return out;
+}
 
 /** Dotted versions by number, a missing part as 0: 1.9.0 < 1.10 = 1.10.0. */
 export const cmpVersion = (a: string, b: string) => {

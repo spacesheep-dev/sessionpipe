@@ -3,7 +3,7 @@
 // Pictures; ADAPTERS.md): which file is a picture, which pictures each harness takes
 // (conformance/control-pictures.json), a saved picture checked again before a run, and
 // what each harness is handed: Codex's `--image` arguments on `exec` and `exec resume`,
-// an ACP agent's `image` blocks.
+// an ACP agent's `image` blocks, the Agent SDK's `image` blocks.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -12,6 +12,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { ACP_PICTURES, acpImages } from "../src/adapters/acp-control.js";
+import { CLAUDE_SDK_PICTURES, claudeImages } from "../src/adapters/claude-code-control.js";
 import { CODEX_PICTURES, codexArgs, codexPictures, codexRefusedPictures } from "../src/adapters/codex-control.js";
 import { pictureBytes, pictureThere } from "../src/adapters/headless.js";
 import {
@@ -35,6 +36,7 @@ const V = JSON.parse(readFileSync(new URL("../../../conformance/control-pictures
 const LIMITS: Record<string, PictureLimits | null> = {
   codex: CODEX_PICTURES,
   acp: ACP_PICTURES,
+  "claude-code-sdk": CLAUDE_SDK_PICTURES,
   "claude-code": null,
   antigravity: null,
 };
@@ -282,7 +284,7 @@ describe("Codex: each picture its own --image, on exec and exec resume", () => {
   });
 });
 
-describe("image blocks: an ACP agent's", () => {
+describe("image blocks: an ACP agent's and the Agent SDK's", () => {
   it("ACP: its type, its bytes in base64 and its file's URL, in order; those it doesn't take left out", () => {
     const a = saved("a b é.png", "a PNG");
     const g = saved("anim.gif", "an animated GIF");
@@ -305,5 +307,25 @@ describe("image blocks: an ACP agent's", () => {
     ]);
     expect(pathToFileURL(a.path).href).toContain("a%20b%20%C3%A9.png");
     expect(acpImages([])).toEqual([]);
+  });
+
+  it("the Agent SDK: base64 sources, in order; over 3000 px or gone left out", () => {
+    const a = saved("a.png", "a PNG");
+    const j = saved("j.jpg", "a JPEG: JFIF, then a baseline frame");
+    const wide = saved("wide.jpg", "a progressive JPEG, fill bytes and a lone marker before its frame");
+    const gone = saved("gone.gif", "a GIF of one frame, with a colour table and an extension");
+    rmSync(gone.path);
+    expect(claudeImages([j, wide, gone, a])).toEqual([
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/jpeg",
+          data: bytesOf("a JPEG: JFIF, then a baseline frame").toString("base64"),
+        },
+      },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: bytesOf("a PNG").toString("base64") } },
+    ]);
+    expect(claudeImages([])).toEqual([]);
   });
 });
