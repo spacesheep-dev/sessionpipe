@@ -4111,6 +4111,20 @@ describe.skipIf(process.platform === "win32")(
       expect(said(brief, "Reports to")).toBe("✓ out");
     });
 
+    // The folder is never listed whole (run.ts jobNames): doctor once sat for minutes on a
+    // folder a day behind, with every worker on the machine listing it too.
+    it("more hook events queued than doctor counts: it says that many or more", async () => {
+      writeConfig({ sinks: [{ name: "out", url: "stdout", tier: 0 }], harnesses: {} } as never);
+      mkdirSync(path.join(state, "jobs"), { recursive: true });
+      for (let i = 0; i < 1003; i++) writeFileSync(path.join(state, "jobs", `${i}.json`), "{}");
+      steadyHook();
+      vi.stubEnv("SESSIONPIPE_CLAUDE", fakeClaude());
+      expect(group(await run("doctor"), "Reports to")).toContain(
+        "  · still to handle  1000 or more hook events waiting on this computer",
+      );
+      expect(JSON.parse((await run("status", "--json")).lines.join("\n")).jobs).toBe(1000);
+    });
+
     it("updates: automatic with what the last check found, what waits for an idle moment, what failed, what was done", async () => {
       paired();
       // A global install this user can write: the background service updates it by itself.

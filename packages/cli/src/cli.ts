@@ -9,7 +9,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -103,7 +102,7 @@ import {
   drain,
   factsState,
   flush,
-  jobsDir,
+  jobNames,
   runJob,
   sinkAt,
   transcriptTurn,
@@ -1775,11 +1774,11 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   if (!cfg.sinks.length)
     reports.rows.push({ mark: "info", label: "nowhere", value: "events stay on this computer until you add a sink" });
   const jobs = waitingJobs();
-  if (jobs)
+  if (jobs.count)
     reports.rows.push({
       mark: "info",
       label: "still to handle",
-      value: `${jobs} hook event${jobs === 1 ? "" : "s"} waiting on this computer`,
+      value: `${jobs.count}${jobs.over ? " or more" : ""} hook event${jobs.count === 1 ? "" : "s"} waiting on this computer`,
     });
 
   // --- who can message it, and whether that is live --------------------------------------
@@ -1910,13 +1909,17 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   return { report, groups: [computer, agents, reports, messages, accounts, updates], todo };
 }
 
-/** Hook events written down and not yet handled by a worker. */
-function waitingJobs(): number {
-  try {
-    return readdirSync(jobsDir(state)).filter((n) => n.endsWith(".json")).length;
-  } catch {
-    return 0;
-  }
+/** As far as doctor counts the jobs folder: past this it says "or more", and stays quick. */
+const WAITING_MAX = 1000;
+
+/** Hook events written down and not yet handled by a worker, counted up to WAITING_MAX
+ *  names of the folder (run.ts jobNames: a folder is never listed whole). */
+function waitingJobs(): { count: number; over: boolean } {
+  const names = jobNames(state, WAITING_MAX + 1);
+  return {
+    count: names.slice(0, WAITING_MAX).filter((n) => n.endsWith(".json")).length,
+    over: names.length > WAITING_MAX,
+  };
 }
 
 /** What is wrong with the hooks' own copy, in a few words. */
@@ -1987,7 +1990,7 @@ async function status(): Promise<void> {
         control,
         pool,
         update: updateState(cfg),
-        jobs: waitingJobs(),
+        jobs: waitingJobs().count,
       },
       null,
       2,

@@ -120,7 +120,10 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // not rerouted because the event got there first.
     const stopAnswer = event === "Stop" ? await (controlAsk(stdin, Date.now()) ?? Promise.resolve(null)) : null;
     mkdirSync(path.join(state, "jobs"), { recursive: true, mode: 0o700 });
+    /** This hook event: its job file's name, and what every copy of the job is told by (run.ts jobKey). */
+    const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const job = {
+      id: name,
       harness,
       event,
       argv: [harness, event, ...rest],
@@ -157,11 +160,7 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       ppid: process.ppid,
       at: Date.now(),
     };
-    const jobFile = path.join(
-      state,
-      "jobs",
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`,
-    );
+    const jobFile = path.join(state, "jobs", `${name}.json`);
     writeFileSync(
       jobFile,
       raw ? Buffer.concat([Buffer.from(`${JSON.stringify({ ...job, stdin: "" })}\n`), raw]) : JSON.stringify(job),

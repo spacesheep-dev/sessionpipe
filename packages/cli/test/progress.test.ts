@@ -4,8 +4,8 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { filterEvent } from "@sessionpipe/core";
-import { afterAll, describe, expect, it } from "vitest";
+import { adapterByName, filterEvent } from "@sessionpipe/core";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { openTurn, PROGRESS_MS, runJob } from "../src/run.js";
 import { jsonLines } from "./helpers/lines.js";
 
@@ -80,6 +80,10 @@ describe("turn.progress", () => {
     await runJob(tool("c"), { state: tmp });
     expect(progress()).toHaveLength(2); // nothing new said: nothing sent
     line("assistant", "Writing the viewer module now.", "2026-10-11T21:37:00.000Z");
+    // That look was one all the same: 5 s after it is too soon, though nothing went out then.
+    clock += 5_000;
+    await runJob(tool("c2"), { state: tmp });
+    expect(progress()).toHaveLength(2);
     clock += PROGRESS_MS;
     await runJob(tool("d"), { state: tmp });
     expect(progress()[2].data.assistant).toBe("Reading the dashboard source.\n\nWriting the viewer module now.");
@@ -103,6 +107,51 @@ describe("turn.progress", () => {
     expect(end.delivered).toEqual({ f: 1 });
     expect(sent().at(-1)).toMatchObject({ type: "session.ended", data: { reason: "other" } });
     expect(sent().filter((e) => e.type === "turn.transcript")).toHaveLength(1);
+  });
+
+  // A session waiting on its own subagents says nothing new for hours while each of their
+  // tool calls is one of its own. A look that found nothing was not written down, so every
+  // call read the whole transcript again under the session's lock (a 92 MB one, 2026-11-20:
+  // the session's jobs fell a day behind and took the machine's hooks with them).
+  it("a turn that says nothing new is read once every PROGRESS_MS, however many tool calls land", async () => {
+    const quiet = path.join(tmp, "quiet.jsonl");
+    const said = (role: "user" | "assistant", text: string, at: string) =>
+      JSON.stringify(
+        role === "user"
+          ? { type: "user", timestamp: at, message: { role, content: text } }
+          : { type: "assistant", timestamp: at, message: { role, content: [{ type: "text", text }] } },
+      );
+    writeFileSync(quiet, `${said("user", "Run the workflow", "2026-10-11T23:00:00.000Z")}\n`);
+    const of = { session_id: "quiet-1", transcript_path: quiet };
+    await runJob(job("SessionStart", { source: "startup", ...of }), { state: tmp, drain: false });
+    await runJob(job("UserPromptSubmit", { prompt: "Run the workflow", ...of }), { state: tmp, drain: false });
+    appendFileSync(quiet, `${said("assistant", "Twelve agents are at it.", "2026-10-11T23:00:02.000Z")}\n`);
+    const claude = adapterByName("claude-code");
+    if (!claude) throw new Error("no Claude Code adapter");
+    const reads = vi.spyOn(claude, "readTranscript");
+    try {
+      const types: string[] = [];
+      for (let i = 1; i <= 60; i++) {
+        clock += 1_000;
+        const r = await runJob(
+          job("PostToolUse", {
+            tool_name: "Bash",
+            tool_input: { command: "ls" },
+            tool_response: "ok",
+            tool_use_id: `q${i}`,
+            ...of,
+          }),
+          { state: tmp, drain: false },
+        );
+        types.push(...r.events.map((e) => e.type));
+      }
+      // Looked at 20 s (the reply was new: sent), 40 s and 60 s (nothing new: not sent).
+      expect(reads.mock.calls.filter(([file]) => file === quiet)).toHaveLength(3);
+      expect(types.filter((t) => t === "turn.progress")).toHaveLength(1);
+      expect(types.filter((t) => t === "tool.ended")).toHaveLength(60);
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   it("a long reply keeps its end, for the sender and for every sink", () => {
