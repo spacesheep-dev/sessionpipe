@@ -229,8 +229,10 @@ const hookDelivery = (text: string): string => {
   return said.delivered ? said.text : "";
 };
 
-const hasBlock = (c: unknown, type: string): boolean =>
-  Array.isArray(c) && c.some((b) => b && typeof b === "object" && (b as { type?: unknown }).type === type);
+/** The blocks of `type` in a message's content. */
+const blocks = (c: unknown, type: string): Record<string, unknown>[] =>
+  Array.isArray(c) ? c.filter((b): b is Record<string, unknown> => b && typeof b === "object" && b.type === type) : [];
+const hasBlock = (c: unknown, type: string): boolean => blocks(c, type).length > 0;
 
 /** Claude Code / Droid: {type:"user"|"assistant", message:{content}, timestamp, isMeta, isSidechain, origin},
  *  plus the person's mid-turn messages (queuedPrompt) and messages from a channel (channelText). */
@@ -241,6 +243,11 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
   // were not its last; once a message has begun another turn, its tools are its own.
   let saidLine = -1;
   let turnOver = false;
+  // For `ended`: whether the conversation's latest record closes its turn, an assistant
+  // message that stopped for another reason than a tool call while no call of the turn
+  // waits for its result. A tool result means the model has more to say.
+  let ended = false;
+  const calls = new Set<unknown>();
   for (let i = from; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j || j.isSidechain) continue;
@@ -258,6 +265,15 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
       ((j.type === "assistant" && hasBlock(c, "tool_use")) || (j.type === "user" && hasBlock(c, "tool_result")))
     )
       saidLine = -1;
+    if (j.type === "user")
+      for (const b of blocks(c, "tool_result")) {
+        calls.delete(b.tool_use_id);
+        ended = false;
+      }
+    if (j.type === "assistant" && Array.isArray(c)) {
+      for (const b of blocks(c, "tool_use")) calls.add(b.id);
+      ended = (j.message as { stop_reason?: unknown }).stop_reason !== "tool_use" && !calls.size;
+    }
     if (j.type === "user" && (j.isCompactSummary || j.repeatsCompactSummary)) continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const id = typeof j.promptId === "string" && j.promptId ? j.promptId : undefined;
@@ -272,6 +288,8 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
       if (!text || isInjected(text)) return;
       msgs.push({ role: "user", text, at, line: i, ...m });
       turnOver = true;
+      ended = false;
+      calls.clear();
     };
     if (j.type === "user" && !channel && !peer && (j.isMeta || (origin?.kind && origin.kind !== "human"))) {
       // Nobody's words, with one exception: a message sessionpipe's Stop hook delivered.
@@ -288,6 +306,9 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
       if (!peer && INTERRUPTED.test(raw)) {
         msgs.push({ role: "interrupt", text: "", at, line: i });
         turnOver = true;
+        // Stopped where it stood: over, whatever it was waiting on.
+        ended = true;
+        calls.clear();
       } else if (!peer) ask(raw, id ? { id } : {});
       // `peerAsk` takes Claude Code's preamble and the envelope off; a subagent's report,
       // which Claude Code files as a peer's message, is not an ask at all.
@@ -300,6 +321,8 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
         // synthetic rows (an API error, a spent balance) are the turn's real outcome.
         msgs.push({ role: "interrupt", text: "", at, line: i });
         turnOver = true;
+        ended = true;
+        calls.clear();
       } else if (text) {
         msgs.push({ role: "assistant", text, at, line: i });
         saidLine = i;
@@ -311,6 +334,7 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
   // pairTurns took the last turn's last message for its last words; here they are that
   // only while no tool call or result of the same turn came after them.
   if (out.tail && saidLine !== (out.turns[out.turns.length - 1] as { endLine: number }).endLine) delete out.tail.said;
+  if (ended) out.ended = true;
   return out;
 }
 
@@ -329,20 +353,30 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
   // Keep absolute line numbers: the delivery cursor refers to the original file.
   const start = boundary ? lines.findIndex((line) => boundary(parse(line))) : 0;
   if (start < 0) return pairTurns(msgs, endOf(lines));
+  // For `ended`: Codex closes every turn with a `task_complete` event (each turn of every
+  // rollout recorded does), after the turn's last message.
+  let ended = false;
   for (let i = Math.max(from, start); i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
-    if (!j || j.type !== "response_item") continue;
+    if (!j) continue;
     const p = j.payload as { type?: string; role?: string; content?: unknown } | undefined;
-    if (!p || p.type !== "message") continue;
+    if (j.type === "event_msg" && p?.type === "task_complete") ended = true;
+    if (j.type !== "response_item" || !p || p.type !== "message") continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const text = textParts(p.content, ["input_text", "output_text"]).trim();
     if (!text) continue;
     if (p.role === "user") {
       if (codexInjected(text)) continue; // Codex's own injections, not the person's words
       msgs.push({ role: "user", text, at, line: i });
-    } else if (p.role === "assistant") msgs.push({ role: "assistant", text, at, line: i });
+      ended = false;
+    } else if (p.role === "assistant") {
+      msgs.push({ role: "assistant", text, at, line: i });
+      ended = false;
+    }
   }
-  return pairTurns(msgs, endOf(lines));
+  const out = pairTurns(msgs, endOf(lines));
+  if (ended) out.ended = true;
+  return out;
 }
 
 /** Gemini CLI chat log: {type:"user"|"gemini", content|message|text, timestamp}. */
@@ -375,6 +409,8 @@ export function readGrok(lines: string[], from: number): TranscriptRead {
   /** The message the previous line added to, when that line was a chunk of it. */
   let open: Msg | null = null;
   let asked: Msg | null = null;
+  /** For `ended`: a `turn_completed` came after the last message. */
+  let ended = false;
   for (let i = from; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     const params = j && typeof j.params === "object" && j.params ? (j.params as Record<string, unknown>) : null;
@@ -384,6 +420,7 @@ export function readGrok(lines: string[], from: number): TranscriptRead {
     const role = kind === "user_message_chunk" ? "user" : kind === "agent_message_chunk" ? "assistant" : null;
     if (!j || !u || !role) {
       if (j) open = null;
+      if (kind === "turn_completed") ended = true;
       if (u && kind === "turn_completed" && asked && typeof u.prompt_id === "string" && u.prompt_id) {
         asked.id = u.prompt_id;
         asked = null;
@@ -407,14 +444,17 @@ export function readGrok(lines: string[], from: number): TranscriptRead {
     const msg: Msg = { role, text: said, at, line: i };
     open = msg;
     msgs.push(msg);
+    ended = false;
     if (role === "user") asked = msg;
   }
   for (const m of msgs) m.text = m.text.trim();
-  return pairTurns(
+  const out = pairTurns(
     msgs.filter((m) => m.text),
     endOf(lines),
     true,
   );
+  if (ended) out.ended = true;
+  return out;
 }
 
 /** Antigravity: one step per line, type USER_INPUT | PLANNER_RESPONSE, content with <USER_REQUEST> wrapping. */

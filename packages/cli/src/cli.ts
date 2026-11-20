@@ -23,6 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ADAPTERS,
+  type Adapter,
+  type AdapterEvent,
   adapterByName,
   assertConfigWritable,
   type BackfillRow,
@@ -32,6 +34,7 @@ import {
   claudeDirs,
   configFile,
   type Event,
+  type FactsState,
   filterEvent,
   type HookCommand,
   machineName,
@@ -49,6 +52,7 @@ import {
 } from "@sessionpipe/core";
 import { askMain } from "./ask.js";
 import { connectFolders, connectTier, tierArg } from "./connect.js";
+import { aliasFile, readAliases, receiverIdOf } from "./control/aliases.js";
 import { ago, autoUpdateOff, readUpdate, updateFile, updateSummary } from "./control/autoupdate.js";
 import { channelIo, channelMain, controlMain, enabledHarnesses, waitMain } from "./control/cli.js";
 import type { Status } from "./control/daemon.js";
@@ -91,7 +95,20 @@ import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
 import { cutOff, type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
 import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
-import { buildSinks, drain, factsState, flush, jobsDir, runJob, VERSION } from "./run.js";
+import {
+  atRest,
+  buildSinks,
+  closedTurns,
+  cursorPast,
+  drain,
+  factsState,
+  flush,
+  jobsDir,
+  runJob,
+  sinkAt,
+  transcriptTurn,
+  VERSION,
+} from "./run.js";
 import { assertSetupVersion, cliPath, rerunGlobally, stableNode, viaNpx } from "./runtime.js";
 import {
   bestStore,
@@ -428,7 +445,7 @@ async function install(): Promise<void> {
 
 /** No sink takes tier ≥ 1: the harness only needs one tool event (issue #12). */
 function isLean(cfg: Config): boolean {
-  return !cfg.sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= 1);
+  return !sinkAt(cfg.sinks, 1);
 }
 
 /** A sink crossing tier 0 changes which events the hooks watch (isLean): rewrite the
@@ -918,8 +935,63 @@ function collectRows(
   return rows;
 }
 
-async function backfillRows(adapters: readonly (typeof ADAPTERS)[number][], days: number, cfg: Config): Promise<void> {
-  await queueBackfill(collectRows(adapters, days), days, cfg);
+async function backfillRows(
+  adapters: readonly (typeof ADAPTERS)[number][],
+  days: number,
+  cfg: Config,
+  words = false,
+): Promise<void> {
+  await queueBackfill(collectRows(adapters, days), days, cfg, false, words);
+}
+
+/** A session no hook reports has no turn end to say when its last turn is over. The file
+ *  says it (TranscriptRead.ended), but a turn can end and its session go on at once, so
+ *  that word counts once the file has also been quiet BACKFILL_QUIET_MS. A file nobody
+ *  has written for BACKFILL_OVER_MS is over whatever it says (a terminal killed mid-turn,
+ *  a harness whose file cannot say), unless a hook holds a turn open: that turn's own
+ *  worker sends it when it ends, a prompt can wait days for its answer, and the half of it
+ *  sent now would make two of it. An open turn whose Stop never came goes once the file
+ *  says it ended and a day has passed. */
+const BACKFILL_QUIET_MS = 10 * 60_000;
+const BACKFILL_OVER_MS = 24 * 3_600_000;
+
+/** Tier 2, on `sessionpipe backfill`: the exchanges of a session's transcript that no hook
+ *  delivered (a Codex Desktop thread, a session from before the hooks), as turn.transcript,
+ *  read from the session's transcript cursor and numbered on from it as a worker numbers
+ *  them after a live turn, the cursor moved past them before they reach the outbox. Its
+ *  last turn goes only once it is over (above); until then closedTurns keeps it back, as it
+ *  does a turn whose end is not in the file yet, so it goes once and whole. A file not
+ *  written since a backfill settled it (read it to its end, or found it a day old) is not
+ *  read again. */
+function backfillTurns(
+  adapter: Adapter,
+  ref: { harness: string; session: string },
+  file: string,
+  facts: FactsState,
+  stamp: (a: AdapterEvent, now: number) => Event,
+): Event[] {
+  let mtime: number;
+  try {
+    mtime = statSync(file).mtimeMs;
+  } catch {
+    return [];
+  }
+  const cur = facts.get(ref.harness, ref.session);
+  // Only the same stamp: a file whose time went back (restored, copied in) was written.
+  if (mtime === cur.backfill_mtime) return [];
+  const read = adapter.readTranscript(file, Number(cur.transcript_line) || 0);
+  const quiet = Date.now() - mtime;
+  const over = quiet >= BACKFILL_OVER_MS;
+  const whole = cur.open_turn == null ? over || (!!read.ended && quiet >= BACKFILL_QUIET_MS) : over && !!read.ended;
+  const c = closedTurns(read, { all: whole });
+  const base = Number(cur.transcript_turns) || 0;
+  const events = c.turns.map((t, i) => stamp(transcriptTurn(t, base + i, "backfill"), t.at));
+  facts.save(ref.harness, ref.session, {
+    ...(events.length ? cursorPast(read, c.turns, c.line, base + events.length) : {}),
+    // Settled: whatever of a day-old file did not go waits for the file to be written.
+    ...(whole || over ? { backfill_mtime: mtime } : {}),
+  });
+  return events;
 }
 
 /** Queue each row as session.backfill: every session not backfilled before; or, with
@@ -927,29 +999,42 @@ async function backfillRows(adapters: readonly (typeof ADAPTERS)[number][], days
  *  under another name than its harness's service now gives it, again, with its next seq,
  *  so a receiver shows that name without waiting for the session's next event. With
  *  remote titles on, a row takes that name first (an adapter's remoteFacts: claude.ai's,
- *  for Claude Code). Four sessions at a time, each under its own lock, as the worker takes
- *  it: a live session's seq and facts are the worker's too. One a hook holds right now is
- *  left to its own events, which carry the name as well. */
+ *  for Claude Code). With `words` (`sessionpipe backfill`, never install or connect) and a
+ *  sink at tier 2, a row that names its transcript also sends the words that holds and no
+ *  hook sent (backfillTurns), and its session.backfill then carries no `turns`: a
+ *  receiver counts the turns it accepts, and would count them twice. Four sessions at a
+ *  time, each under its own lock, as the worker takes it: a live session's seq and facts
+ *  are the worker's too. One a hook holds right now is left to its own events, which
+ *  carry the name as well, and its words to its worker or the next backfill. Every event
+ *  is redacted before it is written, as a hook's are. */
 async function queueBackfill(
   rows: { harness: string; row: BackfillRow }[],
   days: number,
   cfg: Config,
   renames = false,
+  words = false,
 ): Promise<{ named: number; renamed: number }> {
   const outbox = new Outbox(state);
   const facts = factsState(state);
   const machine = machineName(cfg, os.hostname());
+  const sendWords = words && sinkAt(cfg.sinks, 2);
+  // A session the control daemon started goes by the id its start command named, and its
+  // hooks send its words under that id: read here under the harness's id, they would
+  // arrive a second time, as another session.
+  const aliases = sendWords ? readAliases(aliasFile(path.join(state, "control"))) : {};
   let n = 0;
   let named = 0;
   let renamed = 0;
+  let turns = 0;
+  let told = 0;
   const one = async ({ harness, row }: { harness: string; row: BackfillRow }): Promise<void> => {
     const ref = { harness, session: row.session.id };
     const release = takeLock(state, ref);
     if (!release) return;
     try {
-      const adapter = ADAPTERS.find((a) => a.name === harness);
+      const adapter = ADAPTERS.find((a) => a.name === harness) as Adapter;
       let remote = false;
-      if (cfg.remote_titles && adapter?.remoteFacts && row.transcript) {
+      if (cfg.remote_titles && adapter.remoteFacts && row.transcript) {
         const got = await adapter.remoteFacts(row.session, row.session, row.transcript, facts);
         if (got.title) {
           Object.assign(row.session, got);
@@ -960,25 +1045,40 @@ async function queueBackfill(
       const mem = facts.get(harness, row.session.id);
       const known = mem.session as Partial<Session> | undefined;
       const rename = remote && (mem.backfilled || known) && row.session.title !== (known?.title ?? mem.sent_title);
-      if (renames ? !rename : mem.backfilled) return;
+      const meta = renames ? rename : !mem.backfilled;
       const { id, ...rest } = row.session;
-      const e = makeEvent(
-        {
-          type: "session.backfill",
-          harnessEvent: "backfill",
-          data: {
-            started_at: new Date(row.started_at).toISOString(),
-            last_at: new Date(row.last_at).toISOString(),
-            ...(row.turns !== undefined ? { turns: row.turns } : {}),
-          },
-        },
-        {
+      // This session's words can go this run.
+      const speaks = sendWords && !!row.transcript && !receiverIdOf(aliases, harness, id);
+      const stamp = (a: AdapterEvent, now: number): Event =>
+        makeEvent(a, {
           harness: { name: harness },
           session: { ...rest, id, seq: outbox.nextSeq(ref), machine, ...(rest.cwd ? { cwd: tilde(rest.cwd) } : {}) },
-          now: row.last_at,
-        },
-      );
-      outbox.append(ref, [e]);
+          now,
+        });
+      const events: Event[] = [];
+      if (meta)
+        events.push(
+          stamp(
+            {
+              type: "session.backfill",
+              harnessEvent: "backfill",
+              data: {
+                started_at: new Date(row.started_at).toISOString(),
+                last_at: new Date(row.last_at).toISOString(),
+                ...(row.turns !== undefined && !speaks ? { turns: row.turns } : {}),
+              },
+            },
+            row.last_at,
+          ),
+        );
+      const said = speaks ? backfillTurns(adapter, ref, row.transcript as string, facts, stamp) : [];
+      events.push(...said);
+      outbox.append(ref, events.map(atRest));
+      if (said.length) {
+        turns += said.length;
+        told++;
+      }
+      if (!meta) return;
       // What was sent is what a later rename compares with; a live session's next light
       // event (which reads no facts) carries it too.
       facts.save(harness, row.session.id, {
@@ -993,15 +1093,29 @@ async function queueBackfill(
     }
   };
   for (let i = 0; i < rows.length; i += 4) await Promise.all(rows.slice(i, i + 4).map(one));
-  if (!renames)
+  if (!renames) {
     out(`  ✓ Backfill: ${n} session${n === 1 ? "" : "s"} from the last ${days} days queued as session.backfill`);
+    if (sendWords)
+      out(
+        `  ✓ Words: ${turns} turn${turns === 1 ? "" : "s"} of ${told} session${told === 1 ? "" : "s"} queued as turn.transcript, secrets removed`,
+      );
+    else if (!words && sinkAt(cfg.sinks, 2)) {
+      // Install and connect send no words: the person who wants them asks. Only a session
+      // whose row names its transcript has words a backfill can read.
+      const k = rows.filter((r) => r.row.transcript).length;
+      if (k)
+        out(
+          `    Their words stay here: \`sessionpipe backfill --days ${days}\` sends a tier-2 sink the prompts and replies of ${k === rows.length ? "these sessions" : `${k} of them`}, secrets removed.`,
+        );
+    }
+  }
   void drain(state, cfg.sinks, outbox);
   return { named, renamed };
 }
 
 async function backfill(): Promise<void> {
   if (strayWord(["--days"])) return;
-  return backfillRows(selectedAdapters(), Number(flag("--days") ?? 30), readConfig());
+  return backfillRows(selectedAdapters(), Number(flag("--days") ?? 30), readConfig(), true);
 }
 
 /** The drain's `flush` lock, waited for: a drain holds every sink's cursor map and

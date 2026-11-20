@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Seven additions on protocol 1. Every rule a receiver may already rely on still holds.
+Eight additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -49,6 +49,14 @@ Seven additions on protocol 1. Every rule a receiver may already rely on still h
   its own word (Claude Code: `low`, `medium`, `high`, `xhigh`, `max`). Absent when the
   harness does not say, and a receiver reads absent as unknown. Fixture:
   `harness/claude-code/post-tool-use-read-image.json`.
+- **`turn.transcript` comes from a backfill too** (PROTOCOL.md §4, #123). `sessionpipe
+  backfill` sends the exchanges of a session whose turns no hook read (a Codex Desktop
+  thread, a Claude Code session from before the hooks) to a sink at tier 2 or higher:
+  after the session's `session.backfill`, numbered from its transcript cursor, redacted as
+  a live turn's are, with no `turn.started` or `turn.ended` around them. The
+  `session.backfill` then carries no `turns`. A receiver dedups them on `(harness,
+  session, seq)` like any event. `install` and `connect` still send metadata only.
+  Fixture: `delivery/35`.
 
 ### For receivers (0.13.3)
 

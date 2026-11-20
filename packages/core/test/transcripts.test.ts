@@ -163,6 +163,7 @@ describe("isInjected", () => {
       turns: [{ user: "hello", assistant: "hi", at: Date.parse(T0), endLine: 1 }],
       line: 3,
       tail: { start: 0, said: "hi" },
+      ended: true,
     });
   });
 });
@@ -173,6 +174,7 @@ describe("readClaude", () => {
       turns: [COMPACTED_TURN],
       line: 8,
       tail: { start: 0, said: "Writing the evaluation app now." },
+      ended: true,
     });
   });
 
@@ -422,6 +424,7 @@ describe("readClaude: the person's mid-turn messages", () => {
       turns: [{ user: "hello", assistant: "hi", at: at(T0), endLine: 8 }],
       line: 9,
       tail: { start: 0, said: "hi" },
+      ended: true,
     });
   });
 });
@@ -846,6 +849,105 @@ describe("readClaude: messages from a channel", () => {
       0,
     );
     expect(r.turns).toEqual([{ user: "the ask", assistant: "the answer", at: at(T0), endLine: 7 }]);
+  });
+});
+
+describe("readClaude: whether the file says its last turn ended", () => {
+  const recorded = (name: string) =>
+    readFileSync(new URL(`../../../conformance/transcripts/claude-code/${name}.jsonl`, import.meta.url), "utf8")
+      .trimEnd()
+      .split("\n");
+  const endedAt = (lines: string[], n: number) => readClaude(lines.slice(0, n), 0).ended;
+
+  it("ended once an assistant message waits on no tool, and not while a call or its result is the last word", () => {
+    // Recorded (2.1.3xx): a prompt, a tool call, its result, the reply, Claude Code's own
+    // system rows; a prompt and a reply; a prompt, a tool call, its result, the person's Esc.
+    const lines = recorded("interrupted-turn");
+    expect(endedAt(lines, 1)).toBeUndefined(); // the prompt alone
+    expect(endedAt(lines, 2)).toBeUndefined(); // the tool call: stop_reason tool_use
+    expect(endedAt(lines, 3)).toBeUndefined(); // its result: the model has more to say
+    expect(endedAt(lines, 4)).toBe(true); // the reply, end_turn
+    expect(endedAt(lines, 6)).toBe(true); // system rows after it change nothing
+    expect(endedAt(lines, 7)).toBeUndefined(); // the next prompt
+    expect(endedAt(lines, 8)).toBe(true);
+    expect(endedAt(lines, 13)).toBeUndefined(); // mid-tool again
+    expect(endedAt(lines, 14)).toBe(true); // interrupted: over, whatever it waited on
+    // A thinking block of a message that goes on to call a tool says tool_use already.
+    expect(endedAt(recorded("stop-block"), 2)).toBeUndefined();
+    expect(endedAt(recorded("stop-block"), 5)).toBe(true);
+  });
+
+  it("a turn the harness ended where it stood is over; one read from the cursor on says so too", () => {
+    const killed = recorded("killed-turn");
+    expect(endedAt(killed, 2)).toBe(true);
+    expect(readClaude(killed, 2).ended).toBe(true);
+    expect(readClaude(killed.slice(0, 3), 2).ended).toBeUndefined();
+  });
+
+  it("a tool call left without its result holds the turn open, whatever the message after it says", () => {
+    // A list may hold what is no block at all; it is passed over.
+    const tool = (id: string, stop: string) =>
+      JSON.stringify({
+        type: "assistant",
+        timestamp: T1,
+        message: { stop_reason: stop, content: [null, "x", { type: "tool_use", id, name: "Bash" }] },
+      });
+    const result = (id: string) => cl("user", [{ type: "tool_result", tool_use_id: id, content: "ok" }]);
+    const words = (text: string) =>
+      JSON.stringify({
+        type: "assistant",
+        timestamp: T1,
+        message: { stop_reason: "end_turn", content: [{ type: "text", text }] },
+      });
+    expect(readClaude([user("go"), tool("c1", "tool_use"), words("Still working.")], 0).ended).toBeUndefined();
+    expect(readClaude([user("go"), tool("c1", "tool_use"), result("c1"), words("Done.")], 0).ended).toBe(true);
+    // Two calls in one message, one answered: still waiting.
+    expect(
+      readClaude([user("go"), tool("c1", "tool_use"), tool("c2", "tool_use"), result("c1"), words("Half.")], 0).ended,
+    ).toBeUndefined();
+    // An assistant record whose content is no list (a record this reader cannot use) is
+    // not taken for a turn's end.
+    expect(readClaude([user("go"), cl("assistant", "plain")], 0).ended).toBeUndefined();
+  });
+});
+
+describe("readCodex: whether the file says its last turn ended", () => {
+  const msg = (role: string, kind: string, text: string) =>
+    JSON.stringify({
+      type: "response_item",
+      timestamp: T0,
+      payload: { type: "message", role, content: [{ type: kind, text }] },
+    });
+  const event = (type?: string) => JSON.stringify({ type: "event_msg", ...(type ? { payload: { type } } : {}) });
+  const call = JSON.stringify({
+    type: "response_item",
+    payload: { type: "function_call", name: "shell", call_id: "c1" },
+  });
+
+  it("ended at task_complete, the event Codex writes after a turn's last message", () => {
+    const turn = [
+      event("task_started"),
+      msg("user", "input_text", "Build it"),
+      msg("assistant", "output_text", "Starting the build."),
+      call,
+    ];
+    expect(readCodex(turn, 0).ended).toBeUndefined();
+    const done = [
+      ...turn,
+      msg("assistant", "output_text", "The build finished green."),
+      event(),
+      event("task_complete"),
+    ];
+    expect(readCodex(done, 0).ended).toBe(true);
+    // Words after it belong to a turn that has not ended.
+    expect(readCodex([...done, msg("user", "input_text", "And the docs?")], 0).ended).toBeUndefined();
+    expect(readCodex([...done, msg("assistant", "output_text", "One more thing.")], 0).ended).toBeUndefined();
+    // The recorded rollout closes every turn with one (packages/core/test/fixtures).
+    const fork = readFileSync(new URL("./fixtures/codex-forked-subagent.jsonl", import.meta.url), "utf8")
+      .trimEnd()
+      .split("\n");
+    expect(readCodex(fork, 0).ended).toBe(true);
+    expect(readCodex(fork.slice(0, 45), 0).ended).toBeUndefined();
   });
 });
 

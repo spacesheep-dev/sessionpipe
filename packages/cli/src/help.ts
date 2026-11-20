@@ -19,7 +19,7 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     status: "status [--json]",
     doctor: "doctor [--json]",
     tail: "tail [--session ID] [--tier 0-3] [--harness NAME] [--all] [--json]",
-    backfill: `backfill [--days 30] [${harnesses.map((h) => `--${h}`).join(" ")}]`,
+    backfill: `backfill [--days 30] [${harnesses.map((h) => `--${h}`).join(" ")}] (each session as session.backfill; for a tier-2 sink, also the words no hook sent of Claude Code, Codex and Grok Build sessions)`,
     forget: "forget <harness> <session>",
     replay: "replay [--sink NAME] [--from-start] [--tools all|main|beat]",
     update: "update [off|on] (bring this whole computer up to date now; off/on: the background service's daily update)",

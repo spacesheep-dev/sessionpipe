@@ -178,7 +178,7 @@ const credentials = (auth?: string): { token?: string; secret?: string } =>
   auth === "wrong" ? { token: "wrong-token" } : auth === "signed" ? { secret: SECRET } : { token: TOKEN };
 
 const fixtures = readdirSync(DIR)
-  .filter((n) => /^(0[1-8]|34)-.*\.json$/.test(n))
+  .filter((n) => /^(0[1-8]|3[45])-.*\.json$/.test(n))
   .map((n) => JSON.parse(readFileSync(path.join(DIR, n), "utf8")) as Fixture);
 
 let rx: { url: string; close: () => Promise<void> };
@@ -188,7 +188,7 @@ beforeAll(async () => {
 afterAll(() => rx.close());
 
 describe("conformance/delivery through the HTTP sink", () => {
-  it("covers the nine sender scenarios of HTTP.md §7", () => {
+  it("covers the ten sender scenarios of HTTP.md §7", () => {
     expect(fixtures.map((f) => f.name)).toEqual([
       "accept",
       "dedup",
@@ -199,14 +199,15 @@ describe("conformance/delivery through the HTTP sink", () => {
       "unknown-type",
       "forget",
       "auth-signed",
+      "backfill-transcript",
     ]);
   });
 
   // The receiver here verifies signatures with the sink's secret, so `skip_when: "no secret"`
   // never applies.
   it.each(fixtures)("$name ($spec)", async (fx) => {
-    const skip = /^max_tier == (\d)$/.exec(fx.skip_when ?? "");
-    if (skip && Number(skip[1]) === MAX_TIER) return;
+    const skip = /^max_tier (==|<) (\d)$/.exec(fx.skip_when ?? "");
+    if (skip && (skip[1] === "==" ? MAX_TIER === Number(skip[2]) : MAX_TIER < Number(skip[2]))) return;
     if (fx.capability && !CAPABILITIES.includes(fx.capability)) return;
     const run = ulid().slice(-8).toLowerCase();
     for (const step of fx.steps) {

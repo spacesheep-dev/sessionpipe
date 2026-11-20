@@ -65,6 +65,12 @@ export interface TranscriptRead {
    *  (Claude Code's `last_assistant_message`); until `said` is those words, the end of the
    *  turn is not in the file yet. Absent when there are no turns. */
   tail?: { start: number; said?: string };
+  /** The file itself says its last turn is over: the harness wrote what it writes as a
+   *  turn ends, and nothing of another turn came after it. Claude Code's: an assistant
+   *  message that waits on no tool; Codex's: `task_complete`; Grok Build's:
+   *  `turn_completed`. Absent when the last turn may still be running, and from every
+   *  reader whose file cannot say. */
+  ended?: true;
 }
 
 export interface SessionFacts extends Partial<Session> {
@@ -79,7 +85,8 @@ export interface BackfillRow {
   started_at: number;
   last_at: number;
   turns?: number;
-  /** The file the row was read from, for what `remoteFacts` asks about it. Never sent. */
+  /** The file the row was read from, for what `remoteFacts` asks about it and for the
+   *  words `sessionpipe backfill` sends a tier-2 sink. The path itself is never sent. */
   transcript?: string;
 }
 
