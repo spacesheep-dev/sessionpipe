@@ -7,7 +7,7 @@ and released in lockstep. This file records protocol-level changes.
 
 ### For receivers (0.18.0)
 
-Six additions on protocol 1. Every rule a receiver may already rely on still holds.
+Seven additions on protocol 1. Every rule a receiver may already rely on still holds.
 
 - **A signed batch may carry no bearer** (HTTP.md §2). A sink added with `--secret` and no
   `--token` sends `webhook-signature` and no `authorization`. A receiver that verifies the
@@ -44,6 +44,11 @@ Six additions on protocol 1. Every rule a receiver may already rely on still hol
   again inside the file's one time limit; the reference daemon asks twice more, after 1 s
   and 4 s, within 5 minutes. A receiver may see up to three `GET`s for one file. A `404`,
   another status, or a wrong length or hash is final. Vectors: `control-file-retry.json`.
+- **A session may say its effort** (PROTOCOL.md §3). `session.effort`, tier 0 like
+  `model`, is the reasoning effort the harness reports for the session's latest turn, in
+  its own word (Claude Code: `low`, `medium`, `high`, `xhigh`, `max`). Absent when the
+  harness does not say, and a receiver reads absent as unknown. Fixture:
+  `harness/claude-code/post-tool-use-read-image.json`.
 
 ### For receivers (0.13.3)
 

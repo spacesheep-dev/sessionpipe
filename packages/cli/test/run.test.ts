@@ -61,6 +61,17 @@ describe("runJob", () => {
     const own = await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
     expect(own.events[0]?.session.delegated_by).toBeUndefined();
   });
+  it("the effort a Claude Code hook reports goes out with the session (#210)", async () => {
+    const id = "4e960f0a-fc94-4b51-a223-9c810563a481";
+    const stop = {
+      ...job("Stop"),
+      harness: "claude-code",
+      argv: ["claude-code", "Stop"],
+      stdin: JSON.stringify({ session_id: id, cwd: tmp, hook_event_name: "Stop", effort: { level: "xhigh" } }),
+      env: { CLAUDE_CONFIG_DIR: tmp },
+    };
+    expect((await runJob(stop, { state: tmp })).events[0]?.session.effort).toBe("xhigh");
+  });
   it("stores tool input redacted at rest, in 0600 files under 0700 dirs", async () => {
     await runJob(
       job("PostToolUse", {

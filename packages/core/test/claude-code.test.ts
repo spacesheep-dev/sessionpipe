@@ -124,6 +124,12 @@ describe("claude-code fromHook", () => {
     expect(hook("SubagentStart", { agent_id: "a1" })?.session.parent_id).toBeUndefined();
     expect(hook("Stop", { cwd: 1 }, {}, "/argv")?.session.cwd).toBe("/argv");
   });
+  it("session.effort: the payload's effort.level when it is a bare word, else nothing (#210)", () => {
+    const effort = (v: unknown) => hook("Stop", { effort: v })?.session.effort;
+    expect(effort({ level: "xhigh" })).toBe("xhigh");
+    for (const v of [undefined, null, "high", { level: 3 }, { level: "high effort" }, { level: "-x" }])
+      expect(effort(v), JSON.stringify(v)).toBeUndefined();
+  });
   it("hints.attended: Claude Code's own word, and a control turn is the person's", () => {
     const att = (env: Record<string, string>) =>
       hook("SessionStart", { source: "startup" }, { HOME: home, ...env })?.hints?.attended;
@@ -508,6 +514,18 @@ describe("claude-code facts", () => {
       url: "claude://code/continue/local_1",
     });
     expect(claudeCode.facts({ id: SID }, undefined, {}, memState())).toEqual({});
+  });
+  it("effort from the newest assistant line that says one in a bare word (#210)", () => {
+    const said = (effort: unknown) => rec({ type: "assistant", effort, message: { content: [] } });
+    const file = transcript([
+      said("low"),
+      said("max"),
+      rec({ type: "user", effort: "low", message: { content: "next" } }),
+      said("not a word"),
+      assistant("No effort on this line."),
+    ]);
+    expect(claudeFacts(file, SID, {}, memState()).effort).toBe("max");
+    expect(claudeFacts(transcript([assistant("old")]), SID, {}, memState()).effort).toBeUndefined();
   });
   it("skips meta, sidechain and non-human asks, reads text parts, a detached HEAD is no branch", () => {
     const file = transcript([

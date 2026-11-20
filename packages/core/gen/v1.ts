@@ -86,6 +86,12 @@ export interface Session {
    * harnesses, as `parent_id` is within one; never authority, never a subagent.
    */
   delegated_by?: string | undefined;
+  /**
+   * The reasoning effort the harness reports for the session's latest turn, in the
+   * harness's own word (Claude Code: low, medium, high, xhigh, max). Absent = unknown. A
+   * bare word: tier 0 is not redacted, so the shape is the only guard.
+   */
+  effort?: string | undefined;
 }
 
 /** What ran on the event before it left the machine. */

@@ -78,6 +78,7 @@ blanks an earlier full value.
 | `repo` | The `origin` remote as a URL with any credentials stripped. |
 | `branch` | The checked-out branch; absent on a detached HEAD. |
 | `model` | The model id the harness reports. |
+| `effort` | The reasoning effort the harness reports for the session's latest turn, in the harness's own word (Claude Code: `low`, `medium`, `high`, `xhigh`, `max`), a bare word of at most 40 characters of `[A-Za-z0-9_.-]`. It changes mid-session when the person changes it. Absent when the harness does not say, and a receiver MUST read absent as unknown. |
 | `title`, `title_source` | The session's name and where it came from: `custom` (the person named it), `harness` (the tool's own titler), `first-ask` (the first prompt, cut). A receiver SHOULD never replace a better source with a worse one. |
 | `url` | A link that opens the session (a Remote Control link, a web remote). |
 | `account_id` | An opaque id for the harness account, never an email. A receiver the person paired with for control learns the email that goes with it from the pairing request and the daemon's hellos (`accounts`, [CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)). A Claude Code home that runs on another API has no harness login; its account is the endpoint, `api-` and 16 hex characters of the SHA-256 of the endpoint's origin, the same on every machine that uses it, and the hellos name it by the endpoint's host. |
