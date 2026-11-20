@@ -21,6 +21,8 @@ jobs:
   test:
     name: node ${{ matrix.node }} · ${{ matrix.os }}
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'graphide' || matrix.os }}
+    # A leg takes four to eight minutes. One that hangs fails here, not after six hours.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
