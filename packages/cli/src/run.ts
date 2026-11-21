@@ -50,6 +50,7 @@ import {
   takeNamedLock,
   tilde,
   writeConfig,
+  writeWhole,
 } from "@sessionpipe/core";
 import { deliveredWords } from "@sessionpipe/core/control";
 import { aliasFile, readAliases, receiverIdOf } from "./control/aliases.js";
@@ -288,7 +289,8 @@ export async function sweepJobs(
     try {
       const r = await runJob(c.job, { state, claimed: c.file, drain: false, lockWaitMs: SWEEP_LOCK_WAIT_MS });
       if (r.events.length) markMore(state);
-    } catch {
+    } catch (e) {
+      logFailed(state, c.job, e);
     } finally {
       releaseJob(c.file);
     }
@@ -296,6 +298,29 @@ export async function sweepJobs(
   }
   if (ran) await drain(state, readConfig().sinks, new Outbox(state), undefined, o);
   return ran;
+}
+
+/** A job whose run threw is let go of, as it always was (run again it would throw again),
+ *  and never in silence: for two days every job of one session ended on an outbox too big
+ *  to read whole, and nothing on the machine said so (2026-11-20). What failed, by its
+ *  harness and event. Why, in the error's own words only when the system said them (a file
+ *  that could not be read or written: its message is a code and a path); any other error
+ *  can quote the value it failed on, which may be a payload's, so it is named by its kind
+ *  and where it was thrown. */
+export function logFailed(state: string, job: Pick<Job, "harness" | "event">, e: unknown): void {
+  let why = "something that is not an error was thrown";
+  if (e instanceof Error) {
+    const { code, syscall } = e as NodeJS.ErrnoException;
+    // The stack begins with the error's own words, and those can hold a line that looks
+    // like a frame (a tool's output with a stack trace in it): the frames come after them.
+    const frames = (e.stack ?? "").slice(String(e).length);
+    const where = /^\s+at (.+)$/m.exec(frames)?.[1] ?? "an unknown place";
+    why = syscall ? `${e.name}: ${e.message}` : `${e.name}${typeof code === "string" ? ` [${code}]` : ""} at ${where}`;
+  }
+  log(
+    state,
+    `${job.harness} ${job.event}: the job failed and is not run again: ${why.replace(/\s+/g, " ").slice(0, 300)}`,
+  );
 }
 
 export function log(state: string, line: string): void {
@@ -328,24 +353,6 @@ export function factsState(state: string): FactsState {
       writeWhole(file(h, s), JSON.stringify(next));
     },
   };
-}
-
-/** Write a small file so that it is whole or as it was: beside it, then into its place.
- *  A session's facts hold its transcript cursor, and facts cut short by a full disk or a
- *  kill read as none, so the next turn's end sent every turn again. Every job that makes
- *  an event writes them now (the hook events it ran). Where the swap is refused (another
- *  program holds the file open on Windows), it is written in place, as it always was. */
-function writeWhole(file: string, text: string): void {
-  const beside = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(beside, text, { mode: 0o600 });
-    renameSync(beside, file);
-  } catch {
-    try {
-      unlinkSync(beside);
-    } catch {}
-    writeFileSync(file, text, { mode: 0o600 });
-  }
 }
 
 export function buildSinks(sinks: SinkConfig[], o: { locked?: (name: string) => void } = {}): Sink[] {

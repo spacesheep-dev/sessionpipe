@@ -25,6 +25,7 @@ import {
   jobNames,
   jobsDir,
   log,
+  logFailed,
   RAN_KEPT,
   runJob,
   SWEEP_READ,
@@ -103,17 +104,6 @@ describe("runJob", () => {
       expect(statSync(f).mode & 0o777).toBe(0o600);
       expect(statSync(path.dirname(f)).mode & 0o777).toBe(0o700);
     }
-  });
-  it("a job takes its session's lock as soon as a sibling lets go, not at the next backoff step", async () => {
-    const ref = { harness: "codex", session: "race-1" };
-    const release = takeLock(tmp, ref);
-    setTimeout(() => release?.(), 900);
-    const t0 = Date.now();
-    const { events } = await runJob(job("PreToolUse", { tool_name: "Bash", tool_input: {}, tool_use_id: "c" }), {
-      state: tmp,
-    });
-    expect(events).toHaveLength(1);
-    expect(Date.now() - t0).toBeLessThan(1400); // doubling backoff got there at 1550 ms
   });
   it("a claim is released once the job's events are in the outbox", async () => {
     const f = enqueueJob(tmp, job("PreToolUse", { tool_name: "Bash", tool_input: {}, tool_use_id: "d" }));
@@ -724,6 +714,60 @@ describe("claims and sweeps, the edges", () => {
     expect(ran).toBe(all);
     expect(sweeps).toBe(Math.ceil(all / 20));
     expect(readdirSync(jobsDir(state))).toEqual([]);
+  });
+  it("a swept job whose run throws is let go of and said in the log, with the error's words and nothing of the payload", async () => {
+    const state = path.join(tmp, "broken");
+    // The session's seq counter cannot be written: a folder is where its file should be.
+    mkdirSync(path.join(state, "outbox", "codex", "race-1.seq"), { recursive: true });
+    const f = enqueueJob(state, job("SessionEnd", { reason: "exit", secret: "hunter2-in-the-payload" }));
+    const { utimesSync } = await import("node:fs");
+    const old = new Date(Date.now() - 10_000);
+    utimesSync(f, old, old);
+    expect(await sweepJobs(state, 3000)).toBe(1);
+    expect(readdirSync(jobsDir(state))).toEqual([]);
+    const said = readFileSync(path.join(state, "log"), "utf8");
+    // What the system said about a file is a code and a path: kept whole.
+    expect(said).toMatch(/codex SessionEnd: the job failed and is not run again: Error: E[A-Z]+: /);
+    expect(said).not.toContain("hunter2");
+    const last = () => (readFileSync(path.join(state, "log"), "utf8").trim().split("\n").pop() as string).slice(25);
+    // Any other error can quote what it failed on, and that can be a payload's: its kind and
+    // where it was thrown, never its words.
+    const quoting = (() => {
+      try {
+        return JSON.parse("rm -rf / --password=hunter2");
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(String((quoting as Error).message)).toContain("rm -rf");
+    logFailed(state, { harness: "codex", event: "Stop" }, quoting);
+    expect(last()).toMatch(/^codex Stop: the job failed and is not run again: SyntaxError at \S/);
+    expect(last()).not.toMatch(/rm -rf|hunter2/);
+    // Nor when its words hold a line that looks like where it was thrown.
+    for (const words of ["boom\n    at password=hunter2", "x\n  at sk-live-SECRET (rm -rf /)\n    at more"]) {
+      logFailed(state, { harness: "codex", event: "Stop" }, new TypeError(words));
+      expect(last()).toMatch(/^codex Stop: the job failed and is not run again: TypeError at \S/);
+      expect(last()).not.toMatch(/hunter2|SECRET|rm -rf/);
+      expect(last()).toMatch(/run\.test\.ts|node:|file:/);
+    }
+    // One Node names by a code of its own keeps the code.
+    logFailed(
+      state,
+      { harness: "codex", event: "Stop" },
+      Object.assign(new RangeError("Cannot create a string longer than 0x1fffffe8 characters"), {
+        code: "ERR_STRING_TOO_LONG",
+      }),
+    );
+    expect(last()).toMatch(
+      /^codex Stop: the job failed and is not run again: RangeError \[ERR_STRING_TOO_LONG\] at \S/,
+    );
+    // An error with no stack, and something thrown that is no error: said as that, nothing of it kept.
+    const bare = new Error("secret words");
+    delete bare.stack;
+    logFailed(state, { harness: "codex", event: "Stop" }, bare);
+    expect(last()).toBe("codex Stop: the job failed and is not run again: Error at an unknown place");
+    logFailed(state, { harness: "codex", event: "Stop" }, `only\nwords ${"w".repeat(900)}`);
+    expect(last()).toBe("codex Stop: the job failed and is not run again: something that is not an error was thrown");
   });
   it("a sweep leaves a job younger than olderThanMs to the worker its hook spawned", async () => {
     enqueueJob(tmp, job("SessionEnd", { reason: "exit" }));

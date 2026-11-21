@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Outbox, readConfig, stateDir } from "@sessionpipe/core";
-import { claimJob, type DrainLife, drain, MAX_TRIES, releaseJob, runJob, sweepJobs } from "./run.js";
+import { claimJob, type DrainLife, drain, logFailed, MAX_TRIES, releaseJob, runJob, sweepJobs } from "./run.js";
 import { refreshSinks } from "./wellknown.js";
 
 /** How long a worker lives. */
@@ -69,7 +69,7 @@ export async function workerMain(argv: string[]): Promise<void> {
       if (!r.requeued || (claimed.job.tries ?? 0) + 1 >= MAX_TRIES) return;
       startWorker(script, r.requeued);
     })
-    .catch(() => {})
+    .catch((e: unknown) => logFailed(stateDir(), claimed.job, e))
     .finally(() => releaseJob(claimed.file))
     .then(() => sweepJobs(stateDir(), undefined, undefined, undefined, life))
     .catch(() => {})

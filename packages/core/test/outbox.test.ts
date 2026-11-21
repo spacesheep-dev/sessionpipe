@@ -2,9 +2,12 @@
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  ftruncateSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -16,7 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Cursors, Outbox, processAlive, takeLock, takeNamedLock } from "../src/outbox.js";
+import { Cursors, Outbox, processAlive, takeLock, takeNamedLock, writeWhole } from "../src/outbox.js";
 import { filterEvent } from "../src/privacy/filter.js";
 import type { Event } from "../src/types.js";
 import { isUlid, ulid } from "../src/ulid.js";
@@ -223,6 +226,114 @@ describe("outbox: never lose, never duplicate (PROTOCOL.md §6)", () => {
     const junk = { harness: "codex", session: "junk-only" };
     writeFileSync(o.file(junk), "{}\nnot json\n");
     expect(o.nextSeq(junk)).toBe(0);
+  });
+
+  // A session's last seq is at its outbox's end, and only the end is read for it. Read
+  // whole, a long session's outbox cannot be made a string at all (1.9 GB, 2026-11-20):
+  // with its counter lost, every job of that session spent its worker's whole life and
+  // 1.7 GB finding that out, under the session's lock.
+  describe("the last seq, read from the outbox's end", () => {
+    const lose = (o: Outbox) => writeFileSync(path.join(o.dir("codex"), "inv.seq"), "");
+    const fresh = (): Outbox => {
+      const o = new Outbox(tmp);
+      mkdirSync(o.dir("codex"), { recursive: true });
+      return o;
+    };
+    /** An event whose line is `bytes` long or more. */
+    const long = (seq: number, bytes: number): string =>
+      JSON.stringify({ ...ev(seq), data: { text: "x".repeat(bytes) } });
+
+    it("an outbox that holds nothing, or was never written, starts at 0", () => {
+      const o = fresh();
+      expect(o.nextSeq(ref)).toBe(0);
+      writeFileSync(o.file(ref), "");
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(0);
+    });
+
+    it("one line with no newline at all; a last line cut short; lines that say no seq, for longer than is read at once", () => {
+      const o = fresh();
+      writeFileSync(o.file(ref), JSON.stringify(ev(7)));
+      expect(o.nextSeq(ref)).toBe(8);
+      // The line after it was cut by a full disk: the one before is the last event.
+      writeFileSync(
+        o.file(ref),
+        `${JSON.stringify(ev(7))}\n${JSON.stringify(ev(9))}\n${JSON.stringify(ev(10)).slice(0, 40)}`,
+      );
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(10);
+      // Only a cut line: nothing to go by.
+      writeFileSync(o.file(ref), JSON.stringify(ev(3)).slice(0, 40));
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(0);
+      // 300 KB of lines without a seq after the last event.
+      writeFileSync(
+        o.file(ref),
+        `${JSON.stringify(ev(20))}\n${`${JSON.stringify({ note: "y".repeat(990) })}\n`.repeat(300)}`,
+      );
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(21);
+    });
+
+    it("a last line longer than is read at once, and one that starts the file", () => {
+      const o = fresh();
+      writeFileSync(o.file(ref), `${JSON.stringify(ev(1))}\n${long(2, 200_000)}\n`);
+      expect(o.nextSeq(ref)).toBe(3);
+      writeFileSync(o.file(ref), `${long(5, 200_000)}\n\n`);
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(6);
+      // A newline exactly where one read ends and the next begins: the last 64 KiB of the
+      // file are that newline, a line that says no seq, and the newline that ends it.
+      writeFileSync(o.file(ref), `${JSON.stringify(ev(30))}\n${"z".repeat(64 * 1024 - 2)}\n`);
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(31);
+    });
+
+    // A hole of 600 MB, then one event: more than a string can hold, and none of it read.
+    // (Windows fills the hole with real zeros, which takes it a while: left to the others.)
+    it.runIf(process.platform !== "win32")("an outbox bigger than a string can be is no slower", () => {
+      const o = fresh();
+      const fd = openSync(o.file(ref), "w");
+      ftruncateSync(fd, 600 * 1024 * 1024);
+      closeSync(fd);
+      appendFileSync(o.file(ref), `\n${JSON.stringify(ev(41))}\n`);
+      const t0 = Date.now();
+      expect(o.nextSeq(ref)).toBe(42);
+      expect(Date.now() - t0).toBeLessThan(2000);
+    });
+
+    // Nothing longer than an outbox line can be is held: of a longer line only the start is
+    // read, where an event says its session, and so its seq.
+    it("a run of nothing megabytes long at the end, and a line longer than any is written with", () => {
+      const o = fresh();
+      // A crash left 20 MB of nothing, with no newline, after the last event.
+      writeFileSync(o.file(ref), `${JSON.stringify(ev(60))}\n`);
+      appendFileSync(o.file(ref), Buffer.alloc(20 * 1024 * 1024));
+      expect(o.nextSeq(ref)).toBe(61);
+      // An event an older sessionpipe wrote whole, 9 MB of it: its seq is in its first bytes.
+      writeFileSync(o.file(ref), `${JSON.stringify(ev(70))}\n${long(71, 9 * 1024 * 1024)}\n`);
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(72);
+      // 9 MB that is no event, and 9 MB whose session says no seq: the event before them.
+      writeFileSync(o.file(ref), `${JSON.stringify(ev(80))}\n${"j".repeat(9 * 1024 * 1024)}\n`);
+      appendFileSync(o.file(ref), `{"session":{"id":"s/1"},"data":{"text":"${"k".repeat(9 * 1024 * 1024)}"}}\n`);
+      lose(o);
+      expect(o.nextSeq(ref)).toBe(81);
+    });
+
+    it("the counter is written beside its file and moved into place: never left empty, nothing left beside", () => {
+      const o = fresh();
+      expect(o.nextSeq(ref)).toBe(0);
+      o.append(ref, [ev(0)]);
+      expect(o.nextSeq(ref)).toBe(1);
+      expect(readFileSync(path.join(o.dir("codex"), "inv.seq"), "utf8")).toBe("2");
+      expect(readdirSync(o.dir("codex")).sort()).toEqual(["inv.jsonl", "inv.seq"]);
+      const f = path.join(tmp, "whole.txt");
+      writeWhole(f, "one");
+      writeWhole(f, "two");
+      expect(readFileSync(f, "utf8")).toBe("two");
+      expect(readdirSync(tmp).filter((n) => n.startsWith("whole"))).toEqual(["whole.txt"]);
+    });
   });
 
   it("a truncated trailing line is left for the next read; a corrupt whole line is skipped", () => {
