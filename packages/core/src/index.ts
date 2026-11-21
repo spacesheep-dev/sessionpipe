@@ -32,6 +32,7 @@ export {
   takeLock,
   takeNamedLock,
   waitNamedLock,
+  writeWhole,
 } from "./outbox.js";
 export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.js";
 export * from "./privacy/index.js";

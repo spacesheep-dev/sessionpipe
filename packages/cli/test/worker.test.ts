@@ -2,7 +2,7 @@
 // The detached worker in-process: it claims its job by rename, runs it, starts a fresh
 // worker for a job the session's lock held out (up to MAX_TRIES), sweeps, and exits
 // within 15 s whatever the job does.
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,6 +141,10 @@ describe("the worker", () => {
     await expect(workerMain(argv(f))).resolves.toBeUndefined();
     expect(queue()).toEqual([]);
     expect(sweepJobs).toHaveBeenCalledTimes(1);
+    // Let go of, and said: for two days every job of one session failed without a word.
+    expect(readFileSync(path.join(tmp, "log"), "utf8")).toMatch(
+      /^\S+ codex \w+: the job failed and is not run again: Error at \S.*$/m,
+    );
   });
 
   it("exits at 15 s whatever the job is doing; a job that ends in time cancels that", async () => {

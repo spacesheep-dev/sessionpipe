@@ -31,10 +31,55 @@ export interface OutboxRef {
 }
 
 const READ_CHUNK = 1024 * 1024;
+/** How much of an outbox's end is read at a time to find its last event. */
+const TAIL_CHUNK = 64 * 1024;
 const READ_MAX = 8 * 1024 * 1024;
 /** The longest line an append writes, in UTF-16 units: each is at most three bytes of
  *  UTF-8, so a line this long, with its newline, is always within READ_MAX. */
 const LINE_MAX = Math.floor(READ_MAX / 3);
+
+/** Write a small file so that it is whole or as it was: beside it, then into its place.
+ *  A session's seq counter and its facts are read back by every job; cut short they read
+ *  as none (a counter then sends the next job to the outbox for the last seq; facts then
+ *  lose the transcript cursor). A file that cannot be written beside (a full disk) is an
+ *  error, and the one in place stays as it was. Only where the folder takes no new file,
+ *  or the swap is refused (another program holds the file open on Windows), is it written
+ *  in place, as it always was. */
+export function writeWhole(file: string, text: string): void {
+  const beside = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(beside, text, { mode: 0o600 });
+    renameSync(beside, file);
+  } catch (e) {
+    try {
+      unlinkSync(beside);
+    } catch {}
+    if (!["EPERM", "EACCES", "EBUSY"].includes((e as NodeJS.ErrnoException).code as string)) throw e;
+    writeFileSync(file, text, { mode: 0o600 });
+  }
+}
+
+/** The seq of the event that is the line from `start` to `end` of an open outbox, when
+ *  the line is one. A line longer than any this outbox is written with (LINE_MAX; an older
+ *  sessionpipe had no such limit, and a crash can leave a run of nothing megabytes long)
+ *  is not read whole: an event says its session before its data, so its seq is in its
+ *  first bytes, and what is not an event says none there. */
+function seqOfLine(fd: number, start: number, end: number): number | undefined {
+  const whole = end - start <= READ_MAX;
+  const buf = Buffer.alloc(Math.min(end - start, whole ? READ_MAX : TAIL_CHUNK));
+  const text = buf.subarray(0, readSync(fd, buf, 0, buf.length, start)).toString("utf8");
+  if (!whole) {
+    const at = text.indexOf('"session":{');
+    const m = at < 0 ? null : /"seq":(\d+)[,}]/.exec(text.slice(at));
+    return m ? Number(m[1]) : undefined;
+  }
+  try {
+    const j = JSON.parse(text) as Event;
+    return typeof j.session?.seq === "number" ? j.session.seq : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** An event as its outbox line. One longer than LINE_MAX (a paste of megabytes, a Write
  *  of a big file) would stop every read of its session at it, so it goes with its text
@@ -90,21 +135,43 @@ export class Outbox {
     // empty) with an existing outbox: recover from the file's last line.
     if (n < 0) n = this.lastSeqInFile(ref) + 1;
     mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
-    writeFileSync(f, String(n + 1), { mode: 0o600 });
+    // Whole or as it was: written in place, a counter cut short between the truncate and
+    // the write (a full disk, a kill) was left empty, and every event after it paid for
+    // the recovery above.
+    writeWhole(f, String(n + 1));
     return n;
   }
 
+  /** The seq of the last event in a session's outbox, -1 when it holds none. Read from
+   *  the file's end, a line at a time: the last line is nearly always the one. Read whole,
+   *  a long session's outbox (1.9 GB, 2026-11-20) cannot be made a string at all, and
+   *  with its counter lost every job of that session spent its worker's whole life and
+   *  1.7 GB finding that out, under the session's lock, for two days. */
   private lastSeqInFile(ref: OutboxRef): number {
-    const f = this.file(ref);
-    if (!existsSync(f)) return -1;
-    const lines = readFileSync(f, "utf8").trim().split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const j = JSON.parse(lines[i] as string) as Event;
-        if (typeof j.session?.seq === "number") return j.session.seq;
-      } catch {}
+    let fd: number;
+    try {
+      fd = openSync(this.file(ref), "r");
+    } catch {
+      return -1;
     }
-    return -1;
+    try {
+      const chunk = Buffer.alloc(TAIL_CHUNK);
+      /** Where the line being looked for ends (the byte after its last). */
+      let lineEnd = fstatSync(fd).size;
+      for (let pos = lineEnd; pos > 0; ) {
+        const n = Math.min(chunk.length, pos);
+        pos -= n;
+        const got = chunk.subarray(0, readSync(fd, chunk, 0, n, pos));
+        for (let nl = got.lastIndexOf(10); nl >= 0; nl = nl > 0 ? got.lastIndexOf(10, nl - 1) : -1) {
+          const seq = seqOfLine(fd, pos + nl + 1, lineEnd);
+          if (seq !== undefined) return seq;
+          lineEnd = pos + nl;
+        }
+      }
+      return seqOfLine(fd, 0, lineEnd) ?? -1;
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /** An append that was cut short (a full disk, a file-size limit, a killed process) leaves

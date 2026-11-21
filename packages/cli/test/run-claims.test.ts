@@ -42,6 +42,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 const { claimJob, enqueueJob, jobsDir, runJob, SWEEP_READ, sweepJobs } = await import("../src/run.js");
+const { takeLock, writeWhole } = await import("@sessionpipe/core");
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "sp-claims-"));
 afterEach(() => {
@@ -104,6 +105,56 @@ describe("claims and the jobs folder, with the file system stood in for", () => 
     await runJob({ ...job("SessionStart", { source: "resume" }), id: "c" }, { state: tmp, drain: false });
     expect(JSON.parse(readFileSync(facts, "utf8")).ran).toEqual(["c", "b", "a"]);
     expect(readdirSync(path.dirname(facts))).toEqual(["claims-1.json"]);
+  });
+
+  // A file that cannot be written beside (a full disk) is an error, and the one in place is
+  // as it was: written in place then, a counter was emptied first and stayed empty.
+  it("a full disk leaves a file as it was, with nothing beside it", () => {
+    mkdirSync(tmp, { recursive: true });
+    const f = path.join(tmp, "counter.seq");
+    writeWhole(f, "41");
+    fsState.refuse = (op, file) => {
+      if (op === "write" && file.endsWith(".tmp"))
+        throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    };
+    expect(() => writeWhole(f, "42")).toThrow(/ENOSPC/);
+    expect(readFileSync(f, "utf8")).toBe("41");
+    expect(readdirSync(tmp).filter((n) => n.startsWith("counter"))).toEqual(["counter.seq"]);
+    // The swap refused for any other reason is an error too, and the file is as it was.
+    fsState.refuse = (op, file) => {
+      if (op === "rename" && file.endsWith(".tmp"))
+        throw Object.assign(new Error("EIO: i/o error, rename"), { code: "EIO" });
+    };
+    expect(() => writeWhole(f, "43")).toThrow(/EIO/);
+    expect(readFileSync(f, "utf8")).toBe("41");
+    expect(readdirSync(tmp).filter((n) => n.startsWith("counter"))).toEqual(["counter.seq"]);
+  });
+
+  // The session's lock is asked for every 50 ms. A doubling backoff (50, 100, 200, 400, 800)
+  // asked 650 ms after a sibling that let go at 900 ms. What is timed is the moment the
+  // lock's file is written, not the job: how long the job itself takes is the machine's
+  // pace, and on a Windows CI leg it was most of a second (2026-11-21).
+  it("a job takes its session's lock as soon as a sibling lets go, not at the next backoff step", async () => {
+    mkdirSync(tmp, { recursive: true });
+    const ref = { harness: "codex", session: "claims-1" };
+    const written: number[] = [];
+    fsState.refuse = (op, file) => {
+      if (op === "write" && file.endsWith("codex-claims-1.lock")) written.push(Date.now());
+    };
+    const release = takeLock(tmp, ref);
+    expect(written).toHaveLength(1);
+    let letGo = 0;
+    setTimeout(() => {
+      release?.();
+      letGo = Date.now();
+    }, 900);
+    const { events } = await runJob(job("PreToolUse", { tool_name: "Bash", tool_input: {}, tool_use_id: "c" }), {
+      state: tmp,
+    });
+    expect(events).toHaveLength(1);
+    expect(letGo).toBeGreaterThan(0);
+    const taken = written.find((t, i) => i > 0 && t >= letGo) as number;
+    expect(taken - letGo).toBeLessThan(300);
   });
 
   // Every worker sweeps, and a sweep listed and sorted the whole folder. With 152 800
