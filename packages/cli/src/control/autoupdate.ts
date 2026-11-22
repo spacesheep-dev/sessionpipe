@@ -14,6 +14,7 @@
 // restart:
 //
 //   launchd / systemd   exit UPDATE_EXIT; the service restarts it on the new code
+//   Task Scheduler      exit UPDATE_EXIT; the task's launcher restarts it on the new code
 //                       (every plist and unit sessionpipe ever wrote restarts on a
 //                       non-zero exit).
 //   anything else       this process stops being the daemon and becomes its parent:
@@ -105,24 +106,14 @@ export function updateSummary(o: {
   off: string | null;
   paired: boolean;
   rec: UpdateRecord;
-  platform?: NodeJS.Platform;
 }): UpdateSummary {
   const daemonEnv = o.rec.off?.startsWith("SESSIONPIPE_NO_UPDATE_CHECK")
     ? "SESSIONPIPE_NO_UPDATE_CHECK is set in the daemon's environment"
     : null;
-  // No service manager runs the daemon on Windows yet (pair says so): it checks only while
-  // someone keeps `sessionpipe control run` going, which is not "automatic".
-  // These two reasons are the value of `update.off` in `status --json` and `doctor
-  // --json`, which programs read: they keep the words they have always had there.
-  const byHand =
-    (o.platform ?? process.platform) === "win32"
-      ? "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running"
-      : null;
+  // This reason is the value of `update.off` in `status --json` and `doctor --json`,
+  // which programs read: it keeps the words it has always had there.
   const off =
-    o.off ??
-    (o.paired
-      ? (daemonEnv ?? byHand)
-      : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
+    o.off ?? (o.paired ? daemonEnv : "it runs in the control daemon, which isn't set up here (`sessionpipe connect`)");
   return {
     auto: !off,
     off,
@@ -144,7 +135,7 @@ export function ago(iso: string, now: number): string {
   return `${Math.round(ms / DAY_MS)} days ago`;
 }
 
-export type RestartVia = "launchd" | "systemd" | "supervisor";
+export type RestartVia = "launchd" | "systemd" | "schtasks" | "supervisor";
 
 /** Who restarts this process when it exits UPDATE_EXIT, or null when nobody will (it
  *  then supervises the new daemon itself). A wrong "nobody" costs one extra process; a
@@ -172,8 +163,15 @@ export function restartVia(o: {
     const mainPid = !o.env.SYSTEMD_EXEC_PID || o.env.SYSTEMD_EXEC_PID === String(o.pid);
     if (inUnit && mainPid) return "systemd";
   }
+  // The scheduled task's launcher (sessionpipe-core/service) names itself by its pid, as
+  // the supervisor does: only the process it started has it for a parent.
+  if (o.platform === "win32" && s === `schtasks:${o.ppid}`) return "schtasks";
   return null;
 }
+
+/** Who starts the daemon again after it exits UPDATE_EXIT, as its log names them. */
+export const restartedBy = (via: RestartVia): string =>
+  via === "supervisor" ? "the supervising sessionpipe" : via === "schtasks" ? "the scheduled task's launcher" : via;
 
 /** What the daemon offers the updater. */
 export interface Quiescent {

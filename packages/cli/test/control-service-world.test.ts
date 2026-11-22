@@ -298,7 +298,7 @@ describe.runIf(posix)("a look at the service", () => {
 
   it("is null where there is no manager, and in a world with no service of its own", () => {
     // Nothing stood in: on a platform with no manager nothing is run.
-    expect(serviceLook({ env: {}, platform: "win32" })).toBeNull();
+    expect(serviceLook({ env: {}, platform: "freebsd" })).toBeNull();
     expect(serviceLook({ env: { SESSIONPIPE_STATE: tmp }, platform: "darwin" })).toBeNull();
     // A world with a service of its own, on whatever this platform is: asked, never changed.
     const asked: string[] = [];
@@ -311,7 +311,9 @@ describe.runIf(posix)("a look at the service", () => {
     });
     expect(look?.loaded ?? false).toBe(false);
     for (const a of asked)
-      expect(a).toMatch(/^(launchctl print |systemctl --user is-active |systemctl --user show --property=Version$)/);
+      expect(a).toMatch(
+        /^(launchctl print |systemctl --user is-active |systemctl --user show --property=Version$|\S+powershell\.exe -NoProfile -NonInteractive -Command \$ErrorActionPreference='Stop';try\{\$t=Get-ScheduledTask )/,
+      );
   });
 });
 
@@ -357,6 +359,9 @@ describe.runIf(posix)("the service of a sessionpipe that keeps its files elsewhe
       ...world(),
       SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest",
       HOME: path.join(tmp, "home"),
+      // Windows keeps a sessionpipe's files under these two, and a task gets the account's.
+      APPDATA: path.join(tmp, "roaming"),
+      LOCALAPPDATA: path.join(tmp, "local"),
       npm_config_registry: "http://127.0.0.1:4873",
       EDITOR: "vi",
     };
@@ -369,6 +374,8 @@ describe.runIf(posix)("the service of a sessionpipe that keeps its files elsewhe
       SESSIONPIPE_STATE: env.SESSIONPIPE_STATE,
       SESSIONPIPE_SERVICE_LABEL: "org.sessionpipe.racetest",
       HOME: env.HOME,
+      APPDATA: env.APPDATA,
+      LOCALAPPDATA: env.LOCALAPPDATA,
       npm_config_registry: "http://127.0.0.1:4873",
       PATH: "/usr/bin:/bin",
     });

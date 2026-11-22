@@ -2,7 +2,7 @@
 // `sessionpipe control pair <receiver>`: a key enters this machine's trust store only
 // from this terminal (spec/CONTROL.md §2). The receiver hands back a passkey and a
 // proof over sha256("sessionpipe.pair:<machine>:<code>"); the key is trusted only once
-// the proof verifies here. Also the service files (launchd / systemd) that keep the
+// the proof verifies here. Also the service files (launchd / systemd / Task Scheduler) that keep the
 // daemon running, and `control off`.
 import { randomBytes } from "node:crypto";
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
@@ -345,16 +345,17 @@ export function removeKey(id: string, env?: NodeJS.ProcessEnv): number {
 }
 
 // --- the service -------------------------------------------------------------------
-// The launchd agent and the systemd user unit are core's (sessionpipe-core/service);
+// The launchd agent, the systemd user unit and the Windows scheduled task are core's
+// (sessionpipe-core/service);
 // this is the daemon's: its label, its command line, and what to tell the person.
 
 const DESCRIPTION = "sessionpipe control daemon (signed messages to your coding sessions)";
 
 export { type Exec, ensureLinger } from "@sessionpipe/core/service";
 
-/** The daemon's service: `<node> <cli> control run`, logging to the state dir. Both files
- *  restart it when it exits non-zero; an update exits UPDATE_EXIT (75) to come back on
- *  the new code. SESSIONPIPE_SERVICE tells the daemon which manager that is. */
+/** The daemon's service: `<node> <cli> control run`, logging to the state dir. Each
+ *  manager restarts it when it exits non-zero; an update exits UPDATE_EXIT (75) to come
+ *  back on the new code. SESSIONPIPE_SERVICE tells the daemon which manager that is. */
 const spec = (o: {
   node: string;
   cli: string;
@@ -367,6 +368,8 @@ const spec = (o: {
   unit: o.names?.unit ?? UNIT,
   description: DESCRIPTION,
   argv: [o.node, o.cli, "control", "run"],
+  // Windows: the node that runs the daemon runs the task's launcher too.
+  node: o.node,
   logPath: path.join(o.logDir, "daemon.log"),
   ...(o.home ? { home: o.home } : {}),
   ...(o.env ? { env: o.env } : {}),
@@ -374,14 +377,16 @@ const spec = (o: {
 
 /** What the service file carries beside SESSIONPIPE_SERVICE: the PATH of the shell that
  *  paired (launchd's and systemd's own is a bare /usr/bin:/bin, where a `claude` under nvm
- *  or Homebrew is not), and the `claude` that shell could see, pinned for the daemon as
+ *  or Homebrew is not; a Windows task's is the one the account logs on with, without what
+ *  that shell added), and the `claude` that shell could see, pinned for the daemon as
  *  SESSIONPIPE_CLAUDE (a path that stops existing is skipped and looked for again). */
 export function serviceEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const out: Record<string, string> = {};
   // A sessionpipe with a service of its own (SESSIONPIPE_SERVICE_LABEL: a throwaway
   // world) gives that service the same world: where its files are, whose home it is and
   // which registry npm asks. Without this the service would come up in this computer's
-  // real home, beside the real one.
+  // real home, beside the real one (on Windows its files are under LOCALAPPDATA and
+  // APPDATA, which a task gets from the account and not from this shell).
   if (env.SESSIONPIPE_SERVICE_LABEL)
     for (const [k, v] of Object.entries(env)) if (v !== undefined && WORLD.test(k)) out[k] = v;
   if (env.PATH) out.PATH = env.PATH;
@@ -390,7 +395,7 @@ export function serviceEnv(env: NodeJS.ProcessEnv = process.env): Record<string,
   return out;
 }
 const WORLD =
-  /^(SESSIONPIPE_.+|HOME|USERPROFILE|XDG_[A-Z]+_HOME|CLAUDE_CONFIG_DIR|CODEX_HOME|GEMINI_CLI_HOME|GROK_HOME|npm_config_registry)$/;
+  /^(SESSIONPIPE_.+|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z]+_HOME|CLAUDE_CONFIG_DIR|CODEX_HOME|GEMINI_CLI_HOME|GROK_HOME|npm_config_registry)$/;
 
 export function serviceFiles(o: {
   node: string;
@@ -423,14 +428,17 @@ interface Placing {
 function put(
   o: Placing,
   keep: boolean,
-): { plan: core.ServicePlan; label: string; unit: string; file: string; log: string } | { left: string } {
+):
+  | { plan: core.ServicePlan; label: string; unit: string; file: string; log: string; platform: NodeJS.Platform }
+  | { left: string } {
   const names = serviceNames(o.env) ?? (o.exec ? { label: LABEL, unit: UNIT } : null);
   if (!names) return { left: noService(o.env) as string };
   const { label, unit } = names;
   const logDir = controlState(o.env);
   const here = spec({ node: o.node, cli: o.cli, logDir, names });
   const files = core.serviceFiles(here);
-  const file = (o.platform ?? process.platform) === "darwin" ? files.plist.path : files.unit.path;
+  const platform = o.platform ?? process.platform;
+  const file = (platform === "darwin" ? files.plist : platform === "win32" ? files.launcher : files.unit).path;
   let old: string | null = null;
   try {
     old = readFileSync(file, "utf8");
@@ -442,7 +450,8 @@ function put(
     return { left: `${file} is another program's service (it runs ${was.join(" ")}), and is left as it is` };
   mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const log = path.join(logDir, "daemon.log");
-  // launchd and systemd create this file themselves, with whatever the umask says. It
+  // launchd and systemd create this file themselves, with whatever the umask says (and
+  // so does the Windows launcher, under the profile's own permissions). It
   // sits beside the nonces and the acks, which are 0600 (CONTROL.md §8), and it holds
   // message ids, session ids and folder paths — so it is created here, private, before
   // the service can make a readable one.
@@ -462,11 +471,15 @@ function put(
     ...(o.exec ? { exec: o.exec } : {}),
     ...(o.platform ? { platform: o.platform } : {}),
   });
-  return { plan, label, unit, file, log };
+  return { plan, label, unit, file, log, platform };
 }
 
 const NO_MANAGER = "no service manager for this platform yet; run `sessionpipe control run` yourself";
-const managed = (platform: NodeJS.Platform = process.platform) => platform === "darwin" || platform === "linux";
+const managed = (platform: NodeJS.Platform = process.platform) =>
+  platform === "darwin" || platform === "linux" || platform === "win32";
+/** A manager as a sentence names it. */
+export const managerName = (manager: "launchd" | "systemd" | "schtasks"): string =>
+  manager === "schtasks" ? "Task Scheduler" : manager;
 
 /** Write and start the service for this platform (`control pair`, `pool on`, `ask on`):
  *  it is given the PATH of the shell that ran this (`serviceEnv`). Returns what it did,
@@ -475,13 +488,17 @@ export function installService(o: Placing): string {
   if (!managed(o.platform)) return NO_MANAGER;
   const r = put(o, false);
   if ("left" in r) return `left alone: ${r.left}; ${BY_HAND}`;
-  const { plan, label, unit, file, log } = r;
+  const { plan, label, unit, file, log, platform } = r;
   if (plan.manager === "launchd")
     return plan.domain === "gui"
       ? `launchd agent ${label} (log: ${log})`
       : `launchd agent ${label} in the background domain, since nobody is logged in at this Mac's screen; after a restart it starts again when someone logs in there (log: ${log})`;
   if (plan.manager === "systemd")
     return `systemd user unit ${unit}; ${plan.linger?.note} (journalctl --user -u ${unit})`;
+  if (plan.manager === "schtasks")
+    return `scheduled task ${core.taskName(label)}: it starts when you log on to Windows, with no window (log: ${log})`;
+  if (platform === "win32")
+    return `${plan.why ?? `${plan.restored ? `left ${file} as it was` : `wrote ${file}`}, but Task Scheduler didn't take the task`}; run \`sessionpipe control run\` yourself`;
   return `${plan.restored ? `left ${file} as it was` : `wrote ${file}`}, but systemd --user isn't reachable here; run \`sessionpipe control run\` yourself (tmux, screen)`;
 }
 
@@ -503,7 +520,9 @@ export function placeService(o: Placing): void {
   if ("left" in r) throw new Error(r.left);
   if (!r.plan.manager)
     throw new Error(
-      `systemd --user didn't start it (it can't be reached from here, or it refused)${r.plan.restored ? back : ""}`,
+      r.platform === "win32"
+        ? (r.plan.why ?? `Task Scheduler didn't take the task (schtasks refused it)${r.plan.restored ? back : ""}`)
+        : `systemd --user didn't start it (it can't be reached from here, or it refused)${r.plan.restored ? back : ""}`,
     );
 }
 

@@ -452,6 +452,16 @@ describe("the service, made to run this copy", () => {
     const b = run({ look: other, status: [old, old, null, st("1.1.0")] }, { health: async () => ({ accounts: [] }) });
     expect((await b.out).state).toBe("current");
     expect(b.sim.seeded).toEqual([turns]);
+    // On Windows a service of this release is ended outright when it is replaced, before
+    // it can write anything down: it is written for that one too, and nowhere else.
+    const now = st("0.9.0", { mid_turn: turns });
+    const win = run({ look: other, status: [now, now, null, st("1.1.0")] }, { platform: "win32" });
+    expect((await win.out).state).toBe("current");
+    expect(win.sim.seeded).toEqual([turns]);
+    expect(win.sim.did).toEqual(["quiesce", "seed", "place"]);
+    const mac = run({ look: other, status: [now, now, null, st("1.1.0")] }, { platform: "darwin" });
+    expect((await mac.out).state).toBe("current");
+    expect(mac.sim.seeded).toEqual([]);
     // With no session mid-turn, or a status that names none, there is nothing to write.
     for (const idle of [st("0.14.2", { mid_turn: [] }), st("0.14.2")]) {
       const c = run({ look: other, status: [idle, idle, null, st("1.1.0")] }, { health: async () => null });
@@ -777,6 +787,11 @@ describe("the service that runs this copy already", () => {
       { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "launchd" } }) },
     );
     expect(((await mac.out) as { error: string }).error).toContain("and launchd can't be asked from this shell");
+    const win = run(
+      { look: null },
+      { health: async () => ({ accounts: [], copy: { cli: `${THEIRS}/cli.js`, via: "schtasks" } }) },
+    );
+    expect(((await win.out) as { error: string }).error).toContain("and Task Scheduler can't be asked from this shell");
     // A supervisor of its own is somebody's hand too.
     const own = run(
       { look: null },

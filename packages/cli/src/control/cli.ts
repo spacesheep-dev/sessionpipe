@@ -29,7 +29,15 @@ import { controlAccount, secretGet, sinkWithSecrets } from "../secrets.js";
 import { shq } from "../shell.js";
 import { clean, PLAIN, table, tint, type Ui } from "../style.js";
 import { copyOnPath, installEverywhere, installedVersion, latestVersion } from "../update.js";
-import { AutoUpdater, autoUpdateOff, restartVia, supervise, UPDATE_EXIT, updateFile } from "./autoupdate.js";
+import {
+  AutoUpdater,
+  autoUpdateOff,
+  restartedBy,
+  restartVia,
+  supervise,
+  UPDATE_EXIT,
+  updateFile,
+} from "./autoupdate.js";
 import { namedAsChannel, parentArgv, runChannel } from "./channel.js";
 import { ControlDaemon, DaemonRunning, type Status } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
@@ -508,7 +516,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     await d.stop();
     const via = restartVia({ env: process.env, platform: process.platform, pid: process.pid, ppid: process.ppid });
     if (via) {
-      log(`exiting ${UPDATE_EXIT} so ${via === "supervisor" ? "the supervising sessionpipe" : via} starts ${to}`);
+      log(`exiting ${UPDATE_EXIT} so ${restartedBy(via)} starts ${to}`);
       process.exit(UPDATE_EXIT);
     }
     // Nobody restarts this process: it stays, as the new daemon's parent.

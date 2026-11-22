@@ -289,7 +289,10 @@ export async function bringCurrent(d: CurrentDeps, o: { installed?: boolean } = 
       // A service from before 0.15 writes nothing down when it is stopped, and the one
       // that replaces it would copy a session it didn't know was mid-turn. It is told
       // apart by what it answers: only one that remembers says which copy it is.
-      if (running && !remembers) {
+      // On Windows none gets to write it down: nothing there asks a process to stop
+      // (replacing the scheduled task ends its processes outright), so it is written
+      // for that one too.
+      if (running && (!remembers || d.platform === "win32")) {
         const turns = running.mid_turn ?? [];
         if (turns.length) d.seed(turns);
       }
@@ -339,10 +342,10 @@ export async function bringCurrent(d: CurrentDeps, o: { installed?: boolean } = 
       // It runs this copy already, or someone runs it by hand: it restarts itself.
       const copy = (await d.health())?.copy;
       if (copy && !d.same(copy.cli, d.cli))
-        return copy.via === "launchd" || copy.via === "systemd"
+        return copy.via === "launchd" || copy.via === "systemd" || copy.via === "schtasks"
           ? {
               state: "failed",
-              error: `the background service runs another copy (${copy.cli}) on sessionpipe ${before.version}, and ${copy.via} can't be asked from this shell to move it onto this one. Run this from a terminal you opened on this computer yourself`,
+              error: `the background service runs another copy (${copy.cli}) on sessionpipe ${before.version}, and ${copy.via === "schtasks" ? "Task Scheduler" : copy.via} can't be asked from this shell to move it onto this one. Run this from a terminal you opened on this computer yourself`,
               next: "sessionpipe update",
             }
           : {

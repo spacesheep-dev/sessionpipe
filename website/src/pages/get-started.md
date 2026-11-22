@@ -12,7 +12,7 @@ Run it on each machine your agents run on: a laptop, a lab workstation over ssh,
 - **A sink at tier 2** (prompts and answers, secrets removed; `--tier` to change it), capped at the receiver's `max_tier`.
 - **Signed messages**: the control daemon, in safe mode unless `--mode auto`, for the folder you ran it in, or the folders your recent sessions ran in when you ran it from your home folder (never the home folder itself).
 - **Keys** in the macOS Keychain, or the Secret Service keyring in a Linux desktop session; otherwise a `0600` file, which is what a headless server has. `sessionpipe secrets` shows where each one is.
-- **The daemon keeps running after you log out** (systemd linger on Linux; a background launchd agent on a Mac nobody is logged in to).
+- **The daemon keeps running after you log out** (systemd linger on Linux; a background launchd agent on a Mac nobody is logged in to). On Windows a scheduled task starts it when you log on, with no window and no administrator rights.
 - Each Claude Code account it finds, and whether it's **signed in** as this machine sees it: a message you send starts a headless run with that login.
 
 Run it again any time; it only fixes what's missing. `sessionpipe doctor` checks all of the above.

@@ -66,6 +66,15 @@ sessionpipe control keys [remove <id>]
 sessionpipe control off             # tell the receiver, forget its token and keys
 ```
 
+Pairing keeps the daemon running without a terminal: a launchd agent on macOS, a systemd
+user unit on Linux, and on Windows a scheduled task at your logon
+(`\sessionpipe\org.sessionpipe.control` in Task Scheduler). None of them needs root or an
+administrator. The Windows task opens no window: it runs Node under `conhost.exe
+--headless`, on a small launcher
+(`%LOCALAPPDATA%\sessionpipe\service\org.sessionpipe.control.cjs`) that gives the daemon
+the PATH of the shell that paired, appends its output to `daemon.log`, and starts it again
+when it exits for an update or fails. `control off` removes it.
+
 Pairing through `npx` first installs that version globally and runs pairing from
 that persistent copy. On Homebrew, the daemon uses a matching stable Node link
 so a Node upgrade does not leave it pointing at a removed Cellar version.
@@ -252,7 +261,8 @@ receivers; and the last line says so. It does four things, in order:
 2. Writes the hooks again from this copy.
 3. Puts the background service on this copy, the same one you type, so the two cannot
    drift apart. How depends on who runs it:
-   - **launchd or systemd has it, and it runs another copy or doesn't answer.** It is
+   - **launchd, systemd or Task Scheduler has it, and it runs another copy or doesn't
+     answer.** It is
      replaced. It keeps the environment its service file gave it (its PATH, a
      `SESSIONPIPE_CLAUDE` you added by hand); only the program changes.
    - **Its service file is there and nothing runs** (a start that failed). It is put back.
@@ -273,9 +283,9 @@ says what to type next (into a pipe: one line, with `Next: <command>` at its end
 | npm can't write the prefix (installed with sudo) | `sudo npm install -g --prefix <prefix> sessionpipe@<version> && sessionpipe update`. On Windows there is no sudo: `sessionpipe update`, from a terminal opened as administrator |
 | This copy isn't an npm install (a git checkout, a dev build) | `npx sessionpipe@latest update` |
 | The hooks couldn't be written | `sessionpipe install` |
-| Nothing runs the service and there is no service file for it: you run it yourself, or nothing manages services here (Windows, a container) | `sessionpipe control run` |
+| Nothing runs the service and there is no service file for it: you run it yourself, or nothing manages services here (a container) | `sessionpipe control run` |
 | You run the service yourself and it didn't restart | `sessionpipe control run`, after stopping it where it runs |
-| launchd or systemd refused the new service. The one that was there before is put back and started again | `sessionpipe update` when a service answers again; `sessionpipe control run` when nothing answers |
+| launchd, systemd or Task Scheduler refused the new service. The one that was there before is put back and started again | `sessionpipe update` when a service answers again; `sessionpipe control run` when nothing answers |
 | The service was started and doesn't answer, or answers as another version | `sessionpipe doctor` |
 
 A receiver that hasn't answered the service is not a failed update. The last line still
@@ -293,7 +303,7 @@ it is mid-turn, so a message to it still waits for its Stop.
 
 A service from before 0.15 has neither habit. It forgets who is mid-turn when it stops,
 and it restarts itself only once no session on the computer is mid-turn, which on a busy
-computer never comes. So where launchd or systemd has it, `update` replaces it at once,
+computer never comes. So where a service manager has it, `update` replaces it at once,
 after writing down for the new one who is mid-turn. One that someone runs by hand can
 only restart itself, by its older rule: `update` says so, and that nothing more is to
 be typed.
@@ -338,6 +348,8 @@ How it restarts depends on how it runs:
 - **launchd (macOS) or systemd (Linux)**, as `control pair` / `connect` set it up: the
   daemon exits with code 75 and the service starts it again. Every service file
   sessionpipe has written restarts on a non-zero exit, so older installs need nothing.
+- **Task Scheduler (Windows)**: the daemon exits with code 75 and the task's launcher
+  starts it again at once, as it does 5 seconds after a failure.
 - **Anything else** (a terminal, tmux, a container that starts `sessionpipe control run`
   itself): the old process stays as the new daemon's parent, with the same environment
   and output, and restarts it the same way after each later update. Whatever waits on
@@ -350,7 +362,8 @@ Only a global npm install that this user can write updates itself; a copy in the
 cache, a git checkout or a dev build is left alone. `sessionpipe doctor` says whether it's
 on, when it last checked and what it found; the daemon's log
 (`~/.local/state/sessionpipe/control/daemon.log` under launchd,
-`journalctl --user -u sessionpipe-control.service` under systemd) has one line per check
+`journalctl --user -u sessionpipe-control.service` under systemd,
+`%LOCALAPPDATA%\sessionpipe\control\daemon.log` on Windows) has one line per check
 and per update.
 
 ```sh
@@ -359,7 +372,8 @@ sessionpipe update on
 ```
 
 `SESSIONPIPE_NO_UPDATE_CHECK=1` turns the daily update off too, but only where the
-service can see it: a launchd or systemd service doesn't inherit your shell's variables,
+service can see it: a service that launchd, systemd or Task Scheduler starts doesn't
+inherit your shell's variables,
 while `sessionpipe update off` reaches it (it re-reads the config every ten minutes).
 Set in your shell, it makes `sessionpipe update` there change nothing (above).
 The registry asked is npm's own, or the one `npm_config_registry` names.
@@ -512,7 +526,8 @@ What only the service's log used to know is on that page: a disk that filled up,
 it can't read from the keychain, a pool with no account left to try, a receiver that
 hasn't answered. Whether Claude Code is signed in is asked of the running service over
 its socket, since a shell over ssh can't read a Mac's login keychain and would only
-guess; and a service that launchd or systemd doesn't have at all is said to be that,
+guess; and a service that launchd, systemd or Task Scheduler doesn't have at all is said
+to be that,
 not merely "offline".
 
 `sessionpipe control status` is a page for a person at a terminal, and the JSON it

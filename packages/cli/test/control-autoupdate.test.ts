@@ -114,12 +114,7 @@ describe("what status says", () => {
       latest: null,
       last_error: "ENOTFOUND",
     });
-    const byHand = updateSummary({ off: null, paired: true, rec: {}, platform: "win32" });
-    expect(byHand.auto).toBe(false);
-    expect(byHand.off).toBe(
-      "it runs in the control daemon, which has no service on Windows yet: it checks while `sessionpipe control run` is running",
-    );
-    expect(updateSummary({ off: null, paired: true, rec: {}, platform: "linux" }).auto).toBe(true);
+    expect(updateSummary({ off: null, paired: true, rec: {} }).auto).toBe(true);
     // Why it is off is this copy's own reason first; what failed and what was done both stay.
     const failed = { version: "0.6.0", at: checked, error: "npm: 403" };
     const updated = { from: "0.4.0", to: "0.5.0", at: checked, ms: 1 };

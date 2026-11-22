@@ -2,7 +2,8 @@
 // sessionpipe-core/service: the launchd agent and the systemd user unit, as files (a
 // dry run's snapshots below are the whole text), and installing and removing them with
 // a stand-in for launchctl, systemctl and loginctl, in a temp home. Nothing here runs a
-// real service manager, and a dry run writes nothing.
+// real service manager, and a dry run writes nothing. The Windows scheduled task is in
+// service-windows.test.ts.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -88,7 +89,7 @@ WantedBy=default.target
     // A dry run touches nothing.
     expect(existsSync(path.join(home, "Library"))).toBe(false);
     expect(existsSync(path.join(home, ".config"))).toBe(false);
-    expect(installService({ ...SPEC, home, dryRun: true, platform: "win32" })).toEqual({
+    expect(installService({ ...SPEC, home, dryRun: true, platform: "freebsd" })).toEqual({
       files: [],
       commands: [],
       manager: null,
@@ -588,10 +589,10 @@ describe("a look at the service", () => {
   it("another platform has no manager, and nothing is asked", () => {
     const none = manager();
     const nothing = { manager: null, file: null, installed: false, loaded: false, argv: null, pid: null };
-    expect(serviceState({ ...NAMES, home, platform: "win32", exec: none.exec })).toEqual(nothing);
+    expect(serviceState({ ...NAMES, home, platform: "freebsd", exec: none.exec })).toEqual(nothing);
     expect(none.asked).toEqual([]);
     // With no stand-in either: there is still nothing to run.
-    expect(serviceState({ ...NAMES, home, platform: "win32" })).toEqual(nothing);
+    expect(serviceState({ ...NAMES, home, platform: "freebsd" })).toEqual(nothing);
   });
 
   it("asks about this process's own user; where the system has no uid, about none", () => {
