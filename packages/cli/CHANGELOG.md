@@ -1,5 +1,23 @@
 # sessionpipe
 
+## 0.18.4
+
+### Patch Changes
+
+- 25101d0: The pool no longer loses its accounts' sign-ins to a secrets store that cannot be written
+  
+  - Refreshing a pooled account's token replaces its sign-in: the old one is dead once it is used. When the secrets store refused the new one (a keychain that is locked), the pool kept it in memory only, and the daemon's next start found the old one, already used up: the account needed signing in again. On one laptop three accounts were refreshed that way in one night, and all three were signed out after the daemon's next start.
+  - No refresh is made now while the store cannot be reached, unless a request is waiting on a token that no longer works. The idle usage poll, which nobody waits on, never refreshes then, and a token with minutes left is used as it is. Whether a keychain can be reached is asked with one read of the account's own item, and after a refusal no sooner than 30 s, 60 s, then every five minutes: a locked keychain keeps its tool, and the daemon with it, waiting eight seconds for each answer.
+  - A sign-in that did have to be refreshed while the store refused the write is offered to it again: by the next request, by the idle poll while the pool runs, and once more when the daemon stops; the log says when it is in. While the pool runs and such a sign-in is less than a day old, the daemon does not restart by itself for an update. `sessionpipe pool` says how many are waiting, and a stop that still cannot write one says which command signs the account in again.
+  - A token refreshed for an account that was removed, or signed in afresh, while the vendor was being asked is no longer kept.
+- b7a195f: The pool says when its Claude accounts need signing in again, where the person is looking, and one command signs them all in
+  
+  - When every pooled account needed signing in again, the pool answered each request with a 429 to wait out, a minute at a time. Claude Code asks such an answer again for ten minutes: its terminal shows only that it is retrying, `claude -p` and the apps built on it show nothing, and the pool's words are never read (measured with Claude Code 2.1.327). No wait helps there, so the answer is now a 428 with the pool's words, which Claude Code shows at once with nothing in front of them: `API Error: 428 sessionpipe pool: all 3 of its Claude accounts need signing in again. In a terminal run: sessionpipe pool login`. A pool with no account, or with every account turned off, is answered the same way. It is not a 401 or a 403, in front of which Claude Code puts "Please run /login", where no pooled account is signed in; not a 407, which a standard `fetch` takes for a network failure; and not a 422 or 424, on which Claude Code may clear older tool results out of the session and ask again.
+  - The request that finds an account signed out no longer passes on the upstream's own 401 ("token expired"). Each remaining account is asked instead (a sign-in found dead does not use up the one retry), and when none can serve the pool's own answer goes back. An account that is only waiting on a token endpoint that is down is not counted as signed out: that is still a 503 to wait out.
+  - Accounts at their limit are still a 429 with the time one has room again, and it now adds how many others need signing in.
+  - `sessionpipe pool login` is new: it takes a person through every account that needs signing in again, one after another (the page to open, the code pasted back), or signs in a new account when none does. It was two commands an account. An account chosen in the browser by mistake is said, and one that was not in the pool is named as new, with the command that takes it out. `sessionpipe pool add --login` and `--code -` stay for where no terminal is at hand.
+  - `sessionpipe pool`, `sessionpipe doctor`, `sessionpipe status` and `sessionpipe control status` say how many accounts need signing in again, and doctor's fix is that one command.
+
 ## 0.18.3
 
 ### Patch Changes
