@@ -32,6 +32,7 @@ class FakePool implements Pool {
   on = false;
   listening = false;
   in_flight = 0;
+  unsaved = 0;
   started = 0;
   stopped = 0;
   calls: string[] = [];
@@ -130,6 +131,7 @@ class FakePool implements Pool {
       port: 51234,
       listening: this.listening,
       in_flight: this.in_flight,
+      ...(this.unsaved ? { unsaved: this.unsaved, holds_restart: true as const } : {}),
       settings: [],
       accounts: this.accountsList.map((a, i) => ({ ...a, current: this.on && i === 0 && a.status === "ready" })),
       ...(this.pending ? { pending: this.pending } : {}),
@@ -387,6 +389,12 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
     pool.in_flight = 2;
     expect(d!.busy()).toBe("2 pooled request(s) being answered");
     pool.in_flight = 0;
+    // A refreshed sign-in the secrets store has not taken is in memory only: a restart
+    // now would sign that account out, so the daemon does not make one by itself.
+    pool.unsaved = 2;
+    expect(d!.busy()).toBe("2 refreshed sign-in(s) the secrets store has not taken yet");
+    pool.unsaved = 0;
+    expect(d!.busy()).toBeNull();
     const r = await ask(sock, { op: "status" }, 2000);
     expect((r as { status: { pool: unknown } }).status.pool).toMatchObject({ on: true, listening: true, accounts: 0 });
     await d!.stop();

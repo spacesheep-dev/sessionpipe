@@ -347,6 +347,10 @@ function printStatus(r: Done, out: (s?: string) => void, now: number, ui: Ui): v
         s.on && nobodyElse ? ". Until then Claude Code here is refused" : ""
       }`,
     );
+  if (s.unsaved)
+    out(
+      `  ! ${s.unsaved === 1 ? "1 refreshed sign-in is" : `${s.unsaved} refreshed sign-ins are`} not in the secrets store yet (it refused the write, as a locked keychain does): kept in memory and offered again; a restart before then signs ${s.unsaved === 1 ? "that account" : "those accounts"} out`,
+    );
   for (const f of s.settings) out(`  settings  ${tilde(f.file).padEnd(44)} ${f.state}${f.note ? ` — ${f.note}` : ""}`);
   if (s.pending)
     out(

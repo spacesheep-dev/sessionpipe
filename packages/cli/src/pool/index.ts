@@ -176,6 +176,12 @@ export interface PoolStatus {
   settings: { file: string; state: PoolEnvState; note?: string }[];
   accounts: (PoolAccount & AccountSummary & { limits?: PoolLimits })[];
   pending?: { id: string; url: string; expires_at: string };
+  /** Refreshed sign-ins held in memory only, the secrets store having refused them:
+   *  a restart before it takes them signs those accounts out. Absent when none. */
+  unsaved?: number;
+  /** Some of them are recent, and the pool is running to offer them again: the daemon
+   *  holds back a restart of its own (for a day at most). */
+  holds_restart?: true;
 }
 
 export interface Pool {
@@ -284,6 +290,10 @@ export function openPool(deps: PoolDeps): Pool {
     now,
     load: (id) => secrets.credential(cfg, id),
     save: (id, c) => secrets.setCredential(cfg, id, c),
+    // A file is always there to write. A keychain that is locked answers no read, and its
+    // tool waits eight seconds to say so: one read of the account's own item is the
+    // cheapest way to know, and it changes nothing.
+    storeOpen: (id) => secrets.reachable(cfg, id),
     refresh: (c) => adapter.refreshCredential(c, fetchFn, now),
     isAuthError: (e) => e instanceof adapter.PoolAuthError,
     log,
@@ -424,7 +434,8 @@ export function openPool(deps: PoolDeps): Pool {
 
   /** Ask the usage endpoint for one account; the numbers go to the policy (no session). */
   const pollOne = async (id: string): Promise<void> => {
-    const cred = await credentials.get(id);
+    // Nobody waits on these numbers: a sign-in the store could not keep is not refreshed for them.
+    const cred = await credentials.get(id, false, true);
     if (!cred.ok) {
       if (cred.why === "sign-in" && observeStanding(id, { error: "sign in again" })) changed();
       return;
@@ -450,6 +461,8 @@ export function openPool(deps: PoolDeps): Pool {
     return true;
   };
   const pollIdle = async () => {
+    // A refreshed sign-in the store refused is offered again, on or off: it is the only copy.
+    credentials.flush();
     // Off means off: no credential is used until the person turns the pool on again.
     if (!cfg.on) return;
     const t = now();
@@ -574,6 +587,13 @@ export function openPool(deps: PoolDeps): Pool {
       const s = server;
       server = null;
       if (s) await s.close();
+      // The last chance for a refreshed sign-in the store has not taken: what is still in
+      // memory only when this process ends is gone, and its account needs a person.
+      const lost = credentials.flush(true);
+      if (lost)
+        log(
+          `${lost} refreshed sign-in(s) could not be written to the secrets store before stopping; each of those accounts will need signing in again (sessionpipe pool login)`,
+        );
       flush();
     },
 
@@ -739,6 +759,9 @@ export function openPool(deps: PoolDeps): Pool {
         ...(cfg.rotated_at ? { rotated_at: cfg.rotated_at } : {}),
         ...(other ? { another_daemon: true } : {}),
         in_flight: server?.stats.in_flight ?? 0,
+        ...(credentials.pending() ? { unsaved: credentials.pending() } : {}),
+        // Only while it runs: stopped, nothing offers them to the store, and nothing waits.
+        ...(poll !== null && credentials.holding() ? { holds_restart: true as const } : {}),
         settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer(), read().previous ?? undefined)) : [],
         accounts: cfg.accounts.map((a, i) => {
           const limits = policy.accounts[i]?.limits;

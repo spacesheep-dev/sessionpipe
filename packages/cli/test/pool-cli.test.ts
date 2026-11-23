@@ -670,6 +670,20 @@ describe("sessionpipe pool, with the daemon running", () => {
     ...over,
   });
 
+  it("refreshed sign-ins the secrets store has not taken are said, with what a restart would cost", async () => {
+    answer = { op: "pool", outcome: "delivered", detail: "on · 0 accounts", status: status({ unsaved: 1 }) };
+    await run(["status"]);
+    expect(lines).toContain(
+      "  ! 1 refreshed sign-in is not in the secrets store yet (it refused the write, as a locked keychain does): kept in memory and offered again; a restart before then signs that account out",
+    );
+    lines = [];
+    answer = { op: "pool", outcome: "delivered", detail: "on · 0 accounts", status: status({ unsaved: 3 }) };
+    await run(["status"]);
+    expect(lines.find((l) => l.includes("secrets store"))).toMatch(
+      /^ {2}! 3 refreshed sign-ins are not in the secrets store yet .* signs those accounts out$/,
+    );
+  });
+
   it("every request goes over the socket, never to the engine in this process", async () => {
     answer = { op: "pool", outcome: "delivered", detail: "on · 0 accounts", status: status() };
     let opened = 0;
