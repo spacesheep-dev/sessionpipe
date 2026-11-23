@@ -546,6 +546,145 @@ describe("the listener", () => {
       ),
     );
   }
+  // What signed three accounts out on one laptop (2026-11-22): their tokens were refreshed
+  // behind a locked keychain, which refused the new ones, and the daemon's next start had
+  // only the old ones, already used up.
+  describe("a keychain that cannot be written", () => {
+    /** A keychain that can be locked (no read, no write) or left readable only, and a
+     *  vendor whose refresh tokens are good once, as the real one's are. */
+    const world = () => {
+      env.SESSIONPIPE_SECRETS = "keychain";
+      const items = new Map<string, string>();
+      const kc = { mode: "open" as "open" | "readonly" | "locked", waited: [] as string[] };
+      const run: Runner = (_c, args, input) => {
+        // Locked, every question but a delete waits out the tool's eight seconds.
+        if (kc.mode === "locked") {
+          if (args[0] !== "delete-generic-password") kc.waited.push(args[0] === "-i" ? "write" : "read");
+          return { status: null, stdout: "" };
+        }
+        if (args[0] === "find-generic-password")
+          return items.has(args[4]!) ? { status: 0, stdout: items.get(args[4]!)! } : { status: 44, stdout: "" };
+        if (kc.mode === "open" && args[0] === "delete-generic-password") items.delete(args[4]!);
+        if (kc.mode === "open" && args[0] === "-i") {
+          const m = /-a "([^"]+)".* -w "([^"]+)"/.exec(input!)!;
+          items.set(m[1]!, m[2]!);
+        }
+        return { status: 0, stdout: "" };
+      };
+      const used = new Set<string>();
+      adapter.refresh = async (c) => {
+        if (used.has(c.refresh)) throw new adapter.PoolAuthError("that refresh token was used already");
+        used.add(c.refresh);
+        return { access: `${c.access}+`, refresh: `${c.refresh}+`, expires_at: now + 3_600_000 };
+      };
+      const stored = (id: string) => JSON.parse(Buffer.from(items.get(`pool:${id}`)!, "base64url").toString("utf8"));
+      return { items, kc, run, stored };
+    };
+    const words = (pool: Pool) => pool.status().accounts.map((a) => a.status);
+
+    it("locked while the tokens run out: the idle poll refreshes nothing, and after a restart every account is still signed in", {
+      timeout: 15_000,
+    }, async () => {
+      const { kc, run, stored } = world();
+      const pool = open({ run });
+      const ids = [await signIn(pool, "one"), await signIn(pool, "two"), await signIn(pool, "three")].map((a) => a.id);
+      await pool.setOn(true);
+      now += 2 * 3_600_000;
+      kc.mode = "locked";
+      const before = adapter.calls.refresh;
+      await pool.refresh();
+      await pool.refresh();
+      expect(adapter.calls.refresh).toBe(before);
+      // Three accounts polled twice, and the keychain was asked once, with one read: each
+      // question it gets while locked stops the daemon for eight seconds.
+      expect(kc.waited).toEqual(["read"]);
+      expect(pool.status().unsaved).toBeUndefined();
+      // The daemon starts again, the keychain open by then: the sign-ins it holds are good.
+      kc.mode = "open";
+      const next = open({ run });
+      now += 31_000;
+      await next.refresh();
+      expect(words(next)).toEqual(["ready", "ready", "ready"]);
+      expect(ids.map((id) => stored(id).access)).toEqual(["access-one+", "access-two+", "access-three+"]);
+    });
+
+    it("a request served while the keychain refuses the write: kept in memory, said, offered again by the idle poll and at a stop", {
+      timeout: 15_000,
+    }, async () => {
+      const { items, kc, run, stored } = world();
+      const up = await upstream((_req, res) => {
+        res.writeHead(200, {});
+        res.end('{"id":"msg"}');
+      });
+      try {
+        const pool = open({ upstream: up.url, run, pollMs: 25 });
+        const one = await signIn(pool, "one");
+        await pool.setOn(true);
+        const { port } = await pool.start();
+        const ask = () =>
+          fetch(`http://127.0.0.1:${port}/v1/messages`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${items.get("pool:token")}`, "content-type": "application/json" },
+            body: body("aaaaaaaa-0000-4000-8000-000000000001"),
+          });
+        const until = async (ok: () => boolean) => {
+          for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+        };
+        // The token has run out and the keychain takes no write: the request is served
+        // all the same, and the new sign-in is in memory only.
+        now += 2 * 3_600_000;
+        kc.mode = "readonly";
+        expect((await ask()).status).toBe(200);
+        expect(pool.status()).toMatchObject({ unsaved: 1, holds_restart: true });
+        expect(stored(one.id).access).toBe("access-one");
+        expect(logs.filter((l) => l.includes("kept in memory only"))).toHaveLength(1);
+        // The keychain takes writes again: the idle poll puts it in, with no request made
+        // and no account to ask about (this one is turned off, so its numbers are not read).
+        pool.disable(one.id);
+        kc.mode = "open";
+        now += 5 * 60_000;
+        await until(() => pool.status().unsaved === undefined);
+        expect(pool.status().unsaved).toBeUndefined();
+        pool.enable(one.id);
+        expect(pool.status().holds_restart).toBeUndefined();
+        expect(stored(one.id).access).toBe("access-one+");
+        expect(logs.filter((l) => l.endsWith("refreshed token is in the store now"))).toHaveLength(1);
+        // Again, and this time it is a stop that writes it: asked at once, whatever the wait.
+        now += 2 * 3_600_000;
+        kc.mode = "readonly";
+        expect((await ask()).status).toBe(200);
+        expect(pool.status().unsaved).toBe(1);
+        kc.mode = "open";
+        await pool.stop();
+        expect(stored(one.id).access).toBe("access-one++");
+        expect(logs.some((l) => l.includes("could not be written"))).toBe(false);
+        // Stopped, nothing holds a restart; and a stop the keychain still refuses says what it costs.
+        const again = open({ upstream: up.url, run });
+        await again.start();
+        now += 2 * 3_600_000;
+        kc.mode = "readonly";
+        const token = items.get("pool:token");
+        expect(
+          (
+            await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+              method: "POST",
+              headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+              body: body("aaaaaaaa-0000-4000-8000-000000000001"),
+            })
+          ).status,
+        ).toBe(200);
+        await again.stop();
+        expect(again.status()).toMatchObject({ unsaved: 1 });
+        expect(again.status().holds_restart).toBeUndefined();
+        expect(logs.at(-1)).toBe(
+          "1 refreshed sign-in(s) could not be written to the secrets store before stopping; each of those accounts will need signing in again (sessionpipe pool login)",
+        );
+      } finally {
+        await up.close();
+      }
+    });
+  });
+
   it("starts on a free port the first time, remembers it, rewrites settings when it moves, and serves a request end to end", {
     timeout: 15_000,
   }, async () => {

@@ -220,6 +220,15 @@ export class PoolSecrets {
     return { value, unreadable: value === null && !probe(where, this.run) };
   }
 
+  /** Whether an account's credential can be read right now, asked with one read and
+   *  nothing else: a keychain that is locked keeps its tool waiting eight seconds for
+   *  every question, so the probe `read` adds for an empty answer (a write, then a read)
+   *  is not made here. A file is always there to read. */
+  reachable(cfg: PoolConfig, id: string): boolean {
+    const where = this.store(cfg);
+    return where === "file" || secretGet(where, credentialName(id), this.run) !== null;
+  }
+
   /** False when the store refused (then nothing was written anywhere). */
   set(cfg: PoolConfig, name: string, value: string): boolean {
     const where = this.store(cfg);

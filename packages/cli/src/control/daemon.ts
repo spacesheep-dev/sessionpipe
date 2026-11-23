@@ -1038,8 +1038,11 @@ export class ControlDaemon {
    *  held a restart back, and on a computer where some session is always working an
    *  update's restart never came. */
   busy(): string | null {
-    const pooled = this.deps.pool?.status().in_flight ?? 0;
+    const pool = this.deps.pool?.status();
+    const pooled = pool?.in_flight ?? 0;
     if (pooled) return `${pooled} pooled request(s) being answered`;
+    // In memory only: a restart now would sign those accounts out (pool/credentials.ts).
+    if (pool?.holds_restart) return `${pool.unsaved} refreshed sign-in(s) the secrets store has not taken yet`;
     if (this.inflight.size) return `${this.inflight.size} message(s) in hand`;
     if (this.procs || this.ownRuns.size) return "a headless agent run";
     if (this.startsRunning) return "a session starting";
