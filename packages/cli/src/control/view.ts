@@ -81,7 +81,9 @@ export function statusView(ui: Ui, st: Status, now: number): string[] {
               mark: (st.pool.on && !st.pool.listening && !st.pool.another_daemon ? "bad" : "info") as "bad" | "info",
               label: "pool Claude accounts",
               value: st.pool.on
-                ? `on · ${many(st.pool.accounts, "account")}, ${st.pool.with_room} with room left · ${
+                ? `on · ${many(st.pool.accounts, "account")}, ${st.pool.with_room} with room left${
+                    st.pool.sign_in ? `, ${st.pool.sign_in} to sign in again` : ""
+                  } · ${
                     st.pool.listening
                       ? `127.0.0.1:${st.pool.port}`
                       : st.pool.another_daemon

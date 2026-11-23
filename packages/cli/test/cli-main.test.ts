@@ -3942,6 +3942,36 @@ describe.skipIf(process.platform === "win32")("doctor: accounts", () => {
     } finally {
       await close();
     }
+    // Both signed out: a sign-in is what only a person can do, so it is said by its
+    // command, in place of "see which". One signed out and the other serving: still said.
+    close = await up({ sign_in: 2 });
+    try {
+      const out = await run("doctor");
+      expect(out.text).toMatch(row("!", "pool", "on · 2 accounts · 0 with room left · 2 to sign in again"));
+      expect(fixes(out)).toEqual([
+        "To fix",
+        "  1. 2 pooled Claude accounts need signing in again, and no other has room, so Claude Code sessions here are refused. Sign in:",
+        "       sessionpipe pool login",
+      ]);
+      expect(said(await run("status"), "Accounts")).toBe(
+        "! pool: on · 2 accounts · 0 with room left · 2 to sign in again",
+      );
+    } finally {
+      await close();
+    }
+    close = await up({ with_room: 1, sign_in: 1 });
+    try {
+      const one = await run("doctor");
+      expect(one.text).toMatch(row("!", "pool", "on · 2 accounts · 1 with room left · 1 to sign in again"));
+      expect(fixes(one)).toEqual([
+        "To fix",
+        "  1. A pooled Claude account needs signing in again. Sign in:",
+        "       sessionpipe pool login",
+      ]);
+      expect(JSON.parse((await run("doctor", "--json")).lines.join("\n")).warnings).toEqual([]);
+    } finally {
+      await close();
+    }
     // One has room: all good, and `status` only names it.
     close = await up({ with_room: 1 });
     try {

@@ -182,7 +182,8 @@ account: the session notices nothing. The numbers each account reports arrive as
 
 ```sh
 sessionpipe pool add --import        # copy every Claude Code login on this machine into the pool
-sessionpipe pool add --login         # sign in to another account: a URL, then paste the code to --code -
+sessionpipe pool login               # sign in again to every account that needs it, or to a new one: a URL each, the code pasted back
+sessionpipe pool add --login         # the same in two steps, for where no terminal is at hand: a URL, then the code to --code -
 sessionpipe pool on                  # write the env block; installs the daemon's service if it isn't there
 sessionpipe pool                     # the accounts in order, each with its room left and reset times
 sessionpipe pool order <id|email>…   # the complete order; enable | disable | remove | refresh too

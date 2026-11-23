@@ -8,7 +8,9 @@
 // footer still works), and its limit headers are read on the way. A 429 or a `rejected`
 // before any byte was written sends the request again on the next account, once; after
 // the first byte nothing is retried. With no account left the upstream's own answer
-// passes through unchanged, so Claude Code shows its own message. The listener is
+// passes through unchanged, so Claude Code shows its own message. The one answer that is
+// not passed on is a 401 for an account whose sign-in has just been found dead: what
+// helps then is the pool's own words (NEEDS_PERSON, SIGN_IN), not "token expired". The listener is
 // thin: the policy decides, the adapter knows the vendor.
 //
 // What it refuses before any account is touched: a Host that isn't this loopback (a page
@@ -30,6 +32,33 @@ export const BODY_CAP = 32 * 1024 * 1024;
  *  milliseconds on loopback), and for how long at most. */
 export const DRAIN_BYTES = 8 * 1024 * 1024;
 export const DRAIN_MS = 5_000;
+
+/** The status of an answer no wait will change: a person has to act. Which status it is
+ *  decides what the person sees, and each was tried on Claude Code 2.1.327 with the
+ *  pool's own words as the message:
+ *  - 429 with Retry-After (what the pool used to say): asked again every minute for ten,
+ *    the terminal showing only "retrying", `claude -p` and apps on it nothing at all.
+ *  - 401: asked again with a backoff for minutes, then "Please run /login".
+ *  - 403: shown at once, behind "Please run /login", which is not where a pooled
+ *    account is signed in; an app on the Agent SDK is told `authentication_failed`.
+ *  - 400: shown at once and clean, after six requests.
+ *  - 407: shown clean by Claude Code, but a network failure to anything on a standard
+ *    `fetch` (Node's throws on a 407 from a server that is not its proxy), so its words
+ *    are never read there.
+ *  - 422 and 424: shown clean, but where one of Claude Code's own switches is on they
+ *    make it clear older tool results out of the session and ask again; 451 it calls
+ *    "blocked".
+ *  - 428 (and 402): one request, shown at once as `API Error: 428 <the pool's words>`,
+ *    nothing in front of them, and no meaning of its own to Claude Code, to a standard
+ *    `fetch`, or to the SDKs' retries (408, 409, 429 and 5xx).
+ *  428 it is: something is required before this request can be served. */
+export const NEEDS_PERSON = 428;
+
+/** What a person types to sign the pool's accounts in again: one command, which takes
+ *  them through each account that needs it (pool/cli.ts `login`). Every answer that says
+ *  an account needs signing in says this too: Claude Code, and whatever runs on it, shows
+ *  the answer's words where the person is looking. */
+export const SIGN_IN = "sessionpipe pool login";
 
 export interface PoolServerDeps {
   adapter: Pick<PoolAdapter, "POOL_ENDPOINTS" | "readLimits" | "parseUserId" | "withAccount" | "upstreamHeaders">;
@@ -175,6 +204,25 @@ export function bearerOk(header: string | undefined, token: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** Why nobody can serve and no wait will change it, with what to type: `all` accounts in
+ *  the pool, `on` of them enabled, `out` of those needing a sign-in. Counts only: an
+ *  answer's words go wherever an app sends its errors. */
+export function nobody(all: number, on: number, out: number): string {
+  if (!all) return `the pool has no Claude account. In a terminal run: ${SIGN_IN}`;
+  if (!on)
+    return "every Claude account in the pool is turned off. In a terminal run: sessionpipe pool (it lists them), then sessionpipe pool enable <account>";
+  const need = (n: number) => `need${n === 1 ? "s" : ""} signing in again`;
+  const who =
+    out < on
+      ? `${out} of the ${on} Claude accounts that are on ${need(out)} and no other can serve`
+      : on < all
+        ? `the ${on === 1 ? "one Claude account that is" : `${on} Claude accounts that are`} on ${need(on)}`
+        : on === 1
+          ? `its Claude account ${need(1)}`
+          : `all ${on} of its Claude accounts ${need(on)}`;
+  return `${who}. In a terminal run: ${SIGN_IN}`;
+}
+
 const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const errorBody = (type: string, message: string) => JSON.stringify({ type: "error", error: { type, message } });
 
@@ -260,7 +308,10 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
 
   /** Why accounts were skipped on the way to a refusal, so the answer names the real
    *  cause: a store that can't be read and a token endpoint that is down are 503s
-   *  (Claude Code retries those by itself); holds and nothing signed in are 429s. */
+   *  (Claude Code retries those by itself), and accounts at their limit are a 429 with
+   *  the time one has room again. When no wait can help, because every account that
+   *  could serve needs signing in again, or the pool has none that is on, the answer is
+   *  NEEDS_PERSON with what to type. */
   interface Skipped {
     unreadable: number;
     upstream: string | null;
@@ -288,9 +339,20 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
     const now = deps.now();
     const ats = deps.state.accounts.map((a) => roomAt(a, now)).filter((t): t is number => t !== null);
     const at = ats.length ? Math.min(...ats) : null;
+    const on = deps.state.accounts.filter((a) => a.enabled);
+    const out = on.filter((a) => a.error).length;
+    if (at === null && (out || !on.length)) {
+      sendJson(
+        res,
+        NEEDS_PERSON,
+        errorBody("authentication_error", `sessionpipe pool: ${nobody(deps.state.accounts.length, on.length, out)}`),
+      );
+      return;
+    }
     const when = at === null ? "an account is signed in" : new Date(at).toISOString();
     const secs = at === null ? 60 : Math.max(1, Math.ceil((at - now) / 1000));
-    sendJson(res, 429, errorBody("rate_limit_error", `sessionpipe pool: no account has room until ${when}`), {
+    const also = out ? `; ${out} more need${out === 1 ? "s" : ""} signing in again (${SIGN_IN})` : "";
+    sendJson(res, 429, errorBody("rate_limit_error", `sessionpipe pool: no account has room until ${when}${also}`), {
       "retry-after": String(secs),
     });
   };
@@ -371,6 +433,8 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       const status = up.status;
       const rejected = status === 429 || limits?.status === "rejected";
       let moveOn = false;
+      /** This account's sign-in was found dead on this very request. */
+      let signedOut = false;
       if (rejected) {
         const ra = up.headers.get("retry-after");
         observe(
@@ -392,7 +456,12 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
             tried.delete(a.id);
             moveOn = true;
           } else {
-            if (again.why === "sign-in") observe(deps.state, a.id, { error: "sign in again" }, now);
+            if (again.why === "sign-in") {
+              observe(deps.state, a.id, { error: "sign in again" }, now);
+              signedOut = true;
+            }
+            // Not a dead sign-in: if nobody else serves, the refusal says which it was.
+            if (again.why === "upstream") skipped.upstream = again.detail;
             moveOn = true;
           }
         }
@@ -400,16 +469,27 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
         observe(deps.state, a.id, { upstream5xx: true }, now);
       }
       if (moveOn) deps.onStanding?.();
-      if (moveOn && !retried) {
+      // One retry, on the next account. An account found signed out does not use it up:
+      // its 401 came before anything was done with the request, and what the person needs
+      // to hear is how many accounts are signed out, which only asking the rest tells.
+      if (moveOn && (!retried || signedOut)) {
         const other = next();
         if (other) {
-          retried = true;
+          if (!signedOut) retried = true;
           stats.retries++;
           account = other;
           deps.log(`${a.id}: ${status}${limits?.status ? ` (${limits.status})` : ""}; trying ${other.id}`);
           await up.body?.cancel();
           continue;
         }
+      }
+      // The upstream's 401 for an account that turned out to be signed out says "token
+      // expired": Claude Code asks that again for minutes, then tells the person to
+      // /login, which is not where a pooled account is signed in. The pool's own answer
+      // says who needs signing in and how.
+      if (signedOut) {
+        await up.body?.cancel();
+        break;
       }
       // Pass through: this is the answer, whatever it is.
       pin(deps.state, session, a.id, now);
@@ -430,7 +510,8 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       );
       return;
     }
-    deps.log(`no account could be tried (session ${short(session)})`);
+    const out = deps.state.accounts.filter((a) => a.enabled && a.error).length;
+    deps.log(`no account could be tried (session ${short(session)})${out ? `: ${out} to sign in again` : ""}`);
     refuse(res, skipped);
   }
 

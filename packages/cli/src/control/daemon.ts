@@ -668,6 +668,8 @@ export interface Status {
     listening: boolean;
     accounts: number;
     with_room: number;
+    /** Accounts that are on and need signing in again, when there are any. */
+    sign_in?: number;
     in_flight: number;
     /** Another daemon answers on the pool's port; this one doesn't listen. */
     another_daemon?: true;
@@ -1215,6 +1217,9 @@ export class ControlDaemon {
       listening: s.listening,
       accounts: s.accounts.length,
       with_room: s.accounts.filter((a) => a.status === "ready").length,
+      ...(s.accounts.some((a) => a.status === "error")
+        ? { sign_in: s.accounts.filter((a) => a.status === "error").length }
+        : {}),
       in_flight: s.in_flight,
       ...(s.another_daemon ? { another_daemon: true } : {}),
     };

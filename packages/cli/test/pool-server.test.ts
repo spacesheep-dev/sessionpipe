@@ -15,9 +15,12 @@ import {
   bearerOk,
   DRAIN_MS,
   hostOk,
+  NEEDS_PERSON,
+  nobody,
   normalPath,
   type PoolServer,
   type PoolServerDeps,
+  SIGN_IN,
   startPoolServer,
   upstreamUrl,
 } from "../src/pool/server.js";
@@ -643,18 +646,191 @@ describe("nothing with room", () => {
       type: "error",
       error: {
         type: "rate_limit_error",
-        message: `sessionpipe pool: no account has room until ${new Date(T0 + 90_000).toISOString()}`,
+        message: `sessionpipe pool: no account has room until ${new Date(T0 + 90_000).toISOString()}; 1 more needs signing in again (${SIGN_IN})`,
       },
     });
     expect(up.seen).toEqual([]);
     expect(srv!.stats.refused).toBe(1);
-    state.accounts = [];
+    expect(logs).toContain("no account could be tried (session aaaaaaaa): 1 to sign in again");
+    // An account that is on and has room, yet cannot be asked (nothing says whose it is):
+    // the old answer, a 429 to wait out a minute at a time.
+    creds.set("noid", credential("noid", 3_600_000, T0));
+    state.accounts = [acct("noid")];
     const r2 = await send("/v1/messages", { body: body(S1) });
+    expect(r2.status).toBe(429);
     expect(r2.headers.get("retry-after")).toBe("60");
     expect(((await r2.json()) as { error: { message: string } }).error.message).toBe(
       "sessionpipe pool: no account has room until an account is signed in",
     );
     expect(logs).toContain("no account could be tried (session aaaaaaaa)");
+  });
+
+  // Every account signed out, and Claude Code asked the pool's 429 again once a minute for
+  // ten minutes before it said anything: a person saw a session hang, or an app's own word
+  // for a busy provider, and never that a sign-in was wanted (2026-11-23). No wait helps
+  // here, so the answer is one Claude Code shows at once, in words that say what to type.
+  it("two accounts found signed out on one request, and the third serves it: nothing is refused", async () => {
+    await start();
+    adapter.refresh = async () => {
+      throw new FakeAuthError("invalid_grant");
+    };
+    up.handler = (req, res) =>
+      req.headers.authorization === "Bearer access-c"
+        ? json(res, 200, {}, { id: "ok" })
+        : json(res, 401, {}, { type: "error", error: { type: "authentication_error", message: "expired" } });
+    const r = await send("/v1/messages", { body: body(S1) });
+    expect(r.status).toBe(200);
+    expect(up.seen.map((x) => x.headers.authorization)).toEqual([
+      "Bearer access-a",
+      "Bearer access-b",
+      "Bearer access-c",
+    ]);
+    expect(state.accounts.map((a) => a.error)).toEqual(["sign in again", "sign in again", undefined]);
+    expect(state.pins[S1]!.account).toBe("c");
+    // The one retry is still there for the account that answers with a limit.
+    expect(srv!.stats).toMatchObject({ refused: 0, retries: 2 });
+  });
+
+  describe("nobody can serve until a person acts: an answer shown at once that says what to type", () => {
+    const answer = async () => {
+      const r = await send("/v1/messages", { body: body(S1) });
+      return {
+        status: r.status,
+        retry: r.headers.get("retry-after"),
+        ...((await r.json()) as { error: { type: string; message: string } }).error,
+      };
+    };
+    const signedOut = { error: "sign in again" };
+
+    it("every account needs signing in again: none is asked, and the answer names the command", async () => {
+      await start();
+      for (const a of state.accounts) a.error = "sign in again";
+      expect(await answer()).toEqual({
+        status: NEEDS_PERSON,
+        retry: null,
+        type: "authentication_error",
+        message: `sessionpipe pool: all 3 of its Claude accounts need signing in again. In a terminal run: ${SIGN_IN}`,
+      });
+      expect(up.seen).toEqual([]);
+      expect(srv!.stats.refused).toBe(1);
+      expect(logs).toContain("no account could be tried (session aaaaaaaa): 3 to sign in again");
+      // One account in the pool: said of that one. An account that is off is not counted.
+      state.accounts = [acct("a", signedOut), acct("b", { enabled: false })];
+      expect((await answer()).message).toBe(
+        `sessionpipe pool: the one Claude account that is on needs signing in again. In a terminal run: ${SIGN_IN}`,
+      );
+      // Not 401 or 403 (Claude Code says "/login"), not 429 (it waits ten minutes), not 407
+      // (a standard fetch, this test's own, takes it for a network failure), and not 422
+      // or 424 (Claude Code may clear the session's older tool results on those).
+      expect(NEEDS_PERSON).toBe(428);
+      // Every way it is said, by how many there are, are on and are signed out.
+      expect(nobody(1, 1, 1)).toBe(`its Claude account needs signing in again. In a terminal run: ${SIGN_IN}`);
+      expect(nobody(3, 2, 2)).toBe(
+        `the 2 Claude accounts that are on need signing in again. In a terminal run: ${SIGN_IN}`,
+      );
+    });
+
+    it("some signed out and the rest unable to serve: how many, and that no other can", async () => {
+      await start();
+      creds.set("noid", credential("noid", 3_600_000, T0));
+      state.accounts = [acct("a", signedOut), acct("noid"), acct("c", signedOut)];
+      expect(await answer()).toMatchObject({
+        status: NEEDS_PERSON,
+        message: `sessionpipe pool: 2 of the 3 Claude accounts that are on need signing in again and no other can serve. In a terminal run: ${SIGN_IN}`,
+      });
+      state.accounts = [acct("a", signedOut), acct("noid")];
+      expect((await answer()).message).toContain(
+        "1 of the 2 Claude accounts that are on needs signing in again and no other can serve",
+      );
+    });
+
+    it("an account that will have room again is waited for, and the ones signed out are said beside it", async () => {
+      await start();
+      state.accounts = [
+        acct("a", signedOut),
+        acct("b", signedOut),
+        acct("c", { hold_until: T0 + 90_000, hold_at: T0, hold_why: "limit" }),
+      ];
+      expect(await answer()).toEqual({
+        status: 429,
+        retry: "90",
+        type: "rate_limit_error",
+        message: `sessionpipe pool: no account has room until ${new Date(T0 + 90_000).toISOString()}; 2 more need signing in again (${SIGN_IN})`,
+      });
+      state.accounts = [acct("a", signedOut), acct("c", { hold_until: T0 + 90_000, hold_at: T0, hold_why: "limit" })];
+      expect((await answer()).message).toMatch(/; 1 more needs signing in again \(sessionpipe pool login\)$/);
+    });
+
+    // Two sign-ins dead and the third's token only waiting on a token endpoint that is
+    // down: that one comes back by itself, so the answer is the wait, not a sign-in.
+    it("an account held up by the token endpoint is not counted as signed out: a 503 to wait out", async () => {
+      // a's token runs out while its request is with the upstream; b's and c's are good for an hour.
+      creds.set("a", credential("a", 400_000, T0));
+      for (const id of ["b", "c"]) creds.set(id, credential(id, 3_600_000, T0));
+      await start();
+      adapter.refresh = async (c) => {
+        if (c.access === "access-a") throw new Error("HTTP 503");
+        throw new FakeAuthError("invalid_grant");
+      };
+      up.handler = (_req, res) => {
+        if (now === T0) now += 500_000;
+        json(res, 401, {}, { type: "error", error: { type: "authentication_error", message: "expired" } });
+      };
+      expect(await answer()).toMatchObject({
+        status: 503,
+        retry: "30",
+        type: "api_error",
+        message: "sessionpipe pool: Anthropic's token endpoint is not answering (HTTP 503)",
+      });
+      expect(state.accounts.map((a) => a.error)).toEqual([undefined, "sign in again", "sign in again"]);
+    });
+
+    it("a pool with no account, or with every account turned off", async () => {
+      await start();
+      state.accounts = [];
+      expect(await answer()).toEqual({
+        status: NEEDS_PERSON,
+        retry: null,
+        type: "authentication_error",
+        message: `sessionpipe pool: the pool has no Claude account. In a terminal run: ${SIGN_IN}`,
+      });
+      state.accounts = [acct("a", { enabled: false }), acct("b", { enabled: false, error: "sign in again" })];
+      expect((await answer()).message).toBe(
+        "sessionpipe pool: every Claude account in the pool is turned off. In a terminal run: sessionpipe pool (it lists them), then sessionpipe pool enable <account>",
+      );
+      expect(nobody(0, 0, 0)).toContain("has no Claude account");
+    });
+
+    // The request that finds it out: each account's token is refused, its refresh too.
+    // The upstream's own 401 ("token expired") went back to Claude Code, which asked it
+    // again for minutes and then said to /login, where no pooled account is signed in.
+    it("found out on this very request: the pool's words, not the upstream's 401", async () => {
+      await start();
+      adapter.refresh = async () => {
+        throw new FakeAuthError("invalid_grant");
+      };
+      up.handler = (_req, res) =>
+        json(
+          res,
+          401,
+          {},
+          { type: "error", error: { type: "authentication_error", message: "OAuth token has expired." } },
+        );
+      // Each account is asked once on this one request: a sign-in found dead does not use
+      // up the one retry, so the answer counts them all.
+      expect(await answer()).toEqual({
+        status: NEEDS_PERSON,
+        retry: null,
+        type: "authentication_error",
+        message: `sessionpipe pool: all 3 of its Claude accounts need signing in again. In a terminal run: ${SIGN_IN}`,
+      });
+      expect(up.seen).toHaveLength(3);
+      expect(state.accounts.every((a) => a.error === "sign in again")).toBe(true);
+      // From then on nobody upstream is asked.
+      expect((await answer()).status).toBe(NEEDS_PERSON);
+      expect(up.seen).toHaveLength(3);
+      expect(state.pins[S1]).toBeUndefined();
+    });
   });
   it("an upstream that can't be reached: the next account, then a 502 of our own", async () => {
     const dead = await upstream();

@@ -309,6 +309,10 @@ describe.skipIf(process.platform === "win32")("the listener's life, busy() and s
       with_room: 1,
       in_flight: 0,
     });
+    // An account that needs signing in again is counted for doctor and status, which name
+    // the command; with none, the count is not there at all.
+    (off.find("misha") as { status: string }).status = "error";
+    expect(d!.status().pool).toMatchObject({ accounts: 3, with_room: 1, sign_in: 1 });
     await d!.stop();
     const on = new FakePool();
     on.on = true;
