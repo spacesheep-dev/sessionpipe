@@ -87,6 +87,7 @@ import { helpFor, usageTable } from "./help.js";
 import { installLauncher, launcherPath, launcherState, removeLauncher, usesLauncher } from "./launcher.js";
 import { poolMain, poolOffForUninstall } from "./pool/cli.js";
 import { readPool } from "./pool/index.js";
+import { SIGN_IN } from "./pool/server.js";
 import { Refusal } from "./refusal.js";
 import { type Inventory, look, spelled, startable } from "./reinstall/find.js";
 import { binTarget, remove, same } from "./reinstall/ours.js";
@@ -1613,21 +1614,35 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
     const p = live?.pool;
     const none = poolCfg.on && !!p && p.accounts > 0 && p.with_room === 0;
     const refused = troubles.find((t) => t.kind === "pool");
+    /** Accounts that need a person: no wait brings them back. */
+    const signIn = (poolCfg.on && p?.sign_in) || 0;
     accounts.rows.push({
-      mark: none || refused ? "warn" : poolCfg.on ? "ok" : "info",
+      mark: none || refused || signIn ? "warn" : poolCfg.on ? "ok" : "info",
       label: "pool",
       value: `${poolCfg.on ? "on" : "off"} · ${poolCfg.accounts.length} account${poolCfg.accounts.length === 1 ? "" : "s"}${
         p && poolCfg.on ? ` · ${p.with_room} with room left` : ""
-      }${refused ? ` · had none to try ${refused.times} time${refused.times === 1 ? "" : "s"} in the last hour` : ""}`,
+      }${signIn ? ` · ${signIn} to sign in again` : ""}${
+        refused ? ` · had none to try ${refused.times} time${refused.times === 1 ? "" : "s"} in the last hour` : ""
+      }`,
     });
-    if (none || refused) {
+    if (none || refused)
       warnings.push("the pool has no account with room left: Claude Code sessions here are being refused");
+    // A sign-in is the one thing here only a person can do, so it is said by its command;
+    // accounts at their limit come back by themselves, and `sessionpipe pool` says when.
+    if (signIn)
+      todo.push({
+        order: 5,
+        say: `${signIn === 1 ? "A pooled Claude account needs" : `${signIn} pooled Claude accounts need`} signing in again${
+          none ? ", and no other has room, so Claude Code sessions here are refused" : ""
+        }. Sign in:`,
+        run: SIGN_IN,
+      });
+    else if (none || refused)
       todo.push({
         order: 5,
         say: "Every pooled Claude account is at its limit or signed out, so Claude Code sessions here were refused. See which, and when each has room again:",
         run: "sessionpipe pool",
       });
-    }
   }
 
   // A systemd user service stops at logout unless the user lingers.

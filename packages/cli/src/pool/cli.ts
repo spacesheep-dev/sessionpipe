@@ -14,9 +14,11 @@ import { Refusal } from "../refusal.js";
 import { cliPath, stableNode } from "../runtime.js";
 import { PLAIN, type Ui } from "../style.js";
 import { openPool, type Pool, type PoolStatus, summaryLine } from "./index.js";
+import { SIGN_IN } from "./server.js";
 
 export const POOL_HELP = `  sessionpipe pool [--json]                        (the accounts in order, the room each has left)
   sessionpipe pool on | off                        (point every Claude Code here at the pool, or stop)
+  sessionpipe pool login                           (sign in again to every account that needs it, or to a new one)
   sessionpipe pool add --import | --login [--code -]
   sessionpipe pool remove|enable|disable <id|email> | order <id|email>… | refresh [<id|email>]`;
 
@@ -31,6 +33,8 @@ export interface PoolCliDeps {
   installService: () => string;
   /** The pasted `code#state`, read without echo. */
   readSecret: () => Promise<string>;
+  /** A person is at this terminal to paste a code (stdin is one). */
+  interactive: () => boolean;
   now: () => number;
 }
 
@@ -64,6 +68,7 @@ export async function poolMain(
     // The same persistent paths `control pair` writes (control/cli.ts).
     installService: () => installService({ node: stableNode(process.execPath), cli: cliPath(distDir) }),
     readSecret,
+    interactive: () => !!process.stdin.isTTY,
     now: Date.now,
     ...over,
   };
@@ -88,7 +93,72 @@ export async function poolMain(
     else out("  daemon:   not running (nothing needs it while the pool is off)");
   };
 
+  /** A sign-in begun: the id it is held under and the page to open. */
+  const begin = async (): Promise<{ id: string; url: string }> => {
+    const { detail } = await request({ action: "login.begin" });
+    const at = detail.indexOf(" ");
+    return { id: detail.slice(0, at), url: detail.slice(at + 1) };
+  };
+  const signedOut = (s: PoolStatus) => s.accounts.filter((a) => a.status === "error");
+  /** The account a sign-in was for: the one no longer in error, else the one that is new. */
+  const signedIn = (before: PoolStatus, after: PoolStatus) =>
+    signedOut(before).find((a) => !signedOut(after).some((b) => b.id === a.id)) ??
+    after.accounts.find((a) => !before.accounts.some((b) => b.id === a.id));
+
   switch (sub) {
+    // One command for what used to be two an account: every account that needs signing in
+    // again, one after another (the page to open, the code pasted here), or with none that
+    // needs it, a new account. Which account a sign-in is for is the person's choice in
+    // the browser, so each is named before its page, and one chosen wrongly is said.
+    case "login": {
+      let r = await request({ action: "status" });
+      if (!deps.interactive())
+        throw new Refusal(
+          "signing in needs a terminal to paste the code at; without one it is two steps: `sessionpipe pool add --login`, then the code to `sessionpipe pool add --login --code -`",
+          "sessionpipe pool add --login",
+        );
+      let left = signedOut(r.status);
+      // A person who chooses the wrong account in the browser gets two more goes.
+      for (let goes = left.length + 2; goes > 0; goes--) {
+        out(
+          left.length
+            ? `  Sign in again to ${who(left[0] as (typeof left)[number])}${left.length > 1 ? ` (${left.length} accounts need it)` : ""}.`
+            : "  Sign in to the Claude account to add.",
+        );
+        const { id, url } = await begin();
+        out(
+          `  Open this in a browser, choose ${left.length ? "that account" : "the account"}, and copy the code it shows:`,
+        );
+        out(`  ${url}`);
+        const code = (await deps.readSecret()).trim();
+        if (!code) {
+          out("  · no code pasted: stopped here");
+          break;
+        }
+        // Read again here: minutes went by in the browser, and what changed in them is
+        // not this sign-in's doing.
+        const before = (await request({ action: "status" })).status;
+        r = await request({ action: "login.complete", account: id, code }, VENDOR_MS);
+        const got = signedIn(before, r.status);
+        const added = !!got && !before.accounts.some((a) => a.id === got.id);
+        out(
+          `  ✓ signed in ${got ? who(got) : "an account"}${
+            added && left.length
+              ? `, which is new to the pool (\`sessionpipe pool remove ${got.id}\` takes it out again)`
+              : ""
+          }`,
+        );
+        const still = signedOut(r.status);
+        const asked = left[0];
+        if (asked && still.some((a) => a.id === asked.id))
+          out(`  · that was another account: ${who(asked)} still needs signing in`);
+        left = still;
+        if (!left.length) break;
+      }
+      out(`  pool:     ${summaryLine(r.status)}`);
+      if (left.length) out(`  ! still to sign in again: ${left.map(who).join(", ")}. Run \`${SIGN_IN}\` again`);
+      return daemonLine(r);
+    }
     case "status": {
       const r = await request({ action: "status" });
       if (has("--json")) return out(JSON.stringify({ ...r.status, daemon: r.daemon }, null, 2));
@@ -126,7 +196,8 @@ export async function poolMain(
       }
       if (has("--login")) {
         if (has("--code")) {
-          const pending = (await request({ action: "status" })).status.pending;
+          const before = (await request({ action: "status" })).status;
+          const pending = before.pending;
           if (!pending)
             throw new Refusal(
               "no sign-in is pending; run `sessionpipe pool add --login` first",
@@ -135,13 +206,12 @@ export async function poolMain(
           const code = (await deps.readSecret()).trim();
           if (!code) throw new Error("no code was pasted");
           const r = await request({ action: "login.complete", account: pending.id, code }, VENDOR_MS);
-          const added = r.status.accounts.at(-1);
+          const added = signedIn(before, r.status);
           out(`  ✓ signed in ${added ? who(added) : "an account"}`);
           out(`  pool:     ${summaryLine(r.status)}`);
           return daemonLine(r);
         }
-        const r = await request({ action: "login.begin" });
-        const url = r.detail.slice(r.detail.indexOf(" ") + 1);
+        const { url } = await begin();
         out("  Open this in a browser, sign in to the account to add, and copy the code it shows:");
         out(`  ${url}`);
         out("  Then, within 10 minutes, paste it to:  sessionpipe pool add --login --code -");
@@ -264,7 +334,19 @@ function printStatus(r: Done, out: (s?: string) => void, now: number, ui: Ui): v
       out(`  ${" ".repeat(9)} ${win("five_hour", "5h", 0)} · ${win("seven_day", "7d", 0)}`);
     }
   }
-  if (!s.accounts.length) out("  no accounts: `sessionpipe pool add --import` or `sessionpipe pool add --login`");
+  if (!s.accounts.length) out("  no accounts: `sessionpipe pool add --import` or `sessionpipe pool login`");
+  // What to do about "sign in again", and what it costs until it is done: the status
+  // word alone left a person to work out the command, and that Claude Code was being
+  // refused because of it.
+  const signedOut = s.accounts.filter((a) => a.status === "error").length;
+  // Refused for good only when nobody else will serve: an account at its limit comes back.
+  const nobodyElse = s.accounts.every((a) => a.status === "error" || a.status === "disabled");
+  if (signedOut)
+    out(
+      `  ! ${signedOut === 1 ? "1 account needs" : `${signedOut} accounts need`} signing in again: \`${SIGN_IN}\`${
+        s.on && nobodyElse ? ". Until then Claude Code here is refused" : ""
+      }`,
+    );
   for (const f of s.settings) out(`  settings  ${tilde(f.file).padEnd(44)} ${f.state}${f.note ? ` — ${f.note}` : ""}`);
   if (s.pending)
     out(

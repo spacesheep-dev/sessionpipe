@@ -280,7 +280,7 @@ describe("sessionpipe pool, with no daemon running", () => {
     expect(lines).toEqual([
       "  pool:     off · 0 accounts",
       "  daemon:   not running (nothing needs it while the pool is off)",
-      "  no accounts: `sessionpipe pool add --import` or `sessionpipe pool add --login`",
+      "  no accounts: `sessionpipe pool add --import` or `sessionpipe pool login`",
     ]);
   });
 
@@ -354,9 +354,34 @@ describe("sessionpipe pool, with no daemon running", () => {
     pool.beginLogin();
     await run(["status"], { open: () => pool });
     expect(lines[2]).toMatch(/o@x\.y\s+enabled\s+5h —\s+7d —\s+sign in again$/);
+    // What to type about it; the pool is off here, so nothing is being refused.
+    expect(lines[0]).toBe("  pool:     off · 1 account · 0 with room · 1 to sign in again");
+    expect(lines[3]).toBe("  ! 1 account needs signing in again: `sessionpipe pool login`");
     expect(lines.at(-1)).toBe(
       `  sign-in pending until ${clock(now + 600_000)}: paste the code to \`sessionpipe pool add --login --code -\``,
     );
+  });
+
+  // The screen a person opens when Claude Code is being refused: it says what to type,
+  // and that this is why.
+  it("every account signed out while the pool is on: what to type, once for each, and that Claude Code is refused until then", async () => {
+    const pool = open();
+    for (const id of ["one", "two"]) {
+      adapter.logins.set(id, { credential: credential(id), profile: { account_uuid: uuidOf(id), email: `${id}@x.y` } });
+      await pool.completeLogin(`${id}#st4te`, pool.beginLogin().id);
+    }
+    await pool.setOn(true);
+    adapter.refresh = async () => {
+      throw new adapter.PoolAuthError("expired");
+    };
+    now += 3_600_000;
+    await pool.refresh();
+    await run(["status"], { open: () => pool });
+    expect(lines[0]).toBe("  pool:     on · 2 accounts · 0 with room · 2 to sign in again");
+    expect(lines).toContain(
+      "  ! 2 accounts need signing in again: `sessionpipe pool login`. Until then Claude Code here is refused",
+    );
+    await pool.stop();
   });
 
   it("on: writes the env block, says what Claude Code does, installs the service, and warns when there is no account", async () => {
@@ -457,6 +482,113 @@ describe("sessionpipe pool, with no daemon running", () => {
       "  pool:     off · 1 account · 1 with room · serving n@x.y",
       "  daemon:   not running (nothing needs it while the pool is off)",
     ]);
+  });
+
+  // Signing three accounts in again was six commands (a URL, then the code, for each). It
+  // is one: each account is named before its page, and the code is pasted where it asks.
+  describe("login: every account that needs it, in one command", () => {
+    const three = async () => {
+      const pool = open();
+      for (const id of ["one", "two", "three"]) {
+        adapter.logins.set(id, {
+          credential: credential(id),
+          profile: { account_uuid: uuidOf(id), email: `${id}@x.y` },
+        });
+        await pool.completeLogin(`${id}#st4te`, pool.beginLogin().id);
+      }
+      adapter.refresh = async () => {
+        throw new adapter.PoolAuthError("expired");
+      };
+      now += 3_600_000;
+      await pool.refresh();
+      adapter.refresh = async (c) => c;
+      return pool;
+    };
+    /** The codes a person pastes, one a round; then nothing. */
+    const pasting = (codes: string[]) => ({ interactive: () => true, readSecret: async () => codes.shift() ?? "" });
+
+    it("three signed out: each is named, signed in in turn, and the pool has room again", async () => {
+      const pool = await three();
+      expect(summaryLine(pool.status())).toBe("off · 3 accounts · 0 with room · 3 to sign in again");
+      lines = [];
+      await run(["login"], { open: () => pool, ...pasting(["one#st4te", "two#st4te", "three#st4te"]) });
+      expect(lines.filter((l) => !l.includes("https://"))).toEqual([
+        `  Sign in again to one@x.y (${pool.accounts()[0]!.id}) (3 accounts need it).`,
+        "  Open this in a browser, choose that account, and copy the code it shows:",
+        `  ✓ signed in one@x.y (${pool.accounts()[0]!.id})`,
+        `  Sign in again to two@x.y (${pool.accounts()[1]!.id}) (2 accounts need it).`,
+        "  Open this in a browser, choose that account, and copy the code it shows:",
+        `  ✓ signed in two@x.y (${pool.accounts()[1]!.id})`,
+        `  Sign in again to three@x.y (${pool.accounts()[2]!.id}).`,
+        "  Open this in a browser, choose that account, and copy the code it shows:",
+        `  ✓ signed in three@x.y (${pool.accounts()[2]!.id})`,
+        "  pool:     off · 3 accounts · 3 with room · serving one@x.y",
+        "  daemon:   not running (nothing needs it while the pool is off)",
+      ]);
+      expect(lines.filter((l) => l.includes("https://"))).toHaveLength(3);
+    });
+
+    it("the wrong account chosen in the browser is said, and asked for again; nothing pasted stops it there", async () => {
+      const pool = await three();
+      lines = [];
+      // The first paste is account three's: one still needs it, and is asked for again.
+      await run(["login"], { open: () => pool, ...pasting(["three#st4te", "one#st4te"]) });
+      const [one, two, three3] = pool.accounts();
+      expect(lines.filter((l) => !l.includes("https://") && !l.startsWith("  Open"))).toEqual([
+        `  Sign in again to one@x.y (${one!.id}) (3 accounts need it).`,
+        `  ✓ signed in three@x.y (${three3!.id})`,
+        `  · that was another account: one@x.y (${one!.id}) still needs signing in`,
+        `  Sign in again to one@x.y (${one!.id}) (2 accounts need it).`,
+        `  ✓ signed in one@x.y (${one!.id})`,
+        `  Sign in again to two@x.y (${two!.id}).`,
+        "  · no code pasted: stopped here",
+        "  pool:     off · 3 accounts · 2 with room · 1 to sign in again · serving one@x.y",
+        `  ! still to sign in again: two@x.y (${two!.id}). Run \`sessionpipe pool login\` again`,
+        "  daemon:   not running (nothing needs it while the pool is off)",
+      ]);
+      // An account that is not in the pool, chosen by mistake: it is in now, and that is said.
+      adapter.logins.set("stray", {
+        credential: credential("stray"),
+        profile: { account_uuid: uuidOf("stray"), email: "s@x.y" },
+      });
+      lines = [];
+      await run(["login"], { open: () => pool, ...pasting(["stray#st4te"]) });
+      const stray = pool.accounts().at(-1)!;
+      expect(lines).toContain(
+        `  ✓ signed in s@x.y (${stray.id}), which is new to the pool (\`sessionpipe pool remove ${stray.id}\` takes it out again)`,
+      );
+      expect(lines).toContain(`  · that was another account: two@x.y (${two!.id}) still needs signing in`);
+      pool.remove(stray.id);
+      // An account already signed in, chosen where another was asked for: said as that.
+      lines = [];
+      await run(["login"], { open: () => pool, ...pasting(["one#st4te", "one#st4te", "one#st4te", "one#st4te"]) });
+      expect(lines.filter((l) => l.includes("another account"))).toEqual(
+        Array(3).fill(`  · that was another account: two@x.y (${two!.id}) still needs signing in`),
+      );
+      expect(lines.filter((l) => l === "  ✓ signed in an account")).toHaveLength(3);
+      expect(lines.at(-2)).toContain("still to sign in again: two@x.y");
+    });
+
+    it("nobody signed out: it signs in a new account; with no terminal to paste at, it says the two steps", async () => {
+      const pool = open();
+      adapter.logins.set("new", {
+        credential: credential("new"),
+        profile: { account_uuid: uuidOf("new"), email: "n@x.y" },
+      });
+      await run(["login"], { open: () => pool, ...pasting(["new#st4te"]) });
+      expect(lines.filter((l) => !l.includes("https://"))).toEqual([
+        "  Sign in to the Claude account to add.",
+        "  Open this in a browser, choose the account, and copy the code it shows:",
+        `  ✓ signed in n@x.y (${pool.accounts()[0]!.id})`,
+        "  pool:     off · 1 account · 1 with room · serving n@x.y",
+        "  daemon:   not running (nothing needs it while the pool is off)",
+      ]);
+      // A test's stdin is no terminal, as a pipe's or a service's is not.
+      await expect(run(["login"], { open: () => pool })).rejects.toMatchObject({
+        message: expect.stringContaining("signing in needs a terminal to paste the code at"),
+        next: "sessionpipe pool add --login",
+      });
+    });
   });
 
   it("add --login --code -: no pending sign-in, an empty paste, and a code the vendor refuses", async () => {

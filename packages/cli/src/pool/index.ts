@@ -209,8 +209,10 @@ export function summaryLine(s: Pick<PoolStatus, "on" | "accounts">): string {
   const n = s.accounts.length;
   const room = s.accounts.filter((a) => a.status === "ready").length;
   const current = s.accounts.find((a) => a.current);
+  const out = s.accounts.filter((a) => a.status === "error").length;
   const parts = [s.on ? "on" : "off", `${n} account${n === 1 ? "" : "s"}`];
   if (n) parts.push(`${room} with room`);
+  if (out) parts.push(`${out} to sign in again`);
   if (current) parts.push(`serving ${current.label || current.email}`);
   return parts.join(" · ");
 }

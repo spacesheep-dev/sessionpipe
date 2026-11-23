@@ -459,6 +459,9 @@ describe("control status, as a terminal shows it", () => {
       ).find((l) => l.includes("pool Claude accounts"));
     expect(pool({})).toBe("  ✗ pool Claude accounts   on · 1 account, 0 with room left · its listener is not up");
     expect(pool({ another_daemon: true })).toContain("· another service answers for it");
+    expect(pool({ listening: true, sign_in: 1 })).toBe(
+      "  · pool Claude accounts   on · 1 account, 0 with room left, 1 to sign in again · 127.0.0.1:4141",
+    );
     expect(pool({ on: false })).toBe("  · pool Claude accounts   off · 1 account");
     // On with no account yet it is still said; a pool nobody set up is not.
     expect(pool({ accounts: 0, listening: true })).toBe(
