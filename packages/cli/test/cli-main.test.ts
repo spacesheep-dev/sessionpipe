@@ -434,12 +434,27 @@ describe.skipIf(process.platform === "win32")("help, version and the dispatch", 
     await run("wait", "--session", "claude-code:x");
     expect(waitMain).toHaveBeenCalledWith(["wait", "--session", "claude-code:x"], expect.any(Function));
     // `ask` answers with an exit code of its own: 0 leaves the process's alone, anything else is kept.
-    await run("ask", "codex", "hi");
-    expect(askMain).toHaveBeenCalledWith(
-      ["ask", "codex", "hi"],
-      { out: expect.any(Function), err: expect.any(Function) },
-      { distDir: realDist },
-    );
+    // It is told whether a person watches stderr (a terminal): the answer as it grows is theirs alone.
+    const wasTty = process.stderr.isTTY;
+    try {
+      for (const tty of [false, true]) {
+        process.stderr.isTTY = tty;
+        vi.mocked(askMain).mockClear();
+        await run("ask", "codex", "hi");
+        expect(askMain).toHaveBeenCalledWith(
+          ["ask", "codex", "hi"],
+          { out: expect.any(Function), err: expect.any(Function), watched: tty },
+          { distDir: realDist },
+        );
+      }
+    } finally {
+      process.stderr.isTTY = wasTty;
+    }
+    // It is given its words as typed: `--no-color`, taken out of every other command's, would
+    // otherwise make `ask --no-color on` read as `ask on` (CONTROL.md §13, the first word).
+    vi.mocked(askMain).mockClear();
+    await run("--no-color", "ask", "--no-color", "on", "--yes");
+    expect(askMain).toHaveBeenCalledWith(["ask", "--no-color", "on", "--yes"], expect.anything(), expect.anything());
     expect(process.exitCode).toBeUndefined();
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     vi.mocked(askMain).mockImplementationOnce(async (_argv, io) => {

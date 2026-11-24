@@ -194,6 +194,27 @@ export function ask(sock: string, req: LocalRequest, timeoutMs: number): Promise
   });
 }
 
+/** Whether the way to the daemon's socket is open from this process: `open` (something
+ *  listens), `blocked` (the system refused the connection itself: a sandbox around this
+ *  command, as Codex puts around the commands it runs; the daemon may well be running), or
+ *  `absent` (nothing listens, or nothing answered in time). `ask` and `askMany` say only
+ *  "no reply"; a caller that has to tell the person why asks this. */
+export function reach(sock: string, timeoutMs = 2000): Promise<"open" | "blocked" | "absent"> {
+  return new Promise((resolve) => {
+    const s = net.connect(sock);
+    const finish = (r: "open" | "blocked" | "absent") => {
+      clearTimeout(t);
+      s.destroy();
+      resolve(r);
+    };
+    const t = setTimeout(() => finish("absent"), timeoutMs);
+    s.on("connect", () => finish("open"));
+    s.on("error", (e: NodeJS.ErrnoException) =>
+      finish(e.code === "EPERM" || e.code === "EACCES" ? "blocked" : "absent"),
+    );
+  });
+}
+
 /** One request, several replies on the same connection (an ask): `onReply` sees each one
  *  in order, the promise settles with the one that ends the exchange. `timeoutMs` bounds
  *  the whole exchange; null when it ends without an end — no daemon, a timeout, a garbled
