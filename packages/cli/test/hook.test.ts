@@ -526,6 +526,48 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
     }
   });
 
+  it("Codex's Stop asks too, under Codex's own id for the thread; nothing else of Codex's does", async () => {
+    let reply: unknown = { op: "block", reason: "Do the thing", id: "m1" };
+    const d = await daemon(sock, () => reply);
+    const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
+    const rollout = `/h/.codex/sessions/2026/11/24/rollout-2026-11-24T11-11-00-${THREAD}.jsonl`;
+    const codex = (extra: Record<string, unknown> = {}) =>
+      JSON.stringify({ session_id: THREAD, transcript_path: rollout, cwd: "/w", hook_event_name: "Stop", ...extra });
+    try {
+      await run(["codex", "Stop"], codex({ stop_hook_active: true }));
+      expect(d.asked).toEqual([{ op: "stop", session: `codex:${THREAD}`, active: true }]);
+      // What Codex continues a turn with (0.171.0), in the words the daemon gave.
+      expect(out).toEqual([`${JSON.stringify({ decision: "block", reason: "Do the thing" })}\n`]);
+      reply = { op: "none" };
+      await run(["codex", "Stop"], codex());
+      expect(d.asked[1]).toEqual({ op: "stop", session: `codex:${THREAD}`, active: false });
+      expect(out).toHaveLength(1);
+      // Never asked: a thread Codex keeps nowhere, a subagent's Stop (another thread's
+      // rollout under the parent's id), a payload with no session, one that is not JSON, a
+      // turn the daemon itself runs, and Codex's permission prompt, which no hook can answer.
+      await run(["codex", "Stop"], codex({ transcript_path: null }));
+      await run(
+        ["codex", "Stop"],
+        codex({ transcript_path: rollout.replace(THREAD, "0199b6f2-0000-7e3a-9b4c-000000000000") }),
+      );
+      await run(["codex", "Stop"], codex({ session_id: "" }));
+      await run(["codex", "Stop"], "not json");
+      await run(["codex", "Stop"], codex(), { SESSIONPIPE_CONTROL_JOB: "1" });
+      await run(["codex", "PermissionRequest"], codex());
+      await run(["codex", "SessionEnd"], codex());
+      expect(d.asked).toHaveLength(2);
+      expect(out).toHaveLength(1);
+      // The worker is told which Stop was answered with a message: that turn goes on
+      // (run.ts). One job of the nine, whatever order their files sort in.
+      expect(jobs()).toHaveLength(9);
+      const answered = jobs().filter((j) => (j as { continued?: boolean }).continued === true);
+      expect(answered.map((j) => JSON.parse(j.stdin).stop_hook_active)).toEqual([true]);
+      expect(jobs().filter((j) => "continued" in j)).toHaveLength(1);
+    } finally {
+      await d.close();
+    }
+  });
+
   it("a closed stdout swallows the block; the job still goes", async () => {
     const d = await daemon(sock, () => ({ op: "block", reason: "x", id: "m1" }));
     try {

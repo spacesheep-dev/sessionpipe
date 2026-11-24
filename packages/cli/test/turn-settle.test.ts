@@ -562,6 +562,24 @@ describe("closedTurns", () => {
     });
     expect(closedTurns({ turns: [], line: 3 }, { all: true })).toEqual({ turns: [], line: 3, waiting: false });
   });
+  it("at a Stop answered with a message, a last turn the file says is still growing is held, the cursor before it", () => {
+    const growing = { turns: [a, b], line: 9, growing: { start: 4 } };
+    // The turns before it go now, and there is nothing to look again for.
+    expect(closedTurns(growing, { all: true, live: true })).toEqual({ turns: [a], line: 4, waiting: false });
+    // Alone, it is the turn the Stop ended, until the message's own row closes it: a second look.
+    expect(closedTurns({ turns: [a], line: 5, growing: { start: 1 } }, { all: true, live: true })).toEqual({
+      turns: [],
+      line: 1,
+      waiting: true,
+    });
+    // At any other end everything goes as it stands; and a reader that says nothing of it is as before.
+    expect(closedTurns(growing, { all: true })).toEqual({ turns: [a, b], line: 9, waiting: false });
+    expect(closedTurns({ turns: [a, b], line: 9 }, { all: true, live: true })).toEqual({
+      turns: [a, b],
+      line: 9,
+      waiting: false,
+    });
+  });
   it("a last turn that failed is whole: nothing more is added to it", () => {
     const cut = turn("b", "", { failed: true });
     expect(closedTurns({ turns: [a, cut], line: 9, tail: { start: 4 } }, {})).toEqual({

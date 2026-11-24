@@ -1323,14 +1323,17 @@ export class ControlDaemon {
         return;
       }
       case "stop": {
-        const l = this.liveOf(req.session);
+        // A hook names its session as the harness does. One this daemon started goes by the
+        // start's name (Codex picks its own id), and that is the name its messages wait under.
+        const session = this.named(req.session);
+        const l = this.liveOf(session);
         l.lastEvent = this.deps.now();
         l.heard = true;
-        this.recordMode(req.session, req.mode);
+        this.recordMode(session, req.mode);
         // A Stop: the turn, or the continuation the message before this one caused, is
         // over. Said before the next message is handed over, so each answer ends where
         // the next one's turn begins.
-        this.turnEnded(req.session);
+        this.turnEnded(session);
         const p = this.takeTurn(l);
         if (!p) {
           this.reply(s, { op: "none" });
@@ -1341,7 +1344,7 @@ export class ControlDaemon {
         l.fromFile = false;
         // The transcript of the session whose Stop this is. Its last words may not be in
         // it yet, so this is only where the search for the answer starts (reply.ts).
-        const from = this.answerFrom(req.session);
+        const from = this.answerFrom(session);
         // An ask's framing says how the answer travels already; a receiver's gets the note.
         const body = this.inPlace(p.receiver, p.text, p.msgId);
         this.reply(s, {
@@ -1349,7 +1352,7 @@ export class ControlDaemon {
           reason: isSink(p.receiver) ? body : `${body}\n\n${IN_PLACE_ANSWER}`,
           id: p.msgId,
         });
-        this.followAnswer(p.receiver, p.msgId, "turn", req.session, from, p.queuedAt, {
+        this.followAnswer(p.receiver, p.msgId, "turn", session, from, p.queuedAt, {
           mark: messageMark(p.msgId),
           end: "next",
         });
@@ -1461,10 +1464,12 @@ export class ControlDaemon {
       this.unpark(named);
       l.ended = this.deps.now();
     }
-    if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd") {
-      // A failed turn and a session's end are told here alone. A Stop was already told by
-      // the hook's own question (`stop`, which comes before this event), and is not told
-      // twice: an event that arrives late would end the continuation that followed it.
+    // `Interrupt` is Codex's: the person stopped the turn, and no Stop follows.
+    if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd" || e.event === "Interrupt") {
+      // A failed turn, a stopped one and a session's end are told here alone. A Stop was
+      // already told by the hook's own question (`stop`, which comes before this event),
+      // and is not told twice: an event that arrives late would end the continuation that
+      // followed it.
       if (e.event !== "Stop") this.turnEnded(named);
       this.notMidTurn(l);
     }
@@ -2099,6 +2104,11 @@ export class ControlDaemon {
     return { folder: ok, transcript: null };
   }
 
+  /** A Codex thread's rollout, by Codex's own id for it; none for a name that is no such id. */
+  private codexRollout(thread: string): string | null {
+    return isUuid(thread) ? codexControl.findRollout(thread, this.deps.env ?? process.env) : null;
+  }
+
   /** A Codex, Antigravity or ACP-driven session: one the daemon started is its alias
    *  (the harness's id and the start's folder); one the hooks reported is Codex's
    *  rollout (its `session_meta` cwd) or, for the others, the folder its hooks gave. */
@@ -2111,7 +2121,7 @@ export class ControlDaemon {
     let cwd: string | undefined = a?.cwd || undefined;
     let file: string | null = null;
     if (ref.harness === "codex") {
-      file = isUuid(target) ? codexControl.findRollout(target, this.deps.env ?? process.env) : null;
+      file = this.codexRollout(target);
       if (!a && !file) return { refused: "no_session", why: `no Codex session ${known(ref.id)} on this machine` };
       cwd ||= file ? codexControl.codexFacts(file).cwd : undefined;
     } else cwd ||= this.live.get(session)?.cwd || this.factsCwd(ref.harness, ref.id);
@@ -3777,8 +3787,21 @@ export class ControlDaemon {
    *  to: a message handed to a session at its Stop was answered there, while the daemon
    *  read the copy, which said nothing for half an hour or said another message's answer
    *  (2026-11-10). */
-  private answerFrom(session: string): { file: string; offset: number } | null {
+  private answerFrom(session: string): { file: string; offset: number; harness?: "codex" } | null {
     const ref = parseSessionRef(session);
+    if (ref?.harness === "codex") {
+      // The thread's rollout, by Codex's own id for it.
+      const thread = this.aliasOf("codex", ref.id)?.id ?? ref.id;
+      // The file the session's own hooks last named, where they named this thread's: Codex
+      // moves a thread to a new file when the person edits an earlier prompt, and only its
+      // hooks say which one it writes now. Else the thread's rollout as it is named.
+      const told = this.live.get(session)?.transcript ?? "";
+      const file =
+        path.basename(told).toLowerCase().includes(thread.toLowerCase()) && existsSync(told)
+          ? told
+          : this.codexRollout(thread);
+      return file ? { file, offset: transcriptEnd(file), harness: "codex" } : null;
+    }
     if (ref?.harness !== "claude-code") return null;
     const t = findTranscript(ref.id, this.deps.claudeDirs());
     return t ? { file: t.file, offset: transcriptEnd(t.file) } : null;
@@ -3808,7 +3831,7 @@ export class ControlDaemon {
     id: string,
     mode: "waiter" | "turn" | "inbox",
     session: string,
-    from: { file: string; offset: number } | null,
+    from: { file: string; offset: number; harness?: "codex" } | null,
     sent: number,
     how: { mark: string | null; end: "next" | "marked" },
   ): void {
@@ -3827,6 +3850,7 @@ export class ControlDaemon {
     const stream = this.answerStream(r, id);
     const f = follow(from.file, from.offset, {
       ...how,
+      ...(from.harness ? { harness: from.harness } : {}),
       timeoutMs: this.deps.answerWaitMs ?? ANSWER_WAIT_MS,
       ...(this.deps.answerGraceMs !== undefined ? { graceMs: this.deps.answerGraceMs } : {}),
       now: this.deps.now,

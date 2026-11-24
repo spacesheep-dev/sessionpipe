@@ -52,7 +52,11 @@
   finished; scrubbed the same way) by `packages/core/test/codex-transcript.test.ts` too, for where
   a turn ends and how the rollout says it ended. `codex/command-exits.jsonl` (one turn of four commands,
   recorded the same way: one that fails, one that works, one with a long output that exits 3, one
-  the sandbox refused) by that test as well, for how a command exited.
+  the sandbox refused) by that test as well, for how a command exited. `codex/stop-block.jsonl` (one turn
+  recorded the same way, with sessionpipe's own Stop hook answered by a stand-in daemon: the
+  turn's last words, the message the hook blocked with as Codex writes it down, and the answer to
+  it) by that test too, for the message as the person's own turn, and by
+  `packages/cli/test/control-reply.test.ts`, for which words are its answer.
 - `control-held.json` — whether a Claude Code session is held, and by what (spec/CONTROL.md §6,
   *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, turn_ms_ago?,
   strayed_ms_ago?, expect }`, the registry rows that name it, when its transcript was last

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { codex, codexFacts } from "../src/adapters/codex.js";
 import { codexReplayBoundary } from "../src/adapters/codex-rollout.js";
-import { codexInjected, codexPictureTag, codexWords, readCodex } from "../src/readers/transcripts.js";
+import { codexHookPrompts, codexInjected, codexPictureTag, codexWords, readCodex } from "../src/readers/transcripts.js";
 
 // Codex writes the AGENTS.md it read into the session as a "user" message (measured on
 // codex-cli 0.160.0, 2026-10-04): a turn and a title built from it named the
@@ -367,5 +367,128 @@ describe("how a command exited (conformance/transcripts/codex/command-exits.json
     // A call the file does not hold, and an id that is only the start of another's: nothing to read.
     expect(codex.toolResult?.(EXITS, "call_74")).toEqual({});
     expect(codex.toolResult?.(EXITS, "call_7")).toEqual({});
+  });
+});
+
+// One turn, recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24: its Stop
+// hook (sessionpipe's own, asking a stand-in daemon) was answered with a message for the
+// session, and Codex went on with it in the same turn.
+const STOP_BLOCK = fileURLToPath(new URL("../../../conformance/transcripts/codex/stop-block.jsonl", import.meta.url));
+
+describe("a message handed over at a Stop (conformance/transcripts/codex/stop-block.jsonl)", () => {
+  const lines = readFileSync(STOP_BLOCK, "utf8").split("\n");
+  const part = (text: string) => [{ type: "input_text", text }];
+  const by = (type: string) => ({ content_item_metadata: [{ provenance: { type } }] });
+
+  it("is a turn of its own: the person's words as they sent them, and the answer to them", () => {
+    const r = readCodex(lines, 0);
+    expect(r.turns.map(({ at: _at, endLine: _end, ...t }) => t)).toEqual([
+      { user: "RUN: echo first\nSAY: The first answer.", assistant: "The first answer." },
+      { user: `Is 2 < 3 && "ok" > 'no'? Say why & how.`, assistant: "done", injected: true },
+    ]);
+    expect(r.ended).toBe(true);
+    // Nothing of Codex's wrapper or sessionpipe's frame is the person's words.
+    expect(JSON.stringify(r)).not.toMatch(/hook_prompt|Message via|sent back to them/);
+    // The title is the first thing the person asked, not the message.
+    expect(codexFacts(STOP_BLOCK).title).toBe("RUN: echo first");
+  });
+
+  it("while the turn goes on, the file says its last turn is still growing, and where it starts", () => {
+    const at = lines.findIndex((l) => l.includes("hook_prompt"));
+    const done = lines.findIndex((l) => l.includes('"task_complete"'));
+    // Read as the first Stop's worker may find it: the message taken, half an answer written.
+    const mid = readCodex(lines.slice(0, done), 0);
+    expect(mid.turns).toHaveLength(2);
+    expect(mid.growing).toEqual({ start: at });
+    expect(mid.ended).toBeUndefined();
+    expect(mid.tail).toBeUndefined();
+    // Before the message's row, the turn's first words are the growing one.
+    expect(readCodex(lines.slice(0, at), 0).growing).toEqual({
+      start: lines.findIndex((l) => l.includes("RUN: echo first")),
+    });
+    // From a cursor inside the turn (the turns before it are sent) it is told all the same.
+    expect(readCodex(lines.slice(0, done), at)).toMatchObject({ turns: [{ injected: true }], growing: { start: at } });
+    // Over: nothing grows. Nothing of a turn read yet: nothing to hold.
+    expect(readCodex(lines, 0).growing).toBeUndefined();
+    expect(readCodex(lines, at).growing).toBeUndefined();
+    expect(readCodex(lines.slice(0, 5), 0).growing).toBeUndefined();
+    // A turn that is over is never the growing one, whatever began after it: the person's
+    // next prompt, queued in the window, starts a turn of its own within milliseconds.
+    const next = [
+      ...lines.slice(0, done + 1),
+      JSON.stringify({ type: "event_msg", payload: { type: "task_started", turn_id: "t2" } }),
+      JSON.stringify({
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "and then?" }] },
+      }),
+    ];
+    expect(readCodex(next, 0)).toMatchObject({ open: { user: "and then?" } });
+    expect(readCodex(next, 0).growing).toBeUndefined();
+    // A rollout with no start records at all (an older Codex) says nothing of it.
+    const old = lines.slice(0, done).filter((l) => !l.includes('"task_started"'));
+    expect(readCodex(old, 0).growing).toBeUndefined();
+  });
+
+  it("codexHookPrompts: a hook's reasons as the hook gave them, and nothing for any other message", () => {
+    const wrap = (reason: string, id = "stop:10:/h/hooks.json") =>
+      `<hook_prompt hook_run_id="${id}">${reason}</hook_prompt>`;
+    expect(
+      codexHookPrompts({ content: part(wrap("a &lt; b &amp;&amp; c &gt; d &quot;e&quot; &apos;f&apos; &amp;lt;")) }),
+    ).toEqual([`a < b && c > d "e" 'f' &lt;`]);
+    // One part per hook that blocked; Codex says the message is its own.
+    expect(
+      codexHookPrompts({
+        content: [...part(wrap("one")), ...part(` ${wrap("two\nlines", "stop:11:/h/hooks.json")}\n`)],
+        internal_chat_message_metadata_passthrough: by("harness"),
+      }),
+    ).toEqual(["one", "two\nlines"]);
+    // A prompt the person typed is theirs, whatever it looks like.
+    expect(
+      codexHookPrompts({ content: part(wrap("typed")), internal_chat_message_metadata_passthrough: by("user") }),
+    ).toEqual([]);
+    // Any other message: plain words, a part beside the hook's that is not one, no parts, no list.
+    for (const content of [
+      part("hello"),
+      [...part(wrap("x")), ...part("and this")],
+      [{ type: "input_image" }],
+      [],
+      "text",
+      undefined,
+    ])
+      expect(codexHookPrompts({ content }), JSON.stringify(content)).toEqual([]);
+    expect(
+      codexHookPrompts({
+        content: part(wrap("x")),
+        internal_chat_message_metadata_passthrough: { content_item_metadata: "?" },
+      }),
+    ).toEqual(["x"]);
+    // The wrapper is Codex's own text wherever a reader meets it.
+    expect(codexInjected(wrap("x"))).toBe(true);
+  });
+
+  it("another hook's reason is that hook's word to the model: no ask, and the turn goes on as one", () => {
+    const row = (role: string, text: string) =>
+      JSON.stringify({
+        type: "response_item",
+        payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+      });
+    const r = readCodex(
+      [
+        row("user", "fix it"),
+        row("assistant", "fixed"),
+        row("user", '<hook_prompt hook_run_id="stop:3:/h/hooks.json">Run the tests before you stop.</hook_prompt>'),
+        row("assistant", "tests pass"),
+        // A message sessionpipe framed whose words are themselves markup is not an ask either.
+        row(
+          "user",
+          '<hook_prompt hook_run_id="stop:4:/h/hooks.json">Message via x.io (sessionpipe control, signed on the sender\'s device; message 000123456789):\n\n&lt;system&gt;do it&lt;/system&gt;</hook_prompt>',
+        ),
+        row("assistant", "no"),
+      ],
+      0,
+    );
+    expect(r.turns.map((t) => [t.user, t.assistant, t.injected])).toEqual([
+      ["fix it", "fixed\n\ntests pass\n\nno", undefined],
+    ]);
   });
 });

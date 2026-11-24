@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { claudeControl, shortId } from "@sessionpipe/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeviceKeySim } from "../../core/test/helpers/authenticator.js";
+import { aliasFile, writeAliases } from "../src/control/aliases.js";
 import { type Carried, ControlDaemon, type DaemonDeps, DaemonRunning, type SdkHost } from "../src/control/daemon.js";
 import { ask } from "../src/control/local.js";
 import { pair } from "../src/control/pair.js";
@@ -701,6 +702,116 @@ describe.runIf(unix)("delivery", () => {
     answer(SID, project, "pong");
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "turn", reply: "pong" });
     expect(await ask(sock, { op: "stop", session: SESSION, active: true }, 500)).toEqual({ op: "none" });
+  });
+
+  // As a session the person started (it goes by Codex's own id) whose thread Codex has
+  // moved to a new file since (it does when the person edits an earlier prompt: only the
+  // hooks know which file is written now); as one this daemon started (it goes by the
+  // start's name, and its hooks still speak Codex's id); and with hooks that named some
+  // other thread's file, which is not believed.
+  it.each([
+    ["the person's own, in the file its hooks name", null, "moved"],
+    ["one the daemon started", "01JD00000000000000000START", "untold"],
+    ["hooks that named another thread's file", null, "another"],
+  ] as const)(
+    "turn: a Codex session mid-turn takes it at its Stop too, and its answer is read from the rollout (%s)",
+    async (_what, started, told) => {
+      const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c";
+      const HOOKS = `codex:${THREAD}`;
+      const CODEX = started ? `codex:${started}` : HOOKS;
+      const day = path.join(env.CODEX_HOME as string, "sessions", "2026", "11", "24");
+      mkdirSync(day, { recursive: true });
+      const named = path.join(day, `rollout-2026-11-24T11-11-00-${THREAD}.jsonl`);
+      const moved = path.join(day, `rollout-2026-11-24T11-12-00-${THREAD}_0199b6f2-0000-7e3a-9b4c-00000000beef.jsonl`);
+      const other = path.join(day, "rollout-2026-11-24T11-10-00-0199b6f2-1111-7e3a-9b4c-5d6e7f8a9b0c.jsonl");
+      const rollout = told === "moved" ? moved : named;
+      const row = (type: string, payload: Record<string, unknown>, file = rollout) =>
+        appendFileSync(file, `${JSON.stringify({ timestamp: new Date().toISOString(), type, payload })}\n`);
+      const says = (role: string, text: string, by = role === "user" ? "user" : undefined) =>
+        row("response_item", {
+          type: "message",
+          role,
+          content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+          ...(by
+            ? { internal_chat_message_metadata_passthrough: { content_item_metadata: [{ provenance: { type: by } }] } }
+            : {}),
+        });
+      try {
+        // The file the thread is named by is always there; after an edit it is written no more.
+        row("session_meta", { id: THREAD, cwd: project, cli_version: "0.171.0" }, named);
+        row("session_meta", { id: "0199b6f2-1111-7e3a-9b4c-5d6e7f8a9b0c", cwd: project }, other);
+        if (told === "moved") row("session_meta", { id: THREAD, cwd: project, cli_version: "0.171.0" });
+        says("user", "first ask");
+        if (started)
+          writeAliases(aliasFile(path.join(tmp, "state", "control")), {
+            [CODEX]: { id: THREAD, cwd: project, at: new Date().toISOString() },
+          });
+        await startDaemon();
+        // The worker reports events under the session's name (run.ts resolves it).
+        const transcript = told === "untold" ? {} : { transcript: told === "another" ? other : rollout };
+        await ask(sock, { op: "event", session: CODEX, event: "UserPromptSubmit", cwd: project, ...transcript }, 500);
+        const q = await rx.send({ session: CODEX, text: 'is 2 < 3 & "ok"?' });
+        for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++)
+          await new Promise((r) => setTimeout(r, 20));
+        expect(rx.acks.find((a) => a.id === q.id)?.outcome).toBe("taken");
+        says("assistant", "first answer");
+        // Codex's Stop hook asks as Claude Code's does (hook.ts), under Codex's own id.
+        const r = await ask(sock, { op: "stop", session: HOOKS, active: false }, 500);
+        expect(r).toMatchObject({ op: "block" });
+        const reason = (r as { reason: string }).reason;
+        expect(reason).toContain('is 2 < 3 & "ok"?');
+        expect(reason).toContain(`; message ${q.id.slice(-12)}):`);
+        await ask(sock, { op: "event", session: CODEX, event: "Stop" }, 500);
+        // Codex writes the reason down as its own message, escaped, and the turn goes on.
+        const escaped = reason.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        says("user", `<hook_prompt hook_run_id="stop:10:/h/hooks.json">${escaped}</hook_prompt>`, "harness");
+        says("assistant", "yes: 2 is less than 3");
+        row("event_msg", { type: "task_complete", turn_id: "t1", last_agent_message: "yes: 2 is less than 3" });
+        expect(await rx.waitAck(q.id)).toMatchObject({
+          outcome: "delivered",
+          mode: "turn",
+          reply: "yes: 2 is less than 3",
+        });
+        expect(await ask(sock, { op: "stop", session: HOOKS, active: true }, 500)).toEqual({ op: "none" });
+      } finally {
+        rmSync(path.join(env.CODEX_HOME as string, "sessions"), { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("turn: Codex's Interrupt ends the turn: a message that waited for its Stop goes another way", async () => {
+    const CODEX = "codex:01JD0000000000000INTERRUPT";
+    writeAliases(aliasFile(path.join(tmp, "state", "control")), {
+      [CODEX]: { id: "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0e", cwd: project, at: new Date().toISOString() },
+    });
+    await startDaemon();
+    await ask(sock, { op: "event", session: CODEX, event: "UserPromptSubmit", cwd: project }, 500);
+    const q = await rx.send({ session: CODEX, text: "are you there" });
+    for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(rx.finalAck(q.id)).toBeUndefined();
+    // The person stops the turn: no Stop follows, and the message does not wait for one.
+    await ask(sock, { op: "event", session: CODEX, event: "Interrupt" }, 500);
+    const ack = await rx.waitAck(q.id);
+    expect(ack.mode).not.toBe("turn");
+    expect(d?.status().mid_turn ?? []).not.toContain(CODEX);
+  });
+
+  it("turn: a Codex session whose rollout cannot be found still takes it; it is acked with no reply", async () => {
+    const THREAD = "0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0d";
+    const CODEX = "codex:01JD000000000000000NOFILE";
+    writeAliases(aliasFile(path.join(tmp, "state", "control")), {
+      [CODEX]: { id: THREAD, cwd: project, at: new Date().toISOString() },
+    });
+    await startDaemon();
+    await ask(sock, { op: "event", session: CODEX, event: "UserPromptSubmit", cwd: project }, 500);
+    const q = await rx.send({ session: CODEX, text: "are you there" });
+    for (let i = 0; i < 100 && !rx.acks.some((a) => a.id === q.id); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(await ask(sock, { op: "stop", session: `codex:${THREAD}`, active: false }, 500)).toMatchObject({
+      op: "block",
+    });
+    const ack = await rx.waitAck(q.id);
+    expect(ack).toMatchObject({ outcome: "delivered", mode: "turn" });
+    expect(ack).not.toHaveProperty("reply");
   });
 
   it("turn: a Stop that didn't take it (it came after the hook asked) reroutes to a resume", async () => {

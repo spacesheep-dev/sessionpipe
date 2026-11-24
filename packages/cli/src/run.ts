@@ -128,6 +128,9 @@ export interface Job {
   /** The length of a payload too big for the hook to hand on (hook.ts STDIN_MAX); `stdin`
    *  is then empty. */
   omitted_bytes?: number;
+  /** A Stop its hook answered with a block (a message handed over, CONTROL.md §6 `turn`):
+   *  the turn is not over, it goes on with the message. */
+  continued?: boolean;
 }
 
 export const MAX_TRIES = 10;
@@ -458,8 +461,15 @@ export const wordsDigest = (text: string): string =>
  *  other, nothing goes but at `all`. */
 export function closedTurns(
   read: TranscriptRead,
-  o: { all?: boolean; due?: string | undefined },
+  o: { all?: boolean; due?: string | undefined; live?: boolean },
 ): { turns: Turn[]; line: number; waiting: boolean } {
+  // A Stop that was answered with a block (`live`), from a reader whose file says the last
+  // turn is not over (`growing`: Codex's, before its `task_complete`): the turn goes on
+  // with the message it was handed, and what it has said so far is not all of it. That
+  // turn waits, whole, for its end; the ones before it go now. Alone, it is the turn the
+  // Stop was the end of, a moment before the message's own row closes it: worth a second look.
+  if (o.all && o.live && read.growing)
+    return { turns: read.turns.slice(0, -1), line: read.growing.start, waiting: read.turns.length === 1 };
   const whole = !!o.all || (read.tail?.said !== undefined && wordsDigest(read.tail.said) === o.due);
   const waiting = !whole && o.due !== undefined;
   if (whole) return { turns: read.turns, line: read.line, waiting };
@@ -742,7 +752,13 @@ export async function runJob(
      *  words `due` are, as its Stop names it. */
     const turnEvents = (
       file: string,
-      o: { all?: boolean; due?: string | undefined; open?: string | undefined; named?: string | undefined },
+      o: {
+        all?: boolean;
+        due?: string | undefined;
+        open?: string | undefined;
+        named?: string | undefined;
+        live?: boolean;
+      },
     ) => {
       const cur = facts.get(job.harness, id);
       let turnNo = Number(cur.transcript_turns) || 0;
@@ -885,7 +901,13 @@ export async function runJob(
           ? wordsDigest(r.hints.final)
           : undefined;
       const named = r.events.find((e) => e.type === "turn.ended")?.data.turn_id;
-      const how = { all: final === undefined, due: final, named: typeof named === "string" ? named : undefined };
+      const how = {
+        all: final === undefined,
+        due: final,
+        named: typeof named === "string" ? named : undefined,
+        // The hook answered this Stop with a message: the turn goes on (closedTurns).
+        live: job.continued === true,
+      };
       let got = turnEvents(transcript, how);
       events.push(...got.events);
       for (

@@ -349,7 +349,40 @@ export function readClaude(lines: string[], from: number): TranscriptRead {
  *  `<environment_context>` and the like, and the AGENTS.md it read (`# AGENTS.md
  *  instructions for <folder>` followed by `<INSTRUCTIONS>`). */
 export function codexInjected(text: string): boolean {
-  return /^<[a-z_-]+>/i.test(text) || /^# AGENTS\.md instructions\b/i.test(text);
+  return /^<[a-z_-]+>/i.test(text) || /^<hook_prompt\s/.test(text) || /^# AGENTS\.md instructions\b/i.test(text);
+}
+
+/** How Codex hands its model what a Stop hook blocked with (0.171.0): a `user` message of
+ *  one text part per hook, `<hook_prompt hook_run_id="…">REASON</hook_prompt>`, with the
+ *  reason's `<`, `>` and `&` escaped, which Codex marks as its own (the part's
+ *  `provenance.type` is `harness`, where a typed prompt's is `user`). */
+const HOOK_PROMPT = /^<hook_prompt hook_run_id="[^"]*">([\s\S]*)<\/hook_prompt>$/;
+const XML = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" } as const;
+const unescapeXml = (s: string): string =>
+  s.replace(/&(lt|gt|amp|quot|apos);/g, (_, name: keyof typeof XML) => XML[name]);
+
+/** The reasons of the hooks a Codex `user` message carries, as the hooks gave them; none
+ *  for any other message. A prompt the person typed is theirs whatever it looks like:
+ *  Codex says who wrote a message, and one it says the person wrote is never a hook's. */
+export function codexHookPrompts(payload: {
+  content?: unknown;
+  internal_chat_message_metadata_passthrough?: unknown;
+}): string[] {
+  if (!Array.isArray(payload.content) || !payload.content.length) return [];
+  const about = (payload.internal_chat_message_metadata_passthrough as { content_item_metadata?: unknown } | undefined)
+    ?.content_item_metadata;
+  if (
+    Array.isArray(about) &&
+    about.some((a) => (a as { provenance?: { type?: unknown } })?.provenance?.type === "user")
+  )
+    return [];
+  const out: string[] = [];
+  for (const part of payload.content as { type?: unknown; text?: unknown }[]) {
+    const m = part?.type === "input_text" && typeof part.text === "string" ? HOOK_PROMPT.exec(part.text.trim()) : null;
+    if (!m) return [];
+    out.push(unescapeXml(m[1] as string));
+  }
+  return out;
 }
 
 /** The lines Codex wraps a picture it was given in (`--image`, measured on 0.171.0): an
@@ -385,10 +418,19 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
   // end of their turn. Codex ends its own tasks the same way (a compaction, a review),
   // and one of those failing says nothing of the turn before it.
   let asked = false;
-  for (let i = Math.max(from, start); i < lines.length; i++) {
+  // A turn Codex said it began (`task_started`) and has not said is over: only a rollout
+  // that holds the one record can be missing the other (`growing`). Told from the whole
+  // file, wherever the cursor is: a turn's start record is behind it once the turns
+  // before the last one are sent.
+  // Where that turn began: a turn that ended before it is over, whatever runs now.
+  let running = -1;
+  for (let i = start; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j) continue;
     const p = j.payload as { type?: string; role?: string; content?: unknown; error?: unknown } | undefined;
+    if (j.type === "event_msg" && p?.type === "task_started") running = i;
+    if (j.type === "event_msg" && (p?.type === "task_complete" || p?.type === "turn_aborted")) running = -1;
+    if (i < from) continue;
     if (j.type === "event_msg" && (p?.type === "task_complete" || p?.type === "turn_aborted")) {
       ended = true;
       const cut = p.type === "turn_aborted" ? "interrupt" : p.error ? "failed" : null;
@@ -400,6 +442,18 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
     const text = codexWords(p.content);
     if (!text) continue;
     if (p.role === "user") {
+      // A Stop hook's words. sessionpipe's own Stop hook blocks with a message the control
+      // daemon queued for the session (CONTROL.md §6: delivered in place), so that reason
+      // is the person's words in sessionpipe's frame, sent from somewhere else, and the
+      // rest of the turn answers them: a turn of its own. Any other hook's reason is that
+      // hook's feedback to the model, and nobody's ask.
+      for (const reason of codexHookPrompts(p)) {
+        const said = deliveredWords(reason);
+        if (!said.delivered || isInjected(said.text)) continue;
+        msgs.push({ role: "user", text: said.text, at, line: i, injected: true });
+        ended = false;
+        asked = true;
+      }
       if (codexInjected(text)) continue; // Codex's own injections, not the person's words
       msgs.push({ role: "user", text, at, line: i });
       ended = false;
@@ -409,8 +463,15 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
       ended = false;
     }
   }
-  const out = pairTurns(msgs, endOf(lines));
+  const out = pairTurns(msgs, endOf(lines), true);
+  // Where the last turn starts is kept only to say that it is still growing: Codex names
+  // no last words, so nothing else is told by it.
+  const lastStart = out.tail?.start;
+  delete out.tail;
   if (ended) out.ended = true;
+  // Not a turn a later prompt has closed (`open`), and not one from before the running task.
+  else if (running >= 0 && !out.open && lastStart !== undefined && lastStart > running)
+    out.growing = { start: lastStart };
   return out;
 }
 

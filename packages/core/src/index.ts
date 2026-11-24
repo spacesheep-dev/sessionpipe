@@ -38,6 +38,9 @@ export { configFile, homeDir, safeId, stateDir, tilde, untilde } from "./paths.j
 export * from "./privacy/index.js";
 export { gitFacts, stripCredentials } from "./readers/git.js";
 export {
+  codexHookPrompts,
+  codexInjected,
+  codexWords,
   isInjected,
   pairTurns,
   peerAsk,

@@ -13,6 +13,7 @@
 // of the turn that was ending land after its Stop hook has already asked, and they were
 // sent back as the answer to a message they were written before (2026-11-10).
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { codexHookPrompts, codexInjected, codexWords } from "@sessionpipe/core";
 
 /** The transcript's size now: where its answer will start. */
 export function transcriptEnd(file: string): number {
@@ -266,6 +267,67 @@ export class Answer {
   }
 }
 
+/** `Answer`, for a Codex rollout (0.171.0). The message is taken at the session's Stop:
+ *  Codex writes the hook's reason down as a `user` message of its own making
+ *  (`codexHookPrompts`), and the row that carries this message's mark is that one. What
+ *  the model says after it is the answer, up to the end of the turn (`task_complete`, or
+ *  `turn_aborted` when the person stopped it), the next message handed over, or a prompt
+ *  the person typed. Codex's own notes to the model (its context blocks) end nothing.
+ *  `until` cuts nothing here: Codex stamps a row when it writes it, which can be after
+ *  the turn's own Stop, and the rows above end an answer by themselves. */
+export class CodexAnswer {
+  private readonly parts: string[] = [];
+  anchored = false;
+  done = false;
+  until: number | null = null;
+  private readonly mark: string | null;
+
+  constructor(mark: string | null) {
+    this.mark = whole(mark) ? mark : null;
+  }
+
+  get usable(): boolean {
+    return this.mark !== null;
+  }
+
+  get text(): string {
+    return this.parts.join("\n\n");
+  }
+
+  feed(line: string): void {
+    const mark = this.mark;
+    if (this.done || mark === null) return;
+    let j: { type?: unknown; payload?: Record<string, unknown> } | null;
+    try {
+      j = JSON.parse(line) as typeof j;
+    } catch {
+      return;
+    }
+    const p = j?.payload;
+    if (!j || !p || typeof p !== "object") return;
+    const message = j.type === "response_item" && p.type === "message";
+    const handed = message && p.role === "user" ? codexHookPrompts(p) : [];
+    if (!this.anchored) {
+      if (handed.some((reason) => reason.includes(mark))) this.anchored = true;
+      return;
+    }
+    if (j.type === "event_msg") {
+      if (p.type === "task_complete" || p.type === "turn_aborted") this.done = true;
+      return;
+    }
+    if (!message) return;
+    const words = codexWords(p.content);
+    if (p.role === "user") {
+      // Another hook's word beside this message's own is part of the same hand-over;
+      // the next message's, or the person's next prompt, begins something new.
+      if (handed.length ? !handed.some((reason) => reason.includes(mark)) : words && !codexInjected(words))
+        this.done = true;
+      return;
+    }
+    if (p.role === "assistant" && words) this.parts.push(words);
+  }
+}
+
 /** `Answer` over rows already in hand. */
 export function answerIn(lines: string[], mark: string | null): { done: boolean; text: string; anchored: boolean } {
   const a = new Answer(mark);
@@ -297,6 +359,9 @@ export interface FollowOptions {
   now?: () => number;
   /** The answer so far, each time it grows (for the progress ack). */
   onText?: (text: string) => void;
+  /** Whose transcript this is, where it is not Claude Code's: a Codex rollout's rows are
+   *  read as `CodexAnswer` reads them. */
+  harness?: "codex";
 }
 
 export interface Following {
@@ -319,7 +384,7 @@ export function follow(file: string, from: number, o: FollowOptions): Following 
   const poll = o.pollMs ?? 500;
   const grace = o.graceMs ?? GRACE_MS;
   const deadline = now() + o.timeoutMs;
-  const a = new Answer(o.mark);
+  const a = o.harness === "codex" ? new CodexAnswer(o.mark) : new Answer(o.mark);
   let offset = from;
   let rest: Buffer = Buffer.alloc(0);
   let gone = false;

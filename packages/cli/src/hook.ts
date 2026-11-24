@@ -128,6 +128,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       event,
       argv: [harness, event, ...rest],
       stdin,
+      // This Stop was answered with a block: the turn goes on with a message (run.ts).
+      ...(stopAnswer ? { continued: true } : {}),
       ...(omitted !== undefined ? { omitted_bytes: omitted } : {}),
       cwd: process.cwd(),
       env: pick([
@@ -200,7 +202,11 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
    *  goes wrong (no daemon, a timeout) prints nothing: the harness carries on as usual.
    *  `at`: when this hook fired, which a permission question is told with. */
   function controlAsk(stdin: string, at: number): Promise<string | null> | null {
-    if (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest")) return null;
+    // Codex's Stop takes a queued message the same way (its hook's `{"decision":"block"}`
+    // continues the turn with the reason, 0.171.0); its permission prompt has no answer a
+    // hook can give, so only its Stop asks.
+    const codexStop = harness === "codex" && event === "Stop";
+    if (!codexStop && (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest"))) return null;
     // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
     // asks at its Stop: the daemon hands that session its next message itself. Its
     // permission prompts do park: nobody is at a terminal there, so the owner's signed
@@ -222,6 +228,16 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     }
     const id = typeof s.session_id === "string" ? s.session_id : "";
     if (!id) return null;
+    if (codexStop) {
+      // A thread Codex keeps nowhere (`transcript_path: null`: its own background work,
+      // `codex exec --ephemeral`) is no session, and a hook that names another thread's
+      // rollout under this id is not this session's own.
+      if (typeof s.transcript_path !== "string" || !s.transcript_path.toLowerCase().includes(id.toLowerCase()))
+        return null;
+      return ask(sock, { op: "stop", session: `codex:${id}`, active: s.stop_hook_active === true }, 300).then((r) =>
+        r?.op === "block" ? JSON.stringify({ decision: "block", reason: r.reason }) : null,
+      );
+    }
     // Our entry in ~/.claude/settings.json is run by every harness that imports that file
     // — Devin's `claude` hooks provider is live, not a stub — and it arrives under the
     // claude-code name. Every Claude Code payload names a transcript and a UUID session;

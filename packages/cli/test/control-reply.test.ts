@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { readClaude } from "@sessionpipe/core";
 import { describe, expect, it } from "vitest";
-import { Answer, answerIn, firstAsk, follow, ranInMode, transcriptEnd } from "../src/control/reply.js";
+import { Answer, answerIn, CodexAnswer, firstAsk, follow, ranInMode, transcriptEnd } from "../src/control/reply.js";
 import { channelMark, frameAsk, kindPath, messageMark, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
@@ -631,5 +631,137 @@ describe("sessionToolsFrom", () => {
       ]),
     ).toEqual(["mcp__spacesheep", "mcp__x__y", "mcp__plugin_spacesheep_spacesheep"]);
     expect(sessionToolsFrom("mcp__spacesheep")).toEqual([]);
+  });
+});
+
+describe("a Stop block as Codex records it (conformance/transcripts/codex/stop-block.jsonl)", () => {
+  // Recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24, with sessionpipe's
+  // own hook asking a stand-in daemon: a turn says its last words, its Stop hook is answered
+  // with a block carrying a message, and the session answers the message in the same turn.
+  const file = new URL("../../../conformance/transcripts/codex/stop-block.jsonl", import.meta.url);
+  const rows = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const mark = messageMark("01JD0000000000000123456789");
+  const read = (lines: string[], m: string | null = mark) => {
+    const a = new CodexAnswer(m);
+    for (const line of lines) a.feed(line);
+    return { done: a.done, text: a.text, anchored: a.anchored };
+  };
+  const row = (type: string, payload: Record<string, unknown>, timestamp = "2026-11-24T19:11:00.000Z") =>
+    JSON.stringify({ timestamp, type, payload });
+  const says = (role: string, text: string, by?: string) =>
+    row("response_item", {
+      type: "message",
+      role,
+      content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+      ...(by
+        ? { internal_chat_message_metadata_passthrough: { content_item_metadata: [{ provenance: { type: by } }] } }
+        : {}),
+    });
+  const handed = (m: string) =>
+    says(
+      "user",
+      `<hook_prompt hook_run_id="stop:10:/h/hooks.json">Message via x.io (sessionpipe control; ${m}):\n\nhi</hook_prompt>`,
+      "harness",
+    );
+  const ended = row("event_msg", { type: "task_complete", turn_id: "t1" });
+
+  it("the answer is what the session said after Codex wrote the message down, to the turn's end", () => {
+    expect(mark).toBe("message 000123456789");
+    const at = rows.findIndex((r) => r.includes("hook_prompt"));
+    expect(rows[at]).toContain("Message via board.example.com (");
+    // As Codex wrote it: the message's `<`, `>` and `&` escaped, its quotes as they were.
+    expect(rows[at]).toContain(`Is 2 &lt; 3 &amp;&amp; \\"ok\\" &gt; 'no'?`);
+    // From the file's start, from the turn's last words, and from the message's own row.
+    for (const from of [0, at - 3, at])
+      expect(read(rows.slice(from))).toEqual({ done: true, text: "done", anchored: true });
+    // The words before the block are never its answer; from after its row, nothing is guessed.
+    expect(read(rows).text).not.toContain("The first answer.");
+    expect(read(rows.slice(at + 1))).toEqual({ done: false, text: "", anchored: false });
+    // Another message's mark is nowhere in it, and a message with no mark has no row.
+    expect(read(rows, messageMark("01JD0000000000000123456780")).anchored).toBe(false);
+    expect(read(rows, null)).toEqual({ done: false, text: "", anchored: false });
+    expect(new CodexAnswer(null).usable).toBe(false);
+    expect(new CodexAnswer(mark).usable).toBe(true);
+  });
+
+  it("follow reads a Codex rollout when told whose it is", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-codex-reply-"));
+    try {
+      const f = path.join(dir, "rollout.jsonl");
+      const at = rows.findIndex((r) => r.includes("hook_prompt"));
+      writeFileSync(f, `${rows.slice(0, at).join("\n")}\n`);
+      const following = follow(f, transcriptEnd(f), {
+        mark,
+        end: "next",
+        timeoutMs: 5000,
+        pollMs: 10,
+        harness: "codex",
+      });
+      appendFileSync(f, `${rows.slice(at).join("\n")}\n`);
+      expect(await following.answer).toBe("done");
+      // Read as a Claude Code transcript the same rows say nothing.
+      const blind = follow(f, 0, { mark, end: "next", timeoutMs: 50, pollMs: 10 });
+      expect(await blind.answer).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("what ends an answer, and what does not", () => {
+    const m = mark as string;
+    // The person's next prompt, and the next message handed over, each begin something new.
+    expect(read([handed(m), says("assistant", "a"), says("user", "next", "user"), says("assistant", "b")])).toEqual({
+      done: true,
+      text: "a",
+      anchored: true,
+    });
+    expect(read([handed(m), says("assistant", "a"), handed("message 000000000001"), says("assistant", "b")]).text).toBe(
+      "a",
+    );
+    // Codex's own notes to the model, another hook's word beside this message's own, and a
+    // row that is no message end nothing.
+    const notes = [
+      says("user", "<environment_context>\n  <cwd>/w</cwd>\n</environment_context>", "harness"),
+      handed(m),
+      says("developer", "be brief"),
+      says("assistant", ""),
+      row("response_item", { type: "function_call", call_id: "c1" }),
+      row("event_msg", { type: "token_count" }),
+      "not json",
+      "null",
+      JSON.stringify({ type: "response_item" }),
+    ];
+    expect(read([handed(m), says("assistant", "a"), ...notes, says("assistant", "b")])).toEqual({
+      done: false,
+      text: "a\n\nb",
+      anchored: true,
+    });
+    // The turn's end, or the person stopping it, settles it.
+    expect(read([handed(m), says("assistant", "a"), ended, says("assistant", "late")])).toMatchObject({
+      done: true,
+      text: "a",
+    });
+    expect(read([handed(m), row("event_msg", { type: "turn_aborted", turn_id: "t1" })])).toMatchObject({
+      done: true,
+      text: "",
+    });
+    // A prompt the person typed that quotes the message is not the message being taken.
+    expect(read([says("user", handed(m), "user"), says("assistant", "a")]).anchored).toBe(false);
+    expect(
+      read([says("user", `<hook_prompt hook_run_id="x">${m}</hook_prompt>`, "user"), says("assistant", "a")]).anchored,
+    ).toBe(false);
+    // No clock cuts it: Codex stamps a row when it writes it, which can be after the turn's
+    // own Stop, and such a row is still the answer's.
+    const a = new CodexAnswer(mark);
+    a.feed(handed(m));
+    a.until = Date.parse("2026-11-24T19:11:30.000Z");
+    a.feed(
+      row(
+        "response_item",
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "written late" }] },
+        "2026-11-24T19:12:00.000Z",
+      ),
+    );
+    expect({ done: a.done, text: a.text }).toEqual({ done: false, text: "written late" });
   });
 });

@@ -82,6 +82,14 @@ export interface TranscriptRead {
    *  `turn_completed`. Absent when the last turn may still be running, and from every
    *  reader whose file cannot say. */
   ended?: true;
+  /** The file itself says its last turn is NOT over yet, and where that turn starts: the
+   *  harness writes a record as a turn begins and another as it ends (Codex's
+   *  `task_started`, `task_complete`) and has not written the second for this one. A Stop
+   *  that was answered with a block goes on with the same turn; until it is over that turn
+   *  is held back, with the cursor before it, so it is sent once and whole. Absent when the last
+   *  turn is over, when there is none, when the file holds no record of the turn's start
+   *  either (a Codex too old to write one), and from every reader whose file cannot say. */
+  growing?: { start: number };
 }
 
 export interface SessionFacts extends Partial<Session> {
