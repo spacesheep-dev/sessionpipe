@@ -455,7 +455,9 @@ describe.runIf(unix)("a copy, when nothing can reach the session", () => {
         copies_v2: {
           [SID]: {
             id: COPY,
-            at: "2026-11-10T16:45:59.936Z",
+            // Made after the session's last write: the session hasn't moved on since, so
+            // its messages still go to this copy (a staler one is retired: control-holds).
+            at: new Date(Date.now() + 60_000).toISOString(),
             reason: "the session was open on this computer and couldn't be reached in place",
             why: "a word this version doesn't know",
           },

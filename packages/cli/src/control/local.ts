@@ -17,6 +17,9 @@ export type LocalRequest =
   /** A Stop hook asks for a queued message (turn mode). `mode` is the session's own
    *  permission mode, as its payload reports it (CONTROL.md §6, The session's mode). */
   | { op: "stop"; session: string; active: boolean; mode?: string }
+  /** A UserPromptSubmit hook asks what the session's copies did while it couldn't be
+   *  reached in place (CONTROL.md §6 `fork`); answered with `notes` or `none`. */
+  | { op: "notes"; session: string }
   /** A PermissionRequest hook parks until a verified answer, or until it's released:
    *  by a later event of its session that says this question is over (attention.ts).
    *  `agent` is the thread that asked, a subagent's id or "" for the main thread, and
@@ -100,6 +103,8 @@ export type LocalReply =
   | { op: "block"; reason: string; id: string }
   | { op: "decision"; behavior: "allow" | "deny"; message?: string; id: string }
   | { op: "none" }
+  /** What the session's copies were asked and answered since it was last told. */
+  | { op: "notes"; text: string }
   /** A newer waiter for the same session took over; this one stops. */
   | { op: "replaced" }
   | { op: "ok" }

@@ -97,6 +97,17 @@ function copied(orig: string, copy: string): void {
   );
 }
 
+/** The same, with the copy last used `agoMs` ago, as this daemon records it. */
+function copiedAt(orig: string, copy: string, agoMs: number): void {
+  transcript(copy);
+  const at = new Date(Date.now() - agoMs).toISOString();
+  mkdirSync(path.join(tmp, "state", "control"), { recursive: true });
+  writeFileSync(
+    path.join(tmp, "state", "control", "state.json"),
+    JSON.stringify({ copies: { [orig]: copy }, copies_v2: { [orig]: { id: copy, at, reason: "", used: at } } }),
+  );
+}
+
 interface Run {
   argv: string[];
   pid: number;
@@ -540,5 +551,99 @@ describe.runIf(unix)("a turn running in the copy a session's messages go to", ()
     const third = await hand({ session: cc(O), text: "much later" });
     expect(await rx.waitAck(third.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
     expect(ran()).toEqual([`resume ${C.slice(0, 8)}`, `resume ${C.slice(0, 8)}`]);
+  });
+});
+
+// 2026-11-24: a copy made on the 23rd kept answering a session's messages for a day while
+// the session itself, open in the desktop app, rebuilt the deck they were about. The copy
+// knew none of it, and the session never heard what the copy did.
+describe.runIf(unix)("a copy is the session as it was", () => {
+  it("a session written to since its copy last ran gets a fresh copy of itself, not the old one", async () => {
+    copiedAt(O, C, 600_000);
+    touch(O);
+    holds(O, "interactive");
+    await startDaemon();
+    const q = await hand({ session: cc(O), text: "make it bigger" });
+    expect(await rx.waitAck(q.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "fork",
+      session: cc(MADE[0] as string),
+    });
+    expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
+    expect(log.some((l) => l.includes(`the copy ${C}`) && l.includes("fresh one"))).toBe(true);
+  });
+
+  it("a session that has not moved since keeps its copy: a follow-up goes where the first answer came from", async () => {
+    copiedAt(O, C, 1_000);
+    holds(O, "interactive");
+    await startDaemon();
+    const q = await hand({ session: cc(O), text: "and the title too" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+    expect(ran()).toEqual([`resume ${C.slice(0, 8)}`]);
+  });
+
+  it("a write to the session while its copy is being made is one the copy never saw: the next message copies it again", async () => {
+    holds(O, "interactive");
+    await startDaemon();
+    const first = await hand({ session: cc(O), text: "first [slow]" });
+    await until(() => runs().length === 1);
+    // The person's own turn in the window writes while the copy is still running.
+    touch(O);
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    const second = await hand({ session: cc(O), text: "second" });
+    expect(await rx.waitAck(second.id)).toMatchObject({
+      outcome: "delivered",
+      mode: "fork",
+      session: cc(MADE[1] as string),
+    });
+    expect(ran()).toEqual([`fork ${O.slice(0, 8)}`, `fork ${O.slice(0, 8)}`]);
+  });
+
+  it("a copy made again after it was retired counts toward the day's cap", async () => {
+    holds(O, "interactive");
+    await startDaemon({ cfg: { limits: { copies_per_day: 1 } } });
+    const first = await hand({ session: cc(O), text: "first" });
+    expect(await rx.waitAck(first.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    await sleep(6_000);
+    touch(O);
+    const second = await hand({ session: cc(O), text: "second" });
+    expect(await rx.waitAck(second.id)).toMatchObject({ outcome: "refused", code: "copy_limit" });
+    expect(ran()).toEqual([`fork ${O.slice(0, 8)}`]);
+  }, 20_000);
+
+  it("a session whose own transcript is gone keeps its copy: there is nothing to tell its age by", async () => {
+    copiedAt(O, C, 600_000);
+    rmSync(file(O));
+    await startDaemon();
+    const q = await hand({ session: cc(O), text: "still there?" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume", session: cc(C) });
+  });
+
+  it("a notes ask that names no session is answered with none", async () => {
+    await startDaemon();
+    expect(await ask(sock, { op: "notes", session: "nonsense" }, 800)).toMatchObject({ op: "none" });
+  });
+
+  it("a message sent to the copy by its own id still leaves the session a note", async () => {
+    copiedAt(O, C, 1_000);
+    await startDaemon();
+    const q = await hand({ session: cc(C), text: "and the footer" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "resume" });
+    const told = (await ask(sock, { op: "notes", session: cc(O) }, 800)) as { op: string; text?: string };
+    expect(told.op).toBe("notes");
+    expect(told.text).toContain("Asked: and the footer");
+  });
+
+  it("the session is told, once, at its next prompt, what its copy was asked and answered", async () => {
+    holds(O, "interactive");
+    await startDaemon();
+    const q = await hand({ session: cc(O), text: "drop the line under the title" });
+    expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered", mode: "fork" });
+    const first = (await ask(sock, { op: "notes", session: cc(O) }, 800)) as { op: string; text?: string };
+    expect(first.op).toBe("notes");
+    expect(first.text).toContain("in a copy of this session");
+    expect(first.text).toContain("Asked: drop the line under the title");
+    expect(first.text).toContain("The copy answered: did it");
+    expect(await ask(sock, { op: "notes", session: cc(O) }, 800)).toMatchObject({ op: "none" });
   });
 });

@@ -119,6 +119,11 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // Stop to the daemon too, and a message queued for this Stop must be taken here,
     // not rerouted because the event got there first.
     const stopAnswer = event === "Stop" ? await (controlAsk(stdin, Date.now()) ?? Promise.resolve(null)) : null;
+    // A prompt asks what the session's copies did while it couldn't be reached (CONTROL.md
+    // §6 `fork`), and carries it as context. Asked before the worker is spawned; nothing
+    // waits on it longer than a Stop does.
+    const promptNotes =
+      event === "UserPromptSubmit" ? await (controlAsk(stdin, Date.now()) ?? Promise.resolve(null)) : null;
     mkdirSync(path.join(state, "jobs"), { recursive: true, mode: 0o700 });
     /** This hook event: its job file's name, and what every copy of the job is told by (run.ts jobKey). */
     const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -173,9 +178,9 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
       const p = spawn(process.execPath, [worker, jobFile], { detached: true, stdio: "ignore", windowsHide: true, env });
       p.unref();
     }
-    if (stopAnswer) {
+    if (stopAnswer || promptNotes) {
       try {
-        io.stdout(`${stopAnswer}\n`);
+        io.stdout(`${stopAnswer || promptNotes}\n`);
       } catch {}
     }
     // A PermissionRequest waits AFTER its event is on its way, so the receiver already
@@ -206,13 +211,17 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // continues the turn with the reason, 0.171.0); its permission prompt has no answer a
     // hook can give, so only its Stop asks.
     const codexStop = harness === "codex" && event === "Stop";
-    if (!codexStop && (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest"))) return null;
+    if (
+      !codexStop &&
+      (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest" && event !== "UserPromptSubmit"))
+    )
+      return null;
     // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
     // asks at its Stop: the daemon hands that session its next message itself. Its
     // permission prompts do park: nobody is at a terminal there, so the owner's signed
     // answer is the only one it can get (a session started at edits, auto or inherit
     // asks before a Bash).
-    if (env.SESSIONPIPE_CONTROL_JOB && event === "Stop") return null;
+    if (env.SESSIONPIPE_CONTROL_JOB && (event === "Stop" || event === "UserPromptSubmit")) return null;
     const sock = socketPath(state, env);
     if (
       process.platform === "win32"
@@ -259,6 +268,12 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
     // shape, not as a value — the daemon knows the modes it acts on; this file imports
     // nothing but node builtins.
     const mode = modeOf(s);
+    if (event === "UserPromptSubmit")
+      return ask(sock, { op: "notes", session }, 300).then((r) =>
+        r?.op === "notes" && typeof r.text === "string" && r.text
+          ? JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: r.text } })
+          : null,
+      );
     if (event === "Stop")
       return ask(
         sock,

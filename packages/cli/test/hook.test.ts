@@ -461,6 +461,35 @@ describe("Antigravity reads stdout", () => {
 });
 
 // A Unix socket: Windows has none, and the hook there looks for control.json instead (below).
+describe.runIf(process.platform !== "win32")("control: a prompt carries what the session's copies did", () => {
+  let sock: string;
+  beforeEach(() => {
+    sock = path.join(state, "control.sock");
+  });
+
+  it("the notes come back as the prompt's context; none prints nothing; a turn the daemon runs never asks", async () => {
+    let reply: unknown = { op: "notes", text: "A copy answered: dropped the line" };
+    const d = await daemon(sock, () => reply);
+    try {
+      await run(["claude-code", "UserPromptSubmit"], claude());
+      expect(d.asked).toEqual([{ op: "notes", session: `claude-code:${SID}` }]);
+      expect(out).toEqual([
+        `${JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "A copy answered: dropped the line" } })}\n`,
+      ]);
+      expect(jobs()).toHaveLength(1);
+      reply = { op: "none" };
+      await run(["claude-code", "UserPromptSubmit"], claude());
+      expect(out).toHaveLength(1);
+      await run(["claude-code", "UserPromptSubmit"], claude(), { SESSIONPIPE_CONTROL_JOB: "job-1" });
+      await run(["codex", "UserPromptSubmit"], claude());
+      expect(d.asked).toHaveLength(2);
+      expect(jobs()).toHaveLength(4);
+    } finally {
+      await d.close();
+    }
+  });
+});
+
 describe.runIf(process.platform !== "win32")("control: the Stop hook asks the daemon for a queued message", () => {
   let sock: string;
   beforeEach(() => {

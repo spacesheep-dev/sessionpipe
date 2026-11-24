@@ -808,6 +808,18 @@ Code's `CLAUDE_CODE_RESUME_SOURCE_ALIVE` — a daemon MUST use it, or the copy c
 original's transcript pointer and the delivered turn re-enters the person's own
 conversation unseen.
 
+A copy is the session as it was when the copy was made. Once the session itself has
+been written to since a message last ran in its copy, the copy is out of date: a daemon
+SHOULD forget it and copy the session again for the next message, so that message is
+answered knowing what the session has done since (a follow-up while the session has not
+moved still goes to the same copy). And since nothing a copy does appears in the
+session's own conversation, a daemon SHOULD tell the session at its next prompt, as
+context and never as a request, what each message its copies ran was and what the copy
+answered (Claude Code: the `UserPromptSubmit` hook's `additionalContext`). This is at
+most once: a note handed to a hook that has already given up waiting is not handed again.
+A cap on copies a day counts the copies made, including ones made again after being
+retired.
+
 ### `permission.answer`
 
 Delivered through the harness's permission hook answer (Claude Code `PermissionRequest`

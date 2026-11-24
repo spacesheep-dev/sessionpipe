@@ -69,6 +69,14 @@ import type { Pool } from "../pool/index.js";
 import { drain, factsState } from "../run.js";
 import { type Alias, type Aliases, aliasFile, readAliases, receiverIdOf, writeAliases } from "./aliases.js";
 import { closerOf, questionOver } from "./attention.js";
+import {
+  COPY_NOTE_ASK_CHARS,
+  COPY_NOTE_REPLY_CHARS,
+  COPY_NOTE_SESSIONS_KEPT,
+  clip,
+  copyIsStale,
+  copyNotesText,
+} from "./copy-notes.js";
 import { fetchFiles, picturesOf, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
@@ -110,6 +118,7 @@ import {
   type Ack,
   AckOutbox,
   askOn,
+  COPY_NOTES_KEPT,
   type ControlConfig,
   type ControlMode,
   type DaemonState,
@@ -1322,6 +1331,14 @@ export class ControlDaemon {
         this.scheduleHello();
         return;
       }
+      case "notes": {
+        // A session's own UserPromptSubmit asks what its copies did meanwhile; each note
+        // is told once.
+        const ref = parseSessionRef(this.named(req.session));
+        const text = ref ? this.takeCopyNotes(ref.id) : null;
+        this.reply(s, text ? { op: "notes", text } : { op: "none" });
+        return;
+      }
       case "stop": {
         // A hook names its session as the harness does. One this daemon started goes by the
         // start's name (Codex picks its own id), and that is the name its messages wait under.
@@ -2024,6 +2041,9 @@ export class ControlDaemon {
         await this.serial(cmd.session, async () => {});
       };
       const deliver = async (run: OwnRun | null): Promise<void> => {
+        // A copy made while the session was out of reach is the session as it was then.
+        // Once the session itself has moved on, its next message gets a fresh copy.
+        if (kp === "prompt") this.retireStaleCopy(ref, m.id);
         // Read again: the start has ended, or the message before this one may have moved
         // the session (a fork).
         const now = this.place(cmd.session);
@@ -2775,6 +2795,69 @@ export class ControlDaemon {
 
   /** The daemon's own state, written where a restart will read it again. A failure is
    *  logged and nothing else: it costs a record, never a delivery. */
+  /** Forgets a Claude Code session's copy once the session has been written to since a
+   *  message last ran in the copy: the copy is the conversation as it was when it was
+   *  made, and a message answered there knew nothing the session did after (2026-11-24:
+   *  a copy made on the 23rd answered a day of comments on a deck the session had
+   *  rebuilt since). The next message forks a fresh copy, or is delivered in place. A
+   *  follow-up while the session has not moved still goes to the same copy. */
+  private retireStaleCopy(ref: { harness: string; id: string }, id: string): void {
+    if (ref.harness !== "claude-code") return;
+    const c = this.state.copies[ref.id];
+    if (!c) return;
+    const home = resolveHome(ref.id, this.deps.claudeDirs());
+    if (!home || !("transcript" in home)) return;
+    let written: number;
+    try {
+      written = statSync(home.transcript.file).mtimeMs;
+    } catch {
+      /* v8 ignore next -- resolveHome found the file a moment ago; gone since, the copy is kept and place() refuses the session as it would have anyway */
+      return;
+    }
+    if (!copyIsStale(c.used || c.at, written)) return;
+    delete this.state.copies[ref.id];
+    this.saveState(`that ${known(ref.id)} has moved on from its copy`);
+    this.deps.log(
+      `${id.slice(-8)}: the copy ${c.id} is older than ${known(ref.id)}'s own last write, so this message gets a fresh one`,
+    );
+  }
+
+  /** A fork made at `at` (ms), for the day's cap (`copyLimit`); a day's worth is kept. */
+  private countFork(at: number): void {
+    const cut = this.deps.now() - 24 * 3600_000;
+    this.state.forks = [...(this.state.forks ?? []).filter((t) => Date.parse(t) > cut), new Date(at).toISOString()];
+  }
+
+  /** The Claude Code session `copy` is the copy of, where this machine made one. */
+  private originalOf(copy: string): string | null {
+    for (const [orig, c] of Object.entries(this.state.copies)) if (c.id === copy) return orig;
+    return null;
+  }
+
+  /** Keeps what a copy answered, for the session it is a copy of (`takeCopyNotes`). */
+  private noteForOriginal(original: string, at: string, ask: string, reply: string): void {
+    const all = { ...this.state.copy_notes };
+    const notes = [
+      ...(all[original] ?? []),
+      { at, ask: clip(ask, COPY_NOTE_ASK_CHARS), reply: clip(reply, COPY_NOTE_REPLY_CHARS) },
+    ];
+    // A session's note goes last, so the session noted longest ago is the one that drops
+    // out: sessions that never prompt again are not kept for ever.
+    delete all[original];
+    all[original] = notes.slice(-COPY_NOTES_KEPT);
+    this.state.copy_notes = Object.fromEntries(Object.entries(all).slice(-COPY_NOTE_SESSIONS_KEPT));
+  }
+
+  /** What the session's copies answered since it was last told, as context for its next
+   *  prompt, or null. Told once: taken off the record as it is read. */
+  private takeCopyNotes(original: string): string | null {
+    const notes = this.state.copy_notes?.[original];
+    if (!notes?.length) return null;
+    delete (this.state.copy_notes as Record<string, unknown>)[original];
+    this.saveState(`that ${known(original)} was told what its copies did`);
+    return copyNotesText(notes);
+  }
+
   private saveState(what: string): void {
     try {
       writeState(path.join(this.dir, "state.json"), this.state);
@@ -3516,6 +3599,8 @@ export class ControlDaemon {
     // copy, and queued under their own ids they ran in it side by side.
     const key = `claude-code:${target}`;
     let entered = false;
+    // When the run began: what the copy it runs in knows of the session is as of then.
+    let began = 0;
     let heldNow: Holder | null = null;
     const queued = this.serial(key, async () => {
       // Stopped while it waited for the run before it: acked there and then (below), and
@@ -3529,6 +3614,7 @@ export class ControlDaemon {
       if (mode === "resume") heldNow = this.heldBy(target, place.transcript as Transcript);
       if (heldNow) return;
       entered = true;
+      began = this.deps.now();
       // A copy is told it is a copy: its conversation is a replay, the original is
       // elsewhere, and nothing it does there appears in it.
       const body = this.framed(r, cmd.text as string, false) + (why ? `\n\n${copyNote(why.held)}` : "");
@@ -3625,9 +3711,15 @@ export class ControlDaemon {
       // What the ack says about a copy (CONTROL.md §6 `prompt`): that the answer came
       // from one, and why there is one, as the machine found it.
       const notes: string[] = [];
+      const nowIso = new Date(this.deps.now()).toISOString();
+      // A copy knows the session as of when its run began, not when it ended: a write to
+      // the session while the copy ran is one the copy never saw (retireStaleCopy).
+      const beganIso = new Date(began).toISOString();
       if (why && ran !== target) {
         const reason = HELD[why.held]("the session");
-        this.state.copies[ref.id] = { id: ran, at: new Date(this.deps.now()).toISOString(), reason, why: why.held };
+        this.state.copies[ref.id] = { id: ran, at: beganIso, reason, why: why.held, used: beganIso };
+        this.countFork(began);
+        this.noteForOriginal(ref.id, nowIso, cmd.text as string, out.reply);
         this.saveState(`the copy of ${known(ref.id)}`);
         this.runOver("claude-code", ran);
         notes.push(`${COPY_RAN} ${reason}${why.inPlace ? `; it could not be reached in place: ${why.inPlace}` : ""}`);
@@ -3637,6 +3729,17 @@ export class ControlDaemon {
         // wrote says why that was; an older one's reason is not repeated (store.ts).
         const made = this.state.copies[ref.id];
         notes.push(made?.why ? `${COPY_AGAIN} ${made.reason}` : COPY_AGAIN_BARE);
+        (made as { used?: string }).used = beganIso;
+        this.noteForOriginal(ref.id, nowIso, cmd.text as string, out.reply);
+        this.saveState(`the copy of ${known(ref.id)}`);
+      } else {
+        // Sent to a copy by the copy's own id (a receiver that follows the ack's
+        // `session`): the session it is a copy of is still owed the note.
+        const original = this.originalOf(ref.id);
+        if (original) {
+          this.noteForOriginal(original, nowIso, cmd.text as string, out.reply);
+          this.saveState(`what the copy of ${known(original)} answered`);
+        }
       }
       this.finish(
         r,
@@ -3717,7 +3820,11 @@ export class ControlDaemon {
   private copyLimit(): string | null {
     const cap = this.limits().copiesPerDay;
     const cut = this.deps.now() - 24 * 3600_000;
-    const today = Object.values(this.state.copies).filter((c) => (Date.parse(c.at) || 0) > cut).length;
+    // Counted by the forks made, not the copies on record: a copy retired for being out of
+    // date (retireStaleCopy) and made again is two copies, under one session's name.
+    const recorded = Object.values(this.state.copies).filter((c) => (Date.parse(c.at) || 0) > cut).length;
+    const forked = (this.state.forks ?? []).filter((t) => Date.parse(t) > cut).length;
+    const today = Math.max(recorded, forked);
     if (today < cap) return null;
     return cap
       ? `this machine has already made ${today} copies of sessions today, which is its limit; a copy replays a whole conversation, so they are capped here`
