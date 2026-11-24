@@ -23,6 +23,7 @@ import type {
   InstallOptions,
   InstallReport,
   SessionFacts,
+  TurnEnd,
 } from "./types.js";
 
 const NAME = "codex";
@@ -47,6 +48,27 @@ const codexHome = (env: NodeJS.ProcessEnv) => env.CODEX_HOME || path.join(homeDi
 const hooksFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "hooks.json");
 const configFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "config.toml");
 const sessionsDir = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "sessions");
+
+/** How much of a rollout's end is read for a turn's end record. */
+const TURN_END_TAIL = 4 * 1024 * 1024;
+
+/** One line of a rollout, or null for one that is not JSON. */
+function rolloutLine(line: string): { type?: unknown; payload?: Record<string, unknown> } | null {
+  try {
+    return JSON.parse(line) as { type?: unknown; payload?: Record<string, unknown> } | null;
+  } catch {
+    return null;
+  }
+}
+
+/** Codex's class for an error (`codex_error_info`): a name (`usage_limit_exceeded`,
+ *  `unauthorized`, `other`), or an object whose one key is the name
+ *  (`{"response_too_many_failed_attempts": {"http_status_code": 500}}`). The name alone:
+ *  the error's message can hold an address or the service's own words. */
+function errorClass(info: unknown): string | undefined {
+  const name = typeof info === "string" ? info : info && typeof info === "object" ? Object.keys(info)[0] : undefined;
+  return name && /^[a-z][a-z0-9_]{0,63}$/.test(name) ? name : undefined;
+}
 
 const validTool = (n: unknown): n is string => typeof n === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(n);
 const endReason = (r: unknown): "clear" | "logout" | "exit" | "other" =>
@@ -388,6 +410,28 @@ export const codex: Adapter = {
       return { turns: [], line: fromLine };
     }
     return readCodex(text.split("\n"), fromLine);
+  },
+
+  /** A turn's end as its rollout says it: `task_complete` (with an `error` when the turn
+   *  failed, whose `codex_error_info` is the error's class) or `turn_aborted`, each
+   *  naming its `turn_id`, the id the hooks give (0.171.0). */
+  turnEnd(transcript, turnId): TurnEnd | null {
+    // From the end, and no further back than TURN_END_TAIL: the turn asked about is the
+    // last one or the one before it, and a rollout runs to hundreds of megabytes.
+    const lines = ends(transcript, 0, TURN_END_TAIL).tail;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i] as string;
+      if (!line.includes(turnId) || !/"(task_complete|turn_aborted)"/.test(line)) continue;
+      const j = rolloutLine(line);
+      const p = j?.payload;
+      if (j?.type !== "event_msg" || !p || p.turn_id !== turnId) continue;
+      if (p.type === "turn_aborted") return { reason: "interrupt" };
+      if (p.type !== "task_complete") continue;
+      if (!p.error) return { reason: "stop" };
+      const cls = errorClass((p.error as { codex_error_info?: unknown }).codex_error_info);
+      return { reason: "error", ...(cls ? { error: cls } : {}) };
+    }
+    return null;
   },
 
   facts(session, transcript): SessionFacts {

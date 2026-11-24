@@ -409,8 +409,8 @@ export function openTurn(
   // take it off the transcript's copy: the reading is the person's words there too.
   const prompt = o.prompt === undefined ? undefined : deliveredWords(o.prompt.trim()).text;
   if (prompt && !isInjected(prompt) && !(last && last.user.includes(prompt.slice(0, 200)))) return fresh(prompt, o.at);
-  // A turn the person interrupted is over: it is not the one running now.
-  if (!last || last.interrupted) return null;
+  // A turn the person interrupted, or one that failed, is over: it is not the one running now.
+  if (!last || last.interrupted || last.failed) return null;
   return {
     turn: o.base + read.turns.length - 1,
     user: last.user.slice(0, MAX_TURN_SIDE),
@@ -420,6 +420,9 @@ export function openTurn(
   };
 }
 const MAX_TURN_SIDE = 20_000;
+/** The events at which a turn the hooks still hold as running can no longer be running
+ *  (a compaction is not one: it happens in the middle of a turn). */
+const NOT_RUNNING = new Set(["turn.started", "session.started", "session.ended"]);
 
 /** A turn's Stop can come before the turn's last row is in the transcript: Claude Code
  *  queues its transcript writes and flushes them on a 100 ms timer, and a terminal
@@ -459,8 +462,8 @@ export function closedTurns(
   const waiting = !whole && o.due !== undefined;
   if (whole) return { turns: read.turns, line: read.line, waiting };
   if (!read.tail) return { turns: [], line: read.line, waiting };
-  if (read.open || read.turns[read.turns.length - 1]?.interrupted)
-    return { turns: read.turns, line: read.line, waiting };
+  const end = read.turns[read.turns.length - 1];
+  if (read.open || end?.interrupted || end?.failed) return { turns: read.turns, line: read.line, waiting };
   // The last turn may still be growing.
   return { turns: read.turns.slice(0, -1), line: read.tail.start, waiting };
 }
@@ -800,6 +803,20 @@ export async function runJob(
           )))
     )
       events.push(...turnEvents(transcript, { due: dueBefore, open: openBefore }).events);
+    // A turn that failed and no hook ended. Codex fires neither its Stop hook nor its
+    // notify for a turn its model's service refused, so the hooks hold that turn as
+    // running until something shows it cannot be: the next prompt, a start, the session's
+    // end. The harness's own file says the turn failed (ADAPTERS.md, Codex), and that is
+    // reported first, at every tier: the file is asked one question and none of its words
+    // go out. Only a failure is taken from the file: a turn that finished or was stopped
+    // has a hook of its own, which may simply come after this one.
+    if (openBefore !== undefined && adapter.turnEnd && r.transcript && r.events.some((e) => NOT_RUNNING.has(e.type))) {
+      const end = adapter.turnEnd(r.transcript, openBefore);
+      if (end?.reason === "error") {
+        events.push(stamp({ type: "turn.ended", harnessEvent: job.event, data: { turn_id: openBefore, ...end } }));
+        facts.save(job.harness, id, { open_turn: null });
+      }
+    }
     for (const a of r.events) events.push(stamp(a));
     // Tier 2, while a turn runs: what it has said so far, so a receiver can show a long
     // turn before it ends. On the prompt, then at most every PROGRESS_MS on a tool call,
@@ -829,7 +846,16 @@ export async function runJob(
     }
     // The turn running now, by its prompt's id, until it ends (for `absorbed`).
     if (starting && typeof startedId === "string" && !absorbed) facts.save(job.harness, id, { open_turn: startedId });
-    if (ending) facts.save(job.harness, id, { open_turn: null });
+    // An end that names another turn than the one held as running is a late one: its
+    // worker lost the lock to the next prompt's. Where the harness's file can say how a
+    // turn ended (above), the running turn stays held, so that it can still be asked about.
+    const late =
+      !!adapter.turnEnd &&
+      typeof endId === "string" &&
+      typeof before.open_turn === "string" &&
+      endId !== before.open_turn &&
+      !r.events.some((e) => e.type === "session.ended");
+    if (ending && !late) facts.save(job.harness, id, { open_turn: null });
     // Tier 2: after a turn ends, the transcript's new turns become turn.transcript events.
     // A Stop that names the turn's last words is held to them (see SETTLE_FAST_MS): a
     // swept job is seconds old, so it reads once.
