@@ -6,7 +6,8 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   agyArgs,
   agyEnv,
@@ -19,10 +20,15 @@ import {
   codexArgs,
   codexEnv,
   codexLine,
+  codexLocks,
   codexLogin,
+  codexQueue,
   reading as codexReading,
   findCodex,
   findRollout,
+  heldElsewhere,
+  lastTurn,
+  threadLocked,
 } from "../src/adapters/codex-control.js";
 import { drivableHarnesses, runHeadless } from "../src/adapters/index.js";
 
@@ -534,5 +540,228 @@ describe("codex exec --json as recorded (conformance/control-codex-exec-stream.j
     ]);
     // A command that failed inside a turn that finished is not a failed turn.
     expect(recorded.runs[0]?.lines.some((l) => l.includes('"status":"failed"'))).toBe(true);
+  });
+});
+
+// A thread a live Codex process has open (CONTROL.md §6.4), as codex-cli 0.171.0 answered
+// on 2026-11-24: a second writer's refusal, `codex queue`'s own two lines, and the turn
+// records a headless run and a window leave in a rollout.
+describe("a thread a live Codex process holds", () => {
+  const OTHER = "0199c0de-1111-7222-8333-944455556666";
+  const refusal = (thread: string) =>
+    [
+      "warning: Untrusted project-local configuration is disabled. Run `codex exec --trust` to allow project configuration and MCP servers for this and future chats in the project, including MCP commands outside the sandbox. Explicitly untrusted projects must have their trust setting updated first.",
+      `2026-11-24T21:25:11.777334Z ERROR codex_core::session::session: failed to initialize thread persistence: thread-store conflict: thread ${thread} already has an active writer`,
+      `2026-11-24T21:25:11.777398Z ERROR codex_core::session: Failed to create session: thread-store conflict: thread ${thread} already has an active writer`,
+      `Error: thread/resume: thread/resume failed: thread ${thread} already has an active writer (code -32600)`,
+      "",
+    ].join("\n");
+
+  it("heldElsewhere: Codex's own refusal of a second writer for this thread, and no other failure", () => {
+    expect(heldElsewhere({ code: 1, stdout: "", stderr: refusal(THREAD) }, THREAD)).toBe(true);
+    expect(heldElsewhere({ code: 1, stderr: refusal(THREAD) }, THREAD.toUpperCase())).toBe(true);
+    // The same words from a run that did not end that way, about another thread, another
+    // refusal, and no words.
+    expect(heldElsewhere({ code: 0, stderr: refusal(THREAD) }, THREAD)).toBe(false);
+    expect(heldElsewhere({ code: null, signal: "SIGTERM", stderr: refusal(THREAD) }, THREAD)).toBe(false);
+    expect(heldElsewhere({ code: 1, stderr: refusal(OTHER) }, THREAD)).toBe(false);
+    expect(
+      heldElsewhere({ code: 1, stderr: "Error: thread/resume: thread/resume failed: no rollout found" }, THREAD),
+    ).toBe(false);
+    expect(heldElsewhere({ code: 1 }, THREAD)).toBe(false);
+  });
+
+  it("threadLocked: the thread's own lock file is there, or it is not", () => {
+    const home = path.join(tmp, "codex-locks");
+    mkdirSync(home, { recursive: true });
+    expect(threadLocked(THREAD, { CODEX_HOME: home })).toBe(false);
+    // The folder alone (it stays once any thread was opened), and another thread's file.
+    mkdirSync(path.join(home, "thread-writer-locks"));
+    writeFileSync(path.join(home, "thread-writer-locks", ".coordination.lock"), "");
+    writeFileSync(path.join(home, "thread-writer-locks", `${OTHER}.lock`), "");
+    expect(threadLocked(THREAD, { CODEX_HOME: home })).toBe(false);
+    writeFileSync(path.join(home, "thread-writer-locks", `${THREAD}.lock`), "");
+    expect(threadLocked(THREAD, { CODEX_HOME: home })).toBe(true);
+    expect(threadLocked(THREAD.toUpperCase(), { CODEX_HOME: home })).toBe(true);
+    // A name that is no thread id is never looked for.
+    expect(threadLocked("../thread-writer-locks/x", { CODEX_HOME: home })).toBe(false);
+    expect(threadLocked("", { CODEX_HOME: home })).toBe(false);
+    // Asked of this process's own environment when none is given.
+    vi.stubEnv("CODEX_HOME", home);
+    try {
+      expect(threadLocked(THREAD)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  // A stand-in `codex` as npm leaves it on Windows (a .cmd naming its script), which runs
+  // under this node on every platform, with no shell.
+  const dir = path.join(tmp, "codex-queue");
+  const cli = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+  const shim = path.join(dir, "codex.cmd");
+  const seen = path.join(dir, "seen.json");
+  const stand = (body: string) => {
+    mkdirSync(path.dirname(cli), { recursive: true });
+    writeFileSync(
+      cli,
+      `const fs = require("fs");\nconst a = process.argv.slice(2);\nfs.writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: a, job: process.env.SESSIONPIPE_CONTROL_JOB || null, home: process.env.CODEX_HOME || null }));\n${body}\n`,
+    );
+    writeFileSync(shim, `@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
+  };
+
+  it("codexLocks: the binary's own version says whether another process's lock stops it", () => {
+    const says = (text: string, code = 0) => {
+      stand(`process.stdout.write(${JSON.stringify(text)}); process.exit(${code});`);
+      return codexLocks(shim, { PATH: process.env.PATH });
+    };
+    expect(says("codex-cli 0.171.0\n")).toBe(true);
+    expect(JSON.parse(readFileSync(seen, "utf8")).argv).toEqual(["--version"]);
+    expect(says("codex-cli 0.171.3\n")).toBe(true);
+    expect(says("codex-cli 0.172.0\n")).toBe(true);
+    expect(says("codex-cli 1.0.0\n")).toBe(true);
+    // Before the version it was measured on, a binary that says no version, one that fails.
+    expect(says("codex-cli 0.170.9\n")).toBe(false);
+    expect(says("codex-cli 0.99.12\n")).toBe(false);
+    expect(says("codex\n")).toBe(false);
+    expect(says("codex-cli 0.171.0\n", 3)).toBe(false);
+    expect(codexLocks(path.join(dir, "no-codex-here"), {})).toBe(false);
+    // With this process's own environment when none is given.
+    stand(`process.stdout.write("codex-cli 0.171.0");`);
+    expect(codexLocks(shim)).toBe(true);
+  });
+
+  it("lastTurn: how the thread's last turn stands, however far back its start is", () => {
+    const f = path.join(tmp, "last-turn.jsonl");
+    const at = "2026-11-24T21:25:52.381Z";
+    const began = (turn_trigger?: string) =>
+      j({
+        timestamp: at,
+        type: "event_msg",
+        payload: { type: "task_started", ...(turn_trigger ? { turn_attribution: { turn_trigger } } : {}) },
+      });
+    const over = (type: string) => j({ type: "event_msg", payload: { type } });
+    const meta = j({ type: "session_meta", payload: { id: THREAD } });
+    const is = (...rows: string[]) => {
+      writeFileSync(f, `${[meta, ...rows].join("\n")}\n`);
+      const t = lastTurn(f);
+      return t && { open: t.open, trigger: t.trigger, at: t.at };
+    };
+    const running = (trigger: string | null) => ({ open: true, trigger, at: Date.parse(at) });
+    const done = { open: false, trigger: null, at: 0 };
+    expect(is(began("exec"))).toEqual(running("exec"));
+    expect(is(began("user"))).toEqual(running("user"));
+    expect(is(began("queue"))).toEqual(running("queue"));
+    // What the turn wrote meanwhile changes nothing; neither does a line that is no JSON.
+    expect(
+      is(
+        began("exec"),
+        j({ type: "response_item", payload: { type: "message" } }),
+        j({ type: "event_msg", payload: { type: "token_count" } }),
+        j({ type: "event_msg" }),
+        '{"type":"event_msg","payload":',
+        "null",
+      ),
+    ).toEqual(running("exec"));
+    // Over, either way a turn ends; and the turn after it.
+    expect(is(began("exec"), over("task_complete"))).toEqual(done);
+    expect(is(began("exec"), over("turn_aborted"))).toEqual(done);
+    expect(is(over("task_complete"), began("user"), over("task_complete"), began("exec"))).toEqual(running("exec"));
+    // A Codex from before it said what began a turn, and a start with no time on it.
+    expect(is(began())).toEqual(running(null));
+    expect(
+      is(j({ type: "event_msg", payload: { type: "task_started", turn_attribution: { turn_trigger: 7 } } })),
+    ).toEqual({
+      open: true,
+      trigger: null,
+      at: 0,
+    });
+    // No turn at all, an empty file, and no file.
+    expect(is()).toBeNull();
+    writeFileSync(f, "");
+    expect(lastTurn(f)).toBeNull();
+    expect(lastTurn(path.join(tmp, "no-such-rollout.jsonl"))).toBeNull();
+    // A turn that has written more since it began than any fixed tail holds: 3 MiB of
+    // output in rows of a quarter MiB, and one row longer than a piece read at a time.
+    const output = (n: number) =>
+      j({ type: "response_item", payload: { type: "function_call_output", output: "x".repeat(n) } });
+    const long = [began("exec"), ...Array.from({ length: 12 }, () => output(256 * 1024)), output(1500 * 1024)];
+    expect(is(...long)).toEqual(running("exec"));
+    // When the file was last written is told too.
+    expect(lastTurn(f)?.written).toBeGreaterThan(Date.now() - 60_000);
+    // As recorded: a window's two finished turns, the second taken from its queue.
+    expect(
+      lastTurn(fileURLToPath(new URL("../../../conformance/transcripts/codex/queued.jsonl", import.meta.url))),
+    ).toMatchObject({
+      open: false,
+    });
+  });
+
+  const TEXT = `Message via board.example.com (sessionpipe control; message 000123456789):\n\n-n "$(id)" & 'quoted' \\ %PATH% é\n\nlast line`;
+  const QUEUED = `console.log("Queued message 01a20f72-ce2c-7b53-ae19-98e81248ae3d for thread " + a[2] + ".");`;
+
+  it("codexQueue: one command, the message as one argument whatever it holds; ok when Codex says it is queued", async () => {
+    stand(
+      `${QUEUED}\nconsole.error("Warning: message was queued, but could not resume thread " + a[2] + ": start a local daemon or specify a server with --remote");`,
+    );
+    expect(await codexQueue(shim, THREAD, TEXT, { PATH: process.env.PATH, CODEX_HOME: "/h" })).toEqual({
+      ok: true,
+      said: "",
+    });
+    expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual({
+      argv: ["queue", "--thread", THREAD, `--message=${TEXT}`, "--resume"],
+      job: "1",
+      home: "/h",
+    });
+    // A message that begins with a dash is still the message: it is joined to its flag.
+    await codexQueue(shim, THREAD, "--help me", { PATH: process.env.PATH });
+    expect(JSON.parse(readFileSync(seen, "utf8")).argv[3]).toBe("--message=--help me");
+    // With this process's own environment when none is given.
+    expect(await codexQueue(shim, THREAD, "hi")).toEqual({ ok: true, said: "" });
+    // Codex's word is the hand-over, however the command ended after it.
+    stand(`${QUEUED}\nprocess.exit(3);`);
+    expect(await codexQueue(shim, THREAD, TEXT, { PATH: process.env.PATH })).toEqual({ ok: true, said: "" });
+    stand(`${QUEUED}\nsetTimeout(() => {}, 30000);`);
+    expect(await codexQueue(shim, THREAD, TEXT, { PATH: process.env.PATH }, { timeoutMs: 600 })).toEqual({
+      ok: true,
+      said: "",
+    });
+  });
+
+  it("codexQueue: not queued is said in Codex's words or by how it ended, never with the message or this machine's home", async () => {
+    const env = { PATH: process.env.PATH };
+    stand(
+      `console.error("error: unrecognized subcommand 'queue'\\n\\nUsage: codex [OPTIONS] [PROMPT]"); process.exit(2);`,
+    );
+    const old = await codexQueue(shim, THREAD, TEXT, env);
+    expect(old.ok).toBe(false);
+    expect(old.said).toMatch(/^error: unrecognized subcommand 'queue'\s+Usage: codex/);
+    // Codex names a file under the person's home: the home is not sent anywhere.
+    stand(`console.error("Error: failed to open /home/someone/.codex/queue_1.sqlite"); process.exit(1);`);
+    expect(await codexQueue(shim, THREAD, TEXT, env, { home: "/home/someone" })).toEqual({
+      ok: false,
+      said: "Error: failed to open ~/.codex/queue_1.sqlite",
+    });
+    // It ended badly and said nothing; it ended well and did not say the message is queued.
+    stand("process.exit(3);");
+    expect(await codexQueue(shim, THREAD, TEXT, env)).toEqual({ ok: false, said: "it exited with code 3" });
+    stand(`console.log("ok");`);
+    expect(await codexQueue(shim, THREAD, TEXT, env)).toEqual({ ok: false, said: "" });
+    // There is no such program; a launcher that names none.
+    const none = await codexQueue(path.join(dir, "no-codex-here"), THREAD, TEXT, {});
+    expect(none).toEqual({ ok: false, said: "it could not be run" });
+    writeFileSync(path.join(dir, "empty.cmd"), "@ECHO off\r\n");
+    const unnamed = await codexQueue(path.join(dir, "empty.cmd"), THREAD, TEXT, {});
+    expect(unnamed.ok).toBe(false);
+    expect(unnamed.said).toMatch(/^empty\.cmd is a launcher script that names no program to run/);
+    for (const r of [old, none, unnamed]) expect(r.said).not.toContain("last line");
+  });
+
+  it("codexQueue: a command that never ends leaves it unknown whether the message is queued", async () => {
+    stand("setTimeout(() => {}, 30000);");
+    expect(await codexQueue(shim, THREAD, TEXT, { PATH: process.env.PATH }, { timeoutMs: 400 })).toEqual({
+      ok: null,
+      said: "it did not answer in time",
+    });
   });
 });

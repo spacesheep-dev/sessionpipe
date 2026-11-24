@@ -492,3 +492,70 @@ describe("a message handed over at a Stop (conformance/transcripts/codex/stop-bl
     ]);
   });
 });
+
+// A window with one turn of the person's own, then a message put in Codex's own queue for
+// the thread while the window had it (`codex queue --thread … --message … --resume`):
+// recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24.
+const QUEUED = fileURLToPath(new URL("../../../conformance/transcripts/codex/queued.jsonl", import.meta.url));
+
+describe("a message taken from Codex's own queue (conformance/transcripts/codex/queued.jsonl)", () => {
+  const lines = readFileSync(QUEUED, "utf8").split("\n");
+  const turns = (ls: string[]) => readCodex(ls, 0).turns.map(({ at: _at, endLine: _end, ...t }) => t);
+
+  it("is a turn of its own, which Codex says the queue began: the person's words, sent from elsewhere", () => {
+    const began = lines.filter((l) => l.includes('"task_started"')).map((l) => JSON.parse(l).payload.turn_attribution);
+    expect(began.map((b) => b.turn_trigger)).toEqual(["user", "queue"]);
+    // The queued message is an ordinary prompt of the person's to Codex, in sessionpipe's frame.
+    const row = JSON.parse(lines.find((l) => l.includes("Message via")) as string).payload;
+    expect(row).toMatchObject({ type: "message", role: "user" });
+    expect(row.internal_chat_message_metadata_passthrough.content_item_metadata).toEqual([
+      { provenance: { type: "user" } },
+    ]);
+    const r = readCodex(lines, 0);
+    expect(turns(lines)).toEqual([
+      { user: "SAY: hello from the window", assistant: "hello from the window" },
+      { user: "Is the build green? Say why & how.", assistant: "done", injected: true },
+    ]);
+    expect(r.ended).toBe(true);
+    expect(JSON.stringify(r)).not.toMatch(/Message via|sent back to them/);
+    expect(codexFacts(QUEUED).title).toBe("SAY: hello from the window");
+    // Not answered yet: the open turn says the same of its ask.
+    const at = lines.findIndex((l) => l.includes("Message via"));
+    expect(readCodex(lines.slice(0, at + 1), 0).open).toMatchObject({
+      user: "Is the build green? Say why & how.",
+      injected: true,
+    });
+  });
+
+  it("the same frame as the prompt of a headless turn is that turn's own ask, without the frame", () => {
+    // What a `codex exec resume` the daemon runs is given (the `resume` mode).
+    const headless = lines.map((l) => l.replace('"turn_trigger":"queue"', '"turn_trigger":"exec"'));
+    expect(headless).not.toEqual(lines);
+    expect(turns(headless)[1]).toEqual({ user: "Is the build green? Say why & how.", assistant: "done" });
+    // A rollout from before Codex said what began a turn.
+    const old = lines.filter((l) => !l.includes('"task_started"'));
+    expect(turns(old)[1]).toEqual({ user: "Is the build green? Say why & how.", assistant: "done" });
+  });
+
+  it("a frame around words that are nobody's ask opens no turn; words in no frame are kept as typed", () => {
+    const at = lines.findIndex((l) => l.includes("Message via"));
+    const framed = JSON.parse(lines[at] as string);
+    const text = framed.payload.content[0].text as string;
+    const withWords = (words: string) => {
+      const row = structuredClone(framed);
+      row.payload.content[0].text = words;
+      return [...lines.slice(0, at), JSON.stringify(row), ...lines.slice(at + 1)];
+    };
+    // A harness's own notification inside the frame: the readers skip it wherever it is.
+    const note = text.replace("Is the build green? Say why & how.", "<task-notification>done</task-notification>");
+    expect(note).not.toBe(text);
+    expect(turns(withWords(note))).toEqual([
+      { user: "SAY: hello from the window", assistant: "hello from the window\n\ndone" },
+    ]);
+    // Typed into the window while it took its queue: the person's own turn, as written.
+    expect(turns(withWords("message 000123456789 was mine"))[1]).toEqual({
+      user: "message 000123456789 was mine",
+      assistant: "done",
+    });
+  });
+});
