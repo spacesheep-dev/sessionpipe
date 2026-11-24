@@ -1,0 +1,42 @@
+{
+  "spec": "CONTROL.md \u00a76 `fork`, A copy is the session as it was",
+  "note": "Whether a session's copy is out of date, so the next message for the session gets a fresh copy rather than this one. `last_ran` is when a message last ran in the copy, as the copy's record says (its `used`, else its `at`; empty: a record that never said). `session_written_s` is when the session's own transcript was last written, in seconds relative to `last_ran` (negative: before it). A write while the copy's run was going on is one the copy never saw. `expect`: `stale` (forget it, copy the session again) or `current` (keep sending the session's messages to it).",
+  "cases": [
+    {
+      "name": "the session was written to a day after its copy last ran",
+      "last_ran": "2026-11-23T17:42:50.665Z",
+      "session_written_s": 86400,
+      "expect": "stale"
+    },
+    {
+      "name": "written ten minutes after",
+      "last_ran": "2026-11-24T19:40:52.319Z",
+      "session_written_s": 600,
+      "expect": "stale"
+    },
+    {
+      "name": "not written to since the copy last ran",
+      "last_ran": "2026-11-24T19:40:52.319Z",
+      "session_written_s": -3600,
+      "expect": "current"
+    },
+    {
+      "name": "written while the copy's run was still going, a second after it began",
+      "last_ran": "2026-11-24T19:40:52.319Z",
+      "session_written_s": 1,
+      "expect": "stale"
+    },
+    {
+      "name": "written in the same instant the copy's run began",
+      "last_ran": "2026-11-24T19:40:52.319Z",
+      "session_written_s": 0,
+      "expect": "current"
+    },
+    {
+      "name": "a record that never said when (0.10.0 and earlier wrote the id alone)",
+      "last_ran": "",
+      "session_written_s": 86400,
+      "expect": "current"
+    }
+  ]
+}

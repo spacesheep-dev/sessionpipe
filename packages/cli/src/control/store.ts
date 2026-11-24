@@ -326,7 +326,23 @@ export interface Copy {
    *  `Holder`). Absent on a record a daemon up to 0.13.3 wrote: those all say the session
    *  "was open", whether it was or not, so their reason is not repeated to anyone. */
   why?: CopyWhy;
+  /** When a message last ran in the copy, ISO-8601. A session written to after this has
+   *  moved on, and its next message gets a fresh copy rather than this one (daemon.ts
+   *  `retireStaleCopy`). Absent on older records: `at` stands for it. */
+  used?: string;
 }
+
+/** What a copy answered for a session that could not be reached in place: kept for the
+ *  session itself, which is told at its next prompt (CONTROL.md §6 `fork`), since nothing
+ *  the copy did appears in its own conversation. */
+export interface CopyNote {
+  at: string;
+  ask: string;
+  reply: string;
+}
+
+/** At most this many notes wait for a session; the oldest are dropped. */
+export const COPY_NOTES_KEPT = 8;
 
 export { COPY_WHYS, type CopyWhy };
 
@@ -337,11 +353,13 @@ const asCopy = (v: unknown): Copy | null => {
   const c = v as { id?: unknown; at?: unknown; reason?: unknown; why?: unknown };
   if (typeof c.id !== "string" || !c.id) return null;
   const why = COPY_WHYS.find((w) => w === c.why);
+  const used = (c as { used?: unknown }).used;
   return {
     id: c.id,
     at: typeof c.at === "string" ? c.at : "",
     reason: typeof c.reason === "string" ? c.reason : "",
     ...(why ? { why } : {}),
+    ...(typeof used === "string" && used ? { used } : {}),
   };
 };
 
@@ -381,6 +399,12 @@ export interface DaemonState {
    *  like `mid_turn`; read back pruned to the ends that still count (`endStillCounts`).
    *  Absent: none. */
   ended?: Record<string, string>;
+  /** Original session id → what its copies answered that it has not been told yet
+   *  (`CopyNote`). Absent: none. */
+  copy_notes?: Record<string, CopyNote[]>;
+  /** When each copy of the last day was made, ISO-8601, for the day's cap: a session's
+   *  copy can be retired and made again, so the copies on record undercount. */
+  forks?: string[];
   /** Session ref → when a run asked to copy it, and not known to have run anywhere else,
    *  ended (ISO-8601): the session is held for 90 seconds after that, whatever end its
    *  hooks reported meanwhile (§6). Carried with `ended`, which without it would account
@@ -396,6 +420,13 @@ export interface MidTurn {
   transcript?: string;
 }
 
+const isCopyNote = (n: unknown): n is CopyNote =>
+  !!n &&
+  typeof n === "object" &&
+  typeof (n as CopyNote).at === "string" &&
+  typeof (n as CopyNote).ask === "string" &&
+  typeof (n as CopyNote).reply === "string";
+
 export function readState(file: string, now: number = Date.now()): DaemonState {
   const copies: Record<string, Copy> = {};
   const started: Record<string, StartOptions> = {};
@@ -404,6 +435,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
   const mid_turn: Record<string, MidTurn> = {};
   let ended: Record<string, string> | undefined;
   let strays: Record<string, string> | undefined;
+  let copy_notes: Record<string, CopyNote[]> | undefined;
+  let forks: string[] | undefined;
   try {
     const j = JSON.parse(readFileSync(file, "utf8")) as {
       copies?: unknown;
@@ -414,6 +447,8 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
       mid_turn?: unknown;
       ended?: unknown;
       strays?: unknown;
+      copy_notes?: unknown;
+      forks?: unknown;
     };
     if (j.started && typeof j.started === "object")
       for (const [k, v] of Object.entries(j.started)) {
@@ -443,6 +478,18 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
             ...(typeof m.transcript === "string" ? { transcript: m.transcript } : {}),
           };
       }
+    if (j.copy_notes && typeof j.copy_notes === "object")
+      for (const [k, v] of Object.entries(j.copy_notes as Record<string, unknown>)) {
+        if (!Array.isArray(v)) continue;
+        const kept = v.filter(isCopyNote).slice(-COPY_NOTES_KEPT);
+        if (!kept.length) continue;
+        copy_notes = copy_notes ?? {};
+        copy_notes[k] = kept;
+      }
+    if (Array.isArray(j.forks)) {
+      const day = j.forks.filter((t): t is string => typeof t === "string" && now - Date.parse(t) < 24 * 3600_000);
+      if (day.length) forks = day;
+    }
     ended = timesKept(j.ended, now, endStillCounts);
     strays = timesKept(j.strays, now, stillRecent);
     // The richer shape when it is there, the plain id map when it isn't.
@@ -453,7 +500,17 @@ export function readState(file: string, now: number = Date.now()): DaemonState {
         if (c) copies[k] = c;
       }
   } catch {}
-  return { copies, started, modes, parked, mid_turn, ...(ended ? { ended } : {}), ...(strays ? { strays } : {}) };
+  return {
+    copies,
+    started,
+    modes,
+    parked,
+    mid_turn,
+    ...(ended ? { ended } : {}),
+    ...(strays ? { strays } : {}),
+    ...(copy_notes ? { copy_notes } : {}),
+    ...(forks ? { forks } : {}),
+  };
 }
 
 /** A map of session ref → ISO time as state.json keeps one (`ended`, `strays`): the

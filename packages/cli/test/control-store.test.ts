@@ -272,6 +272,38 @@ describe("forks and aliases on disk", () => {
     expect(readState(f).parked).toEqual({ "claude-code:a": { at: fresh, id: "01K6" } });
     writeFileSync(f, JSON.stringify({ parked: "none" }));
     expect(readState(f).parked).toEqual({});
+    // When a copy last ran, kept where the record has it; anything else is dropped.
+    writeFileSync(
+      f,
+      JSON.stringify({ copies_v2: { a: { ...copy, used: fresh }, b: { ...copy, used: 7 }, c: { ...copy, used: "" } } }),
+    );
+    expect(readState(f).copies).toEqual({ a: { ...copy, used: fresh }, b: copy, c: copy });
+    // What copies answered for a session not yet told: only well-formed notes, the last
+    // eight of them, and no entry for a session left with none.
+    const note = { at: fresh, ask: "drop", reply: "done" };
+    writeFileSync(
+      f,
+      JSON.stringify({
+        copy_notes: {
+          a: Array.from({ length: 10 }, (_, i) => ({ ...note, ask: `n${i}` })),
+          b: [note, { at: fresh, ask: 7, reply: "x" }, null, "note", { at: fresh, ask: "q" }],
+          c: [{ ask: "q", reply: "r" }],
+          d: "none",
+        },
+      }),
+    );
+    const notes = readState(f).copy_notes as Record<string, { ask: string }[]>;
+    expect(Object.keys(notes)).toEqual(["a", "b"]);
+    expect(notes.a?.map((n) => n.ask)).toEqual(["n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9"]);
+    expect(notes.b).toEqual([note]);
+    writeFileSync(f, JSON.stringify({ copy_notes: "none" }));
+    expect(readState(f).copy_notes).toBeUndefined();
+    // The copies made in the last day, for the cap: older ones and non-times dropped.
+    const old = new Date(Date.now() - 25 * 3600_000).toISOString();
+    writeFileSync(f, JSON.stringify({ forks: [fresh, old, 7, "whenever"] }));
+    expect(readState(f).forks).toEqual([fresh]);
+    writeFileSync(f, JSON.stringify({ forks: [old] }));
+    expect(readState(f).forks).toBeUndefined();
     // The clock it is read against is the daemon's own.
     writeFileSync(f, JSON.stringify({ parked: { "claude-code:a": { at: fresh, id: "01K6" } } }));
     expect(readState(f, Date.now() + 400_000).parked).toEqual({});
