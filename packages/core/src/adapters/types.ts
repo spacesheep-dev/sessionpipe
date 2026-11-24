@@ -194,7 +194,7 @@ export interface Adapter {
   toolResult?(transcript: string, callId: string): { ok?: boolean; error?: string } | null;
   /** The account's limits as the transcript last recorded them (`limits.observed` data),
    *  for a harness that writes them there; null when it holds none. */
-  limits?(transcript: string): DataOf<"limits.observed"> | null;
+  limits?(transcript: string, about?: { state: FactsState; session: string }): DataOf<"limits.observed"> | null;
 }
 
 /** Small per-session memory the facts pass keeps under <state>/facts/. */

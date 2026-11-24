@@ -26,6 +26,7 @@ import {
   claudeAccountDirs,
   claudeAccounts,
   claudeControl,
+  codexAccounts,
   codexControl,
   configFile,
   DELEGATED_BY_ENV,
@@ -249,6 +250,8 @@ const SDK_CAPS: Caps = {
  *  grant alone — a stolen receiver session must not be able to put its own account
  *  first or take the person's out. */
 const POOL_CONFIRM = new Set(["on", "off", "remove", "order", "disable", "login.complete"]);
+/** How many accounts a hello names at most. */
+const HELLO_ACCOUNTS_MAX = 20;
 
 /** A failure the harness puts down to the model it was asked to run. */
 const MODEL_FAILURE_RE = /\bmodel\b/i;
@@ -2332,10 +2335,16 @@ export class ControlDaemon {
     return null;
   }
 
-  /** Who is signed in here, for hello. A bad .claude.json names nobody, never fails a hello. */
+  /** Who is signed in here, for hello: each Claude Code account, then Codex's. A bad
+   *  .claude.json, or a Codex sign-in file that cannot be read, names nobody and never
+   *  fails a hello. */
   private accounts(): HarnessAccount[] {
     try {
-      return this.deps.accounts ? this.deps.accounts() : claudeAccounts(this.deps.claudeDirs());
+      const all = this.deps.accounts
+        ? this.deps.accounts()
+        : [...claudeAccounts(this.deps.claudeDirs()), ...codexAccounts(this.deps.env ?? process.env)];
+      // No more than a hello may carry (schemas/v1/control-hello.json).
+      return all.slice(0, HELLO_ACCOUNTS_MAX);
     } catch {
       return [];
     }

@@ -60,7 +60,10 @@
   window recorded the same way: one turn typed into it, then a message put in Codex's own queue
   for the thread while the window had it, which Codex writes as a turn `turn_trigger: "queue"`
   began) by both tests as well, for the queued message as the person's own turn and for its
-  answer, and by `packages/core/test/control-runners.test.ts`.
+  answer, and by `packages/core/test/control-runners.test.ts`. `codex/signed-in.jsonl` (the first line of a
+  thread's rollout as codex-cli 0.171.0 writes it under a ChatGPT sign-in, where it names the account
+  and the person the thread was created under; recorded with a made-up sign-in, so both ids are
+  made up) by `packages/core/test/codex-transcript.test.ts` as well, for a session's `account_id`.
 - `control-held.json` — whether a Claude Code session is held, and by what (spec/CONTROL.md §6,
   *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, turn_ms_ago?,
   strayed_ms_ago?, expect }`, the registry rows that name it, when its transcript was last

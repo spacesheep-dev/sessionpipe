@@ -22,6 +22,7 @@ export * as antigravityControl from "./antigravity-control.js";
 export { AUTOPILOT_EVENTS, autopilotConfigDir, isAutopilotPayload, protocolId } from "./autopilot.js";
 export { claudeAccountDirs, claudeAccounts, claudeDirs, notClaudeCode } from "./claude-code.js";
 export * as claudeControl from "./claude-code-control.js";
+export { codexAccounts } from "./codex.js";
 export * as codexControl from "./codex-control.js";
 export { DEVIN_EVENTS, devinConfigDir, devinDataDir, readDevinChain } from "./devin.js";
 export { GROK_EVENTS, grokHome, isGrokPayload } from "./grok-build.js";

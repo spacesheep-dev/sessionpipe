@@ -965,7 +965,7 @@ export async function runJob(
     // Tier 1: the account's limits, when the turn left new numbers in the transcript
     // (Codex's rollout; Claude Code's come from its status line, through fromHook).
     if (adapter.limits && r.transcript && ending && sinkAt(cfg.sinks, 1)) {
-      const limits = adapter.limits(r.transcript);
+      const limits = adapter.limits(r.transcript, { state: facts, session: r.session.id });
       const sig = limits && JSON.stringify(limits);
       if (limits && sig !== facts.get(job.harness, id).limits_sig) {
         events.push(stamp({ type: "limits.observed", harnessEvent: job.event, data: limits }));

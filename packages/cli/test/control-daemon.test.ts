@@ -1491,6 +1491,34 @@ describe.runIf(unix)("attachments on a start (CONTROL.md §6)", () => {
     expect((await hello()).accounts).toEqual([{ harness: "claude-code", id: "acct-cli", email: "me@example.com" }]);
     await restart({ login: async () => ({ loggedIn: false }), extra: { claude: () => null } });
     expect((await hello()).accounts).toEqual([{ harness: "claude-code", id: "acct-cli", email: "me@example.com" }]);
+    // Codex's account is named too, from its own sign-in file, and passes through unmarked.
+    const codexHome = env.CODEX_HOME as string;
+    mkdirSync(codexHome, { recursive: true });
+    const idToken = `e30.${Buffer.from(JSON.stringify({ email: "codex@example.com" })).toString("base64url")}.c2ln`;
+    writeFileSync(
+      path.join(codexHome, "auth.json"),
+      JSON.stringify({
+        tokens: { id_token: idToken, access_token: "A", refresh_token: "R", account_id: "acct-codex" },
+      }),
+    );
+    try {
+      const said: string[] = [];
+      await restart({ login: async () => ({ loggedIn: true }), extra: { log: (l: string) => said.push(l) } });
+      expect((await hello()).accounts).toEqual([
+        { harness: "claude-code", id: "acct-cli", email: "me@example.com", signed_in: true },
+        { harness: "codex", id: "acct-codex", email: "codex@example.com" },
+      ]);
+      // The email is for the receiver alone: the daemon's log never names it.
+      expect(said.join("\n")).not.toContain("codex@example.com");
+      // No more accounts than a hello may carry.
+      await restart({
+        login: async () => ({ loggedIn: null }),
+        extra: { accounts: () => Array.from({ length: 25 }, (_, i) => ({ harness: "codex", id: `acct-${i}` })) },
+      });
+      expect((await hello()).accounts).toHaveLength(20);
+    } finally {
+      rmSync(path.join(codexHome, "auth.json"), { force: true });
+    }
     // One account in three dirs: a dir that can't say leaves the no standing, signed in
     // from any dir is signed in, and no dir is asked once its account said yes. An account named by its API host is said by that
     // name; another harness's account passes through untouched.
