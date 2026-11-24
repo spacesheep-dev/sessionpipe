@@ -1,0 +1,14 @@
+{
+  "spec": "ADAPTERS.md, Codex (Mapping): a turn ends once",
+  "note": "Codex says that a turn ended by two roads when both are installed, as `sessionpipe install` leaves them: the `Stop` hook, then `notify` with `type: agent-turn-complete`, under one turn id (the hook's `turn_id`, the notify's `turn-id`). Measured on codex-cli 0.171.0, 2026-11-24: one finished turn fired both, the notify after the hook, and a machine that reported each sent two `turn.ended` for it. `ends` is what the harness says, in the order a machine comes to them, each `[road, turn id]` with road `hook` or `notify`; `reported` is the `turn.ended` events that go out, the same way. The second end of one turn by the OTHER road is the first's copy and is dropped, with everything it would have read (the transcript, the limits). Two ends by one road are two ends: a turn its `Stop` hook sent on (`{\"decision\":\"block\"}`) ends again under the same id. A machine remembers the last turn that ended and its road, no more: these are consecutive events of one session.",
+  "cases": [
+    { "name": "hooks and notify both installed: the Stop hook, then notify", "ends": [["hook", "t1"], ["notify", "t1"]], "reported": [["hook", "t1"]] },
+    { "name": "the notify is come to first", "ends": [["notify", "t1"], ["hook", "t1"]], "reported": [["notify", "t1"]] },
+    { "name": "hooks not yet trusted, so Codex runs none: notify alone", "ends": [["notify", "t1"]], "reported": [["notify", "t1"]] },
+    { "name": "no notify: the hook alone", "ends": [["hook", "t1"]], "reported": [["hook", "t1"]] },
+    { "name": "turn after turn, each said twice", "ends": [["hook", "t1"], ["notify", "t1"], ["hook", "t2"], ["notify", "t2"]], "reported": [["hook", "t1"], ["hook", "t2"]] },
+    { "name": "a turn its Stop hook sent on ends twice by the hook, and the notify is still a copy", "ends": [["hook", "t1"], ["hook", "t1"], ["notify", "t1"]], "reported": [["hook", "t1"], ["hook", "t1"]] },
+    { "name": "notify alone, turn after turn", "ends": [["notify", "t1"], ["notify", "t2"]], "reported": [["notify", "t1"], ["notify", "t2"]] },
+    { "name": "a notify with no turn id is never taken for a copy", "ends": [["hook", "t1"], ["notify", null]], "reported": [["hook", "t1"], ["notify", null]] }
+  ]
+}

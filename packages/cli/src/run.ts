@@ -584,7 +584,10 @@ export async function runJob(
   // from minutes ago does not set a session's turn back. Read without the session's lock,
   // to spare the daemon the word; what is run is decided under it, below.
   const told = !!key && ranKeys(factsState(state).get(job.harness, id)).includes(key);
-  if (!claudeEnd && !told) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
+  // An end that came by the fallback road (Codex's notify) may be the copy of one its Stop
+  // hook already reported: the daemon hears of it only once that is known, under the lock.
+  const fallbackEnd = r.hints?.fallback === true && r.events.some((e) => e.type === "turn.ended");
+  if (!claudeEnd && !told && !fallbackEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
   const outbox = new Outbox(state);
   const ref = { harness: job.harness, session: id };
   // Hooks of one session fire close together (parallel subagents, issue #9): poll
@@ -638,6 +641,23 @@ export async function runJob(
       );
       return { events: [], delivered: {} };
     }
+    // A turn ends once. Codex says one end twice when its hooks and its notify are both
+    // installed: the Stop hook, then notify `agent-turn-complete`, under one turn id
+    // (codex-cli 0.171.0; conformance/turn-end-once.json). Whichever of the two comes
+    // second is the first's copy by the other road and is dropped, with everything it
+    // would have read. Two ends by one road are two ends: a turn its Stop hook sent on
+    // ends again.
+    const endId = r.events.find((e) => e.type === "turn.ended")?.data.turn_id;
+    if (typeof endId === "string" && mem.ended_turn === endId && (mem.ended_fallback === true) !== fallbackEnd) {
+      if (key) facts.save(job.harness, id, { ran: ranWith(mem, key) });
+      releaseJob(opts.claimed);
+      log(
+        state,
+        `${job.harness} ${job.event}: this turn's end was already reported by ${fallbackEnd ? "its Stop hook" : "notify"}; dropped (${shortId(job.harness, id)})`,
+      );
+      return { events: [], delivered: {} };
+    }
+    if (fallbackEnd) await tellDaemon(state, job, id, r.session.cwd, r.transcript, r.events);
     // `claude mcp list` fires SessionEnd with a fresh id but no SessionStart or
     // transcript. Check under the session lock, before creating facts or a seq:
     // any existing outbox, facts or transcript is enough to preserve a real end.
@@ -888,6 +908,10 @@ export async function runJob(
     // Written down as run only once its events are in the outbox: a worker that ends
     // before this line leaves a job that is run again, never one that is skipped.
     if (key && events.length) facts.save(job.harness, id, { ran: ranWith(facts.get(job.harness, id), key) });
+    // Which turn ended last and by which road, for the copy that may follow (above). Like
+    // `ran`, only once the end is in the outbox: a worker that dies before this line leaves
+    // an end the other road still reports.
+    if (typeof endId === "string") facts.save(job.harness, id, { ended_turn: endId, ended_fallback: fallbackEnd });
     releaseJob(opts.claimed);
     log(
       state,

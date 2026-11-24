@@ -76,9 +76,16 @@ describe("codex fromHook", () => {
     expect(r).toEqual({
       session: { id: SID, cwd: "/w" },
       events: [{ type: "turn.ended", data: { reason: "stop", turn_id: "t1" }, harnessEvent: "notify" }],
-      hints: {},
+      // The road this end came by: with its hooks on, Codex's Stop hook says the same end
+      // first, and the worker drops the second of the two (conformance/turn-end-once.json).
+      hints: { fallback: true },
       transcript: f,
     });
+    // A turn's end is the only thing Codex's notify says (0.171.0); another `type` is not one.
+    expect(hook("notify", "", env, [JSON.stringify({ type: "approval-requested", "thread-id": SID })])).toBeNull();
+    expect(hook("notify", "", env, [JSON.stringify({ type: 7, "thread-id": SID })])?.events[0]?.type).toBe(
+      "turn.ended",
+    );
     expect(hook("notify", JSON.stringify({ thread_id: SID }), env)?.session).toEqual({ id: SID, cwd: "/" });
     expect(hook("notify", JSON.stringify({ "session-id": SID }), env)?.events[0]?.data).toEqual({ reason: "stop" });
     expect(hook("notify", JSON.stringify({ session_id: SID }), env)?.session.id).toBe(SID);
