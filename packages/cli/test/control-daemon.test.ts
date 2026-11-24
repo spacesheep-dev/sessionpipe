@@ -1208,6 +1208,23 @@ describe.runIf(unix)("permission answers (CONTROL.md §6, §7)", () => {
     });
     expect(await rx.waitAck(b.id)).toMatchObject({ outcome: "expired" });
   });
+  it("a Codex session's prompt is answered in Codex: allow and deny alike are told so, in plain words", async () => {
+    await startDaemon();
+    for (const decision of ["allow", "deny"] as const) {
+      const q = await rx.send({
+        kind: "permission.answer",
+        session: "codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c",
+        text: undefined,
+        for: ATT,
+        decision,
+      });
+      expect(await rx.waitAck(q.id)).toMatchObject({
+        outcome: "unsupported",
+        detail:
+          "A Codex permission prompt is answered in Codex itself for now: sessionpipe does not answer it from here",
+      });
+    }
+  });
   // A session's hooks all report under its id, a subagent's among them. Any of them let
   // go of every held prompt: with a subagent reading files in the background, the main
   // thread's question was let go at the subagent's next tool call, while the terminal

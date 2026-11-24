@@ -1,0 +1,41 @@
+{
+  "harness": "codex",
+  "event": "PermissionRequest",
+  "recorded": {
+    "at": "2026-11-24T20:39:09.000Z",
+    "harness_version": "0.171.0",
+    "how": "codex exec --approve-for-me --dangerously-bypass-hook-trust against a stand-in model that asks to run a command outside the sandbox (`sandbox_permissions: require_escalated`), with a recording hook in $CODEX_HOME/hooks.json; folders replaced by neutral ones. `tool_input.description` is the reason given for asking (the model's, here). The payload has no `tool_use_id`, so the attention's id is one the sender mints."
+  },
+  "input": {
+    "argv": [
+      "codex",
+      "PermissionRequest"
+    ],
+    "stdin": "{\"session_id\":\"01a20f48-a65f-75e0-8338-ec8207f396c0\",\"turn_id\":\"01a20f48-a669-7dd1-802a-f1274afc81fd\",\"transcript_path\":\"/home/user/.codex/sessions/2026/11/24/rollout-2026-11-24T12-39-09-01a20f48-a65f-75e0-8338-ec8207f396c0.jsonl\",\"cwd\":\"/home/user/proj\",\"hook_event_name\":\"PermissionRequest\",\"model\":\"gpt-6.2-sol\",\"permission_mode\":\"default\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"touch /home/user/elsewhere/made-outside\",\"description\":\"the lab asks to run this outside the sandbox\"}}",
+    "env": {},
+    "cwd": "/home/user/proj"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "attention.needed",
+      "harness": {
+        "name": "codex",
+        "event": "PermissionRequest"
+      },
+      "session": {
+        "id": "01a20f48-a65f-75e0-8338-ec8207f396c0",
+        "cwd": "/home/user/proj",
+        "model": "gpt-6.2-sol",
+        "seq": "*"
+      },
+      "data": {
+        "attention_id": "*",
+        "kind": "permission",
+        "tool": "Bash"
+      }
+    }
+  ]
+}
