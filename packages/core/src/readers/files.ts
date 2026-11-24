@@ -27,6 +27,43 @@ export function ends(file: string, headBytes: number, tailBytes: number): { head
   }
 }
 
+/** A file's whole lines, last first, read from its end a piece at a time: for the last
+ *  record of a kind in a transcript that can be tens of MB, where a fixed tail may not
+ *  reach it. A line may be longer than a piece (it is put together once, when its start
+ *  is found). Nothing for a file that can't be read. */
+export function* linesFromEnd(file: string, pieceBytes = 1024 * 1024): Generator<string> {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    let pos = fstatSync(fd).size;
+    // The later parts, in the file's order, of a line whose start is in an earlier piece.
+    let rest: Buffer[] = [];
+    while (pos > 0) {
+      const len = Math.min(pieceBytes, pos);
+      pos -= len;
+      const piece = Buffer.alloc(len);
+      readSync(fd, piece, 0, len, pos);
+      const nl = pos === 0 ? -1 : piece.indexOf(10);
+      if (pos > 0 && nl < 0) {
+        rest.unshift(piece);
+        continue;
+      }
+      const lines = Buffer.concat([piece.subarray(nl + 1), ...rest])
+        .toString("utf8")
+        .split("\n");
+      rest = [piece.subarray(0, nl + 1)];
+      for (let i = lines.length - 1; i >= 0; i--) if (lines[i]) yield lines[i] as string;
+    }
+  } catch {
+    // Unreadable from here on: what was read stands.
+  } finally {
+    if (fd !== undefined)
+      try {
+        closeSync(fd);
+      } catch {}
+  }
+}
+
 export const parseLines = (lines: string[]): Record<string, unknown>[] =>
   lines
     .map((l) => {

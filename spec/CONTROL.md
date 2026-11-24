@@ -452,7 +452,7 @@ used:
 | `sdk` | The daemon started the session itself (Agent SDK streaming input) and still holds it | Claude Code | 0 turns |
 | `waiter` | The session runs `sessionpipe wait` in the background, or was started with `sessionpipe channel` as its channel and is **idle** (§8) | Claude Code | 0 turns, no network |
 | `turn` | The session is mid-turn: the message lands at its next Stop | Claude Code, Codex, Gemini CLI (AfterAgent), Cursor, Copilot CLI, Droid, Kiro | 0 turns |
-| `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3) | Claude Code | 0 turns |
+| `inbox` | The session is live, **idle** and vetted, and the machine's permission class is the session's own: its local inbox takes the message (§6.3). Codex: a live Codex process has the thread, by Codex's own word, and Codex's own queue for it takes the message (§6.4) | Claude Code, Codex (0.171) | 0 turns |
 | `api` | The daemon holds the session through the harness's input API: an agent it started over the Agent Client Protocol (ACP) | Any ACP agent installed on the machine (ADAPTERS.md, *Agents driven through ACP*); OpenCode's server and Codex app-server planned | 0 turns |
 | `resume` | No live process holds the session | Claude Code (`claude -p --resume`), Codex (`codex exec resume`), Antigravity (`agy --conversation`), an ACP agent that can reopen a session (`session/load`) | cold start |
 | `fork` | Live and idle, with no mode above it | Claude Code (`--fork-session`) | cold start |
@@ -482,6 +482,22 @@ session whose headless run exited seconds ago is resumed in place at
 once; it is not copied, and nothing is said about a window. A daemon MUST NOT resume
 inside that window on the strength of an absent registry row alone, and MUST NOT
 describe a session as open where a recent write is all it found.
+
+**Codex says it itself.** Codex locks a thread that a process of its own has open
+(`$CODEX_HOME/thread-writer-locks/<thread>.lock`, 0.171.0) and turns a second writer
+away before anything runs: `codex exec resume` ends at once with exit `1`, nothing on
+stdout, and `thread <id> already has an active writer` on stderr. The holder is a window,
+the background server a window leaves behind (which keeps a thread about a minute after
+its last use), or another headless run. Where that thread's lock file is there, and the
+`codex` the daemon runs is itself one that such a lock stops (0.171.0 or later, asked of
+the binary: an older one would not be refused and would write beside the holder), the
+90-second rule is not applied to a Codex session: the daemon resumes it, and a refusal
+that names the thread is the harness's own word that a live process holds it. Nothing was
+run and nothing was written, the session's own state on the machine is as it was, and the
+message goes into Codex's own queue for that process (§6.4). The lock file is no proof by
+itself: a holder that is killed leaves it behind with nothing locking it, and then the
+resume simply runs. Where the file is absent, or the daemon's `codex` is older, the
+90-second rule stands.
 
 **Held is asked of the transcript the message would run in.** For a session whose
 messages go to a copy that is the copy, and the copy's registry row and its hooks are
@@ -665,6 +681,94 @@ session: a daemon MUST NOT write a second message into an inbox where one of its
 still unconfirmed, and MUST remember that across its own restart — an update restarts it,
 and the window outlives the process. Otherwise the obvious thing to do — send it again —
 puts two copies of the person's words in one place, and a released hold delivers both.
+
+### 6.4 Codex's own queue
+
+Codex keeps a queue of messages for each thread and a command that writes to it:
+`codex queue --thread <id> --message=<text> --resume` (0.171.0; the text joined to its
+flag, since one that begins with a dash is refused as a flag otherwise). The process that
+has the thread open takes a queued message as the prompt of a turn of its own
+(`task_started` with `turn_attribution.turn_trigger: "queue"`): at once when it is idle,
+as its turn ends when it is not. That is the way into a thread a window has open.
+
+A daemon takes this way only on Codex's own word that a live process holds the thread:
+its refusal, naming that thread, of a headless resume the daemon has just tried (§6,
+*What counts as held*). It MUST NOT queue a message for a thread nothing holds: the
+message would wait in Codex's queue with nobody to run it, and a later run of the thread
+would take it into a turn of its own. It MUST NOT queue where it cannot find the thread's
+rollout, which is where everything below is read. It MUST NOT queue where the holder is
+another program's headless run in the middle of a turn: that process takes the message as
+its turn ends and exits with the new turn cut off. That is told from the rollout, whose
+last record of a turn is then a `task_started` with `turn_trigger: "exec"` and no
+`task_complete` or `turn_aborted` after it, however far back that record is. Such a
+record is not always a turn that is running, since a headless run that is killed writes
+no end: it is not believed where a run the machine saw end accounts for it (one of the
+daemon's own, or the session's end by its hooks, no earlier than that record), nor where
+the rollout has not been written for ten minutes. A message that is not queued for this
+reason is acked `failed`, with the reason, and is the person's to send again. The ten
+minutes are a guess with a cost: a headless run that was silent that long and alive after
+all takes the message as its turn ends and cuts the new turn off, and the message is then
+acked `delivered` with whatever that turn had said.
+
+The message is framed and marked as any message handed over in place (§6 `prompt`).
+Codex's line `Queued message <id> for thread <id>.` is the hand-over to Codex, whatever
+else the command does afterwards; a command that ends without it is acked `failed`, says
+what Codex said (without the machine's home folder), and nothing else is tried; one that
+does not end, so that nobody knows, is treated as handed over. The warning `--resume` can
+print (`message was queued, but could not resume thread …`) says nothing either way: it
+is printed where a window with no background server took the message.
+
+**In Codex's queue is not delivered.** The daemon MUST NOT ack `delivered` until the
+rollout shows that a turn began for the message: the prompt Codex writes for it, known by
+the message's mark in sessionpipe's frame (so it is still the message if its words were
+changed while it waited in the queue), and for a message that carries no mark, a
+handoff's answer, by its text word for word. A holder in the middle of a turn takes the
+message when that turn ends, so nothing is counted while a turn is running: one with no
+end record yet, in a thread whose lock file is there, whose rollout was written in the
+last ten minutes. No one of the three is proof by itself, since a holder that is killed
+writes no end and leaves its lock file behind. An idle holder looks at its queue every
+ten seconds; one that has not begun the turn 45 seconds after it could have is not going
+to (it let go in the moment between the refusal and the queue, it is gone, or it is a
+process that does not serve the queue). The message is
+then acked `failed` with code `held`: it says the message is in Codex's queue, may run
+when the session is next used, and was not duplicated. Nothing else is tried. Once the
+turn has begun the message is acked `mode: "inbox"`, and the `reply` is what the model
+says after that prompt to the end of the turn, read as for any in-place message (30
+minutes at most, then `delivered` without one).
+
+**One at a time.** The session's line (§6 `prompt`) is kept until a queued message is
+taken or given up: a later message for the session waits in the daemon, not behind it in
+Codex's queue. While a daemon knows that a message it queued is still untaken, it MUST
+NOT queue another for that thread, by whichever name the session is addressed, and acks
+`failed` with that reason: a later headless run of the thread takes the first waiting
+message into its own turn and cuts the next one off. The hold ends when the first
+message's prompt appears in the rollout, and after 30 minutes whatever happened, since
+the person can remove a message from Codex's queue themselves. A daemon SHOULD keep that
+knowledge across its own restart; the reference daemon keeps it in memory and does not
+yet.
+
+**The turn is the live process's own.** It runs under that process's approval and
+sandbox settings, as a prompt typed into it would: the machine's `mode` governs the turns
+the daemon runs, not this one, and the checks of §6.3 are the Claude Code inbox's own and
+are not made here. Where the holder is the background server and its window is closed,
+the turn runs there with nobody at a window. A message that carries limits of its own, an
+ask's `permission` (§13), is never queued, since the turn would begin under the session's
+settings and not the ask's: it is acked `unsupported`, with that reason. A handoff's
+answer (`reply_to`) carries none and is queued as it is, in its own frame.
+
+A `cancel` takes nothing back from Codex's queue, and Codex puts a message in its queue
+before it says so. So from the moment the daemon asks Codex to take the message, the
+message is the live session's and no turn of the daemon's own: a cancel that arrives then
+is acked `unsupported`, as for any Codex session the daemon is not running (it is stopped
+in Codex itself), Codex is asked to the end, and a turn the live session begins for the
+message is that session's to stop.
+
+Pictures are named in the text's list only (§6 `start`, **Pictures**): the queue takes
+text.
+
+Reading the rollout (ADAPTERS.md), the queued message's row is the person's words sent
+from elsewhere: the frame is taken off, and the turn Codex says the queue began is
+`injected` (`conformance/transcripts/codex/queued.jsonl`).
 
 ### `prompt`
 
@@ -1283,7 +1387,7 @@ hook waits or prints.
 | `delivered` | The harness took it; `mode` says how, `session` names a fork or a started session. |
 | `expired` | Past `expires_at`, or the hook's window closed, or the terminal answered first, or a `cancel` found the turn already over (§6 `cancel`). |
 | `unsupported` | No path for this kind on this harness, or for a `cancel` no path into the process that has the session (§6 `cancel`); `detail` says which. |
-| `failed` | A path exists and errored; `detail` says what. `code` `cancelled`: a `start` stopped by a `cancel` before its process began, so no session exists (§6 `cancel`). `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), or handed to its channel (§8), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
+| `failed` | A path exists and errored; `detail` says what. `code` `cancelled`: a `start` stopped by a `cancel` before its process began, so no session exists (§6 `cancel`). `code` `file`: a `start`'s or a `prompt`'s file could not be fetched, checked or written (§6). `code` `model`: the harness would not run the start's model; `detail` is its words. `code` `login` or `pool`: a `pool` command's vendor call (§6 `pool`). `code` `held`: a message was written into a live session's own inbox (§6.3), handed to its channel (§8), or put into Codex's own queue for it (§6.4), and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so it may be holding it; nothing was duplicated, and nothing was tried on another mode. The machine does not try another. |
 | `refused` | Verification or the machine's policy said no; `code` says which (§5). |
 
 Every message is acked exactly once with a final outcome, optionally preceded by
@@ -1340,6 +1444,11 @@ send → delivered time.
   words, the block's row with the message's mark, the session's answer, and a turn a
   background task began after it. The `reply` a daemon reads for that message is the
   answer alone, wherever in those rows the hand-over fell.
+- `conformance/transcripts/codex/queued.jsonl` — the rows a Codex window writes for a
+  message put in Codex's own queue for its thread (§6.4): the window's own turn, then a
+  turn that `turn_trigger: "queue"` began, whose prompt is the message in sessionpipe's
+  frame with its mark, and the answer. The `reply` is that answer alone, and the turn's
+  ask is the person's words without the frame.
 - `conformance/control-held.json` — whether a session is held, and by what (§6, *What
   counts as held*): registry rows of a window and of another process's run, a transcript
   written seconds ago with and without an end that accounts for it, and the edges of the
@@ -1435,6 +1544,9 @@ person put in `edits` or `auto` for their receivers runs an asked agent at `safe
 the same, and an ask can no more turn approval off than a command can (§3.1). An
 existing session runs the ask under the same cap, narrower than its own level and
 never wider; an ACP agent, which takes no level (§6), runs as the machine's mode says.
+An ask for a Codex session that a live Codex process holds and that is idle is not put
+into Codex's own queue for that process (§6.4), where a turn would begin under that
+session's settings: it is acked `unsupported`.
 A new session is started as a `start` would be, an existing one gets the text
 as a `prompt` would (§6, the first mode that fits), with one more paragraph framing it,
 so the model knows where the task came from and that its answer goes back by itself:

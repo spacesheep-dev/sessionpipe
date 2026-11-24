@@ -424,11 +424,17 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
   // before the last one are sent.
   // Where that turn began: a turn that ended before it is over, whatever runs now.
   let running = -1;
+  // What began it, as Codex says (`turn_trigger`): `queue` is a message that was put in
+  // Codex's own queue for the thread, which is how sessionpipe reaches a live process.
+  let trigger: unknown;
   for (let i = start; i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j) continue;
     const p = j.payload as { type?: string; role?: string; content?: unknown; error?: unknown } | undefined;
-    if (j.type === "event_msg" && p?.type === "task_started") running = i;
+    if (j.type === "event_msg" && p?.type === "task_started") {
+      running = i;
+      trigger = (p as { turn_attribution?: { turn_trigger?: unknown } }).turn_attribution?.turn_trigger;
+    }
     if (j.type === "event_msg" && (p?.type === "task_complete" || p?.type === "turn_aborted")) running = -1;
     if (i < from) continue;
     if (j.type === "event_msg" && (p?.type === "task_complete" || p?.type === "turn_aborted")) {
@@ -455,7 +461,19 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
         asked = true;
       }
       if (codexInjected(text)) continue; // Codex's own injections, not the person's words
-      msgs.push({ role: "user", text, at, line: i });
+      // sessionpipe's own words around a message it delivered are taken off, as the other
+      // readers take them off: the ask is the person's words. Delivered through Codex's
+      // queue it arrived from elsewhere into a live session (`injected`); as the prompt of
+      // a headless turn it is that turn's own ask.
+      const said = deliveredWords(text);
+      if (said.delivered && isInjected(said.text)) continue;
+      msgs.push({
+        role: "user",
+        text: said.text,
+        at,
+        line: i,
+        ...(said.delivered && trigger === "queue" ? { injected: true as const } : {}),
+      });
       ended = false;
       asked = true;
     } else if (p.role === "assistant") {

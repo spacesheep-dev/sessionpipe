@@ -7,12 +7,13 @@
 // the command that started it (CONTROL.md §6 `start`). Shapes measured on codex-cli
 // 0.160.0, 2026-10-04; `--image` on 0.171.0, 2026-11-19; the whole stream recorded on
 // 0.171.0, 2026-11-24 (conformance/control-codex-exec-stream.json).
-import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PICTURE_TYPES, type Picture, type PictureLimits, picturesFor } from "../control/pictures.js";
 import { MODEL_RE, type RunLevel, type StartPermission } from "../control/verify.js";
+import { linesFromEnd } from "../readers/files.js";
 import {
   findBinary,
   jobEnv,
@@ -23,10 +24,12 @@ import {
   type Reading,
   type RunResult,
   runFailure,
+  shimNote,
+  spawnable,
   stderrTail,
 } from "./headless.js";
 
-export { codexFacts, findRollout } from "./codex.js";
+export { codexFacts, findRollout, threadLocked } from "./codex.js";
 
 const LABEL = "Codex";
 
@@ -185,6 +188,137 @@ export function codexLogin(bin: string, env: NodeJS.ProcessEnv = process.env): P
         if (!err) return resolve({ loggedIn: true });
         const code = (err as { code?: unknown }).code;
         resolve(code === 1 ? { loggedIn: false } : { loggedIn: null });
+      },
+    );
+  });
+}
+
+/** A headless turn Codex refused because a live process has the thread: it locks an open
+ *  thread itself (`$CODEX_HOME/thread-writer-locks/<thread>.lock`), and a second writer
+ *  ends at once, exit 1, nothing on stdout, stderr `thread <id> already has an active
+ *  writer` (0.171.0). The holder is a window, the background server a window starts,
+ *  which keeps the thread about a minute after its last use, or another run. Nothing was
+ *  run or written. `thread`: the one the turn was for, which the refusal must name. */
+export function heldElsewhere(res: RunResult, thread: string): boolean {
+  const said = String(res.stderr ?? "").toLowerCase();
+  return res.code === 1 && said.includes(`thread ${thread.toLowerCase()} already has an active writer`);
+}
+
+/** The first Codex whose lock on an open thread was measured (`heldElsewhere`). */
+const LOCKS_FROM = [0, 171, 0] as const;
+
+/** Whether this `codex` refuses a thread that another process of Codex has: asked of the
+ *  binary itself (`codex --version`), since a daemon may be running an older one than the
+ *  window that has the thread, and an older one would write beside it. False for a
+ *  version before the one this was measured on, and for a binary that does not say. */
+export function codexLocks(bin: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const c = probe(bin, ["--version"]);
+  let said = "";
+  try {
+    said = execFileSync(c.file, c.args, {
+      encoding: "utf8",
+      timeout: 4000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env: codexEnv(env),
+      shell: c.shell,
+    });
+  } catch {
+    return false;
+  }
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(said);
+  if (!m) return false;
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const at = v.findIndex((n, i) => n !== LOCKS_FROM[i]);
+  return at < 0 || (v[at] as number) > (LOCKS_FROM[at] as number);
+}
+
+/** How a thread's last turn stands in its rollout, by Codex's own records of a turn's
+ *  start (`task_started`, with what began it: `user`, `exec`, `queue`) and end
+ *  (`task_complete`, `turn_aborted`): the last of them, looked for from the file's end
+ *  however far back it is. `at`: when that record was written; `written`: when the file
+ *  last was. Null for a rollout with no such record, or one that can't be read.
+ *
+ *  A turn with no end is not always running: a headless run that is killed writes none
+ *  (0.171.0: SIGTERM to `codex exec` leaves its `task_started` as the last record, and a
+ *  window opened on the thread afterwards writes nothing until its own first turn). */
+export function lastTurn(
+  rollout: string,
+): { open: boolean; trigger: string | null; at: number; written: number } | null {
+  let written = 0;
+  try {
+    written = statSync(rollout).mtimeMs;
+  } catch {
+    return null;
+  }
+  for (const line of linesFromEnd(rollout)) {
+    if (!line.includes('"event_msg"')) continue;
+    let j: { timestamp?: unknown; payload?: { type?: unknown; turn_attribution?: { turn_trigger?: unknown } } };
+    try {
+      j = JSON.parse(line) as typeof j;
+    } catch {
+      continue;
+    }
+    const p = j?.payload;
+    if (p?.type === "task_complete" || p?.type === "turn_aborted")
+      return { open: false, trigger: null, at: 0, written };
+    if (p?.type !== "task_started") continue;
+    const trigger = p.turn_attribution?.turn_trigger;
+    return {
+      open: true,
+      trigger: typeof trigger === "string" ? trigger : null,
+      at: Date.parse(String(j.timestamp ?? "")) || 0,
+      written,
+    };
+  }
+  return null;
+}
+
+/** Codex's own word that a message is in a thread's queue. */
+const QUEUED = /^Queued message \S+ for thread /m;
+
+/** Hand a message to the thread through Codex's own queue: `codex queue --thread <id>
+ *  --message=<text> --resume`. The process that has the thread takes it, at once when it
+ *  is idle and as its turn ends when it is not, as a turn of its own (`turn_trigger:
+ *  "queue"`); `--resume` has a background server that holds the thread take it without
+ *  waiting for its next look at the queue (ten seconds apart), and only warns where there
+ *  is none (it warns the same where a window with no server took the message, so the
+ *  warning says nothing). Only ever for a thread a live process holds (`heldElsewhere`):
+ *  queued for one nobody has, the message sits until a later run takes it into its own
+ *  turn.
+ *
+ *  `ok`: true when Codex said it is queued, whatever else happened to the command; false
+ *  when the command ended without saying so; null when it did not end in time, so nobody
+ *  knows (Codex puts the message in its queue before it says so). It is never ended early
+ *  for that reason: a command cut short leaves the same doubt, and a queued message
+ *  cannot be taken back. `said` is what Codex wrote last, or how it ended,
+ *  without this machine's home in it and never the command line (the message is on it).
+ *  The text goes as one argument joined to its flag: a text that begins with a dash is
+ *  refused as a flag otherwise (measured). Never rejects. */
+export function codexQueue(
+  bin: string,
+  thread: string,
+  text: string,
+  env: NodeJS.ProcessEnv = process.env,
+  o: { timeoutMs?: number; home?: string } = {},
+): Promise<{ ok: boolean | null; said: string }> {
+  // No shell: the message is one argument, whatever it holds (#165 for a .cmd shim).
+  const c = spawnable(bin, ["queue", "--thread", thread, `--message=${text}`, "--resume"]);
+  if (!c) return Promise.resolve({ ok: false, said: shimNote(bin) });
+  return new Promise((resolve) => {
+    execFile(
+      c.file,
+      c.args,
+      { encoding: "utf8", timeout: o.timeoutMs ?? 20_000, env: codexEnv(env), maxBuffer: 256 * 1024 },
+      (err, stdout, stderr) => {
+        if (QUEUED.test(String(stdout))) return resolve({ ok: true, said: "" });
+        const home = o.home ?? os.homedir();
+        const wrote = stderrTail(String(stderr)).split(home).join("~");
+        if (!err) return resolve({ ok: false, said: wrote });
+        if (err.killed) return resolve({ ok: null, said: "it did not answer in time" });
+        resolve({
+          ok: false,
+          said: wrote || (typeof err.code === "number" ? `it exited with code ${err.code}` : "it could not be run"),
+        });
       },
     );
   });

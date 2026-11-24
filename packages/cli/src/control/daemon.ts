@@ -82,7 +82,16 @@ import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
-import { type Following, firstAsk, follow, ranInMode, transcriptEnd } from "./reply.js";
+import {
+  type Following,
+  firstAsk,
+  follow,
+  type QueuedMessage,
+  queuedIn,
+  queuedTaken,
+  ranInMode,
+  transcriptEnd,
+} from "./reply.js";
 import {
   busyWindowWaits,
   CANCEL,
@@ -194,7 +203,21 @@ interface Driver {
   reading: () => Reading & { warnings?: string[] };
   login?: (bin: string) => Promise<Login>;
   loginHint?: string;
+  /** A harness that refuses a headless turn for a session a live process of its own has
+   *  open, and takes a message for that process through a queue of its own (Codex,
+   *  CONTROL.md §6.4): how the refusal is told, how the message is queued (`ok` null:
+   *  nobody knows whether it was), how the session's last turn stands in its file, and
+   *  whether something still has the session, as far as its own lock file says. */
+  live?: {
+    refused: (res: RunResult, thread: string) => boolean;
+    queue: (bin: string, thread: string, text: string) => Promise<Queued>;
+    lastTurn: (transcript: string) => ReturnType<typeof codexControl.lastTurn>;
+    held: (thread: string) => boolean;
+  };
 }
+
+/** What a harness's own queue said of a message handed to it (Driver.live). */
+type Queued = { ok: boolean | null; said: string };
 
 /** A driven run's arguments, and where they carry pictures, the same without them and
  *  how to tell that the harness refused them (CONTROL.md §6, *Pictures*). */
@@ -289,6 +312,10 @@ const QUIESCE_MS = 60_000;
 /** How long the daemon follows a session's turn for the answer to an in-place
  *  message before acking it delivered without one. */
 const ANSWER_WAIT_MS = 30 * 60_000;
+/** How long a message put in Codex's own queue for a session may wait for an idle holder
+ *  to begin a turn for it (CONTROL.md §6.4). The holder looks at its queue every ten
+ *  seconds; one that has not taken the message after four looks is not going to. */
+const QUEUE_TAKEN_MS = 45_000;
 /** How long a Stop hook may take to be answered. */
 const RECENT_ACKS_MS = 25 * 3600_000;
 /** How many sessions' recorded permission modes are kept (CONTROL.md §6, The session's
@@ -486,6 +513,12 @@ export interface DaemonDeps {
   agy?: () => string | null;
   /** Is Codex signed in as this process sees it? Asked before a run. */
   codexLogin?: (bin: string) => Promise<Login>;
+  /** Hand a message to a thread a live Codex process holds, through Codex's own queue
+   *  (core's codexQueue). Tests stand in for the CLI. */
+  codexQueue?: (bin: string, thread: string, text: string) => Promise<Queued>;
+  /** How long a message in Codex's queue may wait for an idle holder to begin its turn
+   *  before it is said to be held (QUEUE_TAKEN_MS). */
+  queueTakenMs?: number;
   /** An ACP agent's CLI on this machine, by harness name (core's findAcpAgent; null:
    *  not installed). Absent: this daemon drives none of them. */
   acp?: (harness: string) => acpControl.AcpFound | null;
@@ -716,6 +749,19 @@ export class ControlDaemon {
   private readonly nonces: NonceStore;
   private readonly acks: AckOutbox;
   private readonly recentAcks = new Map<string, { ack: Ack; at: number }>();
+  /** Whether a `codex` binary is refused by another process's lock on a thread, by the
+   *  file it was when it was asked (codexSaysWhoHas). */
+  private readonly codexLocking = new Map<string, { stamp: number; locks: boolean }>();
+  /** The harness's own id for a session → a message of the daemon's that the harness took
+   *  into its own queue for it and that no turn began for (queueLive): where its prompt
+   *  would be, and when it was queued. While it waits there nothing more is queued for the
+   *  session, by whichever of its names it is addressed: a later run of the session takes
+   *  the first waiting message into its own turn and cuts the next one off. In memory
+   *  only: a restart forgets it. */
+  private readonly queuedUntaken = new Map<
+    string,
+    { file: string; offset: number; message: QueuedMessage; at: number }
+  >();
   private readonly inflight = new Set<string>();
   /** Each session's runs, one at a time (`serial`). Like `ownRuns` and `lastEnd`, kept
    *  under the session's ref, harness and all: `codex:<id>` and `claude-code:<id>` are
@@ -2124,9 +2170,37 @@ export class ControlDaemon {
     return { folder: ok, transcript: null };
   }
 
+  /** The environment Codex's own files are found by (its `CODEX_HOME`). */
+  private codexHome(): NodeJS.ProcessEnv {
+    return this.deps.env ?? process.env;
+  }
+
+  /** Whether Codex itself will say who has this thread, so nothing has to be guessed from
+   *  when its rollout was last written (CONTROL.md §6, *What counts as held*): a Codex
+   *  that locks its threads has this one's lock file, and the `codex` this daemon runs is
+   *  one that is refused by such a lock (asked of the binary once, and again when the
+   *  file it is changes). An older one would not be refused, and would write beside the
+   *  process that has the thread. */
+  private codexSaysWhoHas(thread: string): boolean {
+    if (!codexControl.threadLocked(thread, this.codexHome())) return false;
+    // No `codex` on this machine, or none where it is said to be: nothing to ask.
+    const bin = (this.driver("codex") as Driver).bin() as string;
+    let stamp = 0;
+    try {
+      stamp = statSync(bin).mtimeMs;
+    } catch {
+      return false;
+    }
+    const known = this.codexLocking.get(bin);
+    if (known?.stamp === stamp) return known.locks;
+    const locks = codexControl.codexLocks(bin, this.codexHome());
+    this.codexLocking.set(bin, { stamp, locks });
+    return locks;
+  }
+
   /** A Codex thread's rollout, by Codex's own id for it; none for a name that is no such id. */
   private codexRollout(thread: string): string | null {
-    return isUuid(thread) ? codexControl.findRollout(thread, this.deps.env ?? process.env) : null;
+    return isUuid(thread) ? codexControl.findRollout(thread, this.codexHome()) : null;
   }
 
   /** A Codex, Antigravity or ACP-driven session: one the daemon started is its alias
@@ -2229,8 +2303,16 @@ export class ControlDaemon {
         pictures: { take: codexControl.codexPictures, refused: codexControl.codexRefusedPictures },
         levels: codexControl.offeredLevels,
         defaultLevel: codexControl.defaultLevel,
-        models: () => this.deps.codexModels?.() ?? codexControl.codexModels(this.deps.env ?? process.env),
+        models: () => this.deps.codexModels?.() ?? codexControl.codexModels(this.codexHome()),
         reading: () => codexControl.reading(),
+        live: {
+          refused: codexControl.heldElsewhere,
+          queue:
+            this.deps.codexQueue ??
+            ((bin, thread, text) => codexControl.codexQueue(bin, thread, text, this.codexHome())),
+          lastTurn: codexControl.lastTurn,
+          held: (thread) => codexControl.threadLocked(thread, this.codexHome()),
+        },
         ...(this.deps.codexLogin ? { login: this.deps.codexLogin } : {}),
         loginHint: codexControl.LOGIN_HINT,
       };
@@ -2964,9 +3046,16 @@ export class ControlDaemon {
     if (ref.harness !== "claude-code") {
       // Codex: a rollout written in the last 90 s by something that isn't known to have
       // finished is a session in use. Antigravity keeps no file that says so: only the
-      // daemon's own run (whose messages wait in line behind it) holds one.
+      // daemon's own run (whose messages wait in line behind it) holds one. A Codex that
+      // locks an open thread itself needs no such guess where it has this thread's lock
+      // file: its own refusal of a second writer says whether something has the thread,
+      // and the message then goes into its queue (§6.4).
+      const guessed = ref.harness !== "codex" || !this.codexSaysWhoHas(this.aliasOf("codex", ref.id)?.id ?? ref.id);
       const held: Holder | null =
-        !this.ownRuns.has(session) && place.file && recentlyWritten(place.file, this.endedAt(session), this.deps.now())
+        guessed &&
+        !this.ownRuns.has(session) &&
+        place.file &&
+        recentlyWritten(place.file, this.endedAt(session), this.deps.now())
           ? "recent"
           : null;
       return {
@@ -3435,8 +3524,135 @@ export class ControlDaemon {
         o,
         recorded,
         this.childEnv(r, cmd),
+        drv.live && {
+          refused: (res) => (drv.live as NonNullable<Driver["live"]>).refused(res, target),
+          instead: () => this.queueLive(r, id, cmd, drv, ready.bin, target, sent),
+        },
       );
     });
+  }
+
+  /** The harness refused a headless turn because a live process of its own has the
+   *  session open: a window, or the background server a window leaves behind (Codex locks
+   *  an open thread itself and turns a second writer away before anything runs). The
+   *  message goes into the harness's own queue for that process instead (CONTROL.md §6.4),
+   *  and is delivered once the session's file shows that a turn began for it: its answer
+   *  is then read from there as any in-place answer is. The session's line is kept until
+   *  that is known, so no second message is queued behind one that nobody may be taking.
+   *
+   *  The turn runs in that process, under its own settings, as a prompt typed into it
+   *  would: so a message that carries limits of its own (an ask's `permission`, §13),
+   *  which the daemon can keep only in a turn it runs, is never queued. */
+  private async queueLive(
+    r: Caller,
+    id: string,
+    cmd: ControlCommand,
+    drv: Driver,
+    bin: string,
+    target: string,
+    sent: number,
+  ): Promise<void> {
+    const live = drv.live as NonNullable<Driver["live"]>;
+    const open = `${drv.label} has that session open in another process`;
+    if (cmd.permission !== undefined)
+      return this.finish(r, id, {
+        outcome: "unsupported",
+        detail: `${open}, and an ask is not put into a live ${drv.label} session's own queue (the turn would begin there under that session's settings, not the ask's): ask again once that session is closed`,
+      });
+    // The session's file is where the holder is told apart, the hand-over seen and the
+    // answer read: without it nothing of that can be known, so nothing is queued.
+    const from = this.answerFrom(cmd.session);
+    if (!from)
+      return this.finish(r, id, {
+        outcome: "failed",
+        detail: `${open}, and its session file was not found on this computer, so nothing was put into its queue`,
+      });
+    if (this.stillQueued(target))
+      return this.finish(r, id, {
+        outcome: "failed",
+        detail: `an earlier message is still waiting in ${drv.label}'s own queue for that session, which has not begun a turn for it: nothing more is queued until it has`,
+      });
+    // Somebody's headless run in mid-turn would take the message as its turn ends and
+    // exit with the new turn cut off: not queued, and said as it is. A turn with no end
+    // is not always one that is running (a run that was killed writes none): not where a
+    // run this machine saw end accounts for it, nor where the file has been silent for as
+    // long as a session's own hooks would be believed.
+    const turn = live.lastTurn(from.file);
+    if (
+      turn?.open &&
+      turn.trigger === "exec" &&
+      turn.at > (this.endedAt(cmd.session) ?? 0) &&
+      this.deps.now() - turn.written < HOOKS_WORD_MS
+    )
+      return this.finish(r, id, {
+        outcome: "failed",
+        detail: `a headless ${drv.label} run has that session and is in the middle of a turn: send it again when that is done`,
+      });
+    const body = this.inPlace(r, cmd.text as string, id);
+    const text = isSink(r) ? body : `${body}\n\n${IN_PLACE_ANSWER}`;
+    // Handed to the live process from here: no longer a turn of the daemon's own, and a
+    // Stop no longer finds it. The harness is asked to the end whatever comes meanwhile:
+    // it puts a message in its queue before it says so, so asking cut short would leave
+    // nobody knowing whether it is in, and a queued message cannot be taken back.
+    this.letGo(this.runOf(id));
+    const out = await live.queue(bin, target, text);
+    if (out.ok === false)
+      return this.finish(r, id, {
+        outcome: "failed",
+        detail: `${open} and did not take the message into its queue${out.said ? `: ${out.said}` : ""}`,
+      });
+    this.deps.log(
+      out.ok
+        ? `${id.slice(-8)}: ${drv.label} has ${target.slice(0, 8)} open; the message is in its own queue for it`
+        : `${id.slice(-8)}: ${drv.label} has ${target.slice(0, 8)} open; whether its queue has the message is not known (${out.said})`,
+    );
+    this.picturesListed(id, `the run was refused; ${drv.label}'s queue takes text`);
+    // Known again by its mark, where it went out with one: a handoff's answer has none.
+    const message: QueuedMessage = { text, mark: isSink(r) ? null : messageMark(id) };
+    const took = await queuedTaken(from.file, from.offset, {
+      ...message,
+      open: !!turn?.open,
+      held: () => live.held(target),
+      written: turn?.written ?? this.deps.now(),
+      quietMs: HOOKS_WORD_MS,
+      idleMs: this.deps.queueTakenMs ?? QUEUE_TAKEN_MS,
+      timeoutMs: this.answerWait(),
+      now: this.deps.now,
+    });
+    if (!took) {
+      this.queuedUntaken.set(target, { file: from.file, offset: from.offset, message, at: this.deps.now() });
+      this.deps.log(`${id.slice(-8)}: no turn began for it in ${cmd.session.slice(0, 24)}; acked held`);
+      return this.finish(
+        r,
+        id,
+        {
+          outcome: "failed",
+          code: "held",
+          detail: `${out.ok ? `put into ${drv.label}'s own queue for that session` : `${drv.label} did not say whether it took the message into its queue for that session`}, and no turn began for it: it may run when the session is next used. Nothing was duplicated, and nothing else was tried.`,
+        },
+        sent,
+      );
+    }
+    this.followAnswer(r, id, "inbox", cmd.session, from, sent, { mark: messageMark(id), end: "marked" }, true);
+  }
+
+  /** How long an in-place message's answer is waited for (ANSWER_WAIT_MS). */
+  private answerWait(): number {
+    return this.deps.answerWaitMs ?? ANSWER_WAIT_MS;
+  }
+
+  /** Is a message of the daemon's still waiting in the harness's own queue for this
+   *  session (by the harness's id for it), taken by nobody (queueLive)? Not once its
+   *  prompt is in the session's file (a holder took it later, or a run of the session
+   *  took it into its own turn), nor after as long as an answer is waited for: a message
+   *  can be taken out of that queue by the person, and nothing here would ever know. */
+  private stillQueued(thread: string): boolean {
+    const q = this.queuedUntaken.get(thread);
+    if (!q) return false;
+    const waited = this.deps.now() - q.at;
+    if (waited < this.answerWait() && !queuedIn(q.file, q.offset, q.message)) return true;
+    this.queuedUntaken.delete(thread);
+    return false;
   }
 
   /** What the log says of a run's pictures (CONTROL.md §6, *Pictures*): how many went
@@ -3488,6 +3704,9 @@ export class ControlDaemon {
     record: StartOptions | null,
     /** The child's lineage, when the run is for another session (childEnv()). */
     extra: Record<string, string>,
+    /** Where the harness refuses the turn because a live process of its own has the
+     *  session (Driver.live): how that is told, and what is done instead. Nothing ran. */
+    held?: { refused: (res: RunResult) => boolean; instead: () => Promise<void> },
   ): Promise<void> {
     const stream = this.answerStream(r, id);
     const reading = drv.reading();
@@ -3527,6 +3746,9 @@ export class ControlDaemon {
     // A runner that doesn't stream hands the whole output over at the end.
     if (!reading.lines && res.stdout) for (const l of res.stdout.split("\n")) if (l.trim()) onLine(l);
     stream.close();
+    // Refused before anything ran: no run of the session is over, and what its own hooks
+    // say of a turn in it stands.
+    if (held && !res.stopped && !reading.lines && held.refused(res)) return held.instead();
     this.runOver(ref.harness, ref.id);
     if (reading.warnings?.length)
       this.deps.log(`${id.slice(-8)}: ${drv.cmd} warned: ${reading.warnings.join(" · ").slice(0, 400)}`);
@@ -3941,9 +4163,11 @@ export class ControlDaemon {
     from: { file: string; offset: number; harness?: "codex" } | null,
     sent: number,
     how: { mark: string | null; end: "next" | "marked" },
+    /** `taken` was already said for it (a message that came here by way of a run). */
+    taken = false,
   ): void {
     this.deps.log(`${id.slice(-8)}: in ${session.slice(0, 24)} via ${mode} ${this.deps.now() - sent} ms after send`);
-    this.finish(r, id, { outcome: "taken" });
+    if (!taken) this.finish(r, id, { outcome: "taken" });
     // A relay: the message is in the session, which is the whole job; nobody waits on a reply.
     if (isSink(r) && !r.wantsReply) {
       this.finish(r, id, { outcome: "delivered", mode }, sent);
@@ -3958,7 +4182,7 @@ export class ControlDaemon {
     const f = follow(from.file, from.offset, {
       ...how,
       ...(from.harness ? { harness: from.harness } : {}),
-      timeoutMs: this.deps.answerWaitMs ?? ANSWER_WAIT_MS,
+      timeoutMs: this.answerWait(),
       ...(this.deps.answerGraceMs !== undefined ? { graceMs: this.deps.answerGraceMs } : {}),
       now: this.deps.now,
       onText: (t) => stream.set(t),

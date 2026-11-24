@@ -3,10 +3,21 @@
 import { appendFileSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { readClaude } from "@sessionpipe/core";
 import { describe, expect, it } from "vitest";
-import { Answer, answerIn, CodexAnswer, firstAsk, follow, ranInMode, transcriptEnd } from "../src/control/reply.js";
-import { channelMark, frameAsk, kindPath, messageMark, routePrompt } from "../src/control/route.js";
+import {
+  Answer,
+  answerIn,
+  CodexAnswer,
+  firstAsk,
+  follow,
+  queuedIn,
+  queuedTaken,
+  ranInMode,
+  transcriptEnd,
+} from "../src/control/reply.js";
+import { channelMark, frameAsk, frameMarked, kindPath, messageMark, routePrompt } from "../src/control/route.js";
 
 const rec = (o: Record<string, unknown>) => JSON.stringify(o);
 const asst = (stop: string, content: unknown[], extra: Record<string, unknown> = {}) =>
@@ -768,5 +779,246 @@ describe("a Stop block as Codex records it (conformance/transcripts/codex/stop-b
       ),
     );
     expect({ done: a.done, text: a.text }).toEqual({ done: false, text: "written late" });
+  });
+});
+
+describe("a message taken from Codex's own queue (conformance/transcripts/codex/queued.jsonl)", () => {
+  // Recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24: a window with one
+  // turn of the person's own, then a message put in Codex's queue for the thread while
+  // the window had it. Codex writes it down as an ordinary prompt, in a turn of its own.
+  const file = new URL("../../../conformance/transcripts/codex/queued.jsonl", import.meta.url);
+  const rows = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const ID = "01JD0000000000000123456789";
+  const mark = messageMark(ID) as string;
+  const read = (lines: string[], m: string | null = mark) => {
+    const a = new CodexAnswer(m);
+    for (const line of lines) a.feed(line);
+    return { done: a.done, text: a.text, anchored: a.anchored };
+  };
+  const says = (role: string, text: string) =>
+    JSON.stringify({
+      timestamp: "2026-11-24T21:25:13.000Z",
+      type: "response_item",
+      payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+    });
+  const ended = JSON.stringify({ type: "event_msg", payload: { type: "task_complete", turn_id: "t2" } });
+
+  it("its row is the prompt that carries its mark in sessionpipe's frame; the answer is what follows, to the turn's end", () => {
+    const at = rows.findIndex((r) => r.includes("Message via board.example.com ("));
+    expect(JSON.parse(rows[at] as string).payload).toMatchObject({ type: "message", role: "user" });
+    expect(rows[at]).toContain(mark);
+    expect(rows[at]).not.toContain("hook_prompt");
+    // From the file's start, from inside the window's own turn, and from the message's own row.
+    for (const from of [0, at - 4, at])
+      expect(read(rows.slice(from))).toEqual({ done: true, text: "done", anchored: true });
+    // What the window said before it is never its answer; from after its row, nothing is guessed.
+    expect(read(rows).text).not.toContain("hello from the window");
+    expect(read(rows.slice(at + 1))).toEqual({ done: false, text: "", anchored: false });
+    expect(read(rows, messageMark("01JD0000000000000123456780")).anchored).toBe(false);
+  });
+
+  it("a prompt that only names the mark is not the message being taken", () => {
+    const framed = frameMarked("hi", "https://x.io", ID);
+    expect(framed).toContain(mark);
+    expect(read([says("user", framed), says("assistant", "a"), ended])).toEqual({
+      done: true,
+      text: "a",
+      anchored: true,
+    });
+    // The person typing its mark, or quoting the message below words of their own.
+    expect(read([says("user", `what did ${mark} say?`), says("assistant", "a"), ended]).anchored).toBe(false);
+    expect(read([says("user", `look at this:\n\n${framed}`), says("assistant", "a"), ended]).anchored).toBe(false);
+    // A row with no words at all, and another message's frame.
+    expect(read([says("user", ""), says("assistant", "a")]).anchored).toBe(false);
+    expect(read([says("user", frameMarked("hi", "https://x.io", "01JD0000000000000123456780"))]).anchored).toBe(false);
+  });
+
+  it("follow reads it from the rollout as the window writes it", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "sp-codex-queued-"));
+    try {
+      const f = path.join(dir, "rollout.jsonl");
+      const at = rows.findIndex((r) => r.includes("Message via board.example.com ("));
+      // Handed over while the window's own turn is still being written: that turn's end is
+      // not this message's (`end: "marked"`), and its words are not the answer.
+      const before = rows.findIndex((r) => r.includes('"task_complete"'));
+      writeFileSync(f, `${rows.slice(0, before).join("\n")}\n`);
+      const following = follow(f, transcriptEnd(f), {
+        mark,
+        end: "marked",
+        timeoutMs: 5000,
+        pollMs: 10,
+        graceMs: 20,
+        harness: "codex",
+      });
+      appendFileSync(f, `${rows.slice(before, at).join("\n")}\n`);
+      following.turnEnded();
+      appendFileSync(f, `${rows.slice(at).join("\n")}\n`);
+      expect(await following.answer).toBe("done");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("whether a message put in Codex's own queue was taken (CONTROL.md §6.4)", () => {
+  // The rows of conformance/transcripts/codex/queued.jsonl: the window's own turn, then the
+  // turn Codex's queue began, whose prompt is the queued text, word for word.
+  const file = new URL("../../../conformance/transcripts/codex/queued.jsonl", import.meta.url);
+  const rows = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const at = rows.findIndex((r) => r.includes("Message via board.example.com ("));
+  const TEXT = JSON.parse(rows[at] as string).payload.content[0].text as string;
+  const MARK = messageMark("01JD0000000000000123456789") as string;
+  const marked = { text: TEXT, mark: MARK };
+  const plain = { text: TEXT, mark: null };
+  const row = (type: string, payload: Record<string, unknown>) => JSON.stringify({ type, payload });
+  const prompt = (text: string, by = "user") =>
+    row("response_item", {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text }],
+      internal_chat_message_metadata_passthrough: { content_item_metadata: [{ provenance: { type: by } }] },
+    });
+  const began = row("event_msg", { type: "task_started", turn_id: "t" });
+  const ended = row("event_msg", { type: "task_complete", turn_id: "t" });
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sp-codex-taken-"));
+  const f = path.join(dir, "rollout.jsonl");
+  const start = (...lines: string[]) => {
+    writeFileSync(f, lines.map((l) => `${l}\n`).join(""));
+    return transcriptEnd(f);
+  };
+  const add = (...lines: string[]) => appendFileSync(f, lines.map((l) => `${l}\n`).join(""));
+  type Watch = Parameters<typeof queuedTaken>[2];
+  const watch = (from: number, o: Partial<Watch> = {}) =>
+    queuedTaken(f, from, {
+      ...marked,
+      open: false,
+      held: () => true,
+      written: Date.now(),
+      quietMs: 60_000,
+      idleMs: 150,
+      timeoutMs: 5000,
+      pollMs: 10,
+      ...o,
+    } as Watch);
+
+  it("the message's prompt is known by its mark in sessionpipe's frame, or with no mark by its words", () => {
+    const recorded = fileURLToPath(file);
+    expect(TEXT).toMatch(/^Message via board\.example\.com \(.*message 000123456789\):\n\nIs the build green\?/);
+    expect(MARK).toBe("message 000123456789");
+    expect(queuedIn(recorded, 0, marked)).toBe(true);
+    // Still the message if its words were changed while it waited in Codex's queue.
+    expect(queuedIn(recorded, 0, { text: TEXT.replace("green", "red"), mark: MARK })).toBe(true);
+    // Another message's mark is not in it.
+    expect(queuedIn(recorded, 0, { text: TEXT, mark: messageMark("01JD0000000000000123456780") })).toBe(false);
+    // No mark (a handoff's answer): word for word, whatever space is around it.
+    expect(queuedIn(recorded, 0, plain)).toBe(true);
+    expect(queuedIn(recorded, 0, { text: `  ${TEXT}\n`, mark: null })).toBe(true);
+    expect(queuedIn(recorded, 0, { text: TEXT.replace("green", "red"), mark: null })).toBe(false);
+    // Only what the file gained after the hand-over counts.
+    expect(queuedIn(recorded, readFileSync(file).length, marked)).toBe(false);
+    // A file that can no longer be followed says nothing against it.
+    expect(queuedIn(path.join(dir, "gone.jsonl"), 10, marked)).toBe(true);
+  });
+
+  it("taken: the rollout gains the message as a prompt", async () => {
+    const from = start(rows[0] as string);
+    const took = watch(from);
+    add(...rows.slice(1));
+    expect(await took).toBe(true);
+    // Already there when it is first looked for; and known by its words alone.
+    expect(await watch(from)).toBe(true);
+    expect(await watch(from, plain)).toBe(true);
+  });
+
+  it("not taken: an idle holder that has not begun a turn for it in time is not going to", async () => {
+    const from = start(rows[0] as string);
+    const t0 = Date.now();
+    expect(await watch(from)).toBe(false);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
+    // Rows that are not the message: another prompt, the person naming its mark, the same
+    // words from a hook, a row that is no JSON, one with no payload.
+    add(
+      prompt("something else"),
+      prompt(`what did ${MARK} say?`),
+      prompt(`<hook_prompt hook_run_id="stop:1:/h">${TEXT}</hook_prompt>`, "harness"),
+      "{",
+      "{}",
+    );
+    expect(await watch(from)).toBe(false);
+    expect(await watch(from, plain)).toBe(false);
+    expect(queuedIn(f, from, marked)).toBe(false);
+  });
+
+  it("a holder in the middle of a turn is waited for, while something has the thread and its file is being written", async () => {
+    // Queued while a turn was running: nothing is counted until it ends.
+    const from = start(rows[0] as string, began);
+    let held = true;
+    const took = watch(from, { open: true, held: () => held, idleMs: 100 });
+    await new Promise((r) => setTimeout(r, 300));
+    add(ended, began, prompt(TEXT));
+    expect(await took).toBe(true);
+    // A turn that began after the message was queued is waited for the same way.
+    const from2 = start(rows[0] as string);
+    const took2 = watch(from2, { idleMs: 200 });
+    add(began);
+    await new Promise((r) => setTimeout(r, 400));
+    add(ended, began, prompt(TEXT));
+    expect(await took2).toBe(true);
+    // The holder went away in the middle of its turn: nobody is going to take it.
+    const from3 = start(rows[0] as string, began);
+    held = false;
+    expect(await watch(from3, { open: true, held: () => held, idleMs: 100 })).toBe(false);
+    // The turn ended and no turn began for the message.
+    const from4 = start(rows[0] as string, began);
+    const took4 = watch(from4, { open: true, idleMs: 100 });
+    add(ended);
+    expect(await took4).toBe(false);
+  });
+
+  it("a turn with no end in a file nobody writes any more is not waited for: a killed holder leaves both behind", async () => {
+    // Its lock file is still there (held), its turn never ended (open): only the silence tells.
+    const from = start(rows[0] as string, began);
+    const t0 = Date.now();
+    expect(await watch(from, { open: true, quietMs: 200, idleMs: 100 })).toBe(false);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(280);
+    // Already silent that long when the message was queued.
+    const from2 = start(rows[0] as string, began);
+    const t1 = Date.now();
+    expect(await watch(from2, { open: true, written: Date.now() - 60_000, quietMs: 1000, idleMs: 100 })).toBe(false);
+    expect(Date.now() - t1).toBeLessThan(600);
+    // A turn that goes on writing is waited for past that.
+    const from3 = start(rows[0] as string, began);
+    const took = watch(from3, { open: true, quietMs: 250, idleMs: 100 });
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 120));
+      add(row("response_item", { type: "function_call", call_id: `c${i}` }));
+    }
+    add(ended, began, prompt(TEXT));
+    expect(await took).toBe(true);
+  });
+
+  it("gives up at its limit, and on a file that was rewritten", async () => {
+    const from = start(rows[0] as string, began);
+    expect(await watch(from, { open: true, timeoutMs: 120 })).toBe(false);
+    const from2 = start(rows[0] as string, began, began, began);
+    const took = watch(from2, { open: true });
+    writeFileSync(f, "");
+    expect(await took).toBe(false);
+    // With the clock it is given and the default pace.
+    const from3 = start(rows[0] as string);
+    let t = 1000;
+    expect(
+      await queuedTaken(f, from3, {
+        ...marked,
+        open: false,
+        held: () => true,
+        written: 0,
+        quietMs: 10,
+        idleMs: 0,
+        timeoutMs: 50,
+        now: () => t++,
+      }),
+    ).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

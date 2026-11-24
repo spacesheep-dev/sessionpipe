@@ -56,7 +56,11 @@
   recorded the same way, with sessionpipe's own Stop hook answered by a stand-in daemon: the
   turn's last words, the message the hook blocked with as Codex writes it down, and the answer to
   it) by that test too, for the message as the person's own turn, and by
-  `packages/cli/test/control-reply.test.ts`, for which words are its answer.
+  `packages/cli/test/control-reply.test.ts`, for which words are its answer. `codex/queued.jsonl` (a
+  window recorded the same way: one turn typed into it, then a message put in Codex's own queue
+  for the thread while the window had it, which Codex writes as a turn `turn_trigger: "queue"`
+  began) by both tests as well, for the queued message as the person's own turn and for its
+  answer, and by `packages/core/test/control-runners.test.ts`.
 - `control-held.json` — whether a Claude Code session is held, and by what (spec/CONTROL.md §6,
   *What counts as held*): `{ rows, written_ms_ago, ended_ms_ago?, turn_ms_ago?,
   strayed_ms_ago?, expect }`, the registry rows that name it, when its transcript was last

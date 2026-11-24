@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ends, parseLines, recentFiles, scanLines } from "../src/readers/files.js";
+import { ends, linesFromEnd, parseLines, recentFiles, scanLines } from "../src/readers/files.js";
 import { gitFacts, stripCredentials } from "../src/readers/git.js";
 
 const dirs: string[] = [];
@@ -156,4 +156,40 @@ describe("gitFacts", () => {
     git(detached, "checkout", "-q", "--detach");
     expect(gitFacts(detached)).toEqual({ repo: "github.com/me/other" });
   }, 30_000);
+});
+
+describe("linesFromEnd: a file's lines, last first, a piece at a time", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "sp-lines-end-"));
+  const f = path.join(dir, "t.jsonl");
+  const all = (text: string, piece?: number) => {
+    writeFileSync(f, text);
+    return [...linesFromEnd(f, piece)];
+  };
+
+  it("every whole line once, whatever the piece and wherever a line is cut", () => {
+    const lines = ["first", "the second line", "é and ü, which are two bytes each", "x".repeat(50), "last"];
+    const text = `${lines.join("\n")}\n`;
+    const want = [...lines].reverse();
+    // Pieces smaller than a line, the size of one, cutting a two-byte letter, and the default.
+    for (const piece of [1, 2, 3, 5, 7, 16, 51, 1024]) expect(all(text, piece)).toEqual(want);
+    expect(all(text)).toEqual(want);
+    // A last line with no newline yet is a line all the same; empty lines are not.
+    expect(all("a\n\nb\npartial", 2)).toEqual(["partial", "b", "a"]);
+    expect(all("only", 2)).toEqual(["only"]);
+    expect(all("", 2)).toEqual([]);
+    expect(all("\n\n", 1)).toEqual([]);
+  });
+
+  it("stops reading when the caller has what it wants, and says nothing for a file it can't read", () => {
+    writeFileSync(f, `${Array.from({ length: 1000 }, (_, i) => `line ${i}`).join("\n")}\n`);
+    const got: string[] = [];
+    for (const line of linesFromEnd(f, 64)) {
+      got.push(line);
+      if (got.length === 2) break;
+    }
+    expect(got).toEqual(["line 999", "line 998"]);
+    expect([...linesFromEnd(path.join(dir, "none"))]).toEqual([]);
+    expect([...linesFromEnd(dir)]).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

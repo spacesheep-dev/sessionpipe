@@ -158,6 +158,19 @@ function uninstallNotify(env: NodeJS.ProcessEnv): InstallReport {
   return { file, changed: false };
 }
 
+/** Whether a Codex that locks its threads has this one's lock file: `<CODEX_HOME>/
+ *  thread-writer-locks/<thread>.lock`, made by the process that opens the thread and
+ *  removed when it lets go in the ordinary way (0.171.0). A holder that is killed leaves
+ *  the file behind with nothing locking it, so the file is no proof that the thread is
+ *  held; that it is absent says no Codex of that kind has it. Codex's own answer to a
+ *  second writer is the proof (codex-control's `heldElsewhere`). */
+export function threadLocked(thread: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return (
+    /^[A-Za-z0-9-]{8,128}$/.test(thread) &&
+    existsSync(path.join(codexHome(env), "thread-writer-locks", `${thread.toLowerCase()}.lock`))
+  );
+}
+
 /** The rollout file of one thread: `<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-<time>-<thread
  *  id>.jsonl`, newest day first. Null for an id that isn't a thread id's shape, so a
  *  short or odd one never matches some other session's file. */

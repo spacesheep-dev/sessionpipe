@@ -14,6 +14,7 @@
 // sent back as the answer to a message they were written before (2026-11-10).
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { codexHookPrompts, codexInjected, codexWords } from "@sessionpipe/core";
+import { deliveredWords } from "@sessionpipe/core/control";
 
 /** The transcript's size now: where its answer will start. */
 export function transcriptEnd(file: string): number {
@@ -273,6 +274,8 @@ export class Answer {
  *  the model says after it is the answer, up to the end of the turn (`task_complete`, or
  *  `turn_aborted` when the person stopped it), the next message handed over, or a prompt
  *  the person typed. Codex's own notes to the model (its context blocks) end nothing.
+ *  A message that reached a live process through Codex's own queue (CONTROL.md §6.4) is
+ *  a prompt of a turn of its own there, in sessionpipe's frame: that row is its row.
  *  `until` cuts nothing here: Codex stamps a row when it writes it, which can be after
  *  the turn's own Stop, and the rows above end an answer by themselves. */
 export class CodexAnswer {
@@ -308,7 +311,11 @@ export class CodexAnswer {
     const message = j.type === "response_item" && p.type === "message";
     const handed = message && p.role === "user" ? codexHookPrompts(p) : [];
     if (!this.anchored) {
-      if (handed.some((reason) => reason.includes(mark))) this.anchored = true;
+      // The message's own row: the reason a Stop hook blocked with, or, where it came
+      // through Codex's queue, a prompt that is sessionpipe's frame carrying the mark.
+      const queued = message && p.role === "user" && !handed.length ? codexWords(p.content) : "";
+      if (handed.some((reason) => reason.includes(mark)) || (queued.includes(mark) && deliveredWords(queued).delivered))
+        this.anchored = true;
       return;
     }
     if (j.type === "event_msg") {
@@ -375,6 +382,148 @@ export interface Following {
   turnEnded(): void;
 }
 
+/** A transcript's rows from `from` on, whole rows only, each time it is asked: up to 4 MiB
+ *  of what it has gained, and how many bytes that was (0: nothing new). False once the
+ *  file can no longer follow what was read: it shrank (rewritten), or it can't be read
+ *  (gone, unreadable, no longer a file). */
+function rowsAfter(file: string, from: number): (row: (line: string) => void) => number | false {
+  let offset = from;
+  let rest: Buffer = Buffer.alloc(0);
+  return (row) => {
+    const size = transcriptEnd(file);
+    if (size < offset) return false;
+    if (size === offset) return 0;
+    let fd: number | null = null;
+    try {
+      fd = openSync(file, "r");
+      const buf = Buffer.alloc(Math.min(size - offset, 4 * 1024 * 1024));
+      const n = readSync(fd, buf, 0, buf.length, offset);
+      offset += n;
+      let chunk: Buffer = rest.length ? Buffer.concat([rest, buf.subarray(0, n)]) : buf.subarray(0, n);
+      for (let nl = chunk.indexOf(10); nl >= 0; nl = chunk.indexOf(10)) {
+        row(chunk.subarray(0, nl).toString("utf8"));
+        chunk = chunk.subarray(nl + 1);
+      }
+      rest = Buffer.from(chunk);
+      return n;
+    } catch {
+      return false;
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+  };
+}
+
+/** A message that was put in Codex's own queue for a thread (CONTROL.md §6.4), as its
+ *  prompt is known again in the thread's rollout: by its mark, where it has one, in
+ *  sessionpipe's frame (the row `CodexAnswer` takes the answer from, and one that is
+ *  still the message's if its words were changed while it waited); else by its text,
+ *  word for word (a handoff's answer, which carries no mark). */
+export interface QueuedMessage {
+  text: string;
+  mark: string | null;
+}
+
+/** What a Codex rollout's row says of such a message: `began`/`ended` for the records of
+ *  a turn's start and end, `took` for the prompt that is the message (Codex writes a
+ *  queued message down as an ordinary prompt of the person's; a hook's own row is never
+ *  it). */
+function queuedRow(line: string, m: QueuedMessage): "began" | "ended" | "took" | null {
+  let j: { type?: unknown; payload?: Record<string, unknown> } | null;
+  try {
+    j = JSON.parse(line) as typeof j;
+  } catch {
+    return null;
+  }
+  const p = j?.payload;
+  if (!j || !p || typeof p !== "object") return null;
+  if (j.type === "event_msg")
+    return p.type === "task_started"
+      ? "began"
+      : p.type === "task_complete" || p.type === "turn_aborted"
+        ? "ended"
+        : null;
+  if (j.type !== "response_item" || p.type !== "message" || p.role !== "user" || codexHookPrompts(p).length)
+    return null;
+  const words = codexWords(p.content);
+  const its = m.mark ? words.includes(m.mark) && deliveredWords(words).delivered : words === m.text.trim();
+  return its ? "took" : null;
+}
+
+/** Whether the rollout already holds, after `from`, the prompt a queued message becomes.
+ *  A file that can no longer be followed says nothing against it: true. */
+export function queuedIn(file: string, from: number, m: QueuedMessage): boolean {
+  const read = rowsAfter(file, from);
+  let took = false;
+  for (;;) {
+    const n = read((line) => {
+      if (queuedRow(line, m) === "took") took = true;
+    });
+    if (n === false) return true;
+    if (took || n === 0) return took;
+  }
+}
+
+/** Whether the process that has a Codex thread took a message out of Codex's own queue
+ *  for it (CONTROL.md §6.4): the rollout gains the message as a prompt, which is the only
+ *  word there is that a turn began for it. A holder in the middle of a turn takes it when
+ *  that turn ends, however long that is, so nothing is counted while a turn is running:
+ *  one with no end yet, in a thread something still has (`held`), whose rollout was
+ *  written in the last `quietMs`. Neither of the first two is proof by itself: a holder
+ *  that is killed writes no end and leaves its lock file behind. An idle holder looks at
+ *  its queue every ten seconds, and one that has not taken the message `idleMs` after it
+ *  could have is not going to. False then, at `timeoutMs`, and for a file that can no
+ *  longer be followed. */
+export function queuedTaken(
+  file: string,
+  from: number,
+  o: QueuedMessage & {
+    /** A turn was running in the thread when the message was queued. */
+    open: boolean;
+    /** Whether a process still has the thread, as far as can be told. */
+    held: () => boolean;
+    /** When the rollout was last written, as the message was queued. */
+    written: number;
+    quietMs: number;
+    idleMs: number;
+    timeoutMs: number;
+    pollMs?: number;
+    now?: () => number;
+  },
+): Promise<boolean> {
+  const now = o.now ?? Date.now;
+  const deadline = now() + o.timeoutMs;
+  const more = rowsAfter(file, from);
+  let open = o.open;
+  let grew = o.written;
+  let took = false;
+  let idleSince: number | null = null;
+  const row = (line: string): void => {
+    const what = queuedRow(line, o);
+    if (what === "took") took = true;
+    else if (what) open = what === "began";
+  };
+  return (async (): Promise<boolean> => {
+    for (;;) {
+      const t = now();
+      const n = more(row);
+      if (n === false) return false;
+      if (took) return true;
+      if (n) grew = t;
+      if (t >= deadline) return false;
+      if (open && t - grew < o.quietMs && o.held()) idleSince = null;
+      else {
+        idleSince ??= t;
+        if (t - idleSince >= o.idleMs) return false;
+      }
+      await new Promise<void>((res) => {
+        const timer = setTimeout(res, o.pollMs ?? 500);
+        timer.unref?.();
+      });
+    }
+  })();
+}
+
 /** Follow the transcript from `from` (its size when the message was handed over) for the
  *  answer to the message that carries `mark`. The answer is complete when its rows say
  *  so (`Answer`); the session's hooks saying the turn ended settle it otherwise, after a
@@ -385,36 +534,16 @@ export function follow(file: string, from: number, o: FollowOptions): Following 
   const grace = o.graceMs ?? GRACE_MS;
   const deadline = now() + o.timeoutMs;
   const a = o.harness === "codex" ? new CodexAnswer(o.mark) : new Answer(o.mark);
-  let offset = from;
-  let rest: Buffer = Buffer.alloc(0);
+  const more = rowsAfter(file, from);
   let gone = false;
   let said = "";
   let overAt: number | null = null;
   let wake = (): void => {};
   /** Read what the transcript has gained, whole rows only. */
   const drain = (): void => {
-    const size = transcriptEnd(file);
-    // Rewritten under us: nothing in it can be trusted to follow what was read.
-    if (size < offset) gone = true;
-    if (size <= offset) return;
-    let fd: number | null = null;
-    try {
-      fd = openSync(file, "r");
-      const buf = Buffer.alloc(Math.min(size - offset, 4 * 1024 * 1024));
-      const n = readSync(fd, buf, 0, buf.length, offset);
-      offset += n;
-      let chunk: Buffer = rest.length ? Buffer.concat([rest, buf.subarray(0, n)]) : buf.subarray(0, n);
-      for (let nl = chunk.indexOf(10); nl >= 0; nl = chunk.indexOf(10)) {
-        a.feed(chunk.subarray(0, nl).toString("utf8"));
-        chunk = chunk.subarray(nl + 1);
-      }
-      rest = Buffer.from(chunk);
-    } catch {
-      // It can no longer be read (gone, unreadable, no longer a file): no answer from it.
-      gone = true;
-    } finally {
-      if (fd !== null) closeSync(fd);
-    }
+    // Rewritten under us, or no longer readable: nothing in it can be trusted to follow
+    // what was read, and there is no answer from it.
+    if (more((line) => a.feed(line)) === false) gone = true;
     if (a.text !== said) {
       said = a.text;
       o.onText?.(said);
