@@ -3,7 +3,7 @@
 // lines per mode, and their output read line by line. The lines follow the shapes
 // measured from codex-cli 0.160.0 and agy 1.2.16 on 2026-10-04 (Codex's two warning
 // items verbatim from a run in a box); the texts in them are made up.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -498,5 +498,41 @@ describe("an npm codex.cmd shim (#165)", () => {
     const shim = path.join(dir, "codex.cmd");
     writeFileSync(shim, `@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
     expect(await codexLogin(shim, { PATH: process.env.PATH })).toEqual({ loggedIn: false });
+  });
+});
+
+// The stream as the real CLI prints it (the stand-in above is in 0.160.0's shapes):
+// recorded on codex-cli 0.171.0 with the commands the daemon runs.
+describe("codex exec --json as recorded (conformance/control-codex-exec-stream.json)", () => {
+  const recorded = JSON.parse(
+    readFileSync(new URL("../../../conformance/control-codex-exec-stream.json", import.meta.url), "utf8"),
+  ) as {
+    runs: {
+      name: string;
+      exit: number;
+      lines: string[];
+      expect: { session: string; warnings: number; reply?: string; failed?: string };
+    }[];
+  };
+  it.each(recorded.runs)("$name: the thread, the warnings, and the answer or the failure", (run) => {
+    const r = codexReading();
+    for (const line of run.lines) r.feed(line);
+    expect(r.session).toBe(run.expect.session);
+    expect(r.warnings).toHaveLength(run.expect.warnings);
+    expect(r.outcome({ code: run.exit, signal: null, stderr: "" })).toEqual(
+      run.expect.reply !== undefined ? { reply: run.expect.reply } : { failed: run.expect.failed },
+    );
+    // Every line is one the reader knows what to make of, or one it passes over: none throws.
+    expect(run.lines.map((l) => typeof codexLine(l))).toEqual(run.lines.map(() => "object"));
+  });
+  it("holds the four runs a daemon meets: a start, a resume, a turn refused at once, and one retried first", () => {
+    expect(recorded.runs.map((r) => [r.name, r.exit, r.expect.reply !== undefined])).toEqual([
+      ["start", 0, true],
+      ["resume", 0, true],
+      ["refused", 1, false],
+      ["retried", 1, false],
+    ]);
+    // A command that failed inside a turn that finished is not a failed turn.
+    expect(recorded.runs[0]?.lines.some((l) => l.includes('"status":"failed"'))).toBe(true);
   });
 });

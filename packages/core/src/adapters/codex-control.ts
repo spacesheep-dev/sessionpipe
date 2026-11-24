@@ -5,7 +5,8 @@
 // for the next message), and its JSONL output read as it streams. Codex picks a new
 // session's id itself (the first line, `thread.started`), so the daemon names it after
 // the command that started it (CONTROL.md §6 `start`). Shapes measured on codex-cli
-// 0.160.0, 2026-10-04; `--image` on 0.171.0, 2026-11-19.
+// 0.160.0, 2026-10-04; `--image` on 0.171.0, 2026-11-19; the whole stream recorded on
+// 0.171.0, 2026-11-24 (conformance/control-codex-exec-stream.json).
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";

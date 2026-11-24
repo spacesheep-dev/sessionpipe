@@ -1,0 +1,72 @@
+{
+  "spec": "ADAPTERS.md, Codex (Control)",
+  "note": "What `codex exec --json` and `codex exec resume --json` print, line for line, as a machine reads them to run a Codex turn headlessly (CONTROL.md §6 `start`, `prompt`): recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24, with the commands the reference daemon runs; folders and the service's address are replaced by neutral ones, and the hour Codex prints for a limit's reset is given in UTC; nothing else. `lines` are stdout as printed. `expect` is what a reader takes from them: `session`, the thread Codex names in `thread.started` (a resume names the same one); `warnings`, how many `error` items it met, none of which is a failure; and either `reply`, the turn's `agent_message` texts joined by a blank line, or `failed`, the message of `turn.failed`. `exit` is the process's exit code: 1 after a `turn.failed`. A top-level `error` line (`Reconnecting... n/5 (…)`, or the service's own words) is a note along the way and decides nothing; `item.started` and `command_execution` items (their `exit_code`, `status`: `completed` or `failed`), `turn.started` and the `usage` of `turn.completed` are not read.",
+  "codex": "0.171.0",
+  "runs": [
+    {
+      "name": "start",
+      "what": "codex exec --json --skip-git-repo-check -C <cwd> -s workspace-write -- <text>: a turn of two commands (one exits 1) and an answer",
+      "exit": 0,
+      "lines": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"01a20f24-c4c2-7311-ac51-34a34e531a6b\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"clamping Interrupt hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ls /nonexistent-dir-xyz'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ls /nonexistent-dir-xyz'\",\"aggregated_output\":\"ls: /nonexistent-dir-xyz: No such file or directory\\n\",\"exit_code\":1,\"status\":\"failed\"}}",
+        "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'echo fine'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'echo fine'\",\"aggregated_output\":\"fine\\n\",\"exit_code\":0,\"status\":\"completed\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"Two commands ran: one failed, one printed fine.\"}}",
+        "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":126,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,\"output_tokens\":21,\"reasoning_output_tokens\":0}}"
+      ],
+      "expect": {"session": "01a20f24-c4c2-7311-ac51-34a34e531a6b", "warnings": 2, "reply": "Two commands ran: one failed, one printed fine."}
+    },
+    {
+      "name": "resume",
+      "what": "codex exec resume --json --skip-git-repo-check -c sandbox_mode=\"workspace-write\" -- <id> <text>: the same thread, one answer",
+      "exit": 0,
+      "lines": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"01a20f24-c4c2-7311-ac51-34a34e531a6b\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"clamping Interrupt hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Still here.\"}}",
+        "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":168,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,\"output_tokens\":28,\"reasoning_output_tokens\":0}}"
+      ],
+      "expect": {"session": "01a20f24-c4c2-7311-ac51-34a34e531a6b", "warnings": 2, "reply": "Still here."}
+    },
+    {
+      "name": "refused",
+      "what": "the model's service refuses the turn at once (HTTP 429, usage_limit_reached): Codex's own words, then turn.failed",
+      "exit": 1,
+      "lines": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"01a20f24-c4c2-7311-ac51-34a34e531a6b\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"clamping Interrupt hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"error\",\"message\":\"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 10:40 PM.\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 10:40 PM.\"}}"
+      ],
+      "expect": {"session": "01a20f24-c4c2-7311-ac51-34a34e531a6b", "warnings": 2, "failed": "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 10:40 PM."}
+    },
+    {
+      "name": "retried",
+      "what": "the model's service answers 401 each time: five `Reconnecting...` notes, then turn.failed",
+      "exit": 1,
+      "lines": [
+        "{\"type\":\"thread.started\",\"thread_id\":\"01a20f24-c4c2-7311-ac51-34a34e531a6b\"}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"clamping Interrupt hook timeout to 3s in /home/user/.codex/hooks.json\"}}",
+        "{\"type\":\"turn.started\"}",
+        "{\"type\":\"error\",\"message\":\"Reconnecting... 1/5 (unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses)\"}",
+        "{\"type\":\"error\",\"message\":\"Reconnecting... 2/5 (unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses)\"}",
+        "{\"type\":\"error\",\"message\":\"Reconnecting... 3/5 (unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses)\"}",
+        "{\"type\":\"error\",\"message\":\"Reconnecting... 4/5 (unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses)\"}",
+        "{\"type\":\"error\",\"message\":\"Reconnecting... 5/5 (unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses)\"}",
+        "{\"type\":\"error\",\"message\":\"unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses\"}",
+        "{\"type\":\"turn.failed\",\"error\":{\"message\":\"unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses\"}}"
+      ],
+      "expect": {"session": "01a20f24-c4c2-7311-ac51-34a34e531a6b", "warnings": 2, "failed": "unexpected status 401 Unauthorized: token expired (lab), url: https://chatgpt.example/backend-api/codex/responses"}
+    }
+  ]
+}
