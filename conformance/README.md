@@ -81,6 +81,10 @@
   are installed (spec/ADAPTERS.md, *Codex*, Mapping): `{ ends, reported }`, the ends as the
   harness says them, each `[road, turn id]`, and the `turn.ended` events that go out. Run by
   `packages/cli/test/run-turn-end-once.test.ts`.
+- `control-codex-exec-stream.json` — what `codex exec --json` and `codex exec resume --json` print
+  (spec/ADAPTERS.md, *Codex*, Control), recorded on codex-cli 0.171.0: `runs`, each `{ name, exit,
+  lines, expect }`, stdout line for line and what a reader takes from it (`session`, `warnings`,
+  and `reply` or `failed`). Run by `packages/core/test/control-runners.test.ts`.
 - `control-busy-window.json` — when a message waits a moment for a window's hooks before it
   is routed (spec/CONTROL.md §6.3): `{ look, hooks_heard, has_copy, asked_before, expect }`, why
   the window's inbox was no way in, whether its hooks report to the machine, whether the window
