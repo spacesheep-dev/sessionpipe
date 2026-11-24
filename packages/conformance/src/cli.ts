@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// npx @sessionpipe/conformance <fixture dir | file>   run adapter fixtures
-// npx @sessionpipe/conformance https://host [--token] run the receiver scenarios (M3)
+// npx sessionpipe-conformance <fixture dir | file>   run adapter fixtures
+// npx sessionpipe-conformance https://host [--token] run the receiver scenarios (M3)
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
