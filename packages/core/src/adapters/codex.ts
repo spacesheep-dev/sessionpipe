@@ -232,6 +232,10 @@ export const codex: Adapter = {
       } catch {}
       const id = (s["thread-id"] ?? s.thread_id ?? s["session-id"] ?? s.session_id) as string | undefined;
       if (!id) return null;
+      // Notify is Codex's word for more than one thing in principle, and a turn's end is
+      // the only one it has (`agent-turn-complete`, codex-rs hooks/src/legacy_notify.rs at
+      // 0.171.0): any other `type` is not a turn's end.
+      if (typeof s.type === "string" && s.type !== "agent-turn-complete") return null;
       // Notify names the thread whose turn ended. Without a rollout it is an ephemeral
       // thread, kept nowhere (the hooks' `transcript_path: null` below). A subagent's
       // thread belongs to its parent, whose hooks already report it: SubagentStart and
@@ -247,7 +251,10 @@ export const codex: Adapter = {
             harnessEvent: "notify",
           },
         ],
-        hints: {},
+        // With its hooks on as well, Codex says this turn's end twice: the Stop hook, then
+        // this, under one turn id (measured on 0.171.0). `fallback` tells the worker which
+        // road an end came by, so that the second of the two is dropped (cli/src/run.ts).
+        hints: { fallback: true },
         transcript: file,
       };
       return r;

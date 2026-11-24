@@ -67,6 +67,10 @@
   (spec/ADAPTERS.md, *Agents driven through ACP*): `{ harness, mode, env }`, the environment added
   for that run only (`{}`: nothing, the agent's own default). Run by
   `packages/core/test/acp-control.test.ts`.
+- `turn-end-once.json` — Codex says a turn's end by its `Stop` hook and by its notify when both
+  are installed (spec/ADAPTERS.md, *Codex*, Mapping): `{ ends, reported }`, the ends as the
+  harness says them, each `[road, turn id]`, and the `turn.ended` events that go out. Run by
+  `packages/cli/test/run-turn-end-once.test.ts`.
 - `control-busy-window.json` — when a message waits a moment for a window's hooks before it
   is routed (spec/CONTROL.md §6.3): `{ look, hooks_heard, has_copy, asked_before, expect }`, why
   the window's inbox was no way in, whether its hooks report to the machine, whether the window
