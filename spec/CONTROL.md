@@ -811,7 +811,7 @@ conversation unseen.
 ### `permission.answer`
 
 Delivered through the harness's permission hook answer (Claude Code `PermissionRequest`
-→ `hookSpecificOutput.decision.behavior`; Codex `PermissionRequest`). The hook waits on
+→ `hookSpecificOutput.decision.behavior`). The hook waits on
 the daemon's socket for a signed answer for up to its window (default 125 s) **while
 the terminal shows its own prompt**: whichever answers first wins. When the terminal
 answers first, the harness does not tell the hook; the daemon learns it from the first
@@ -820,7 +820,13 @@ tool result; a Stop or a new prompt where the main thread asked; where a subagen
 asked, its own stop or a Stop with nothing left in flight), closes the attention,
 releases the waiting hook without an answer, and acks a later answer `expired`. Gemini
 CLI's `Notification` of type `ToolPermission` has no answer channel: acked
-`unsupported`. **Nothing is ever auto-allowed**: a daemon MUST NOT answer `allow` for an
+`unsupported`. Codex's `PermissionRequest` hook takes an answer in Claude Code's shape
+(`allow` approves the one request, `deny` refuses it with its `message`; measured on
+0.171.0, ADAPTERS.md), but Codex asks its hooks **before** it shows its own prompt and
+waits for them, so a hook that waited for a signed answer would keep the prompt from the
+person at the keyboard for as long. The reference daemon's hook does not wait: an
+answer for a Codex session is acked `unsupported`, and the prompt is answered in Codex.
+**Nothing is ever auto-allowed**: a daemon MUST NOT answer `allow` for an
 attention it did not receive a verified `permission.answer` for.
 
 ### `cancel`

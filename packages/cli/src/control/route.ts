@@ -199,6 +199,10 @@ const FITS: Record<DeliveryMode, (s: SessionView) => boolean> = {
   fork: (s) => HEADLESS.has(s.harness) && s.known && !!s.held && s.canFork && !s.copied,
 };
 
+/** Said to a `permission.answer` for a Codex session. */
+export const CODEX_NO_ANSWER =
+  "A Codex permission prompt is answered in Codex itself for now: sessionpipe does not answer it from here";
+
 /** Where a prompt (or a start) goes. Never two writers on one transcript: a live
  *  session gets an in-place lane or a fork, never a resume. */
 /** Said when no `claude` can be found: at daemon start, in a failed ack, and where a
@@ -236,15 +240,23 @@ export function kindPath(
     case "prompt":
       return "prompt";
     case "permission.answer":
-      return harness === "gemini-cli"
-        ? { unsupported: "Gemini CLI has no permission answer channel" }
-        : harness === "devin"
-          ? { unsupported: "Devin has no permission answer channel" }
-          : harness === "grok-build"
-            ? { unsupported: "Grok Build has no permission answer channel" }
-            : harness === "autopilot"
-              ? { unsupported: "Autopilot has no permission answer channel yet" }
-              : "permission";
+      // Codex's permission hook could give the answer, but Codex asks its hooks before it
+      // shows its own prompt and waits for them (0.171.0): a hook held open for a signed
+      // answer would hold the person's prompt back for as long. The hook does not wait, so
+      // there is never a prompt of Codex's to answer, and that is said as it is. (Another
+      // way in may exist: Codex's app-server hands an approval to every client attached to
+      // the thread and takes the first answer. Read in its source, not tried.)
+      return harness === "codex"
+        ? { unsupported: CODEX_NO_ANSWER }
+        : harness === "gemini-cli"
+          ? { unsupported: "Gemini CLI has no permission answer channel" }
+          : harness === "devin"
+            ? { unsupported: "Devin has no permission answer channel" }
+            : harness === "grok-build"
+              ? { unsupported: "Grok Build has no permission answer channel" }
+              : harness === "autopilot"
+                ? { unsupported: "Autopilot has no permission answer channel yet" }
+                : "permission";
     case "cancel":
       return "cancel";
     case "start":

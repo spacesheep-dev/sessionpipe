@@ -542,9 +542,10 @@ describe.runIf(process.platform !== "win32")("control: the Stop hook asks the da
       await run(["codex", "Stop"], codex());
       expect(d.asked[1]).toEqual({ op: "stop", session: `codex:${THREAD}`, active: false });
       expect(out).toHaveLength(1);
-      // Never asked: a thread Codex keeps nowhere, a subagent's Stop (another thread's
-      // rollout under the parent's id), a payload with no session, one that is not JSON, a
-      // turn the daemon itself runs, and Codex's permission prompt, which no hook can answer.
+      // Never asked: a thread Codex keeps nowhere, a payload that names another thread's
+      // rollout under this id, a payload with no session, one that is not JSON, a
+      // turn the daemon itself runs, and Codex's permission prompt: a hook parked there would
+      // hold the prompt back from the person at the keyboard (Codex waits for its hooks first).
       await run(["codex", "Stop"], codex({ transcript_path: null }));
       await run(
         ["codex", "Stop"],

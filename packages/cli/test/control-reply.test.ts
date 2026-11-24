@@ -610,7 +610,12 @@ describe("kinds and modes the ladder names (CONTROL.md §6)", () => {
     expect(kindPath("permission.answer", "gemini-cli")).toEqual({
       unsupported: "Gemini CLI has no permission answer channel",
     });
-    expect(kindPath("permission.answer", "codex")).toBe("permission");
+    // Codex's own prompt is the only place its permission questions are answered, for now.
+    expect(kindPath("permission.answer", "codex")).toEqual({
+      unsupported:
+        "A Codex permission prompt is answered in Codex itself for now: sessionpipe does not answer it from here",
+    });
+    expect(kindPath("permission.answer", "claude-code")).toBe("permission");
     expect(kindPath("cancel", "codex")).toBe("cancel");
     expect(kindPath("restart" as never, "codex")).toEqual({ unsupported: "unknown kind restart" });
   });

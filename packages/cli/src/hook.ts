@@ -203,8 +203,10 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
    *  `at`: when this hook fired, which a permission question is told with. */
   function controlAsk(stdin: string, at: number): Promise<string | null> | null {
     // Codex's Stop takes a queued message the same way (its hook's `{"decision":"block"}`
-    // continues the turn with the reason, 0.171.0); its permission prompt has no answer a
-    // hook can give, so only its Stop asks.
+    // continues the turn with the reason, 0.171.0). Only its Stop asks: its permission
+    // hook could answer too, but Codex waits for that hook before it shows its own prompt,
+    // so one parked here would keep the prompt from the person at the keyboard
+    // (route.ts CODEX_NO_ANSWER).
     const codexStop = harness === "codex" && event === "Stop";
     if (!codexStop && (harness !== "claude-code" || (event !== "Stop" && event !== "PermissionRequest"))) return null;
     // A turn the daemon itself runs (a held Agent SDK session, a headless resume) never
