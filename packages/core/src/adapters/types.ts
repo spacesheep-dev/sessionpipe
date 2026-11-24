@@ -49,6 +49,17 @@ export interface Turn {
    *  turn is whole as it stands, with whatever it had said (nothing, sometimes): no hook
    *  fires for it, so the file is the only thing that knows. */
   interrupted?: true;
+  /** The turn failed before it finished (the model's service refused it, or never
+   *  answered), and the transcript says so. Whole as it stands, like an interrupted one:
+   *  the next prompt is another turn's. */
+  failed?: true;
+}
+
+/** How a turn ended, as the harness's own file says it: for a turn no hook ended. `error`
+ *  is the harness's error class (PROTOCOL.md §4, `turn.ended`), never its message. */
+export interface TurnEnd {
+  reason: "stop" | "interrupt" | "error";
+  error?: string;
 }
 
 export interface TranscriptRead {
@@ -163,6 +174,10 @@ export interface Adapter {
     env?: NodeJS.ProcessEnv,
   ): Promise<Partial<SessionFacts>>;
   backfill(sinceMs: number, env?: NodeJS.ProcessEnv): BackfillRow[];
+  /** How the turn `turnId` ended, read from the transcript, for a harness that fires no
+   *  hook when a turn fails (Codex: no Stop and no notify for a turn its model's service
+   *  refused). Null while the file does not say the turn is over. */
+  turnEnd?(transcript: string, turnId: string): TurnEnd | null;
   /** The account's limits as the transcript last recorded them (`limits.observed` data),
    *  for a harness that writes them there; null when it holds none. */
   limits?(transcript: string): DataOf<"limits.observed"> | null;

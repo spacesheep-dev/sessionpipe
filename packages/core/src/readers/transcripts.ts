@@ -8,8 +8,9 @@ import type { TranscriptRead } from "../adapters/types.js";
 import { deliveredWords } from "../control/frames.js";
 
 interface Msg {
-  /** `interrupt` carries no words: the person stopped the running turn at this line. */
-  role: "user" | "assistant" | "interrupt";
+  /** `interrupt` carries no words: the person stopped the running turn at this line.
+   *  `failed` neither: the turn ended there on an error, before it was whole. */
+  role: "user" | "assistant" | "interrupt" | "failed";
   text: string;
   at: number;
   line: number;
@@ -34,17 +35,19 @@ export function pairTurns(msgs: Msg[], endLine: number, tail = false): Transcrip
     injected?: true;
     id?: string;
     interrupted?: true;
+    failed?: true;
     /** The assistant's last message in the turn, so far. */
     said?: string;
   }[] = [];
   let cur: (typeof turns)[number] | null = null;
   for (const m of msgs) {
-    if (m.role === "interrupt") {
-      // The person stopped the turn: it is whole as it stands, with whatever it had said,
-      // and what follows is another turn. No hook fires for this, so without it the
-      // prompt would wait for a reply that is not coming and join the next prompt instead.
+    if (m.role === "interrupt" || m.role === "failed") {
+      // The person stopped the turn, or it failed: it is whole as it stands, with whatever
+      // it had said, and what follows is another turn. Without this the prompt would wait
+      // for a reply that is not coming and join the next prompt instead.
       if (cur) {
-        cur.interrupted = true;
+        if (m.role === "failed") cur.failed = true;
+        else cur.interrupted = true;
         cur.endLine = m.line;
         turns.push(cur);
         cur = null;
@@ -86,6 +89,7 @@ export function pairTurns(msgs: Msg[], endLine: number, tail = false): Transcrip
       ...(t.injected ? { injected: true as const } : {}),
       ...(t.id ? { id: t.id } : {}),
       ...(t.interrupted ? { interrupted: true as const } : {}),
+      ...(t.failed ? { failed: true as const } : {}),
     })),
     line,
   };
@@ -99,7 +103,10 @@ export function pairTurns(msgs: Msg[], endLine: number, tail = false): Transcrip
   const last = turns[turns.length - 1];
   // An interrupted turn says nothing more, so it has no last words to wait for.
   if (tail && last)
-    out.tail = { start: last.startLine, ...(last.said !== undefined && !last.interrupted ? { said: last.said } : {}) };
+    out.tail = {
+      start: last.startLine,
+      ...(last.said !== undefined && !last.interrupted && !last.failed ? { said: last.said } : {}),
+    };
   return out;
 }
 
@@ -369,13 +376,25 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
   const start = boundary ? lines.findIndex((line) => boundary(parse(line))) : 0;
   if (start < 0) return pairTurns(msgs, endOf(lines));
   // For `ended`: Codex closes every turn with a `task_complete` event (each turn of every
-  // rollout recorded does), after the turn's last message.
+  // rollout recorded does), after the turn's last message. A turn that failed has one
+  // too, with an `error` and no last message, and one the person stopped has a
+  // `turn_aborted` instead (0.171.0): either way the turn is over as it stands, and the
+  // prompt that follows is another turn's.
   let ended = false;
+  // A prompt of the person's since the last end record: only then is an end record the
+  // end of their turn. Codex ends its own tasks the same way (a compaction, a review),
+  // and one of those failing says nothing of the turn before it.
+  let asked = false;
   for (let i = Math.max(from, start); i < lines.length; i++) {
     const j = lines[i] ? parse(lines[i] as string) : null;
     if (!j) continue;
-    const p = j.payload as { type?: string; role?: string; content?: unknown } | undefined;
-    if (j.type === "event_msg" && p?.type === "task_complete") ended = true;
+    const p = j.payload as { type?: string; role?: string; content?: unknown; error?: unknown } | undefined;
+    if (j.type === "event_msg" && (p?.type === "task_complete" || p?.type === "turn_aborted")) {
+      ended = true;
+      const cut = p.type === "turn_aborted" ? "interrupt" : p.error ? "failed" : null;
+      if (cut && asked) msgs.push({ role: cut, text: "", at: 0, line: i });
+      asked = false;
+    }
     if (j.type !== "response_item" || !p || p.type !== "message") continue;
     const at = Date.parse(String(j.timestamp ?? "")) || Date.now();
     const text = codexWords(p.content);
@@ -384,6 +403,7 @@ export function readCodex(lines: string[], from: number): TranscriptRead {
       if (codexInjected(text)) continue; // Codex's own injections, not the person's words
       msgs.push({ role: "user", text, at, line: i });
       ended = false;
+      asked = true;
     } else if (p.role === "assistant") {
       msgs.push({ role: "assistant", text, at, line: i });
       ended = false;

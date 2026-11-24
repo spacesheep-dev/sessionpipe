@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -253,8 +254,13 @@ describe("a Codex rollout whose asks carry pictures (conformance/transcripts/cod
 
   it("the transcript's asks are the words alone, start and resume", () => {
     const r = readCodex(readFileSync(PICTURES, "utf8").split("\n"), 0);
-    expect(r.turns).toEqual([]);
-    expect(r.open?.user).toBe("What single word is written in the picture?\n\nAnd in this one?");
+    // Both turns failed (the Codex that recorded them was not signed in: its rollout ends
+    // each with a `task_complete` that carries the error), so each ask is a turn of its own.
+    expect(r.turns.map((t) => [t.user, t.assistant, t.failed])).toEqual([
+      ["What single word is written in the picture?", "", true],
+      ["And in this one?", "", true],
+    ]);
+    expect(r.open).toBeUndefined();
     expect(JSON.stringify(r)).not.toContain(".sessionpipe/files");
   });
 
@@ -270,5 +276,78 @@ describe("a Codex rollout whose asks carry pictures (conformance/transcripts/cod
     expect(codexWords([{ type: "input_text", text: "is </image> a tag?" }])).toBe("is </image> a tag?");
     expect(codexWords("plain words")).toBe("plain words");
     expect(codexWords([{ type: "input_text", text: "</image>" }, { type: "input_image" }, "junk", null])).toBe("");
+  });
+});
+
+// One thread, recorded on codex-cli 0.171.0 against a stand-in model, 2026-11-24: a turn
+// the model's service refused (HTTP 400), a turn the person stopped while a command ran,
+// then a turn that finished. Codex fired no Stop hook and no notify for the first.
+const FAILED = fileURLToPath(
+  new URL("../../../conformance/transcripts/codex/failed-then-interrupted.jsonl", import.meta.url),
+);
+const T_FAILED = "01a20ea0-fd4b-7f40-b63c-2a1001851908";
+const T_STOPPED = "01a20ea1-0a47-78c3-b575-a67507464ad4";
+const T_DONE = "01a20ea1-2a75-7012-94ae-2922c00d507e";
+
+describe("a turn that failed and one the person stopped (conformance/transcripts/codex/failed-then-interrupted.jsonl)", () => {
+  const lines = readFileSync(FAILED, "utf8").split("\n");
+
+  it("each is a turn of its own, whole as it stands: its prompt never joins the next turn's", () => {
+    const r = readCodex(lines, 0);
+    expect(r.turns.map(({ at: _at, endLine: _end, ...t }) => t)).toEqual([
+      { user: "Why did the build fail?", assistant: "", failed: true },
+      { user: "RUN: sleep 30\nSAY: never said", assistant: "", interrupted: true },
+      { user: "RUN: echo fine\nSAY: The build is fine now.", assistant: "The build is fine now." },
+    ]);
+    expect(r.open).toBeUndefined();
+    expect(r.ended).toBe(true);
+  });
+
+  it("read up to the failed turn's end, the file says its last turn is over and holds no open prompt", () => {
+    const failedAt = lines.findIndex((l) => l.includes('"task_complete"'));
+    const r = readCodex(lines.slice(0, failedAt + 1), 0);
+    expect(r.turns).toHaveLength(1);
+    expect(r.turns[0]).toMatchObject({ user: "Why did the build fail?", failed: true, endLine: failedAt });
+    expect(r.ended).toBe(true);
+    // Before that line the prompt is a turn that just began.
+    expect(readCodex(lines.slice(0, failedAt), 0)).toMatchObject({
+      turns: [],
+      open: { user: "Why did the build fail?" },
+    });
+    // Stopped: the same, at `turn_aborted`.
+    const stoppedAt = lines.findIndex((l) => l.includes('"turn_aborted"'));
+    expect(readCodex(lines.slice(0, stoppedAt + 1), 0).turns.at(-1)).toMatchObject({ interrupted: true });
+    expect(readCodex(lines.slice(0, stoppedAt + 1), 0).ended).toBe(true);
+  });
+
+  it("an end record of a task that is not the person's turn cuts nothing", () => {
+    const row = (type: string, payload: Record<string, unknown>) => JSON.stringify({ type, payload });
+    const says = (role: string, text: string) =>
+      row("response_item", {
+        type: "message",
+        role,
+        content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+      });
+    const r = readCodex(
+      [
+        says("user", "a"),
+        says("assistant", "x"),
+        row("event_msg", { type: "task_complete", turn_id: "t1", last_agent_message: "x" }),
+        // Codex's own tasks end the same way: a compaction that failed, a review that was stopped.
+        row("event_msg", { type: "task_complete", turn_id: "c1", error: { message: "m", codex_error_info: "other" } }),
+        row("event_msg", { type: "turn_aborted", turn_id: "c2", reason: "replaced" }),
+      ],
+      0,
+    );
+    expect(r.turns.map(({ at: _at, endLine: _end, ...t }) => t)).toEqual([{ user: "a", assistant: "x" }]);
+    expect(r.ended).toBe(true);
+  });
+
+  it("how each turn ended, by the id its hooks gave: the error's class, never its message", () => {
+    expect(codex.turnEnd?.(FAILED, T_FAILED)).toEqual({ reason: "error", error: "other" });
+    expect(codex.turnEnd?.(FAILED, T_STOPPED)).toEqual({ reason: "interrupt" });
+    expect(codex.turnEnd?.(FAILED, T_DONE)).toEqual({ reason: "stop" });
+    expect(codex.turnEnd?.(FAILED, "01a20ea0-0000-7000-8000-000000000000")).toBeNull();
+    expect(JSON.stringify(codex.turnEnd?.(FAILED, T_FAILED))).not.toContain("refused");
   });
 });

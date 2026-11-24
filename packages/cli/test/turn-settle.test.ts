@@ -562,6 +562,14 @@ describe("closedTurns", () => {
     });
     expect(closedTurns({ turns: [], line: 3 }, { all: true })).toEqual({ turns: [], line: 3, waiting: false });
   });
+  it("a last turn that failed is whole: nothing more is added to it", () => {
+    const cut = turn("b", "", { failed: true });
+    expect(closedTurns({ turns: [a, cut], line: 9, tail: { start: 4 } }, {})).toEqual({
+      turns: [a, cut],
+      line: 9,
+      waiting: false,
+    });
+  });
   it("the last one only once its last words are the ones named, the cursor before it until then", () => {
     expect(closedTurns({ turns: [a, b], line: 9, tail: { start: 4, said: "y" } }, { due })).toEqual({
       turns: [a, b],

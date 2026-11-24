@@ -99,6 +99,18 @@ describe("pairTurns", () => {
     expect(r.open).toEqual({ user: "c", at: 5 });
     expect(r.line).toBe(5);
   });
+  // A turn that failed ends the same way, under its own name: nothing more is coming.
+  const failed = (line: number) => ({ role: "failed" as const, text: "", at: line, line });
+  it("a failure ends the turn as it stands; it has no last words to wait for", () => {
+    const r = pairTurns([m("user", "a", 0), failed(1), m("user", "b", 2), m("assistant", "x", 3), failed(4)], 5, true);
+    expect(r.turns).toEqual([
+      { user: "a", assistant: "", at: 0, endLine: 1, failed: true },
+      { user: "b", assistant: "x", at: 2, endLine: 4, failed: true },
+    ]);
+    expect(r.open).toBeUndefined();
+    expect(r.tail).toEqual({ start: 2 });
+    expect(pairTurns([failed(0)], 1)).toEqual({ turns: [], line: 1 });
+  });
   it("an interruption with no turn before it is nothing, and after one the cursor may pass", () => {
     expect(pairTurns([stop(0)], 1)).toEqual({ turns: [], line: 1 });
     expect(pairTurns([m("user", "a", 0), stop(1)], 2).line).toBe(2);

@@ -94,6 +94,67 @@ describe("codex fromHook", () => {
     expect(hook("notify", "[]", env)).toBeNull();
     expect(hook("notify", "", env, ["{ broken"])).toBeNull();
   });
+  it("turnEnd: the rollout's own word for how a turn ended, and nothing where it has none", () => {
+    const f = rollout(SID);
+    const line = (payload: Record<string, unknown>, type = "event_msg") => JSON.stringify({ type, payload });
+    writeFileSync(
+      f,
+      [
+        line({ type: "task_started", turn_id: "t1" }),
+        // A prompt that quotes the very words looked for is not the event.
+        line(
+          { type: "message", role: "user", content: [{ type: "input_text", text: 't1 "task_complete"' }] },
+          "response_item",
+        ),
+        line({ type: "task_complete", turn_id: "t1", last_agent_message: "done" }),
+        line({
+          type: "task_complete",
+          turn_id: "t2",
+          error: { message: "private words", codex_error_info: "usage_limit_exceeded" },
+        }),
+        line({
+          type: "task_complete",
+          turn_id: "t3",
+          error: { message: "x", codex_error_info: { response_too_many_failed_attempts: { http_status_code: 500 } } },
+        }),
+        line({ type: "task_complete", turn_id: "t4", error: { message: "x" } }),
+        line({ type: "task_complete", turn_id: "t5", error: { message: "x", codex_error_info: "Not A Class!" } }),
+        line({ type: "task_complete", turn_id: "t6", error: { message: "x", codex_error_info: 7 } }),
+        line({ type: "turn_aborted", turn_id: "t7", reason: "interrupted" }),
+        '{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t8"',
+        '["t9","task_complete"]',
+        "null",
+        line({ type: "task_complete", turn_id: "t10x" }),
+        line({ type: "other_event", turn_id: "t11", kind: "turn_aborted" }),
+      ].join("\n"),
+    );
+    const end = (id: string) => codex.turnEnd?.(f, id);
+    expect(end("t1")).toEqual({ reason: "stop" });
+    expect(end("t2")).toEqual({ reason: "error", error: "usage_limit_exceeded" });
+    expect(end("t3")).toEqual({ reason: "error", error: "response_too_many_failed_attempts" });
+    // No class, or one that is no class name: the reason alone.
+    for (const id of ["t4", "t5", "t6"]) expect(end(id)).toEqual({ reason: "error" });
+    expect(end("t7")).toEqual({ reason: "interrupt" });
+    // A line cut short, a list, a null, an id that is only part of another's, another event.
+    for (const id of ["t8", "t9", "t10", "t11", "nope"]) expect(end(id)).toBeNull();
+    expect(codex.turnEnd?.(path.join(home, "no-such-rollout.jsonl"), "t1")).toBeNull();
+    // Looked for in the file's last 4 MiB and no further back: a rollout can be very large.
+    const filler = line(
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "x".repeat(64 * 1024) }] },
+      "response_item",
+    );
+    writeFileSync(
+      f,
+      [
+        line({ type: "session_meta" }, "session_meta"),
+        line({ type: "task_complete", turn_id: "old", error: { codex_error_info: "other" } }),
+        ...Array.from({ length: 70 }, () => filler),
+        line({ type: "task_complete", turn_id: "new", error: { codex_error_info: "unauthorized" } }),
+      ].join("\n"),
+    );
+    expect(end("new")).toEqual({ reason: "error", error: "unauthorized" });
+    expect(end("old")).toBeNull();
+  });
   it("notify without the thread's rollout under CODEX_HOME is an ephemeral thread: nothing", () => {
     expect(hook("notify", "", env, [JSON.stringify({ "thread-id": SID })])).toBeNull();
     const f = rollout(SID);
