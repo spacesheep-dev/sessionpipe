@@ -324,6 +324,39 @@ export function codexQueue(
   });
 }
 
+/** What this Codex makes of one command line under a rules file of its execution policy
+ *  (`$CODEX_HOME/rules/*.rules`): `codex execpolicy check --rules <file>
+ *  --resolve-host-executables <words…>` prints `{matchedRules, decision?}`. The answer is
+ *  the decision (`allow`, `prompt`, `forbidden`), `none` where no rule matched, or null
+ *  where this Codex could not say: it has no such command, or it could not read the file.
+ *  One construct it does not know and Codex reads none of its rules files, the person's own
+ *  included, so a file is tried here before it is put where Codex loads it. Measured on
+ *  codex-cli 0.171.0, 2026-11-24. */
+export function codexRuleReading(
+  bin: string,
+  rulesFile: string,
+  words: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  // No shell, ever: the file's path and the words go as they are (a codex.cmd shim's own
+  // script runs under this node, #165).
+  const c = spawnable(bin, ["execpolicy", "check", "--rules", rulesFile, "--resolve-host-executables", ...words]);
+  if (!c) return null;
+  try {
+    const out = execFileSync(c.file, c.args, {
+      encoding: "utf8",
+      timeout: 20_000,
+      env: codexEnv(env),
+      maxBuffer: 256 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const decision = (JSON.parse(out) as { decision?: unknown }).decision;
+    return typeof decision === "string" ? decision : "none";
+  } catch {
+    return null;
+  }
+}
+
 /** One `--json` line, as much of it as the daemon uses. */
 export interface CodexPiece {
   /** `thread.started`: the session's id, which Codex chose. */

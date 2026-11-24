@@ -159,6 +159,9 @@ const print = (s = ""): void => {
 };
 // One command per process: `main` sets these for the run, every command reads them.
 let args: string[] = [];
+/** The words as they were typed, `--no-color` included, for the one command that reads
+ *  their order (`ask`: what stands right after it says what it is, CONTROL.md §13). */
+let typed: string[] = [];
 let out: (s?: string) => void = print;
 /** Lines already set for this run's terminal (report.ts, usage.ts): written as they are. */
 let say: (s?: string) => void = print;
@@ -212,6 +215,7 @@ function forPeople(a: readonly string[], tty: boolean): boolean {
 /** Run one command: `argv` is what follows `sessionpipe`; `io` is this process by default. */
 export async function main(argv: string[], io: Io = processIo()): Promise<void> {
   const noColor = argv.includes("--no-color");
+  typed = argv;
   args = argv.filter((a) => a !== "--no-color");
   ui = makeUi({ isTTY: io.tty, columns: io.columns, noColor });
   const people = forPeople(args, ui.tty);
@@ -340,7 +344,12 @@ async function command(cmd: string): Promise<void> {
     case "wait":
       return waitMain(args, out);
     case "ask": {
-      const code = await askMain(args, { out, err: (s) => void process.stderr.write(s) }, { distDir });
+      // As typed: with `--no-color` taken out, `ask --no-color on` would read as `ask on`.
+      const code = await askMain(
+        typed.slice(typed.indexOf("ask")),
+        { out, err: (s) => void process.stderr.write(s), watched: !!process.stderr.isTTY },
+        { distDir },
+      );
       if (code) process.exitCode = code;
       return;
     }

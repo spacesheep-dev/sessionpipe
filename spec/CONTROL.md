@@ -1582,10 +1582,47 @@ the answer and nothing else: the child's id and any progress go to **stderr**, t
 answer alone to **stdout**, exit `0`; a refusal or a failure goes to stderr with exit
 `1`; a usage error exits `2`, as `sessionpipe wait` does. `--json` prints
 `{ask_id, session, reply, ms}` instead. With no daemon answering on the socket it says
-what to run (`sessionpipe ask on`) and exits `1`.
+what to run (`sessionpipe ask on`) and exits `1`. The answer as it grows is progress for
+a person watching: it is written only when stderr is a terminal and the asker is not a
+session. A harness hands its model both streams as one text, whether or not it gave the
+command a terminal, and the model would read the answer twice.
+
+`on`, `off`, `status` and `setup` are commands only as the **first word** after `ask`,
+as typed: `sessionpipe ask on --yes`, never `sessionpipe ask --yes on`,
+`sessionpipe ask -- on` or `sessionpipe ask --no-color on`, which are usage errors (a
+flag of the whole CLI is a word here like any other). Whatever stands first after `ask`
+then says what the command is, so a rule that reads a command's words in order (below)
+tells an ask from the switch for certain.
+
+**From inside a sandbox.** A harness may run a session's commands in a sandbox that
+closes the way to the local socket. Codex does: every Unix socket is refused, the
+daemon's included, at its read-only and its workspace sandbox alike, and no setting of
+it opens one socket alone. The command MUST then say that it was stopped on its way to
+the daemon (the connection was refused with `EPERM` or `EACCES`) and MUST NOT say that
+no daemon is running: a model that passes on "run `sessionpipe ask on`" sends the person
+to do something that changes nothing. Where the harness has a way to let one command
+through, `sessionpipe ask setup` writes it. For Codex that is a rules file of its
+execution policy (ADAPTERS.md, *Codex*; `conformance/control-ask-codex-rules.json` is
+the file and what Codex makes of it), under which
+
+- `sessionpipe ask <agent> "<task>"` runs outside the sandbox when it is the whole
+  command line, in plain words, under its bare name;
+- a program reached by a path is never taken for it (`./sessionpipe ask …`), since a
+  session can write a file of that name into its own workspace;
+- `ask on`, `ask off` and `ask setup` are refused, and so is any flag or `--` where the
+  agent goes: this command's own, and those of the whole CLI (`--no-color`, `--help`).
+
+The file is put where the harness loads it only after it was tried on the Codex this
+machine would run and read there as meant (another Codex on the same machine, one an
+editor brings with it, is not tried), and `ask setup --remove` takes it out. Letting the command through widens
+nothing the daemon checks (above): asking is on or off, the folder is allowed or not,
+and the child runs at `safe` or `read`. It does mean what `ask` always means: the
+child's limits are the daemon's, not the asker's sandbox, so a session in a read-only
+sandbox that asks can have an agent at `safe` change files in an allowed folder.
 
 **How a session learns the command.** `sessionpipe ask setup` writes a short section
 into the harness's own instructions file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`)
-saying the command exists, which agents are installed, and that a session MUST NOT use
-it to send its own reply. That is the person's file and the person's choice; the hook
+saying the command exists, which agents are installed, that it is run as a command of
+its own (the shape a sandbox lets through), and that a session MUST NOT use it to send
+its own reply. That is the person's file and the person's choice; the hook
 path still never injects anything (§9, SECURITY.md).

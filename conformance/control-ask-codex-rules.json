@@ -1,0 +1,49 @@
+{
+  "spec": "CONTROL.md §13, From inside a sandbox; ADAPTERS.md, Codex (Asking)",
+  "note": "The rules file `sessionpipe ask setup` writes for Codex (`$CODEX_HOME/rules/sessionpipe.rules`, Codex's execution policy), and what Codex makes of it. Codex runs a session's commands in a sandbox that refuses every Unix socket, the daemon's included, and no setting of it opens one socket alone; a command its rules allow is run outside the sandbox when the whole command line is that command in plain words. `rules` is the file, byte for byte. `readings` are what `codex execpolicy check --rules <file> --resolve-host-executables <command…>` decides for a command line (`none`: no rule matched, so the command stays in the sandbox): the file is put where Codex loads it only on a machine whose own Codex gives every one of them, because Codex reads all of its rules files or none and one line an older Codex does not know would take every rule the person has with it. `without` is why each line is there: the same file less one line, and the command it then lets through. `runs` are command lines a session's model gave a real Codex with the file in place, and where each ran: `outside` the sandbox (it reached the daemon), `inside` it (the socket was refused, or a look-alike could not write past the sandbox), or `refused` (not run at all; `told` is what the model was given). The look-alike is an executable file named `sessionpipe` in the session's own workspace, which a session can write. Measured on codex-cli 0.171.0 on macOS, 2026-11-24, at both sandboxes an asked or started session runs in (`read-only`, `workspace-write`); the answers were the same at both.",
+  "codex": "0.171.0",
+  "file": "rules/sessionpipe.rules",
+  "rules": "# sessionpipe ask: written by `sessionpipe ask setup`, taken out by `sessionpipe ask setup --remove`.\n# Codex keeps a session's commands in a sandbox that closes the way to this computer's\n# background service. These rules let one command out of it: sessionpipe ask <agent> \"<task>\",\n# under its bare name and as the whole command line. Turning asking on or off stays the person's.\nhost_executable(name=\"sessionpipe\", paths=[])\nprefix_rule(pattern=[\"sessionpipe\", \"ask\"], decision=\"allow\")\nprefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"on\", \"off\", \"setup\"]], decision=\"forbidden\", justification=\"Turning asking on or off, and setting it up, is the person's to do at this machine's terminal.\")\nprefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"--\", \"--cwd\", \"--permission\", \"--model\", \"--text\", \"--json\", \"--quiet\", \"--remove\", \"--no-service\", \"--yes\", \"--no-color\", \"--help\", \"-h\"]], decision=\"forbidden\", justification=\"Put the agent right after ask: sessionpipe ask <agent> '<task>' [--json] [--cwd DIR]\")\n",
+  "readings": [
+    { "command": ["sessionpipe", "ask", "codex", "hi"], "decision": "allow" },
+    { "command": ["sessionpipe", "ask", "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e", "hi", "--json"], "decision": "allow" },
+    { "command": ["sessionpipe", "ask", "status"], "decision": "allow" },
+    { "command": ["sessionpipe", "ask", "on"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "off"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "setup", "--remove"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "--yes", "on"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "--", "off"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "--json", "codex", "hi"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "--no-color", "on", "--yes"], "decision": "forbidden" },
+    { "command": ["sessionpipe", "ask", "--help"], "decision": "forbidden" },
+    { "command": ["./sessionpipe", "ask", "codex", "hi"], "decision": "none" },
+    { "command": ["/tmp/sessionpipe", "ask", "codex", "hi"], "decision": "none" },
+    { "command": ["sessionpipe", "pool"], "decision": "none" }
+  ],
+  "without": [
+    { "line_starting": "host_executable(", "command": ["./sessionpipe", "ask", "codex", "hi"], "decision": "allow" },
+    { "line_starting": "host_executable(", "command": ["/tmp/sessionpipe", "ask", "codex", "hi"], "decision": "allow" },
+    { "line_starting": "prefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"on\"", "command": ["sessionpipe", "ask", "on"], "decision": "allow" },
+    { "line_starting": "prefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"--\"", "command": ["sessionpipe", "ask", "--yes", "on"], "decision": "allow" },
+    { "line_starting": "prefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"--\"", "command": ["sessionpipe", "ask", "--", "off"], "decision": "allow" },
+    { "line_starting": "prefix_rule(pattern=[\"sessionpipe\", \"ask\", [\"--\"", "command": ["sessionpipe", "ask", "--no-color", "on", "--yes"], "decision": "allow" }
+  ],
+  "runs": [
+    { "command": "sessionpipe ask status", "ran": "outside" },
+    { "command": "sessionpipe ask status \"it is the person's\"", "ran": "outside" },
+    { "command": "sessionpipe ask status 'a $b c'", "ran": "outside" },
+    { "command": "sessionpipe ask claude-code 'Reply with exactly: ok'", "ran": "outside" },
+    { "command": "sessionpipe ask status --no-color", "ran": "outside" },
+    { "command": "sessionpipe ask status \"$HOME\"", "ran": "inside", "why": "an expansion: not plain words" },
+    { "command": "sessionpipe ask status \"a\\\"b\"", "ran": "inside", "why": "a backslash in double quotes: not plain words" },
+    { "command": "sessionpipe ask status | cat", "ran": "inside", "why": "piped into a command the rules do not allow" },
+    { "command": "sessionpipe ask status && ./sessionpipe ask x y", "ran": "inside", "why": "chained to a command the rules do not allow" },
+    { "command": "./sessionpipe ask x y", "ran": "inside", "why": "a look-alike reached by a path" },
+    { "command": "sub/sessionpipe ask x y", "ran": "inside", "why": "a look-alike reached by a path" },
+    { "command": "/abs/path/to/workspace/sessionpipe ask x y", "ran": "inside", "why": "a look-alike reached by a path" },
+    { "command": "sessionpipe ask on", "ran": "refused", "told": "Turning asking on or off, and setting it up, is the person's to do at this machine's terminal." },
+    { "command": "sessionpipe ask --json status", "ran": "refused", "told": "Put the agent right after ask: sessionpipe ask <agent> '<task>' [--json] [--cwd DIR]" },
+    { "command": "sessionpipe ask --no-color status", "ran": "refused", "told": "Put the agent right after ask: sessionpipe ask <agent> '<task>' [--json] [--cwd DIR]" },
+    { "command": "sessionpipe ask --help", "ran": "refused", "told": "Put the agent right after ask: sessionpipe ask <agent> '<task>' [--json] [--cwd DIR]" }
+  ]
+}

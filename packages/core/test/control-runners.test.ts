@@ -24,6 +24,7 @@ import {
   codexLogin,
   codexQueue,
   reading as codexReading,
+  codexRuleReading,
   findCodex,
   findRollout,
   heldElsewhere,
@@ -763,5 +764,45 @@ describe("a thread a live Codex process holds", () => {
       ok: null,
       said: "it did not answer in time",
     });
+  });
+});
+
+describe("codex execpolicy check: what a Codex makes of a rules file (CONTROL.md §13)", () => {
+  it("the decision, `none` where no rule matched, null where this Codex could not say", () => {
+    const dir = path.join(tmp, "codex-policy");
+    const cli = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+    mkdirSync(path.dirname(cli), { recursive: true });
+    // A stand-in checker: the rules file and the words it is given decide what it prints.
+    writeFileSync(
+      cli,
+      `const a = process.argv.slice(2);
+if (a.slice(0, 3).join(" ") !== "execpolicy check --rules" || a[4] !== "--resolve-host-executables") process.exit(9);
+if (a[3].endsWith("old.rules")) { console.error("unknown function host_executable"); process.exit(1); }
+if (!a[3].endsWith("a b" + require("node:path").sep + "sessionpipe.rules")) process.exit(8);
+const words = a.slice(5).join(" ");
+if (words === "sessionpipe ask codex hi") console.log(JSON.stringify({ matchedRules: [{}], decision: "allow" }));
+else if (words === "sessionpipe ask on") console.log(JSON.stringify({ matchedRules: [{}, {}], decision: "forbidden" }));
+else if (words === "garbled") console.log("not json");
+else if (words === "nothing") console.log("null");
+else console.log(JSON.stringify({ matchedRules: [] }));
+`,
+    );
+    // An npm shim, so the same test runs on every platform (#165): its script under this node.
+    const shim = path.join(dir, "codex.cmd");
+    writeFileSync(shim, `@ECHO off\r\n"%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
+    // A path with a space in it goes as one word: no shell reads it.
+    const rules = path.join(dir, "a b", "sessionpipe.rules");
+    expect(codexRuleReading(shim, rules, ["sessionpipe", "ask", "codex", "hi"])).toBe("allow");
+    expect(codexRuleReading(shim, rules, ["sessionpipe", "ask", "on"], { PATH: process.env.PATH })).toBe("forbidden");
+    expect(codexRuleReading(shim, rules, ["./sessionpipe", "ask", "codex", "hi"])).toBe("none");
+    expect(codexRuleReading(shim, rules, ["garbled"])).toBeNull();
+    expect(codexRuleReading(shim, rules, ["nothing"])).toBeNull();
+    // A Codex that cannot read the file (a line it does not know), one with no such
+    // command, and a launcher that names no program to run.
+    expect(codexRuleReading(shim, path.join(dir, "old.rules"), ["sessionpipe", "ask", "codex", "hi"])).toBeNull();
+    expect(codexRuleReading(path.join(dir, "no-such-codex"), rules, ["sessionpipe", "ask", "codex", "hi"])).toBeNull();
+    const bare = path.join(dir, "bare.cmd");
+    writeFileSync(bare, "@ECHO off\r\n");
+    expect(codexRuleReading(bare, rules, ["sessionpipe", "ask", "codex", "hi"])).toBeNull();
   });
 });

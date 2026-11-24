@@ -84,6 +84,13 @@
   (spec/ADAPTERS.md, *Agents driven through ACP*): `{ harness, mode, env }`, the environment added
   for that run only (`{}`: nothing, the agent's own default). Run by
   `packages/core/test/acp-control.test.ts`.
+- `control-ask-codex-rules.json` — the rules file `sessionpipe ask setup` writes for Codex and
+  what Codex makes of it (spec/CONTROL.md §13, *From inside a sandbox*): `rules`, the file byte
+  for byte; `readings`, `{ command, decision }` as `codex execpolicy check` decides a command
+  line (`none`: no rule matched, it stays in the sandbox); `without`, `{ line_starting, command,
+  decision }`, the command each line of the file is there to stop; `runs`, command lines a real
+  Codex was given and where each ran. Run by `packages/cli/test/ask.test.ts`, which also tries
+  `readings` and `without` on a Codex installed where the tests run.
 - `turn-end-once.json` — Codex says a turn's end by its `Stop` hook and by its notify when both
   are installed (spec/ADAPTERS.md, *Codex*, Mapping): `{ ends, reported }`, the ends as the
   harness says them, each `[road, turn id]`, and the `turn.ended` events that go out. Run by
