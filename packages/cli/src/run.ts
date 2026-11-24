@@ -436,6 +436,8 @@ const NOT_RUNNING = new Set(["turn.started", "session.started", "session.ended"]
  *  the session's next hook looks (for DUE_MS; a later turn's end takes over anyway). */
 export const SETTLE_FAST_MS = 400;
 const SETTLE_STEP_MS = 25;
+/** How long a tool call's result is waited for in the harness's own file (above). */
+export const TOOL_RESULT_MS = 75;
 export const SETTLE_MS = 5000;
 export const SETTLE_POLL_MS = 100;
 const DUE_MS = 60_000;
@@ -817,6 +819,24 @@ export async function runJob(
         facts.save(job.harness, id, { open_turn: null });
       }
     }
+    // Whether a tool failed, where the hook does not say. Codex's PostToolUse carries a
+    // command's output and never how it exited; its rollout does, a moment after the hook
+    // (ADAPTERS.md, Codex). Looked for once and, only where the file holds the call and
+    // not yet its result, for at most TOOL_RESULT_MS more: a call nothing is found for
+    // stays as the hook reported it.
+    if (adapter.toolResult && r.transcript)
+      for (const e of r.events) {
+        const call = e.type === "tool.ended" ? e.data.call_id : undefined;
+        if (typeof call !== "string") continue;
+        let res = adapter.toolResult(r.transcript, call);
+        for (const until = ticksOf(clock) + TOOL_RESULT_MS; !res && opts.drain !== false && ticksOf(clock) < until; ) {
+          await clock.sleep(SETTLE_STEP_MS);
+          res = adapter.toolResult(r.transcript, call);
+        }
+        if (res?.ok === undefined) continue;
+        e.data.ok = res.ok;
+        if (res.error) e.data.error = res.error;
+      }
     for (const a of r.events) events.push(stamp(a));
     // Tier 2, while a turn runs: what it has said so far, so a receiver can show a long
     // turn before it ends. On the prompt, then at most every PROGRESS_MS on a tool call,

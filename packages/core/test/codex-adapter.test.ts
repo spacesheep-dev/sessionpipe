@@ -94,6 +94,43 @@ describe("codex fromHook", () => {
     expect(hook("notify", "[]", env)).toBeNull();
     expect(hook("notify", "", env, ["{ broken"])).toBeNull();
   });
+  it("toolResult: only what Codex itself wrote first in a call's result counts", () => {
+    const f = rollout(SID);
+    const row = (payload: Record<string, unknown>, type = "response_item") => JSON.stringify({ type, payload });
+    const out = (call_id: string, output: unknown) => row({ type: "function_call_output", call_id, output });
+    writeFileSync(
+      f,
+      [
+        row({ id: SID }, "session_meta"),
+        row({ type: "function_call", call_id: "c1", name: "exec_command" }),
+        out("c1", "Wall time: 4.0 seconds\nProcess exited with code 2\nOutput:\n"),
+        out("c2", "Chunk ID: a1\nWall time: 0.1 seconds\nProcess exited with code -1\n"),
+        // The command's own words, a result cut short by the person, a result that is no text.
+        out("c3", "Process exited with code 0\nWall time: 1 seconds\nProcess exited with code 0\n"),
+        out("c4", "Wall time: 4.0 seconds\naborted by user"),
+        out("c5", { content: "x", success: false }),
+        // A message that quotes the id and the record's name; an event of the same name; a broken line.
+        row({ type: "message", role: "user", content: [{ type: "input_text", text: 'c6 "function_call_output"' }] }),
+        row(
+          { type: "function_call_output", call_id: "c7", output: "Wall time: 1 seconds\nProcess exited with code 0\n" },
+          "event_msg",
+        ),
+        '{"type":"response_item","payload":{"type":"function_call_output","call_id":"c8"',
+        // An edit's result is another kind of record; a call with no result yet.
+        row({ type: "custom_tool_call_output", call_id: "c9", output: "Success." }),
+        row({ type: "function_call", call_id: "c10", name: "exec_command" }),
+      ].join("\n"),
+    );
+    const res = (id: string) => codex.toolResult?.(f, id);
+    expect(res("c1")).toEqual({ ok: false, error: "exit 2" });
+    expect(res("c2")).toEqual({ ok: false, error: "exit -1" });
+    // Nothing to read as ok or not, and nothing to wait for.
+    for (const id of ["c3", "c4", "c5", "c6", "c7", "c8", "c9", "nope"]) expect(res(id), id).toEqual({});
+    expect(codex.toolResult?.(path.join(home, "no-such-rollout.jsonl"), "c1")).toEqual({});
+    // The call is there and its result is not: it may still come.
+    expect(res("c10")).toBeNull();
+  });
+
   it("turnEnd: the rollout's own word for how a turn ended, and nothing where it has none", () => {
     const f = rollout(SID);
     const line = (payload: Record<string, unknown>, type = "event_msg") => JSON.stringify({ type, payload });
