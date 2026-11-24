@@ -49,6 +49,12 @@ const hooksFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "hooks.j
 const configFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "config.toml");
 const sessionsDir = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "sessions");
 
+/** How much of a rollout's end is read for a command's result. Codex cuts a command's
+ *  output before it writes it, but an output of control characters still made a line of
+ *  240 KB, and other records can follow it before the worker looks. */
+const TOOL_RESULT_TAIL = 1024 * 1024;
+const EXITED = /^(?:Chunk ID: [^\n]*\n)?Wall time: [^\n]*\nProcess exited with code (-?\d{1,10})\n/;
+
 /** How much of a rollout's end is read for a turn's end record. */
 const TURN_END_TAIL = 4 * 1024 * 1024;
 
@@ -410,6 +416,35 @@ export const codex: Adapter = {
       return { turns: [], line: fromLine };
     }
     return readCodex(text.split("\n"), fromLine);
+  },
+
+  /** A command's result as its rollout says it: the call's `function_call_output`, whose
+   *  `call_id` is the hook's `tool_use_id` and whose `output` starts with what Codex adds
+   *  before the command's own output, `Wall time: … seconds` and `Process exited with
+   *  code N` (0.171.0; conformance/transcripts/codex/command-exits.jsonl). Codex writes
+   *  it some 10 ms after its PostToolUse hook, which carries the output alone. Null only
+   *  where the result may still come: the call is in the file and its result is not. A
+   *  call the file does not hold (an older Codex names its calls otherwise), an edit
+   *  (`custom_tool_call_output`) and a result in another form (a command still running, a
+   *  tool that is no command) have nothing to read and nothing to wait for. */
+  toolResult(transcript, callId) {
+    const lines = ends(transcript, 0, TOOL_RESULT_TAIL).tail;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i] as string;
+      if (!line.includes(callId)) continue;
+      const j = rolloutLine(line);
+      const p = j?.payload;
+      if (j?.type !== "response_item" || !p || p.call_id !== callId) continue;
+      // Read from the end: the call itself, met before any result of it, has none yet.
+      if (p.type === "function_call") return null;
+      if (p.type !== "function_call_output") continue;
+      // Only the lines Codex itself puts first: the command's own output comes after them
+      // and may say anything.
+      const code = typeof p.output === "string" ? EXITED.exec(p.output)?.[1] : undefined;
+      if (code === undefined) return {};
+      return code === "0" ? { ok: true } : { ok: false, error: `exit ${code}` };
+    }
+    return {};
   },
 
   /** A turn's end as its rollout says it: `task_complete` (with an `error` when the turn

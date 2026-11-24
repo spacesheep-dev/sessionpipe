@@ -178,6 +178,12 @@ export interface Adapter {
    *  hook when a turn fails (Codex: no Stop and no notify for a turn its model's service
    *  refused). Null while the file does not say the turn is over. */
   turnEnd?(transcript: string, turnId: string): TurnEnd | null;
+  /** How the tool call `callId` ended, read from the transcript, for a harness whose
+   *  post-tool hook carries the tool's output and not whether it failed (Codex). Null
+   *  only while the result may still come (the file holds the call and not yet its
+   *  result); where there is nothing to read as ok or not, the answer has no `ok`.
+   *  `error` is a short class (`exit 3`), never the tool's output. */
+  toolResult?(transcript: string, callId: string): { ok?: boolean; error?: string } | null;
   /** The account's limits as the transcript last recorded them (`limits.observed` data),
    *  for a harness that writes them there; null when it holds none. */
   limits?(transcript: string): DataOf<"limits.observed"> | null;

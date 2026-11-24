@@ -351,3 +351,21 @@ describe("a turn that failed and one the person stopped (conformance/transcripts
     expect(JSON.stringify(codex.turnEnd?.(FAILED, T_FAILED))).not.toContain("refused");
   });
 });
+
+// One turn of four commands, recorded on codex-cli 0.171.0 against a stand-in model,
+// 2026-11-24: a command that fails, one that works, one with a long output that exits 3,
+// and one the sandbox refused. Codex's PostToolUse hook gave each command's output and
+// nothing of how it exited.
+const EXITS = fileURLToPath(new URL("../../../conformance/transcripts/codex/command-exits.jsonl", import.meta.url));
+
+describe("how a command exited (conformance/transcripts/codex/command-exits.jsonl)", () => {
+  it("each call's result, by the id its hook gave", () => {
+    expect(codex.toolResult?.(EXITS, "call_70")).toEqual({ ok: false, error: "exit 1" });
+    expect(codex.toolResult?.(EXITS, "call_71")).toEqual({ ok: true });
+    expect(codex.toolResult?.(EXITS, "call_72")).toEqual({ ok: false, error: "exit 3" });
+    expect(codex.toolResult?.(EXITS, "call_73")).toEqual({ ok: false, error: "exit 1" });
+    // A call the file does not hold, and an id that is only the start of another's: nothing to read.
+    expect(codex.toolResult?.(EXITS, "call_74")).toEqual({});
+    expect(codex.toolResult?.(EXITS, "call_7")).toEqual({});
+  });
+});
