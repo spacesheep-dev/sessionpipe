@@ -44,13 +44,13 @@ const plain = (src) => {
 const version = JSON.parse(read("packages/core/package.json")).version;
 // The sessionpipe-gui release the home page offers, with each file's size in bytes as the
 // release lists it: the one place to bump. The page prints decimal MB, as Finder does.
-const guiVersion = "0.8.7";
+const guiVersion = "0.8.8";
 const gui = {
   version: guiVersion,
   files: {
-    dmg: [`sessionpipe_${guiVersion}_universal.dmg`, 8218048],
-    deb: [`sessionpipe_${guiVersion}_amd64.deb`, 4427912],
-    appimage: [`sessionpipe_${guiVersion}_amd64.AppImage`, 83036664],
+    dmg: [`sessionpipe_${guiVersion}_universal.dmg`, 8229912],
+    deb: [`sessionpipe_${guiVersion}_amd64.deb`, 4433102],
+    appimage: [`sessionpipe_${guiVersion}_amd64.AppImage`, 83040760],
     tgz: [`sessionpipe-gui-${guiVersion}.tgz`],
   },
 };
