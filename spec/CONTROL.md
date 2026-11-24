@@ -132,7 +132,8 @@ A machine that sends `start`, even an empty one, also takes a `start` whose `cwd
 (`bad_fields`), so a receiver SHOULD send it an absolute `cwd`, such as one from
 `folders`. No hello names the machine's home folder: the daemon reads `~` itself.
 
-They MAY also carry `accounts`: the harness accounts signed in on the machine, each
+They MAY also carry `accounts`: the harness accounts signed in on the machine (Claude
+Code's, and Codex's ChatGPT account), each
 `{harness, id, email}`, where `id` is what events carry as `session.account_id` and
 `email` is the address the account signs in with, so the receiver's board can name an
 account rather than show its id. An account with no email MAY carry `name` instead:

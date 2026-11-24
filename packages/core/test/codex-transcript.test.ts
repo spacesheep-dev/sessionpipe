@@ -559,3 +559,40 @@ describe("a message taken from Codex's own queue (conformance/transcripts/codex/
     });
   });
 });
+
+// The first line of a thread's rollout under a ChatGPT sign-in (codex-cli 0.171.0; the ids
+// are made up): Codex names the account the thread was created under.
+const SIGNED_IN = fileURLToPath(new URL("../../../conformance/transcripts/codex/signed-in.jsonl", import.meta.url));
+
+describe("the account a thread ran under (conformance/transcripts/codex/signed-in.jsonl)", () => {
+  it("is the session's account_id: the workspace and the person in it, as Codex wrote them; never an email", () => {
+    const f = codexFacts(SIGNED_IN);
+    expect(f.account_id).toBe("0aaa1111-2222-4333-8444-555566667777.user-0000000000000000000000AB");
+    expect(JSON.stringify(f)).not.toContain("@");
+    expect(f.harness_version).toBe("0.171.0");
+  });
+
+  it("a thread with no account (an API key, another provider, an older Codex) has none; a value that is no id is not passed on", () => {
+    expect(codexFacts(FAILED).account_id).toBeUndefined();
+    const dir = mkdtempSync(path.join(tmpdir(), "sp-codex-acct-"));
+    try {
+      const f = path.join(dir, "rollout.jsonl");
+      const made = (creator_account_id: unknown, creator_user_id?: unknown) => {
+        writeFileSync(
+          f,
+          `${JSON.stringify({ type: "session_meta", payload: { id: "t", cwd: "/w", creator_account_id, creator_user_id } })}\n`,
+        );
+        return codexFacts(f).account_id;
+      };
+      for (const bad of ["me@example.com", "", "a b", "x".repeat(129), 7, null, { id: "a" }])
+        expect(made(bad, "user-1"), JSON.stringify(bad)).toBeUndefined();
+      expect(made("acct_AB-12")).toBe("acct_AB-12");
+      expect(made("acct_AB-12", "user-1")).toBe("acct_AB-12.user-1");
+      // A person's id that is no id is left out, never passed on.
+      for (const bad of ["me@example.com", "a b", 7, "u".repeat(120)])
+        expect(made("acct_AB-12", bad), JSON.stringify(bad)).toBe("acct_AB-12");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

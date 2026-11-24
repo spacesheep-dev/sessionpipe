@@ -4,12 +4,12 @@
 // `notify` at the top level of config.toml as the fallback when hooks are off or
 // not yet trusted (non-managed hooks need a /hooks review in the CLI). An existing
 // notify (Codex Computer Use) is chained through --previous-notify, never replaced.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines, recentFiles, scanLines } from "../readers/files.js";
 import { codexInjected, codexWords, readCodex } from "../readers/transcripts.js";
-import type { DataOf } from "../types.js";
+import type { DataOf, HarnessAccount } from "../types.js";
 import { installClaudeShaped, installedClaudeShaped, uninstallClaudeShaped, writeBack } from "./claude-shaped.js";
 import * as toml from "./codex-config.js";
 import { codexReplayBoundary, codexSubagent } from "./codex-rollout.js";
@@ -48,6 +48,60 @@ const codexHome = (env: NodeJS.ProcessEnv) => env.CODEX_HOME || path.join(homeDi
 const hooksFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "hooks.json");
 const configFile = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "config.toml");
 const sessionsDir = (env: NodeJS.ProcessEnv) => path.join(codexHome(env), "sessions");
+
+const idPart = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+/** A ChatGPT account as `account_id` names it: the account's id (a workspace's, on a team
+ *  plan) and, where Codex knows it, the person's own id within it, `<account>.<user>`.
+ *  Both, because a workspace is shared: its id alone would file every colleague's sessions
+ *  and limits under one account. It is the pair Codex itself keeps a thread's creator by.
+ *  Opaque ids, never an email. */
+function accountOf(account: unknown, user: unknown): string | null {
+  if (!idPart(account)) return null;
+  return idPart(user) && account.length + user.length < 128 ? `${account}.${user}` : account;
+}
+/** An address to label an account by. Nothing a board could be made to draw as anything
+ *  else: no spaces, control or direction characters, or angle brackets. */
+const EMAIL_RE = /^[^@\s<>\p{Cc}\p{Cf}]{1,64}@[^@\s<>\p{Cc}\p{Cf}]{1,189}$/u;
+/** A sign-in file is a few kilobytes; nothing larger, and nothing that is not a file, is read. */
+const AUTH_MAX = 1024 * 1024;
+
+/** The claims of a sign-in token (a JWT's middle part), unverified: read for a label, and
+ *  nothing is trusted on their word. */
+function claims(jwt: unknown): Record<string, unknown> {
+  try {
+    const part = typeof jwt === "string" ? jwt.split(".")[1] : undefined;
+    const j: unknown = part ? JSON.parse(Buffer.from(part, "base64url").toString("utf8")) : null;
+    return j && typeof j === "object" ? (j as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Who this machine's Codex is signed in as: the account as a session's `account_id`
+ *  names it (accountOf), and the email it signs in with, which travels only to a receiver
+ *  the person paired with (control's hello). From Codex's own sign-in file
+ *  (`$CODEX_HOME/auth.json`): its `tokens.account_id`, and from its id token's claims the
+ *  person's id and email. Nothing else of the file is used, and its tokens are never
+ *  kept, logged or sent. Nobody for an API key, for a sign-in Codex keeps in the system's
+ *  keyring (there is no file then), and for a file that cannot be read. */
+export function codexAccounts(env: NodeJS.ProcessEnv = process.env): HarnessAccount[] {
+  try {
+    const file = path.join(codexHome(env), "auth.json");
+    const st = statSync(file);
+    if (!st.isFile() || st.size > AUTH_MAX) return [];
+    const tokens = (JSON.parse(readFileSync(file, "utf8")) as { tokens?: { account_id?: unknown; id_token?: unknown } })
+      .tokens;
+    const c = claims(tokens?.id_token);
+    const auth = (c["https://api.openai.com/auth"] ?? {}) as { chatgpt_user_id?: unknown; user_id?: unknown };
+    const id = accountOf(tokens?.account_id, auth.chatgpt_user_id ?? auth.user_id);
+    if (!id) return [];
+    const profile = c["https://api.openai.com/profile"] as { email?: unknown } | undefined;
+    const email = [c.email, profile?.email].find((e): e is string => typeof e === "string" && EMAIL_RE.test(e));
+    return [{ harness: NAME, id, ...(email ? { email } : {}) }];
+  } catch {
+    return [];
+  }
+}
 
 /** How much of a rollout's end is read for a command's result. Codex cuts a command's
  *  output before it writes it, but an output of control characters still made a line of
@@ -413,7 +467,7 @@ export const codex: Adapter = {
       default:
         return null;
     }
-    const r: HookResult = { session, events, hints: {} };
+    const r: HookResult = { session, events, hints: event === "SessionStart" ? { started: true } : {} };
     // Inside a subagent Codex sends the parent's session_id with the subagent's own
     // rollout (its SubagentStart, its tool calls): that file is not this session's.
     if (typeof s.transcript_path === "string" && !ofAnotherThread(s.transcript_path, String(id)))
@@ -482,7 +536,10 @@ export const codex: Adapter = {
     return null;
   },
 
-  facts(session, transcript): SessionFacts {
+  facts(session, transcript, hints, state, env = process.env): SessionFacts {
+    // A Codex process holds the sign-in it started with: who that was is kept for the
+    // limits its turns will leave (`limits`), and asked again at each start.
+    if (hints.started === true) state.save(NAME, session.id, { signed_in_as: codexAccounts(env)[0]?.id ?? null });
     const out: SessionFacts = {};
     if (transcript) Object.assign(out, codexFacts(transcript));
     return out;
@@ -503,7 +560,17 @@ export const codex: Adapter = {
     return rows;
   },
 
-  limits: (transcript) => codexLimits(transcript),
+  /** The limits a turn left in the rollout, with the account they are: the one this
+   *  Codex process started under (`facts`, at its SessionStart). A thread keeps its
+   *  creator's account for good, and one resumed after the person changed account runs on
+   *  the new one's limits; a window left open while the person signs in elsewhere keeps
+   *  running on the account it started with. With no start seen (hooks not yet approved),
+   *  the numbers go unstamped and are the session's account's. */
+  limits(transcript, about) {
+    const limits = codexLimits(transcript);
+    const as = limits && about ? about.state.get(NAME, about.session).signed_in_as : undefined;
+    return limits && typeof as === "string" ? { ...limits, account_id: as } : limits;
+  },
 };
 
 /** Epoch seconds as RFC 3339; anything that is not a plausible time is no time. */
@@ -563,7 +630,14 @@ export function codexFacts(file: string): SessionFacts {
       cwd?: string;
       cli_version?: string;
       git?: { branch?: string; repository_url?: string };
+      creator_account_id?: unknown;
+      creator_user_id?: unknown;
     };
+    // Whose thread it is, as Codex itself wrote it down when the thread was made (0.171.0;
+    // absent for an API key, another provider, or a thread from before Codex kept it).
+    // Never the email: events go to every sink.
+    const account = accountOf(p.creator_account_id, p.creator_user_id);
+    if (account) out.account_id = account;
     if (p.cwd) out.cwd = p.cwd;
     if (p.cli_version) out.harness_version = String(p.cli_version);
     if (p.git?.branch) out.branch = p.git.branch;

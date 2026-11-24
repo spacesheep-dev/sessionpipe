@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { codex } from "../src/adapters/codex.js";
+import { codex, codexAccounts } from "../src/adapters/codex.js";
 import type { HookCommand } from "../src/adapters/types.js";
 
 const SID = "01a0e5c5-5b2f-7c60-9287-31f9f0aa9f65";
@@ -94,6 +94,147 @@ describe("codex fromHook", () => {
     expect(hook("notify", "[]", env)).toBeNull();
     expect(hook("notify", "", env, ["{ broken"])).toBeNull();
   });
+  describe("codexAccounts: who Codex is signed in as, from its sign-in file", () => {
+    const ACCT = "0aaa1111-2222-4333-8444-555566667777";
+    const USER = "user-0000000000000000000000AB";
+    const jwt = (c: unknown) => `e30.${Buffer.from(JSON.stringify(c)).toString("base64url")}.c2ln`;
+    const who = (extra: Record<string, unknown> = {}) => ({
+      "https://api.openai.com/auth": { chatgpt_user_id: USER, chatgpt_plan_type: "plus" },
+      ...extra,
+    });
+    const tokens = (id_token: unknown, account_id: unknown = ACCT) => ({
+      auth_mode: "chatgpt",
+      tokens: { id_token, access_token: "ACCESS-SECRET", refresh_token: "REFRESH-SECRET", account_id },
+    });
+    let codexDir: string;
+    let e: NodeJS.ProcessEnv;
+    const write = (auth: unknown) =>
+      writeFileSync(path.join(codexDir, "auth.json"), typeof auth === "string" ? auth : JSON.stringify(auth));
+    beforeEach(() => {
+      codexDir = path.join(home, "codex-signed-in");
+      mkdirSync(codexDir, { recursive: true });
+      e = { CODEX_HOME: codexDir };
+    });
+
+    it("the account is the workspace and the person in it; the email is its label; neither token is ever in it", () => {
+      expect(codexAccounts(e)).toEqual([]); // no sign-in file: nobody
+      write(tokens(jwt(who({ email: "me@example.com" }))));
+      expect(codexAccounts(e)).toEqual([{ harness: "codex", id: `${ACCT}.${USER}`, email: "me@example.com" }]);
+      expect(JSON.stringify(codexAccounts(e))).not.toMatch(/SECRET|e30\.|plus/);
+      // The email under OpenAI's profile claim; the person's id under its older name.
+      write(
+        tokens(
+          jwt({
+            "https://api.openai.com/profile": { email: "work@example.com" },
+            "https://api.openai.com/auth": { user_id: "user-OLD" },
+          }),
+        ),
+      );
+      expect(codexAccounts(e)).toEqual([{ harness: "codex", id: `${ACCT}.user-OLD`, email: "work@example.com" }]);
+      // The same account is what a thread made under it carries (codexFacts).
+      const f = path.join(codexDir, "rollout.jsonl");
+      writeFileSync(
+        f,
+        `${JSON.stringify({ type: "session_meta", payload: { id: "t", creator_account_id: ACCT, creator_user_id: "user-OLD" } })}\n`,
+      );
+      const none = { get: () => ({}), save: () => {} };
+      expect(codex.facts({ id: "t" }, f, {}, none).account_id).toBe(codexAccounts(e)[0]?.id);
+    });
+
+    it("an id token that names no person or no usable email still names the account", () => {
+      for (const bad of ["not-a-jwt", "a.b.c", jwt("text"), jwt(null), jwt({}), 7, undefined]) {
+        write(tokens(bad));
+        expect(codexAccounts(e), JSON.stringify(bad)).toEqual([{ harness: "codex", id: ACCT }]);
+      }
+      // A person's id that is no id, or would make the whole too long, is left out.
+      for (const user of ["a b", "me@example.com", 7, "u".repeat(100)]) {
+        write(tokens(jwt({ "https://api.openai.com/auth": { chatgpt_user_id: user } })));
+        expect(codexAccounts(e), JSON.stringify(user)).toEqual([{ harness: "codex", id: ACCT }]);
+      }
+      // An address a board could be made to draw as something else is no label.
+      for (const email of ["no at sign", "a b@example.com", "a‮@example.com", "a@exa\u0000mple.com", "<b>@x.io", 7]) {
+        write(tokens(jwt(who({ email }))));
+        expect(codexAccounts(e), JSON.stringify(email)).toEqual([{ harness: "codex", id: `${ACCT}.${USER}` }]);
+      }
+    });
+
+    it("nobody: an API key, an account id that is none, a file that is no sign-in file", () => {
+      for (const none of [
+        { OPENAI_API_KEY: "sk-test" },
+        { tokens: null },
+        tokens(jwt(who()), "me@example.com"),
+        tokens(jwt(who()), 7),
+        {},
+        "{ broken",
+        "null",
+      ]) {
+        write(none);
+        expect(codexAccounts(e), JSON.stringify(none)).toEqual([]);
+      }
+      // Larger than any sign-in file, or not a file at all: never read.
+      write(JSON.stringify({ ...tokens(jwt(who())), pad: "x".repeat(1024 * 1024) }));
+      expect(codexAccounts(e)).toEqual([]);
+      rmSync(path.join(codexDir, "auth.json"));
+      mkdirSync(path.join(codexDir, "auth.json"));
+      expect(codexAccounts(e)).toEqual([]);
+      // With no CODEX_HOME it is this user's ~/.codex; with no environment given, this process's.
+      expect(Array.isArray(codexAccounts({}))).toBe(true);
+      expect(Array.isArray(codexAccounts())).toBe(true);
+    });
+
+    it("limits are the account's that this Codex process started under, which a resumed thread's creator may not be", () => {
+      const f = path.join(codexDir, "rollout.jsonl");
+      const rate_limits = {
+        limit_id: "codex",
+        primary: { used_percent: 12.5, window_minutes: 300, resets_at: 1795560000 },
+      };
+      writeFileSync(
+        f,
+        [
+          JSON.stringify({
+            type: "session_meta",
+            payload: { id: SID, creator_account_id: "acct-then", creator_user_id: USER },
+          }),
+          JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: null, rate_limits } }),
+        ].join("\n"),
+      );
+      const kept = new Map<string, Record<string, unknown>>();
+      const state = {
+        get: (h: string, s: string) => kept.get(`${h}:${s}`) ?? {},
+        save: (h: string, s: string, patch: Record<string, unknown>) =>
+          void kept.set(`${h}:${s}`, { ...kept.get(`${h}:${s}`), ...patch }),
+      };
+      const about = { state, session: SID };
+      const start = (as: NodeJS.ProcessEnv) => {
+        const r = hook("SessionStart", { session_id: SID, transcript_path: f, source: "resume" }, as);
+        expect(r?.hints).toEqual({ started: true });
+        return codex.facts({ id: SID }, f, r?.hints ?? {}, state, as);
+      };
+      // No start seen (hooks not approved yet), or no state to ask: unstamped, the session's account's.
+      expect(codex.limits?.(f, about)).not.toHaveProperty("account_id");
+      expect(codex.limits?.(f)).not.toHaveProperty("account_id");
+      // Started with nobody the sign-in file names (an API key, a keyring): unstamped still.
+      expect(start(e).account_id).toBe(`acct-then.${USER}`);
+      expect(codex.limits?.(f, about)).not.toHaveProperty("account_id");
+      // Started under another account than the thread's creator: its limits are that one's.
+      write(tokens(jwt(who())));
+      start(e);
+      expect(codex.limits?.(f, about)).toMatchObject({ account_id: `${ACCT}.${USER}`, windows: [{ id: "primary" }] });
+      // The person signs in as somebody else while this window stays open: it runs on as it started.
+      write(tokens(jwt(who()), "acct-later"));
+      expect(codex.limits?.(f, about)).toMatchObject({ account_id: `${ACCT}.${USER}` });
+      // Any other hook of the session asks nothing and changes nothing.
+      codex.facts({ id: SID }, f, {}, state, e);
+      expect(codex.limits?.(f, about)).toMatchObject({ account_id: `${ACCT}.${USER}` });
+      // Its next start is under the new sign-in.
+      start(e);
+      expect(codex.limits?.(f, about)).toMatchObject({ account_id: `acct-later.${USER}` });
+      // A rollout with no limits in it has none, whoever is signed in.
+      writeFileSync(f, "");
+      expect(codex.limits?.(f, about)).toBeNull();
+    });
+  });
+
   it("toolResult: only what Codex itself wrote first in a call's result counts", () => {
     const f = rollout(SID);
     const row = (payload: Record<string, unknown>, type = "response_item") => JSON.stringify({ type, payload });
