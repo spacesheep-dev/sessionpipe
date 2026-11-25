@@ -27,6 +27,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -326,6 +333,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -758,6 +772,252 @@
               ]
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "two topics for one receiver: each once, sorted, and the rules reordered send no hello",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "zeta-card",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "zeta/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "acme-card",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "acme-again",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": [
+                "acme/tasks",
+                "zeta/tasks"
+              ]
+            }
+          }
+        },
+        {
+          "at": "2026-11-24T09:15:00.000Z",
+          "change": {
+            "v": 1,
+            "on": true,
+            "rules": [
+              {
+                "name": "acme-again",
+                "paused": false,
+                "source": {
+                  "receiver": "board.example",
+                  "topic": "acme/tasks",
+                  "event": "record.updated"
+                },
+                "when": {
+                  "state": [
+                    "todo"
+                  ],
+                  "for": [
+                    "studio-claude"
+                  ]
+                },
+                "subject": "^X-[0-9]{1,6}$",
+                "target": {
+                  "start": "claude-code"
+                },
+                "folder": "~/work/acme",
+                "level": "edits",
+                "tools": [
+                  "mcp__board"
+                ],
+                "cap": {
+                  "per_day": 5
+                },
+                "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+              },
+              {
+                "name": "acme-card",
+                "paused": false,
+                "source": {
+                  "receiver": "board.example",
+                  "topic": "acme/tasks",
+                  "event": "record.updated"
+                },
+                "when": {
+                  "state": [
+                    "todo"
+                  ],
+                  "for": [
+                    "studio-claude"
+                  ]
+                },
+                "subject": "^X-[0-9]{1,6}$",
+                "target": {
+                  "start": "claude-code"
+                },
+                "folder": "~/work/acme",
+                "level": "edits",
+                "tools": [
+                  "mcp__board"
+                ],
+                "cap": {
+                  "per_day": 5
+                },
+                "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+              },
+              {
+                "name": "zeta-card",
+                "paused": false,
+                "source": {
+                  "receiver": "board.example",
+                  "topic": "zeta/tasks",
+                  "event": "record.updated"
+                },
+                "when": {
+                  "state": [
+                    "todo"
+                  ],
+                  "for": [
+                    "studio-claude"
+                  ]
+                },
+                "subject": "^X-[0-9]{1,6}$",
+                "target": {
+                  "start": "claude-code"
+                },
+                "folder": "~/work/acme",
+                "level": "edits",
+                "tools": [
+                  "mcp__board"
+                ],
+                "cap": {
+                  "per_day": 5
+                },
+                "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+              }
+            ]
+          },
+          "expect": {}
         }
       ]
     }

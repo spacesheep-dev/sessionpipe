@@ -5,7 +5,7 @@
 import type { ControlNotice, StartPermission, TriggerRefusal } from "./v1.js";
 
 /** What became of a run of a rule: a notice or a clock tick the rule took (CONTROL.md §14). */
-export type TriggerResult = "ran" | "refused" | "failed" | "missed";
+export type TriggerResult = "ran" | "refused" | "failed" | "missed" | "dropped";
 
 /**
  * Why the machine itself paused a rule (CONTROL.md §14.7 step 11), kept in the daemon's state and
@@ -164,7 +164,10 @@ export interface TriggersFile {
   rules: TriggerRule[];
 }
 
-/** One line of a rule's history: a run, a refusal or a failure (`trigger list`). */
+/**
+ * One line of a rule's history (`trigger list`): a run, a refusal, a failure, a missed tick or a
+ * waiting run dropped. `code` comes with `refused` only.
+ */
 export interface TriggerHistoryLine {
   /** When. */
   at: string;
@@ -196,10 +199,15 @@ export interface TriggerListEntry {
 
 /** `sessionpipe trigger list --json`. */
 export interface TriggerList {
-  /** Whether triggers are on. */
+  /** Whether triggers are on. A rules file that can't be read is off. */
   on: boolean;
   /** Every rule, in the file's order. */
   rules: TriggerListEntry[];
+  /**
+   * When the rules file can't be read: what is wrong with it, in the machine's words. Absent when
+   * it reads, or is not there.
+   */
+  problem?: string | undefined;
 }
 
 /** What one run of a rule is, as the daemon would start it. */
@@ -226,11 +234,15 @@ export interface TriggerRun {
  */
 export interface TriggerLine {
   /**
-   * The command on one line, flags in their fixed order, values quoted as POSIX single quotes
-   * where they hold anything outside `A-Za-z0-9_./:@=+-` (CONTROL.md §14.1).
+   * The command, flags in their fixed order, each value one POSIX shell word (CONTROL.md §14.1,
+   * conformance/triggers/trigger-line.json). One line, unless the words hold a line feed, which
+   * stays inside their quotes.
    */
   line: string;
-  /** The words the line splits into, from `trigger` on (no `sessionpipe`). */
+  /**
+   * The words the line splits into, from `trigger` on (no `sessionpipe`): at least a clock rule's
+   * fourteen (its words written `--words=<value>`), at most a rule with every flag's twenty-nine.
+   */
   argv: string[];
 }
 

@@ -216,6 +216,7 @@ export const CONFIG_SCHEMAS = {
         "type": "boolean"
       },
       "rules": {
+        "maxItems": 50,
         "type": "array",
         "items": {
           "type": "object",
@@ -421,7 +422,8 @@ export const CONFIG_SCHEMAS = {
                       "ran",
                       "refused",
                       "failed",
-                      "missed"
+                      "missed",
+                      "dropped"
                     ]
                   },
                   "code": {
@@ -460,7 +462,8 @@ export const CONFIG_SCHEMAS = {
                 "required": [
                   "at",
                   "result"
-                ]
+                ],
+                "additionalProperties": false
               }
             },
             "machine_paused": {
@@ -475,14 +478,20 @@ export const CONFIG_SCHEMAS = {
             "rule",
             "today",
             "recent"
-          ]
+          ],
+          "additionalProperties": false
         }
+      },
+      "problem": {
+        "type": "string",
+        "maxLength": 2000
       }
     },
     "required": [
       "on",
       "rules"
-    ]
+    ],
+    "additionalProperties": false
   },
   "trigger-test": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -649,20 +658,25 @@ export const CONFIG_SCHEMAS = {
     "type": "object",
     "properties": {
       "line": {
-        "type": "string"
+        "type": "string",
+        "maxLength": 20000,
+        "pattern": "^sessionpipe trigger add "
       },
       "argv": {
-        "minItems": 4,
+        "minItems": 14,
+        "maxItems": 29,
         "type": "array",
         "items": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4100
         }
       }
     },
     "required": [
       "line",
       "argv"
-    ]
+    ],
+    "additionalProperties": false
   },
 } as const satisfies Record<string, JsonSchema>;
 

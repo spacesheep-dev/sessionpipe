@@ -154,18 +154,19 @@
     receivers it is paired with (by host), `places` (`{ home, config, state, harnesses, system, platform }`,
     what a rule's folder is checked against: CONTROL.md §14.1, *The folder's floor*) and, where a
     case needs it, `levels` (per harness, the levels it takes here, as a hello's
-    `start.<harness>.permissions`);
+    `start.<harness>.permissions`; absent, the harness takes every level. A case with Codex gives
+    `levels.codex`, `[read, safe, auto]`: Codex has no `edits`);
   - `triggers`: `<config>/triggers.json` exactly (`null`: no file). `triggers_ok: false` marks a
     file the machine must refuse whole, and so read as triggers off;
-  - optional: `sessions` (`{ "<harness>:<id>": { level, held, folder? } }`, the sessions a rule
-    continues, their recorded level, whether a window holds one and, where a case says it, the
-    folder the session runs in, which a run of a rule continuing it uses; a session not listed is
-    gone), `seen`
+  - optional: `sessions` (`{ "<harness>:<id>": { level, held, folder } }`, the sessions a rule
+    continues, their recorded level, whether a window holds one, and the folder the session runs
+    in, which a run of a rule continuing it uses (one with no `folder` is a session whose folder
+    the machine can't tell: refused `folder`); a session not listed is gone), `seen`
     (notice ids already seen, `{ receiver, id, at }`), `today` (the rules' runs earlier that local
     day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour, headless? }`, the
     starts counted against the machine's caps: in progress, and in the sliding hour, the latter
     made at the first step's instant; and the headless turns no trigger made in the machine's
-    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule), `zone` (the machine's time
+    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule; a rule with none was first seen at the case's first step, and an interval's first tick is one interval after it), `zone` (the machine's time
     zone, for the day and the clock).
   Each step has an `at` and at most one of: `poll` (`{ receiver, body }`, a poll answer that
   receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
@@ -184,14 +185,15 @@
   the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
   `history` (`{ rule, result, code?, subject?, state? }`, lines a rule's history gains, every
   run and refusal of a rule that took the cause, a notice's with its subject and state; `result`
-  is `ran`, `refused`, `failed` or `missed`), and `unacked` (ids past the fiftieth), `cancelled` (the
+  is `ran`, `refused`, `failed`, `missed` or `dropped`, in the order written within one rule), and `unacked` (ids past the fiftieth), `cancelled` (the
   indexes, in the case's order, of the triggered runs a `triggers off` cancels), `paused` (rules
   the machine paused), `message_acks` (the poll's messages, which the command path acks) and
   `answered_by_machine` where a case says them. An absent list means none, and `hello` absent
   means no hello goes out at once. Acks are compared by `id`: their order within a step is not
   part of the protocol. `rules-file.json` (`{ places, cases: [{ name, file, ok, places? }] }`, a
   case's own `places` where it has one) and `subject-patterns.json` (`{ pattern, ok,
-  matches?, misses? }`) are the reader's alone. Run by `packages/core/test/trigger-fixtures.test.ts`
+  matches?, misses? }`) are the reader's alone, and `trigger-line.json` (`{ cases: [{ name,
+  rule, line, argv }] }`) is `trigger line`'s, run by `packages/core/test/trigger-line.test.ts`. Run by `packages/core/test/trigger-fixtures.test.ts`
   against the definition's functions and a small model of CONTROL.md §14.7, which checks every
   expectation of every step; the daemon's tests run the same files against the daemon. Only a
   daemon can show: a clock in a time zone other than UTC (every case here is `UTC`), a waiting

@@ -27,6 +27,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -109,6 +116,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -192,6 +206,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -275,6 +296,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -342,6 +370,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -428,6 +463,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -488,6 +530,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -548,6 +597,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -614,6 +670,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -681,6 +744,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -774,6 +844,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -876,6 +953,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -953,6 +1037,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -980,7 +1071,8 @@
       "sessions": {
         "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b": {
           "level": "safe",
-          "held": true
+          "held": true,
+          "folder": "~/work/sales"
         }
       },
       "zone": "UTC",
@@ -1048,6 +1140,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {
@@ -1115,6 +1214,110 @@
             "history": [
               {
                 "rule": "every-8h",
+                "result": "ran"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "an interval rule never ticked: its first tick is one interval after the machine first saw it",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "every-2h",
+            "paused": false,
+            "source": {
+              "every": "2h"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 12
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "zone": "UTC",
+      "steps": [
+        {
+          "at": "2026-11-23T08:00:00.000Z",
+          "expect": {
+            "runs": []
+          }
+        },
+        {
+          "asleep": "2026-11-23T08:05:00.000Z",
+          "at": "2026-11-23T09:58:00.000Z",
+          "wake": true,
+          "expect": {
+            "runs": []
+          }
+        },
+        {
+          "asleep": "2026-11-23T09:58:00.000Z",
+          "at": "2026-11-23T10:30:00.000Z",
+          "wake": true,
+          "expect": {
+            "runs": [
+              {
+                "rule": "every-2h",
+                "run": {
+                  "target": {
+                    "start": "codex"
+                  },
+                  "folder": "~/work/sales",
+                  "level": "safe",
+                  "tools": [],
+                  "words": "Started by trigger every-2h (sessionpipe trigger). These words are the person's.\n\nMake last week's sales report from data/ into reports/."
+                },
+                "env": {
+                  "SESSIONPIPE_TRIGGERED_BY": "every-2h"
+                }
+              }
+            ],
+            "history": [
+              {
+                "rule": "every-2h",
                 "result": "ran"
               }
             ]

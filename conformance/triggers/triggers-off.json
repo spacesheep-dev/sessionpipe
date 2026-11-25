@@ -286,6 +286,13 @@
           ],
           "system": [],
           "platform": "linux"
+        },
+        "levels": {
+          "codex": [
+            "read",
+            "safe",
+            "auto"
+          ]
         }
       },
       "triggers": {

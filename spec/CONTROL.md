@@ -1698,15 +1698,27 @@ A rule enters the machine **only from its own terminal**:
   it says that this is the person's command to run at the machine and changes nothing. The last
   three are the ones `ask on` checks; `CLAUDECODE` is set in the shell of every Claude Code
   session as well. `trigger list`, `trigger test` and `trigger line` change nothing and run anywhere.
-- `trigger line <name>` prints, on its own and on one line, the `sessionpipe trigger add` command
-  that makes the rule again (on another machine, say), and `--json` prints it as `TriggerLine`
-  (config.proto): the line and its words. The line is a contract a program may read: the flags in
-  one fixed order (`--on`, `--topic`, `--event`, `--every`, `--when state=`, `--when for=`,
-  `--when by=`, `--subject`, `--start`, `--continue`, `--folder`, `--level`, `--tools`, `--cap`,
-  `--words`), each value bare when it holds only `A-Z a-z 0-9 _ . / : @ = + -` and otherwise in
-  POSIX single quotes (a `'` in it written `'\''`), a word apart from the next by one space. Read
-  back by `add`, it is the same rule, unpaused. A newline in the words is written as itself inside
-  their quotes, the only way a POSIX shell reads one back.
+- `trigger line <name>` prints the one `sessionpipe trigger add` command that makes the rule
+  again (on another machine, say), alone on its output, never wrapped or styled; `--json` prints it
+  as `TriggerLine` (config.proto): the line and the words it splits into. A program reads the line
+  back (`conformance/triggers/trigger-line.json`), so it is a contract:
+  - one command, on one line unless the words hold a line feed, which stays inside their quotes;
+  - the flags in one order: `--on`, `--topic`, `--event` or `--every`; `--when state=`,
+    `--when for=`, `--when by=`; `--subject`; `--start` or `--continue`; `--folder`; `--level`;
+    `--tools`; `--cap` (`<n>/day`); `--words`. `--level` and `--cap` are always written, defaults
+    too; `--event`, `--when`, `--subject` and `--tools` only when the rule has them. A `when` key's
+    values, and the tools, are joined by `,` in one flag, in the rule's order;
+  - a value is bare when it is not empty, holds only `A-Z a-z 0-9 _ . / : @ = + -`, and does not
+    start with `=` (zsh expands it) or `-`; any other is in single quotes, a `'` in it written
+    `'\''`. A value that starts with `-` is written as one word, `--flag=<value>` (the value quoted
+    as above), so no reader takes it for a flag; `add` takes `--flag=<value>` for every flag;
+  - words one space apart, nothing after the last.
+  The quoting is POSIX: sh, bash and zsh read the line back as written; fish, PowerShell and cmd
+  quote otherwise, and a program for them reads `--json`. Read back by `add` on a machine where
+  `add` takes the rule, it is the same rule, unpaused. `trigger line` runs `add`'s checks: a rule
+  `add` would refuse here now is refused, with why; a rule the file spells otherwise than `add`
+  writes it (a folder written out in full, a receiver's default port) is printed as `add` writes
+  it, which is the same rule, and the machine says so beside the line, never in it.
 - `add` writes every field of the rule: without `--level` it writes `safe`, and without `--cap`
   `{"per_day": 5}`, and the sentence it shows says so.
 - `add` checks what a run would check (§14.7: the folder is allowed, the harness runs headlessly
@@ -1751,7 +1763,7 @@ them. A rule (`config.proto`'s `TriggerRule`):
 | `when` | A notice rule only. `state`, `for`, `by`: lists of allowed values (1 to 20 each, the notice's patterns; a list is never empty). An absent list allows any value; a notice without the field fits no list. `by` trusts the receiver's word for who made the change: it keeps a rule to the people the person trusts on an honest receiver, and protects nothing against a receiver that was broken into. |
 | `subject` | A notice rule only. The subjects it takes, in the pattern language of §14.8. |
 | `target` | Exactly one of `{"start": "<harness>"}` (a new session) or `{"continue": "<harness>:<id>"}` (an existing one, the id by its adapter's rule, §3.1). |
-| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. A rule that continues a session runs in that session's own folder, so its `folder` IS the session's recorded folder: `add` writes that folder and refuses another, and at every run the floor and the allowlist are checked on the folder the run really uses, refused `folder` when it is no longer the rule's (`conformance/triggers/run-session-folder.json`). |
+| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. A rule that continues a session runs in that session's own folder, so its `folder` IS the session's recorded folder: `add` writes that folder and refuses another, and at every run the floor and the allowlist are checked on the folder the run really uses, refused `folder` when it is no longer the rule's or can't be told (§14.7 step 12, `conformance/triggers/run-session-folder.json`). |
 | `level` | `read`, `safe`, `edits` or `auto`: the widest the rule runs at (§14.7). A notice rule's is `edits` at most: the receiver holds other people's text. `auto` is for clock rules only. |
 | `tools` | Up to 8 MCP servers or tools a run may use without asking, `^mcp__[A-Za-z0-9_-]{1,64}$` (`mcp__board`, `mcp__board__records_get`), as `control.session_tools` are (§6): never a built-in tool, never a shell pattern, since a command line holding the person's sign-in can do whatever that command can. The pattern is the daemon's for `session_tools`, so looser than the two shapes: any `mcp__` name of those characters. |
 | `cap` | `{"per_day": n}`, 1 to 50 runs a machine-local day. |
@@ -1815,16 +1827,20 @@ words). A line longer than the terminal is cut by the machine itself, never left
 to wrap to its left edge: each further piece goes on behind `         ┆ `, so a person tells a cut
 line from a new one, and no piece starts unmarked. Lines are cut between characters as a person
 sees them (never inside a surrogate pair or between a letter and its marks), at a space where one
-falls late enough, and measured high: a wide or full-width character and a pictograph count two
-columns, a combining mark none. The width is the terminal's (80 when unknown, never under 40); a
-pipe gets whole lines. The sentence holds only fields whose patterns keep them to plain tokens; the
+falls late enough, and measured high: a wide or full-width character (Unicode 16's East Asian
+Width) and a pictograph count two columns, a non-spacing or enclosing mark none, a spacing mark
+one. The sentence is cut at spaces only, each line at the left edge; a token wider than the width
+(a session's id, a long pattern) starts a line of its own and goes on behind `┆ `, so no token is
+cut unmarked and none reads as two. The width is the terminal's (80 when unknown); a pipe gets
+whole lines. A terminal that leaves the lines under 40 columns would wrap them, so there `add`,
+`resume` and `triggers on` show nothing to confirm, ask nothing, and say to widen the terminal. The sentence holds only fields whose patterns keep them to plain tokens; the
 free text is never inside it, so no text in the words or the folder can read as part of the
 sentence (a level or a cap other than the rule's) or as a line of its own. A machine MUST show the
 description whole.
 
 A machine MUST read the file whole or not at all: a file that does not fit this, or is not there,
-is read as no rules with triggers **off**, and the machine says why in `trigger list` and in its
-log. It never runs part of a file, and never guesses what a rule meant
+is read as no rules with triggers **off**, and the machine says why in `trigger list` (its
+`--json`, `TriggerList`, carries it as `problem`) and in its log. It never runs part of a file, and never guesses what a rule meant
 (`conformance/triggers/rules-file.json`).
 
 `trigger list` shows each rule in plain words with its runs today against its cap, whether the
@@ -1892,7 +1908,8 @@ A daemon that knows triggers sends `triggers` in **every** hello
 ([`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json)), to each receiver
 its own: `{"on": true, "topics": ["acme/tasks"]}`. `topics` are the topics of the rules, not
 paused in the file nor by the machine (§14.7 step 11), whose source is **that** receiver, each
-once, at most 50. Off, it is
+once, sorted, at most 50 (`conformance/triggers/hello-topics-only.json`). Sorted, they say the same
+whatever order the rules are in: rules moved in the file need no hello. Off, it is
 `{"on": false, "topics": []}`, so a receiver tells "off" from "a daemon that predates triggers",
 whose hello has no `triggers` at all. The daemon MUST send a hello at once whenever what the hello's
 `triggers` says to some receiver changes (its `on`, or its topics: a rule added, paused, resumed or
@@ -1914,7 +1931,7 @@ predates notices reads `messages` only, and would be handed the same notices on 
 |---|---|
 | `taken` | Not final. A rule took the notice and its run waits (§14.7: a window holds the session, or the machine's caps on starts are reached). A final ack follows by `expires_at`. |
 | `ran` | A rule took it and its run began. `session` names the session, `<harness>:<id>`, so the receiver can link the subject to it. |
-| `no_match` | No rule of the machine takes it. Nothing ran. |
+| `no_match` | No rule of the machine takes it, or the rule that took it (acked `taken`) was paused, removed or changed before its run began (§14.7). Nothing ran. |
 | `duplicate` | The machine saw this id from this receiver before. Nothing ran again. |
 | `expired` | Read at or after its `expires_at`. Nothing ran. |
 | `refused` | The machine said no; `code` says why (below). |
@@ -1978,9 +1995,13 @@ and a flood collapses.
 
 A clock rule's `every` is `mon 09:00` to `sun 09:00` (once a week), `day 08:30` (every day), both
 in the machine's local time, or an interval, `30m` or `2h`, from 15 minutes to 7 days, counted
-from the rule's last tick (or from when it was made or resumed). A rule records no time it was
-made, so a clock rule's first tick is the first after the daemon has seen the rule. A clock tick
-is like a notice with no receiver, no fields and no ack.
+from the rule's last tick. A rule records no time it was made, so the clock counts from when the
+daemon first saw the rule (or its resume, or a new `every`): a weekly or daily rule's first tick is
+the first of its times after that, and an interval's first tick is one interval after it. The
+daemon keeps that time, and each last tick, in its own state, so a restart neither moves a first
+tick nor runs a tick twice (`conformance/triggers/clock-missed.json`). A local time that a change
+of the clocks skips runs as the clock passes it; one it repeats runs once. A clock tick is like a
+notice with no receiver, no fields and no ack.
 
 A tick missed while the machine was asleep or the daemon stopped runs **once** on waking, however
 many ticks were missed, when the latest missed tick is less than six hours late. Six hours late or
@@ -2021,10 +2042,14 @@ fails:
     `TriggerPause`). The pause ends with `trigger resume` at the terminal, with the rule's removal,
     or when the person changes the rule's target; for `unknown_level` only a new target clears it
     for good, since the same session would pause the rule again.
+12. Continuing: the session's own folder, which the run really uses, is known and is the rule's
+    folder, compared as real paths as the floor is (§14.1), and is allowed and over the floor;
+    else `refused` `folder` (`conformance/triggers/run-session-folder.json`). A session whose
+    folder the machine can't tell is refused the same way.
 
 A clock tick takes, in order: a paused rule's tick (in the file or by the machine) is nothing, on
 or off; step 2 (off: a history line `refused` `triggers_off`); its lateness (§14.6: six hours or
-more is `missed`, decided before the cap and never counted); then steps 8 to 11 and the waits
+more is `missed`, decided before the cap and never counted); then steps 8 to 12 and the waits
 below, as a notice's run does. Step 7 is for notice rules only.
 
 **When a run counts.** A run counts against its rule's cap and cooldown the moment it is taken:
@@ -2032,9 +2057,10 @@ when it begins, or, when it must wait, when it is acked `taken`. So two notices 
 the run of the first waits are counted one after the other, and the second is refused `cap` when
 the first used the last run of the day. Every run that counted stays counted whether it then works
 or fails. A count is given back when, and only when, a run that was taken ends without running at
-all: refused `held`, `start_limit` or `busy` at its deadline, dropped by `triggers off`, or refused
-`folder`, `harness` or `no_session` when it is let go. When a waiting run is let go (the window
-lets go of the session, a start ends, the hour has room), steps 9 to 11 are checked **again**, and a
+all: refused `held`, `start_limit` or `busy` at its deadline, dropped by `triggers off`, dropped
+because its rule was paused, removed or changed, or refused `folder`, `harness` or `no_session` when
+it is let go. When a waiting run is let go (the window
+lets go of the session, a start ends, the hour has room), steps 9 to 12 are checked **again**, and a
 run that now fails one is refused with that step's code. A count lent to a waiting run can refuse
 another notice `cap` (or `cooldown`) for good, even when the waiting run later gives it back: this
 is intended, since the machine cannot know at the time that the run will not happen, and a refused
@@ -2090,11 +2116,17 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   never forks a session either: a `15m` clock whose run takes forty minutes has its later ticks
   wait behind it, each refused `busy` if the run outlasts that tick's six hours.
 - **Off.** Turning triggers off drops every waiting run (§14.10).
-- **Paused, removed or changed.** A rule the person pauses or removes drops its waiting runs, and a
-  rule changed under the same name (in anything that decides what a run does) drops the runs that
-  waited for the rule as it was, each giving its count back. A notice among them is acked
-  `no_match`, as a notice that meets only a paused rule is (step 6), never `triggers_off`: the
-  switch is on.
+- **Paused, removed or changed.** A rule the person pauses or removes drops every run of it that
+  was taken and has not begun (waiting, or handed to the harness's line and not yet started), and a
+  rule changed under the same name drops the runs taken for the rule as it was. Changed means a
+  change in what decides what a run does: its source and its filters (`source`, `when`,
+  `subject`), its `target`, `folder`, `level`, `tools` or `words`; a new `cap`, a new order of the
+  rules or the same values written another way change nothing. Each dropped run gives its count
+  back; a notice among them is acked `no_match`, as a notice that meets only a paused rule is
+  (step 6), never `triggers_off` (the switch is on); a tick is told nothing. The rule's history
+  gets a line `dropped` (with the notice's subject and state) while the rule is still in the file;
+  a removed rule's history goes with it (`conformance/triggers/run-waits.json`). A run whose turn
+  has begun is not stopped by a pause or a change; only `triggers off` stops it (§14.10).
 - **What an `edits` run can leave for later runs.** A run at `edits` writes in its folder, and some
   of what a folder holds can widen what later sessions there may do: Claude Code's
   `.claude/settings.json`, `.git/hooks`. A triggered run can write those for the next run of the
@@ -2191,6 +2223,7 @@ itself through the board.
   its rules file and steps (a poll, a hello, a tick, a wake, a change at the machine) with the acks,
   runs and hellos they must give, and `notice-bad-shape.json`, notices that are not the closed
   shape in every way §14.2 names. `rules-file.json`: which rules files a machine reads.
+  `trigger-line.json`: rules and the exact line and words `trigger line` gives each.
   `subject-patterns.json`: which subject patterns it takes, and what each matches.
   `packages/core/test/trigger-fixtures.test.ts` holds every expectation of these files against the
   definition's functions and a small model of §14.7 (dedup, the counts, the allowlist, the

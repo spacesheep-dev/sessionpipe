@@ -34,7 +34,7 @@ const read = (f: string) => JSON.parse(readFileSync(path.join(dir, f), "utf8"));
 /** `SESSIONPIPE_WRITE_TRIGGER_HISTORY=1`: write each step's history as this model reads it into
  *  the files (as `npm run vectors` writes the control vectors), for a person to review in the diff. */
 const WRITE = process.env.SESSIONPIPE_WRITE_TRIGGER_HISTORY === "1";
-const PURE = new Set(["subject-patterns.json", "rules-file.json"]);
+const PURE = new Set(["subject-patterns.json", "rules-file.json", "trigger-line.json"]);
 const scenarios = readdirSync(dir)
   .filter((f) => f.endsWith(".json") && !PURE.has(f))
   .sort();
@@ -152,6 +152,13 @@ const sent = (a: Ack) => ({
   ...(a.session ? { session: a.session.replace(/:\*$/, ":8c132906-8c3f-4814-870a-afc3d05e1d2e") } : {}),
 });
 
+/** What decides what a run of a rule does (§14.7, *Paused, removed or changed*), in one spelling. */
+const runShape = (r: TriggerRule): string =>
+  JSON.stringify(
+    [r.source, r.when ?? {}, r.subject ?? null, r.target, r.folder, r.level, r.tools ?? [], r.words],
+    (_k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v),
+  );
+
 /** The latest tick of a clock rule after `from` and at most `to` (UTC), or null. */
 function latestTick(every: string, from: number, to: number, last?: number): number | null {
   const e = parseEvery(every) as Exclude<ReturnType<typeof parseEvery>, { error: string }>;
@@ -195,6 +202,9 @@ function runCase(c: Case) {
   let headless = c.starts?.headless ?? 0;
   const slots = c.limits?.headless ?? 3;
   const lastTick = new Map(Object.entries(c.last_tick ?? {}).map(([k, v]) => [k, Date.parse(v)]));
+  // A clock rule with no last tick was first seen at the case's first step: an interval counts
+  // from there (§14.6).
+  const firstSeen = Date.parse(c.steps[0]?.at ?? AT);
   const machinePaused = new Set<string>();
   type Waiting = {
     key: string;
@@ -277,9 +287,12 @@ function runCase(c: Case) {
         paused.push(r.name);
         return "no_session";
       }
-      // A continued session runs in its own folder (§14.1): it is the rule's and allowed, or no run.
-      const there = ref(r) ? sessions[ref(r)!]!.folder : undefined;
-      if (there !== undefined && (there !== r.folder || !allowed(there))) return "folder";
+      // Step 11b: a continued session runs in its own folder (§14.1): it is known, the rule's and
+      // allowed, or no run.
+      if (ref(r)) {
+        const there = sessions[ref(r)!]!.folder;
+        if (there === undefined || there !== r.folder || !allowed(there)) return "folder";
+      }
       return null;
     };
     /** A run that passed its checks: counted now, then begun, or waiting (taken) for a window or the caps. */
@@ -341,7 +354,18 @@ function runCase(c: Case) {
         // Only the triggered turns still running are cancelled.
         cancelled = [...stillRunning].sort((a, b) => a - b);
         stillRunning.clear();
-      }
+      } else if (file?.on)
+        // A rule paused, removed or changed in what decides a run drops the runs that waited for
+        // it as it was: the count back, a notice told no_match, a line `dropped` where the rule
+        // still is (§14.7).
+        for (const w of [...waiting]) {
+          const now2 = file.rules.find((r) => r.name === w.rule.name);
+          if (now2 && !now2.paused && runShape(now2) === runShape(w.rule)) continue;
+          waiting = waiting.filter((x) => x !== w);
+          giveBack(w.key);
+          if (w.id) acks.push({ id: w.id, outcome: "no_match" });
+          if (now2) history.push({ rule: w.rule.name, result: "dropped", ...of(w.notice) });
+        }
     }
     for (const i of s.run_ended ?? []) {
       expect(stillRunning.has(i), `${where}: run ${i} is running`).toBe(true);
@@ -415,7 +439,7 @@ function runCase(c: Case) {
     if (s.wake)
       for (const r of file?.rules ?? []) {
         if (isNoticeSource(r.source)) continue;
-        const t = latestTick(r.source.every, Date.parse(s.asleep!), now, lastTick.get(r.name));
+        const t = latestTick(r.source.every, Date.parse(s.asleep!), now, lastTick.get(r.name) ?? firstSeen);
         if (t !== null) ticks.push([r, t]);
       }
     for (const [r, t] of ticks) {

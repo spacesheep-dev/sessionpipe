@@ -25,6 +25,10 @@ enum TriggerResult {
   // A clock tick six hours late or more, so nothing ran (CONTROL.md §14.6). Only a clock rule's
   // history has it, and no ack ever does.
   TRIGGER_RESULT_MISSED = 4;
+  // A run that was taken and waited, dropped before it began because the person paused its rule
+  // or changed it under the same name (CONTROL.md §14.7); its count was given back, and a notice's
+  // ack says `no_match`.
+  TRIGGER_RESULT_DROPPED = 5;
 }
 
 // Why the machine itself paused a rule (CONTROL.md §14.7 step 11), kept in the daemon's state and
@@ -279,8 +283,10 @@ message TriggersFile {
   ];
 }
 
-// One line of a rule's history: a run, a refusal or a failure (`trigger list`).
+// One line of a rule's history (`trigger list`): a run, a refusal, a failure, a missed tick or a
+// waiting run dropped. `code` comes with `refused` only.
 message TriggerHistoryLine {
+  option (sessionpipe.v1.strict) = true;
   // When.
   string at = 1 [
     (google.api.field_behavior) = REQUIRED,
@@ -302,6 +308,7 @@ message TriggerHistoryLine {
 
 // One rule as `sessionpipe trigger list --json` prints it.
 message TriggerListEntry {
+  option (sessionpipe.v1.strict) = true;
   // The rule, as the file has it.
   TriggerRule rule = 1 [(google.api.field_behavior) = REQUIRED];
   // Its runs today, against `cap.per_day`.
@@ -320,10 +327,17 @@ message TriggerListEntry {
 
 // `sessionpipe trigger list --json`.
 message TriggerList {
-  // Whether triggers are on.
+  option (sessionpipe.v1.strict) = true;
+  // Whether triggers are on. A rules file that can't be read is off.
   bool on = 1 [(google.api.field_behavior) = REQUIRED];
   // Every rule, in the file's order.
-  repeated TriggerListEntry rules = 2 [(google.api.field_behavior) = REQUIRED];
+  repeated TriggerListEntry rules = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 50
+  ];
+  // When the rules file can't be read: what is wrong with it, in the machine's words. Absent when
+  // it reads, or is not there.
+  string problem = 3 [(buf.validate.field).string.max_len = 2000];
 }
 
 // What one run of a rule is, as the daemon would start it.
@@ -345,13 +359,22 @@ message TriggerRun {
 // `sessionpipe trigger line <name> --json`: the one `sessionpipe trigger add` command that makes
 // the rule again, as a line and as its words.
 message TriggerLine {
-  // The command on one line, flags in their fixed order, values quoted as POSIX single quotes
-  // where they hold anything outside `A-Za-z0-9_./:@=+-` (CONTROL.md §14.1).
-  string line = 1 [(google.api.field_behavior) = REQUIRED];
-  // The words the line splits into, from `trigger` on (no `sessionpipe`).
+  option (sessionpipe.v1.strict) = true;
+  // The command, flags in their fixed order, each value one POSIX shell word (CONTROL.md §14.1,
+  // conformance/triggers/trigger-line.json). One line, unless the words hold a line feed, which
+  // stays inside their quotes.
+  string line = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 20000,
+    (buf.validate.field).string.pattern = "^sessionpipe trigger add "
+  ];
+  // The words the line splits into, from `trigger` on (no `sessionpipe`): at least a clock rule's
+  // fourteen (its words written `--words=<value>`), at most a rule with every flag's twenty-nine.
   repeated string argv = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated.min_items = 4
+    (buf.validate.field).repeated.min_items = 14,
+    (buf.validate.field).repeated.max_items = 29,
+    (buf.validate.field).repeated.items.string.max_len = 4100
   ];
 }
 
