@@ -22,6 +22,9 @@ import { withoutLineage } from "../launched-by.js";
 /** A headless turn still running after this is stopped. */
 export const JOB_TIMEOUT_MS = 30 * 60_000;
 const OUT_CAP = 1024 * 1024;
+/** How much of a run's stderr is kept: its last this many characters. A `stderr` this long
+ *  may begin in the middle of a line. */
+export const STDERR_KEPT = 4000;
 
 /** How a turn the daemon runs may act (spec/CONTROL.md §2), chosen at the machine's own
  *  terminal: safe, the harness's auto mode, or inherit (no permission flag, so the
@@ -235,7 +238,7 @@ export function runHeadless(bin: string, args: string[], o: RunOptions): Promise
       outLen += b.length;
     });
     child.stderr?.on("data", (b: Buffer) => {
-      errTail = (errTail + b.toString("utf8")).slice(-4000);
+      errTail = (errTail + b.toString("utf8")).slice(-STDERR_KEPT);
     });
     /** The SIGKILL that follows the SIGTERM, while it is still to come. */
     let ending: NodeJS.Timeout | null = null;
@@ -333,10 +336,39 @@ export function stderrTail(stderr: string | undefined, n = 3): string {
  *  ACP agent's `session/cancel` or the end of a headless run's own process. */
 export const CANCELLED_NOTE = "(The turn was cancelled.)";
 
-/** What a run that wasn't there to ask says about the actions it was refused. */
+/** The longest `reply` an ack may carry: schemas/v1/control-ack.json caps it at this
+ *  (held to it by packages/core/test/headless.test.ts). */
+export const REPLY_MAX = 20_000;
+/** How many refused actions a note names, and how long a name it shows. */
+const NAMES_SHOWN = 20;
+const NAME_MAX = 80;
+
+/** `s` cut to at most `n` UTF-16 units, never between the two halves of one character. */
+export function cutText(s: string, n: number): string {
+  if (s.length <= n) return s;
+  const cut = s.slice(0, Math.max(0, n));
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+/** A reply as an ack carries it: the words cut so that, with sessionpipe's own note after
+ *  them, the whole is never longer than `max` (the note itself is cut too, should it be
+ *  longer alone), and never through a character. So what was refused is still named after
+ *  a long answer (spec/CONTROL.md §3.1). */
+export function fitReply(words: string, note: string, max = REPLY_MAX): string {
+  const n = cutText(note, max);
+  return cutText(words, max - n.length) + n;
+}
+
+/** What a run that wasn't there to ask says about the actions it was refused: the first
+ *  NAMES_SHOWN names (each at most NAME_MAX characters), then how many more there were. */
 export function deniedNote(names: string[], count: number): string {
   if (!count) return "";
-  return `\n\n(Not allowed on this machine, since nobody was there to approve: ${names.join(", ") || `${count} action(s)`}.)`;
+  const shown = names
+    .slice(0, NAMES_SHOWN)
+    .map((n) => (n.length > NAME_MAX ? `${cutText(n, NAME_MAX)}…` : n))
+    .join(", ");
+  const more = names.length > NAMES_SHOWN ? `, and ${names.length - NAMES_SHOWN} more` : "";
+  return `\n\n(Not allowed on this machine, since nobody was there to approve: ${shown ? `${shown}${more}` : `${count} action(s)`}.)`;
 }
 
 /** A process that failed before or without its answer, in words. */

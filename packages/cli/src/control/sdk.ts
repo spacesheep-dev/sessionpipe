@@ -9,6 +9,9 @@
 // Measured (P1 spike 4, Claude Code 2.1.286): first token 1.5 s cold, 1.1 s warm;
 // zero turns while idle; but ~300 MB resident per held session, so the daemon
 // closes one that has been idle for ten minutes and a later message resumes it.
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { claudeControl, withoutLineage } from "@sessionpipe/core";
 import type { Picture, RunLevel, StartPermission } from "@sessionpipe/core/control";
 import type { SdkHost, SdkSession } from "./daemon.js";
@@ -24,18 +27,52 @@ const PERMISSION_MODE: Record<StartPermission, string> = {
   auto: "auto",
 };
 
-type SdkQuery = AsyncIterable<{ type: string; subtype?: string; result?: unknown; is_error?: boolean }> & {
+type SdkMessage = {
+  type: string;
+  subtype?: string;
+  result?: unknown;
+  is_error?: boolean;
+  permission_denials?: unknown;
+};
+type SdkQuery = AsyncIterable<SdkMessage> & {
   interrupt(): Promise<void>;
   close(): void;
 };
 type QueryFn = (p: { prompt: AsyncIterable<unknown>; options: Record<string, unknown> }) => SdkQuery;
+
+const SDK_NAME = "@anthropic-ai/claude-agent-sdk";
+
+/** The version of the Agent SDK that `spec` names, from its own package.json: the first
+ *  package.json above the file the name resolves to from here, as `import()` below
+ *  resolves it (the same package: a package's exports never point outside it). Null when
+ *  that file is not the SDK's, or anything can't be read. */
+export function sdkVersion(spec: string): string | null {
+  try {
+    let dir = path.dirname(createRequire(import.meta.url).resolve(spec));
+    for (;;) {
+      let text: string | null = null;
+      try {
+        text = readFileSync(path.join(dir, "package.json"), "utf8");
+      } catch {}
+      if (text !== null) {
+        const j = JSON.parse(text) as { name?: unknown; version?: unknown } | null;
+        return j?.name === SDK_NAME && typeof j.version === "string" ? j.version : null;
+      }
+      const up = path.dirname(dir);
+      if (up === dir) return null;
+      dir = up;
+    }
+  } catch {
+    return null;
+  }
+}
 
 export async function loadSdk(o: {
   claudeBin: string | null;
   env?: NodeJS.ProcessEnv;
   log: (s: string) => void;
 }): Promise<SdkHost | null> {
-  const spec = o.env?.SESSIONPIPE_AGENT_SDK || "@anthropic-ai/claude-agent-sdk";
+  const spec = o.env?.SESSIONPIPE_AGENT_SDK || SDK_NAME;
   let query: QueryFn;
   try {
     const mod = (await import(/* @vite-ignore */ spec)) as { query?: QueryFn };
@@ -45,6 +82,16 @@ export async function loadSdk(o: {
     return null;
   }
   o.log(`Agent SDK found (${spec}): new sessions start in place`);
+  // Which settings files a session reads is said only where this SDK's own default reads
+  // the same ones already, so saying it widens nothing. An older SDK (or one whose version
+  // can't be read) is told nothing, as before, and reads no settings files at all: not
+  // the folder's allow rules, nor the person's own settings with sessionpipe's hooks.
+  const version = sdkVersion(spec);
+  const sources = claudeControl.sdkReadsAllSettings(version);
+  if (!sources)
+    o.log(
+      `Agent SDK ${version ?? "of a version that can't be read"}: its sessions read no settings files (the SDK reads them from ${claudeControl.SDK_ALL_SETTINGS_FROM} on)`,
+    );
   return {
     start({
       session,
@@ -74,6 +121,13 @@ export async function loadSdk(o: {
           });
         }
       }
+      // Why Claude Code left out the folder's own allow rules, once it has said so in a
+      // whole line of stderr, and the denials already named in an earlier reply.
+      let dropped: claudeControl.DroppedRules | null = null;
+      const lines = claudeControl.stderrLines((line) => {
+        dropped ??= claudeControl.droppedRules(line);
+      });
+      const named = new Set<string>();
       const q = query({
         prompt: input(),
         options: {
@@ -83,11 +137,16 @@ export async function loadSdk(o: {
           ...(model ? { model } : {}),
           ...(allowedTools?.length ? { allowedTools } : {}),
           ...(o.claudeBin ? { pathToClaudeCodeExecutable: o.claudeBin } : {}),
+          // The files `claude -p` reads, which this SDK reads by default already: said, so
+          // a later default can't read fewer (CONTROL.md §3.1).
+          ...(sources ? { settingSources: [...claudeControl.SETTING_SOURCES] } : {}),
+          // Read only for Claude Code's word that it left out the folder's allow rules.
+          stderr: lines,
           // Ours without the lineage this process may carry, then the session's own (jobEnv).
           env: { ...withoutLineage(o.env ?? process.env), ...env, SESSIONPIPE_CONTROL_JOB: "1" },
         },
       });
-      const waiting: { resolve: (v: { reply: string; error?: string }) => void }[] = [];
+      const waiting: { resolve: (v: { reply: string; error?: string; note?: string }) => void }[] = [];
       let busy = false;
       let lastUsed = Date.now();
       void (async () => {
@@ -99,7 +158,24 @@ export async function loadSdk(o: {
             const w = waiting.shift();
             const text =
               typeof m.result === "string" && m.result.trim() ? m.result : "(finished without a written reply)";
-            w?.resolve(m.is_error ? { reply: "", error: text } : { reply: text });
+            if (m.is_error) {
+              w?.resolve({ reply: "", error: text });
+              continue;
+            }
+            // What this turn was denied, named as a `claude -p` run names it (CONTROL.md
+            // §3.1), each denial once however many results list it.
+            const fresh = (Array.isArray(m.permission_denials) ? m.permission_denials : []).filter(
+              (d: { tool_use_id?: unknown } | null) => {
+                const id = d?.tool_use_id;
+                if (typeof id !== "string") return true;
+                if (named.has(id)) return false;
+                named.add(id);
+                return true;
+              },
+            );
+            // The note apart from the words, so a long reply is cut before it (finish).
+            const note = claudeControl.refusedNote(fresh, dropped);
+            w?.resolve(note ? { reply: text, note } : { reply: text });
           }
         } catch (e) {
           for (const w of waiting.splice(0)) w.resolve({ reply: "", error: String((e as Error)?.message || e) });
@@ -114,7 +190,7 @@ export async function loadSdk(o: {
           const images = claudeControl.claudeImages(pictures);
           const content = images.length ? [...images, { type: "text", text }] : text;
           // How many of its pictures went as image blocks, where it had any.
-          const counted = (r: { reply: string; error?: string }) =>
+          const counted = (r: { reply: string; error?: string; note?: string }) =>
             pictures.length ? { ...r, native: images.length } : r;
           return new Promise((resolve) => {
             waiting.push({ resolve: (r) => resolve(counted(r)) });

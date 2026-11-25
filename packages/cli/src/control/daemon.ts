@@ -30,7 +30,7 @@ import {
   codexControl,
   configFile,
   DELEGATED_BY_ENV,
-  deniedNote,
+  fitReply,
   type HarnessAccount,
   HELLO_HARNESSES_MAX,
   JOB_TIMEOUT_MS,
@@ -300,7 +300,6 @@ const idOf = (session: string): string => session.slice(session.indexOf(":") + 1
 declare const __SESSIONPIPE_VERSION__: string;
 const VERSION = typeof __SESSIONPIPE_VERSION__ === "string" ? __SESSIONPIPE_VERSION__ : "0.0.0";
 
-const MAX_REPLY = 20_000;
 const HELLO_EVERY_MS = 10 * 60_000;
 /** A window's registry row says it is busy and its hooks have not said a turn began:
  *  how long a message waits for them to, before the window is looked at once more. The
@@ -385,7 +384,10 @@ export interface Carried {
 export interface SdkSession {
   /** Deliver one message; resolves with the agent's reply when the turn ends. Its saved
    *  pictures go natively too where the session takes them (CONTROL.md §6, *Pictures*). */
-  send(text: string, pictures?: readonly Picture[]): Promise<{ reply: string; error?: string; native?: number }>;
+  send(
+    text: string,
+    pictures?: readonly Picture[],
+  ): Promise<{ reply: string; error?: string; native?: number; note?: string }>;
   interrupt(): Promise<void>;
   close(): void;
   readonly busy: boolean;
@@ -1865,10 +1867,19 @@ export class ControlDaemon {
 
   // --- acks -----------------------------------------------------------------------
 
-  private finish(r: Caller, id: string, a: Omit<Ack, "receiver" | "id" | "at">, since?: number): void {
+  /** `note`: sessionpipe's own words after the reply (what was denied, and why), never
+   *  sent as a field of its own: the reply is cut to fit before it, so a long answer never
+   *  loses it (CONTROL.md §3.1, "named in the reply"). */
+  private finish(
+    r: Caller,
+    id: string,
+    { note = "", ...a }: Omit<Ack, "receiver" | "id" | "at"> & { note?: string | undefined },
+    since?: number,
+  ): void {
     const receiver = isSink(r) ? r.label : r.control + r.machine;
     const ack: Ack = { receiver, id, at: new Date(this.deps.now()).toISOString(), ...a };
-    if (ack.reply) ack.reply = redactSecrets(ack.reply).slice(0, MAX_REPLY);
+    // At most the schema's `reply` limit, whatever the note's size (fitReply).
+    if (ack.reply !== undefined) ack.reply = fitReply(redactSecrets(ack.reply), note);
     if (ack.detail) ack.detail = redactSecrets(ack.detail).slice(0, 500);
     if (a.outcome !== "taken") {
       this.inflight.delete(id);
@@ -3301,7 +3312,7 @@ export class ControlDaemon {
           id,
           out.error
             ? { outcome: "failed", detail: out.error }
-            : { outcome: "delivered", mode: s.mode ?? "sdk", reply: out.reply },
+            : { outcome: "delivered", mode: s.mode ?? "sdk", reply: out.reply, note: out.note },
           sent,
         );
       }
@@ -3390,7 +3401,7 @@ export class ControlDaemon {
     s: SdkSession,
     text: string,
     pictures: readonly Picture[] = [],
-  ): Promise<{ reply: string; error?: string }> {
+  ): Promise<{ reply: string; error?: string; note?: string }> {
     const out = await s.send(text, pictures);
     this.picturesSaid(id, pictures.length, out.native ?? 0, "image blocks");
     const run = this.heldRuns.get(session);
@@ -3979,6 +3990,7 @@ export class ControlDaemon {
           outcome: "delivered",
           mode,
           reply: out.reply,
+          ...("note" in out ? { note: out.note } : {}),
           ...(ran !== ref.id ? { session: `claude-code:${ran}` } : {}),
           ...(mode === "fork" && ran !== target ? { copy_of: `claude-code:${target}` } : {}),
           // A copy's turn is in the COPY's transcript, from its first row: the session
@@ -4062,7 +4074,7 @@ export class ControlDaemon {
       : "this machine doesn't make copies of sessions, and that session couldn't be reached in place";
   }
 
-  private outcome(res: RunResult): { failed: string } | { reply: string; session?: string } {
+  private outcome(res: RunResult): { failed: string } | { reply: string; note: string; session?: string } {
     if (res.error) return { failed: `couldn't start Claude Code: ${res.error}` };
     if (res.timedOut) return { failed: "Claude Code was still working after 30 minutes, so it was stopped" };
     if (res.tooBig) return { failed: "Claude Code's answer was too large to read" };
@@ -4078,12 +4090,16 @@ export class ControlDaemon {
       };
     }
     if (j.is_error) return { failed: String(j.result || j.subtype || "Claude Code reported an error") };
-    const denials = Array.isArray(j.permission_denials) ? j.permission_denials : [];
-    const names = [...new Set(denials.map((d) => d?.tool_name).filter((n): n is string => typeof n === "string"))];
-    const tail = deniedNote(names, denials.length);
+    // What was denied, and whether Claude Code had left out the folder's own allow rules
+    // (it says so on stderr only, and the reply would not say why a rule did nothing).
+    // The stderr kept is the end of the stream when it is that long: its first line is
+    // then not read. The note is kept apart, so a long reply is cut before it (finish).
+    const stderr = String(res.stderr || "");
+    const dropped = claudeControl.droppedInStderr(stderr, stderr.length >= claudeControl.STDERR_KEPT);
+    const note = claudeControl.refusedNote(j.permission_denials, dropped);
     const text =
       typeof j.result === "string" && j.result.trim() ? j.result : "(Claude Code finished without a written reply.)";
-    return { reply: text + tail, ...(typeof j.session_id === "string" ? { session: j.session_id } : {}) };
+    return { reply: text, note, ...(typeof j.session_id === "string" ? { session: j.session_id } : {}) };
   }
 
   private addKey(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number) {
@@ -4224,7 +4240,7 @@ export class ControlDaemon {
    *  one in flight. Fire-and-forget — the final ack carries everything. */
   private answerStream(r: Caller, id: string): AnswerStream {
     return new AnswerStream(async (text, seq) => {
-      const reply = redactSecrets(text).slice(0, MAX_REPLY);
+      const reply = fitReply(redactSecrets(text), "");
       if (isSink(r)) return r.progress(reply, seq);
       await this.post(r, "/ack", {
         acks: [{ id, outcome: "progress", at: new Date(this.deps.now()).toISOString(), seq, reply }],
@@ -4376,7 +4392,7 @@ export class ControlDaemon {
           id,
           out.error
             ? this.failedRun(out.error, o)
-            : { outcome: "delivered", mode: "sdk", reply: out.reply, applied: this.applied(o) },
+            : { outcome: "delivered", mode: "sdk", reply: out.reply, note: out.note, applied: this.applied(o) },
           sent,
         );
       }
@@ -4407,7 +4423,18 @@ export class ControlDaemon {
       if (res.stopped && !run.began) return this.finish(r, id, UNSTARTED_ACK, sent);
       const out = res.stopped ? { reply: this.stoppedReply(stream.soFar) } : this.outcome(res);
       if ("failed" in out) return this.finish(r, id, this.failedRun(out.failed, o));
-      this.finish(r, id, { outcome: "delivered", mode: "resume", reply: out.reply, applied: this.applied(o) }, sent);
+      this.finish(
+        r,
+        id,
+        {
+          outcome: "delivered",
+          mode: "resume",
+          reply: out.reply,
+          ...("note" in out ? { note: out.note } : {}),
+          applied: this.applied(o),
+        },
+        sent,
+      );
     });
   }
 

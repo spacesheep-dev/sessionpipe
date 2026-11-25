@@ -7,10 +7,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
+  cutText,
   deniedNote,
   findBinary,
+  fitReply,
   isExe,
   probe,
+  REPLY_MAX,
   runFailure,
   runHeadless,
   shimNote,
@@ -18,6 +21,7 @@ import {
   spawnable,
   stderrTail,
 } from "../src/adapters/headless.js";
+import { SCHEMAS } from "../src/schema/index.js";
 
 // Every case spawns a shell; under a full parallel run that can take seconds.
 vi.setConfig({ testTimeout: 30_000 });
@@ -285,6 +289,47 @@ describe("words", () => {
     expect(deniedNote([], 0)).toBe("");
     expect(deniedNote([], 2)).toContain("2 action(s)");
     expect(deniedNote(["run_command"], 1)).toContain("run_command");
+  });
+  it("deniedNote names the first 20, says truly how many more, and cuts a long name", () => {
+    const names = Array.from({ length: 400 }, (_, i) => `mcp__server_${i}__${"t".repeat(40)}`);
+    const note = deniedNote(names, 400);
+    expect(note).toBe(
+      `\n\n(Not allowed on this machine, since nobody was there to approve: ${names.slice(0, 20).join(", ")}, and 380 more.)`,
+    );
+    expect(note.length).toBeLessThan(1500);
+    expect(deniedNote(names.slice(0, 20), 20)).not.toContain("more");
+    expect(deniedNote(names.slice(0, 21), 21)).toMatch(/, and 1 more\.\)$/);
+    expect(deniedNote(["x".repeat(500)], 1)).toBe(
+      `\n\n(Not allowed on this machine, since nobody was there to approve: ${"x".repeat(80)}….)`,
+    );
+  });
+  it("fitReply: never over the ack schema's limit, the note kept whole after the words, never half a character", () => {
+    const ack = SCHEMAS["control-ack"] as unknown as {
+      properties: { acks: { items: { properties: { reply: { maxLength: number } } } } };
+    };
+    expect(REPLY_MAX).toBe(ack.properties.acks.items.properties.reply.maxLength);
+    const note = "\n\n(Not allowed on this machine, since nobody was there to approve: Bash.)";
+    // A note longer than the limit on its own: cut to the limit, no words at all.
+    expect(fitReply("words", "n".repeat(REPLY_MAX + 5))).toBe("n".repeat(REPLY_MAX));
+    // No words: the note alone.
+    expect(fitReply("", note)).toBe(note);
+    // Words exactly at the limit: whole with no note, cut before one.
+    const full = "w".repeat(REPLY_MAX);
+    expect(fitReply(full, "")).toBe(full);
+    expect(fitReply(full, note)).toBe(`${"w".repeat(REPLY_MAX - note.length)}${note}`);
+    // Words and note exactly at the limit, and one over.
+    const fits = "w".repeat(REPLY_MAX - note.length);
+    expect(fitReply(fits, note)).toBe(fits + note);
+    expect(fitReply(`${fits}w`, note)).toBe(fits + note);
+    for (const r of [fitReply(full, note), fitReply(`${fits}w`, note)]) expect(r).toHaveLength(REPLY_MAX);
+    // 10 000 emoji (two units each) before a note: the cut never leaves half of one.
+    const emoji = "😀".repeat(10_000);
+    const cut = fitReply(emoji, "x".repeat(71));
+    expect(cut.length).toBeLessThanOrEqual(REPLY_MAX);
+    expect(cut.slice(0, -71)).toMatch(/^(?:😀)+$/);
+    expect(cutText("a😀", 2)).toBe("a");
+    expect(cutText("a😀", 3)).toBe("a😀");
+    expect(cutText("abc", -1)).toBe("");
   });
 });
 
