@@ -96,7 +96,6 @@ describe.runIf(process.platform !== "win32")("setup preserves installed code and
       target: "node20",
       alias: {
         "@sessionpipe/core": path.join(root, "packages/core/src/index.ts"),
-        "@sessionpipe/core/schema": path.join(root, "packages/core/src/schema/index.ts"),
         "@sessionpipe/core/control": path.join(root, "packages/core/src/control/index.ts"),
         "@sessionpipe/core/service": path.join(root, "packages/core/src/service/index.ts"),
         "@sessionpipe/core/version": path.join(root, "packages/core/src/version.ts"),

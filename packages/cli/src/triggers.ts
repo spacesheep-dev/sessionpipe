@@ -17,12 +17,12 @@
 //   - `list`, `status` and `test` change nothing and run anywhere.
 // Both guards stop an honest session doing this by accident. Neither is proof that a person typed
 // it: a pseudo-terminal passes the first, and a cleared environment the second.
-import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
   acpControl,
   antigravityControl,
+  CONFIG_SCHEMAS,
   type ControlNotice,
   checkTriggers,
   claudeControl,
@@ -38,10 +38,12 @@ import {
   machineName,
   parseNotice,
   placeholdersIn,
+  problems,
   RULE_NAME_RE,
   RULE_TEXT_MARK,
   readConfig,
   realFolderProblem,
+  realPath,
   type StartPermission,
   sampleNotice,
   stateDir,
@@ -61,7 +63,6 @@ import {
   visible,
 } from "@sessionpipe/core";
 import { levelRank, parseSessionRef } from "@sessionpipe/core/control";
-import { CONFIG_SCHEMAS, problems, SCHEMAS } from "@sessionpipe/core/schema";
 import { aliasFile, readAliases } from "./control/aliases.js";
 import { localDay, type Zone, zoneOf } from "./control/clock.js";
 import { ask, type LocalReply, type LocalRequest, socketPath } from "./control/local.js";
@@ -70,7 +71,7 @@ import { HEADLESS } from "./control/route.js";
 import {
   harnessSession,
   type RulesRead,
-  readRules,
+  readRulesText,
   triggerStateFile,
   triggersFile,
   writeRules,
@@ -83,6 +84,7 @@ import {
   writeControl,
   writePrivate,
 } from "./control/store.js";
+import { readStateFile } from "./control/trigger-state.js";
 import { type RuleState, stateOf, type TriggerState } from "./control/triggers.js";
 import { Refusal } from "./refusal.js";
 import { cliPath, stableNode } from "./runtime.js";
@@ -112,6 +114,8 @@ export interface TriggerDeps {
   wellKnown: (url: string) => Promise<{ control?: { notices?: boolean } }>;
   /** The session `<harness>:<id>` is on this computer. */
   sessionThere: (ref: string) => boolean;
+  /** The folder a session on this computer runs in; null when it is not here. */
+  sessionFolder: (ref: string) => string | null;
   /** Write and start the background service; what it did, in words. */
   installService: () => string;
   now: () => number;
@@ -137,6 +141,7 @@ export function defaultTriggerDeps(distDir: string, env: NodeJS.ProcessEnv = pro
     local: (req, ms) => ask(socketPath(stateDir(env), env), req, ms),
     wellKnown: (url) => readWellKnown(url, 3000) as Promise<{ control?: { notices?: boolean } }>,
     sessionThere: (ref) => sessionThere(ref, env),
+    sessionFolder: (ref) => sessionFolder(ref, env),
     /* v8 ignore next -- writes and starts this computer's real service: tests stand in for it */
     installService: () => installService({ node: stableNode(process.execPath), cli: cliPath(distDir), env }),
     now: Date.now,
@@ -166,18 +171,36 @@ function readLine(question: string): Promise<string> {
 /** Whether a session is on this computer: Claude Code's transcript; a Codex rollout; or a
  *  session the background service started and named (aliases.json). */
 export function sessionThere(ref: string, env: NodeJS.ProcessEnv): boolean {
+  return sessionFolder(ref, env) !== null;
+}
+
+/** The folder a session runs in, as the machine records it (the background service's start,
+ *  Claude Code's transcript, a Codex rollout); null when the session is not on this computer.
+ *  A rule that continues a session runs there, so that is the rule's folder (CONTROL.md §14.1). */
+export function sessionFolder(ref: string, env: NodeJS.ProcessEnv): string | null {
   const r = parseSessionRef(ref);
-  if (!r) return false;
-  if (readAliases(aliasFile(controlState(env)))[ref]) return true;
-  if (r.harness === "claude-code") return !!claudeControl.findTranscript(r.id, claudeDirs(env));
-  if (r.harness === "codex") return !!codexControl.findRollout(r.id, env);
-  return false;
+  if (!r) return null;
+  const aliases = readAliases(aliasFile(controlState(env)));
+  if (Object.hasOwn(aliases, ref)) return (aliases[ref] as { cwd: string }).cwd;
+  if (r.harness === "claude-code") {
+    const t = claudeControl.findTranscript(r.id, claudeDirs(env));
+    return t ? (claudeControl.sessionFolder(t) ?? null) : null;
+  }
+  if (r.harness === "codex") {
+    const f = codexControl.findRollout(r.id, env);
+    return f ? (codexControl.codexFacts(f).cwd ?? null) : null;
+  }
+  return null;
 }
 
 // --- words --------------------------------------------------------------------------------
 
-const LABEL: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", antigravity: "Antigravity" };
-const label = (h: string): string => LABEL[h] ?? h;
+const LABEL = new Map([
+  ["claude-code", "Claude Code"],
+  ["codex", "Codex"],
+  ["antigravity", "Antigravity"],
+]);
+const label = (h: string): string => LABEL.get(h) ?? h;
 
 /** The escapes `visible` writes, marked so they can't be mistaken for typed text. */
 const marked = (ui: Ui, s: string): string => s.replace(/\\(?:t|n|r|u\{[0-9a-fA-F]+\})/g, (e) => tint(ui, "yellow", e));
@@ -208,7 +231,7 @@ export function levelHere(
   offered: Offered,
 ): { level: StartPermission | null; why: string | null } {
   const harness = targetHarness(rule);
-  const levels = offered[harness];
+  const levels = Object.hasOwn(offered, harness) ? offered[harness] : undefined;
   const level = triggerLevel(rule, mode, levels ? { offered: levels } : {});
   if (level === rule.level) return { level, why: null };
   const bySource = triggerLevel(rule, "auto");
@@ -287,6 +310,12 @@ const REFUSED: Record<TriggerRefusal, (l: TriggerHistoryLine, r: TriggerRule) =>
   busy: () => "its own earlier run was still going for as long as this one could wait",
 };
 
+/** A refusal's words; a code this version doesn't know (a newer one's) is said as that. */
+const refusedWords = (l: TriggerHistoryLine, r: TriggerRule): string =>
+  typeof l.code === "string" && Object.hasOwn(REFUSED, l.code)
+    ? REFUSED[l.code as TriggerRefusal](l, r)
+    : `a reason this version doesn't know (${visible(String(l.code))})`;
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** When, as a person reads it in this computer's time: the time today, else the day and the time. */
 function when(iso: string, now: number, zone: Zone): string {
@@ -307,15 +336,15 @@ const span = (ms: number): string =>
 
 /** A history line: when, and what became of it. */
 function historyLine(ui: Ui, l: TriggerHistoryLine, r: TriggerRule, now: number, zone: Zone): [string, string] {
-  const subject = l.subject ? `${l.subject} ` : "";
+  const subject = l.subject ? `${visible(l.subject)} ` : "";
   const what =
     l.result === "missed"
       ? `${tint(ui, "yellow", "missed")}: this computer was asleep or off until six hours after its time`
       : l.result === "ran"
-        ? `${subject}→ ${l.session ? short(l.session) : "a new session"}${l.ms !== undefined ? ` · ${span(l.ms)}` : " · running"}`
+        ? `${subject}→ ${l.session ? visible(short(l.session)) : "a new session"}${l.ms !== undefined ? ` · ${span(l.ms)}` : " · running"}`
         : l.result === "failed"
           ? `${subject}${tint(ui, "red", "couldn't start")}`
-          : `${subject}${tint(ui, "yellow", "refused")}: ${REFUSED[l.code as TriggerRefusal](l, r)}`;
+          : `${subject}${tint(ui, "yellow", "refused")}: ${refusedWords(l, r)}`;
   return [tint(ui, "dim", when(l.at, now, zone).padStart(5)), what];
 }
 
@@ -324,11 +353,7 @@ function historyLine(ui: Ui, l: TriggerHistoryLine, r: TriggerRule, now: number,
 /** The daemon's record of the rules' runs, as the CLI reads it (it writes it only to let go of a
  *  pause when no daemon is running to do it). */
 export function readRecord(env: NodeJS.ProcessEnv): TriggerState {
-  try {
-    return stateOf(JSON.parse(readFileSync(triggerStateFile(env), "utf8")));
-  } catch {
-    return stateOf(undefined);
-  }
+  return stateOf(readStateFile(triggerStateFile(env)));
 }
 
 /** A rule's runs today, by the daemon's record. */
@@ -337,6 +362,8 @@ const todayOf = (st: RuleState | undefined, day: string): NonNullable<RuleState[
 
 interface Here {
   read: RulesRead;
+  /** The file's exact text as read (null: not there): a change after it is never written over. */
+  text: string | null;
   file: TriggersFile | null;
   mode: MachineMode;
   offered: Offered;
@@ -344,10 +371,11 @@ interface Here {
   day: string;
 }
 async function here(d: TriggerDeps): Promise<Here> {
-  const read = readRules(d.env);
+  const { read, text } = readRulesText(d.env);
   const mode = readControl(d.env)?.mode ?? "safe";
   return {
     read,
+    text,
     file: read.state === "ok" ? read.file : null,
     mode,
     offered: await offeredHere(d, mode),
@@ -360,7 +388,7 @@ async function here(d: TriggerDeps): Promise<Here> {
 function editable(h: Here, d: TriggerDeps): TriggersFile {
   if (h.read.state === "refused")
     throw new Refusal(
-      `the rules file can't be read (${h.read.problems[0]}), so triggers are off and nothing in it runs. Fix it, or move it away and add the rules again: ${tilde(triggersFile(d.env), homeDir())}`,
+      `the rules file can't be read (${said(h.read.problems[0] as string)}), so triggers are off and nothing in it runs. Fix it, or move it away and add the rules again: ${tilde(triggersFile(d.env), homeDir())}`,
       "",
     );
   return h.file ?? { v: 1, on: false, rules: [] };
@@ -373,6 +401,11 @@ function ruleOf(f: TriggersFile, name: string | undefined, verb: string): Trigge
   return r;
 }
 
+/** A problem in sessionpipe's own words, which may quote a value: every character in it that
+ *  doesn't show as itself written out, one at a time, so an escape the problem already wrote
+ *  (`shown as \u{a0}`) is not written out twice. */
+const said = (problem: string): string => [...problem].map((c) => visible(c)).join("");
+
 /** The person's command, refused inside a harness session (CONTROL.md §14.1). */
 function personOnly(d: TriggerDeps, what: string): void {
   const v = harnessSession(d.env);
@@ -383,13 +416,27 @@ function personOnly(d: TriggerDeps, what: string): void {
     );
 }
 
+/** After the `yes`: the file is still exactly what was shown, or nothing is written. */
+function unchanged(h: Here, d: TriggerDeps, o: TriggerOut): boolean {
+  if (readRulesText(d.env).text === h.text) return true;
+  say(
+    o,
+    `  ${mark(o.ui, "warn")} `,
+    "The rules changed while you were reading. Nothing was written. Run the command again.",
+  );
+  return false;
+}
+
 /** At the terminal, with a `yes`: no flag skips it. */
-async function confirmed(d: TriggerDeps, o: TriggerOut, what: string, question: string): Promise<boolean> {
+function atTerminal(d: TriggerDeps, what: string): void {
   if (!d.interactive())
     throw new Refusal(
       `${what} needs this computer's own terminal, where you can read what will run and type yes; run it there`,
       "",
     );
+}
+async function confirmed(d: TriggerDeps, o: TriggerOut, what: string, question: string): Promise<boolean> {
+  atTerminal(d, what);
   const typed = (await d.confirm(`  ${question} `)).trim().toLowerCase();
   if (typed === "yes") return true;
   o.say(`  ${mark(o.ui, "info")} Nothing changed.`);
@@ -409,86 +456,21 @@ const sayWords = (o: TriggerOut, first: string, body: string, then?: string) => 
 
 // --- the JSON --------------------------------------------------------------------------------
 
-// TriggerList and TriggerTestAnswer (config.proto) have no generated schema of their own yet
-// (tools/doors names only TriggersFile among the machine's files): they are checked against one
-// put together from the generated parts they are made of, the rule, the notice and the codes.
-const RULE_SCHEMA = (CONFIG_SCHEMAS.triggers.properties.rules as unknown as { items: object }).items;
-const NOTICE_SCHEMA = (() => {
-  const { $id: _i, $schema: _s, ...rest } = SCHEMAS["control-notice"] as Record<string, unknown>;
-  return rest;
-})();
-const NP = SCHEMAS["control-notice"].properties as Record<string, object>;
-const ACK_ITEM = (
-  SCHEMAS["control-notice-ack"].properties.acks as unknown as { items: { properties: Record<string, object> } }
-).items.properties;
-const CODES = (ACK_ITEM.code as { enum: string[] }).enum;
-const RP = (RULE_SCHEMA as { properties: Record<string, object> }).properties;
-const LINE_SCHEMA = {
-  type: "object",
-  required: ["at", "result"],
-  additionalProperties: false,
-  properties: {
-    at: NP.at,
-    result: { type: "string", enum: ["ran", "refused", "failed"] },
-    // `missed` is a history line's alone, never an ack's.
-    code: { type: "string", enum: [...new Set([...CODES, "missed"])] },
-    subject: NP.subject,
-    state: NP.state,
-    session: ACK_ITEM.session,
-    ms: { type: "integer", minimum: 0 },
-  },
-};
-const LIST_SCHEMA = {
-  type: "object",
-  required: ["on", "rules"],
-  properties: {
-    on: { type: "boolean" },
-    rules: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["rule", "today", "recent"],
-        properties: {
-          rule: RULE_SCHEMA,
-          machine_paused: { type: "string", enum: ["gone", "unknown_level"] },
-          today: { type: "integer", minimum: 0 },
-          recent: { type: "array", maxItems: 20, items: LINE_SCHEMA },
-        },
-      },
-    },
-  },
-};
-const RUN_SCHEMA = {
-  type: "object",
-  required: ["target", "folder", "level", "tools", "words"],
-  properties: {
-    target: RP.target,
-    folder: { type: "string" },
-    level: RP.level,
-    tools: RP.tools,
-    words: { type: "string" },
-  },
-};
-const TEST_SCHEMA = {
-  type: "object",
-  required: ["rule", "matches"],
-  properties: {
-    rule: RP.name,
-    notice: NOTICE_SCHEMA,
-    matches: { type: "boolean" },
-    miss: { type: "string", enum: ["receiver", "topic", "event", "state", "for", "by", "subject", "placeholder"] },
-    refusal: ACK_ITEM.code,
-    run: RUN_SCHEMA,
-  },
-};
-
-/** The JSON of a definition's message, printed only once it fits. */
-function json(o: TriggerOut, schema: object, value: TriggerList | TriggerTestAnswer): void {
-  const bad = problems(schema as never, value);
-  /* v8 ignore next -- what is printed is built from a file read whole and the definition's functions */
-  if (bad.length) throw new Error(`the JSON would not fit its definition: ${bad[0]}`);
+/** The JSON of a definition's message (config.proto, its schema generated), printed only once
+ *  it fits. */
+export function printJson(
+  o: TriggerOut,
+  name: "trigger-list" | "trigger-test",
+  value: TriggerList | TriggerTestAnswer,
+): void {
+  const bad = problems(CONFIG_SCHEMAS[name] as never, value);
+  if (bad.length) throw new Error(`the JSON would not fit its definition: ${said(bad[0] as string)}`);
   o.print(JSON.stringify(value, null, 2));
 }
+/** A history line as the definition has it: a newer sessionpipe's code is left out of the JSON
+ *  (the list says it as a reason this version doesn't know). */
+const LINE = (CONFIG_SCHEMAS["trigger-list"].properties.rules.items.properties.recent as unknown as { items: object })
+  .items;
 
 function listOf(h: Here): TriggerList {
   return {
@@ -499,7 +481,7 @@ function listOf(h: Here): TriggerList {
         rule,
         ...(st?.paused ? { machine_paused: st.paused.why ?? "gone" } : {}),
         today: todayOf(st, h.day).runs,
-        recent: (st?.history ?? []).slice(0, 20),
+        recent: (st?.history ?? []).filter((l) => !problems(LINE as never, l).length).slice(0, 20),
       };
     }),
   };
@@ -586,13 +568,10 @@ export async function triggerMain(argv: string[], o: TriggerOut, d: TriggerDeps)
  *  their own under a dim bar (a folded line keeps it). The text is the definition's, which writes
  *  out what does not show: its escapes are marked, never escaped twice. */
 function sayRule(o: TriggerOut, r: TriggerRule): void {
-  // The definition cuts its own lines to the width (a cut line of the words keeps its mark), so
-  // nothing here wraps them again: each is marked and printed as it comes.
-  // The sentence holds only pattern-bound tokens, and folds as any line of ours does.
+  // The definition cuts every line to the width itself, the sentence included (a cut line of the
+  // words keeps its mark), so nothing here wraps them again: each is marked and printed as it comes.
   const width = o.ui.width === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : o.ui.width - 2;
-  const [sentence, ...rest] = describeRule(r, { width }).lines;
-  sayWords(o, "  ", marked(o.ui, sentence as string));
-  for (const l of rest)
+  for (const l of describeRule(r, { width }).lines)
     o.say(`  ${marked(o.ui, l).replace(/ ([│┆]) /, (_m, bar: string) => ` ${tint(o.ui, "dim", bar)} `)}`);
 }
 
@@ -693,8 +672,23 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   const target: TriggerRule["target"] = start ? { start } : { continue: cont as string };
   const harness = (start ?? parseSessionRef(cont as string)?.harness ?? (cont as string).split(":")[0]) as string;
 
-  // Its folder.
-  const given = one(p, "--folder");
+  // Its folder. A rule that continues a session runs in that session's own folder: that IS the
+  // rule's folder (§14.1), shown on the folder line and written, and another is refused.
+  let given = one(p, "--folder");
+  if (cont) {
+    const there = d.sessionFolder(cont);
+    if (there === null)
+      throw new Refusal(
+        `there is no ${label(harness)} session ${visible(short(cont))} on this computer: a rule continues a session that is here`,
+        "",
+      );
+    if (given !== undefined && realPath(path.resolve(untilde(given, home))) !== realPath(there))
+      throw new Refusal(
+        `that session runs in ${visible(tilde(there, home))}, and a rule that continues a session runs in the session's own folder: leave --folder out, or name ${visible(tilde(there, home))}`,
+        "",
+      );
+    given = there;
+  }
   if (!given) throw new Refusal("a rule names the folder it runs in: --folder <dir>", "sessionpipe trigger add --help");
   const abs = path.resolve(untilde(given, home));
   const folder = tilde(abs, home);
@@ -766,11 +760,6 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
       `${label(harness)} can't run headlessly on this computer${runs.length ? `; these can: ${runs.join(", ")}` : ""}`,
       "",
     );
-  if (cont && !d.sessionThere(cont))
-    throw new Refusal(
-      `there is no ${label(harness)} session ${short(cont)} on this computer: a rule continues a session that is here`,
-      "",
-    );
 
   // What would make it never run, said before it is confirmed.
   for (const fld of placeholdersIn(words) as string[])
@@ -787,13 +776,18 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
         );
     } catch (e) {
       warn.push(
-        `${hostOf(pairedUrl)}'s well-known file couldn't be read now (${(e as Error).message}), so whether it sends notices isn't known.`,
+        // Never the other side's own text (an error's words carry bytes of the body): ours.
+        `${hostOf(pairedUrl)}'s well-known file couldn't be read now, so whether it sends notices isn't known.`,
       );
     }
   }
 
   // A folder on the allowlist means control.json is there, and names this computer.
   const machine = (control as ControlConfig).name;
+  if (!isNoticeSource(rule.source) && (await d.local({ op: "status" }, 2000))?.op !== "status")
+    notes.push(
+      "A clock rule's first tick is the first after the background service has seen it, and it isn't running now: `sessionpipe triggers on` installs it.",
+    );
   o.say(`  ${tint(o.ui, "bold", "Add this rule?")}`);
   o.say("");
   showRule(o, rule, h, machine);
@@ -801,6 +795,7 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   for (const w of warn) say(o, `  ${mark(o.ui, "warn")} `, w);
   o.say("");
   if (!(await confirmed(d, o, "Adding a rule", "Type yes to add it, anything else to stop:"))) return;
+  if (!unchanged(h, d, o)) return;
   writeRules(next, d.env);
   say(
     o,
@@ -815,7 +810,7 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
  *  so a rule the daemon would refuse is refused here. */
 function checkWhole(f: TriggersFile, env: NodeJS.ProcessEnv): string | null {
   const v = checkTriggers(f, triggerPlaces(env));
-  return v.ok ? null : (v.problems[0] as string).replace(/^\$\.rules\[\d+\](?: \([^)]*\))?: /, "");
+  return v.ok ? null : said(v.problems[0] as string).replace(/^\$\.rules\[\d+\](?: \([^)]*\))?: /, "");
 }
 
 /** The receiver's name as a rule says it: the host (and port, when not the default) of its
@@ -832,7 +827,7 @@ export function hostOf(s: string): string | null {
 
 async function list(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   const h = await here(d);
-  if (p.flags.has("--json")) return json(o, LIST_SCHEMA, listOf(h));
+  if (p.flags.has("--json")) return printJson(o, "trigger-list", listOf(h));
   headline(o, h, d);
   rulesBlock(o, h, d);
 }
@@ -842,7 +837,7 @@ function headline(o: TriggerOut, h: Here, d: TriggerDeps): void {
     say(
       o,
       `${mark(o.ui, "bad")} `,
-      `${tint(o.ui, "bold", "Triggers are off")}: the rules file can't be read (${h.read.problems[0]}), and nothing in it runs. Fix it, or move it away and add the rules again: ${tilde(triggersFile(d.env), homeDir())}`,
+      `${tint(o.ui, "bold", "Triggers are off")}: the rules file can't be read (${said(h.read.problems[0] as string)}), and nothing in it runs. Fix it, or move it away and add the rules again: ${tilde(triggersFile(d.env), homeDir())}`,
     );
     return;
   }
@@ -913,7 +908,7 @@ function rulesBlock(o: TriggerOut, h: Here, d: TriggerDeps): void {
 
 async function status(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   const h = await here(d);
-  if (p.flags.has("--json")) return json(o, LIST_SCHEMA, listOf(h));
+  if (p.flags.has("--json")) return printJson(o, "trigger-list", listOf(h));
   headline(o, h, d);
   const r = await d.local({ op: "status" }, 2000);
   const t = r?.op === "status" ? (r.status as { triggers?: { waiting: number; running: number } }).triggers : undefined;
@@ -939,6 +934,8 @@ async function status(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
 
 async function on(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   personOnly(d, "Turning triggers on");
+  // At a terminal, always: on already, it still installs the background service.
+  atTerminal(d, "Turning triggers on");
   const h = await here(d);
   const f = editable(h, d);
   const control = readControl(d.env);
@@ -954,6 +951,7 @@ async function on(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
     }
     o.say("");
     if (!(await confirmed(d, o, "Turning triggers on", "Type yes to turn them on, anything else to stop:"))) return;
+    if (!unchanged(h, d, o)) return;
     writeRules({ ...f, on: true }, d.env);
     // The background service reads its settings from control.json: one that never paired has
     // none, and asking stays as it was (off where nothing was set up).
@@ -1039,6 +1037,7 @@ async function resume(name: string | undefined, o: TriggerOut, d: TriggerDeps): 
   showRule(o, { ...r, paused: false }, h, machine);
   o.say("");
   if (!(await confirmed(d, o, "Resuming a rule", "Type yes to resume it, anything else to stop:"))) return;
+  if (!unchanged(h, d, o)) return;
   if (r.paused) writeRules({ ...f, rules: f.rules.map((x) => (x === r ? { ...x, paused: false } : x)) }, d.env);
   if (byMachine) {
     // The pause is the background service's own: it lets go of it; with none running, nothing
@@ -1117,7 +1116,7 @@ async function test(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
           : !d.harnesses().includes(targetHarness(r))
             ? "harness"
             : undefined;
-  const levels = h.offered[targetHarness(r)];
+  const levels = Object.hasOwn(h.offered, targetHarness(r)) ? h.offered[targetHarness(r)] : undefined;
   const a = testAnswer(r, {
     mode: h.mode,
     ...(levels ? { offered: levels } : {}),
@@ -1125,7 +1124,7 @@ async function test(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
     ...(notice ? { notice } : {}),
     ...(refusal ? { refusal } : {}),
   });
-  if (p.flags.has("--json")) return json(o, TEST_SCHEMA, a);
+  if (p.flags.has("--json")) return printJson(o, "trigger-test", a);
   if (!a.matches) {
     say(
       o,
@@ -1155,7 +1154,7 @@ async function test(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
     say(
       o,
       `  ${mark(o.ui, "warn")} `,
-      `Right now it would be refused: ${(REFUSED[a.refusal] as (l: TriggerHistoryLine, r: TriggerRule) => string)({ at: "", result: "refused", ...(notice ? { subject: notice.subject, ...(notice.state ? { state: notice.state } : {}) } : {}) }, r)}.`,
+      `Right now it would be refused: ${refusedWords({ at: "", result: "refused", code: a.refusal, ...(notice ? { subject: notice.subject, ...(notice.state ? { state: notice.state } : {}) } : {}) }, r)}.`,
     );
   o.say(`    ${tint(o.ui, "dim", "the words it would get:")}`);
   const bar = `    ${tint(o.ui, "dim", "│")} `;

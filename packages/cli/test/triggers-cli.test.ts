@@ -21,7 +21,9 @@ import {
   hostOf,
   levelHere,
   levelMeans,
+  printJson,
   readRecord,
+  sessionFolder,
   sessionThere,
   type TriggerDeps,
   triggerMain,
@@ -55,6 +57,7 @@ const deps = (over: Partial<TriggerDeps> = {}): TriggerDeps => ({
   },
   wellKnown: async () => ({ control: { notices: true } }),
   sessionThere: (ref) => ref === "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b",
+  sessionFolder: (ref) => (ref === "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b" ? work : null),
   installService: () => {
     services++;
     return "installed and started (launchd)";
@@ -297,7 +300,11 @@ describe("trigger add", () => {
         },
       },
     );
-    expect(text()).toContain("board.example's well-known file couldn't be read now (HTTP 404)");
+    // Never the other side's own words: ours.
+    expect(text()).toContain(
+      "board.example's well-known file couldn't be read now, so whether it sends notices isn't known.",
+    );
+    expect(text()).not.toContain("HTTP 404");
   });
   it("an auto machine runs it as asked; a continued session says it may run narrower; triggers on says it reads it", async () => {
     const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
@@ -617,6 +624,29 @@ describe("the level, in words", () => {
     expect(sessionThere("claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e", env)).toBe(false);
     expect(sessionThere("codex:0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0c", env)).toBe(false);
     expect(sessionThere("antigravity:x", env)).toBe(false);
+    // Found, its folder is the one its transcript or rollout records, or none when it records none.
+    const claude = path.join(home, ".claude", "projects", "-w");
+    mkdirSync(claude, { recursive: true });
+    const sid = (n: number) => `8c132906-8c3f-4814-870a-afc3d05e1d2${n}`;
+    writeFileSync(path.join(claude, `${sid(1)}.jsonl`), `${JSON.stringify({ type: "user", cwd: work })}\n`);
+    writeFileSync(path.join(claude, `${sid(2)}.jsonl`), `${JSON.stringify({ type: "user" })}\n`);
+    expect(sessionFolder(`claude-code:${sid(1)}`, env)).toBe(work);
+    expect(sessionFolder(`claude-code:${sid(2)}`, env)).toBeNull();
+    const day = path.join(home, ".codex", "sessions", "2026", "10", "28");
+    mkdirSync(day, { recursive: true });
+    const tid = (n: number) => `0199b6f2-7c1d-7e3a-9b4c-5d6e7f8a9b0${n}`;
+    for (const [n, payload] of [
+      [1, { id: tid(1), cwd: work }],
+      [2, { id: tid(2) }],
+    ] as const)
+      writeFileSync(
+        path.join(day, `rollout-2026-10-28T10-00-00-${tid(n)}.jsonl`),
+        `${JSON.stringify({ type: "session_meta", payload })}\n`,
+      );
+    expect(sessionFolder(`codex:${tid(1)}`, env)).toBe(work);
+    expect(sessionFolder(`codex:${tid(2)}`, env)).toBeNull();
+    expect(sessionFolder("antigravity:x", env)).toBeNull();
+    expect(sessionFolder("nope", env)).toBeNull();
   });
 });
 
@@ -632,6 +662,7 @@ describe("corners", () => {
     expect(await d.local({ op: "status" }, 200)).toBeNull();
     await expect(d.wellKnown("http://127.0.0.1:9")).rejects.toThrow();
     expect(d.sessionThere("codex:x")).toBe(false);
+    expect(d.sessionFolder("codex:x")).toBeNull();
     expect(typeof d.now()).toBe("number");
     expect(d.confirm).toBeTypeOf("function");
   });
@@ -733,7 +764,7 @@ describe("corners", () => {
       /can't run headlessly on this computer$/,
     );
     const odd = clockAdd.map((a) => (a === "--start" ? "--continue" : a === "codex" ? "codex:no such id" : a));
-    expect((await refusal(run(odd))).message).toMatch(/can't be written/);
+    expect((await refusal(run(odd))).message).toMatch(/there is no Codex session/);
     const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
     writeControl({
       ...c,
@@ -843,5 +874,216 @@ describe("corners", () => {
     await run(["triggers", "on"], {}, makeUi({ isTTY: true, columns: 60, env: {} }));
     for (const l of lines) expect(plain(l).length).toBeLessThanOrEqual(60);
     expect(lines.some((l) => plain(l).includes("words  │ Make last week's sales report."))).toBe(true);
+  });
+});
+
+describe("what the review found", () => {
+  const CONT = "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b";
+  const nightly = ["trigger", "add", "nightly", "--every", "day 03:00", "--continue", CONT, "--words", "Go on."];
+  /** While the question waits, another terminal changes the rules file. */
+  const meanwhile = (change: () => void): Partial<TriggerDeps> => ({
+    confirm: async (q) => {
+      asked.push(q);
+      change();
+      return "yes";
+    },
+  });
+
+  it("a continue rule's folder is its session's: shown, written, and another --folder refused", async () => {
+    await run(nightly);
+    expect(text()).toContain("folder │ ~/work/acme");
+    expect(readRules()).toMatchObject({ file: { rules: [{ name: "nightly", folder: "~/work/acme" }] } });
+    rmSync(triggersFile());
+    lines = [];
+    await run([...nightly, "--folder", "~/work/acme"]);
+    expect(readRules()).toMatchObject({ file: { rules: [{ folder: "~/work/acme" }] } });
+    rmSync(triggersFile());
+    const r = await refusal(run([...nightly, "--folder", "~/work"]));
+    expect(r.message).toBe(
+      "that session runs in ~/work/acme, and a rule that continues a session runs in the session's own folder: leave --folder out, or name ~/work/acme",
+    );
+    expect(readRules()).toEqual({ state: "none" });
+    const gone = await refusal(run(nightly, { sessionFolder: () => null }));
+    expect(gone.message).toBe(
+      "there is no Codex session codex:019a2b3c on this computer: a rule continues a session that is here",
+    );
+  });
+
+  it("a change made while the question waits is never written over: add, resume and triggers on", async () => {
+    const said = "The rules changed while you were reading. Nothing was written. Run the command again.";
+    // add, while another terminal turns triggers off: off stays off, and nothing is added.
+    writeRules({ v: 1, on: true, rules: [clock] });
+    await run(
+      ["trigger", "add", "x", "--every", "day 03:00", "--start", "codex", "--folder", "~/work/acme", "--words", "go"],
+      meanwhile(() => writeRules({ v: 1, on: false, rules: [clock] })),
+    );
+    expect(text()).toContain(said);
+    expect(readRules()).toMatchObject({ file: { on: false, rules: [{ name: "monday-report" }] } });
+    // resume, while another terminal removes the rule.
+    writeRules({ v: 1, on: true, rules: [{ ...clock, paused: true }] });
+    lines = [];
+    await run(
+      ["trigger", "resume", "monday-report"],
+      meanwhile(() => writeRules({ v: 1, on: true, rules: [] })),
+    );
+    expect(text()).toContain(said);
+    expect(readRules()).toMatchObject({ file: { rules: [] } });
+    // triggers on, while another terminal adds a rule nobody here was shown.
+    writeRules({ v: 1, on: false, rules: [clock] });
+    lines = [];
+    await run(
+      ["triggers", "on"],
+      meanwhile(() => writeRules({ v: 1, on: false, rules: [clock, { ...clock, name: "unseen" }] })),
+    );
+    expect(text()).toContain(said);
+    expect(readRules()).toMatchObject({ file: { on: false } });
+    expect(services).toBe(0);
+  });
+
+  it("triggers on, already on, still needs the terminal before it installs anything", async () => {
+    writeRules({ v: 1, on: true, rules: [clock] });
+    const r = await refusal(run(["triggers", "on"], { interactive: () => false }));
+    expect(r.message).toMatch(/^Turning triggers on needs this computer's own terminal/);
+    expect(services).toBe(0);
+  });
+
+  it("nothing from a receiver or a hand-edited record is printed raw; a reason it doesn't know is said", async () => {
+    await run(
+      ["trigger", "add", "card", "--on", "board.example", "--topic", "acme/tasks", "--start", "codex"].concat([
+        "--folder",
+        "~/work/acme",
+        "--words",
+        "go",
+      ]),
+      { wellKnown: async () => JSON.parse("\u001b[9A\u001b[Jok") },
+    );
+    expect(lines.some((l) => l.includes("\u001b"))).toBe(false);
+    expect(text()).toContain("board.example's well-known file couldn't be read now");
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: {
+        "monday-report": {
+          history: [
+            { at: "2026-11-24T09:00:00.000Z", result: "ran", subject: "X-1", session: "codex:\u001b]0;x\u0007abc" },
+            { at: "2026-11-24T09:01:00.000Z", result: "refused", code: "nope" },
+          ],
+        },
+      },
+      waiting: [],
+    });
+    lines = [];
+    await run(["trigger", "list"]);
+    expect(lines.some((l) => l.includes("\u001b") || l.includes("\u0007"))).toBe(false);
+    expect(text()).toContain("refused: a reason this version doesn't know (nope)");
+    // A line whose session is not a session's name was never read in; the JSON leaves the unknown
+    // reason's line out rather than print what doesn't fit its definition.
+    await run(["trigger", "list", "--json"]);
+    expect(JSON.parse(printed.join("\n")).rules[0].recent).toEqual([]);
+  });
+
+  it("a problem says a hidden character once, and a hand-edited file's bytes never reach the terminal", async () => {
+    const r = await refusal(
+      run(
+        ["trigger", "add", "x", "--every", "day 03:00", "--start", "codex", "--folder", "~/work/acme"].concat([
+          "--words",
+          "Write the\u00a0notes.",
+        ]),
+      ),
+    );
+    expect(r.message).toContain("(shown as \\u{a0})");
+    expect(r.message).not.toContain("\\\\u");
+    writeFileSync(triggersFile(), JSON.stringify({ v: 1, on: true, rules: [{ ...clock, name: "\u001b[2Jx\u202e" }] }));
+    lines = [];
+    await run(["trigger", "list"]);
+    expect(lines.some((l) => l.includes("\u001b") || l.includes("\u202e"))).toBe(false);
+    expect(text()).toContain("the rules file can't be read");
+  });
+  it("--json after a missed tick is the definition's, list and status alike", async () => {
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: { "monday-report": { history: [{ at: "2026-11-24T09:00:00.000Z", result: "missed" }] } },
+      waiting: [],
+    });
+    await run(["trigger", "list", "--json"]);
+    expect(JSON.parse(printed.join("\n")).rules[0].recent).toEqual([
+      { at: "2026-11-24T09:00:00.000Z", result: "missed" },
+    ]);
+    printed = [];
+    await run(["triggers", "status", "--json"]);
+    expect(JSON.parse(printed.join("\n")).rules[0].recent).toHaveLength(1);
+    expect(() =>
+      printJson({ ui: PLAIN, say: () => {}, print: () => {} }, "trigger-list", { on: "yes" } as never),
+    ).toThrow(/^the JSON would not fit its definition: /);
+  });
+
+  it("a rule named constructor is added, listed and shown like any other", async () => {
+    await run([
+      "trigger",
+      "add",
+      "constructor",
+      "--every",
+      "day 03:00",
+      "--start",
+      "codex",
+      "--folder",
+      "~/work/acme",
+      "--words",
+      "go",
+    ]);
+    expect(readRules()).toMatchObject({ file: { rules: [{ name: "constructor" }] } });
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: {
+        constructor: {
+          history: [{ at: "2026-11-24T09:00:00.000Z", result: "missed" }],
+          today: { day: "2026-11-24", runs: 1, keys: [] },
+        },
+      },
+      waiting: [],
+    });
+    lines = [];
+    await run(["trigger", "list"]);
+    expect(text()).toContain("constructor  every day 03:00 → codex safe · 1/5 today");
+    expect(text()).toContain("09:00  missed: this computer was asleep or off");
+    await run(["trigger", "list", "--json"]);
+    expect(JSON.parse(printed.join("\n")).rules[0]).toMatchObject({ rule: { name: "constructor" }, today: 1 });
+  });
+
+  it("a clock rule added with no background service running says when its first tick is", async () => {
+    await run([
+      "trigger",
+      "add",
+      "x",
+      "--every",
+      "day 03:00",
+      "--start",
+      "codex",
+      "--folder",
+      "~/work/acme",
+      "--words",
+      "go",
+    ]);
+    expect(text()).toContain(
+      "A clock rule's first tick is the first after the background service has seen it, and it isn't running now: `sessionpipe triggers on` installs it.",
+    );
+    rmSync(triggersFile());
+    lines = [];
+    daemon = {};
+    await run([
+      "trigger",
+      "add",
+      "x",
+      "--every",
+      "day 03:00",
+      "--start",
+      "codex",
+      "--folder",
+      "~/work/acme",
+      "--words",
+      "go",
+    ]);
+    expect(text()).not.toContain("first tick");
   });
 });

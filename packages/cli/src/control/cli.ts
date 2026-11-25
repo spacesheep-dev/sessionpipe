@@ -332,6 +332,9 @@ export async function controlMain(
           out("  The daemon's service stays: the pool is on (`sessionpipe pool off` first to remove it).");
         else if (c.ask === true)
           out("  The daemon stays: sessions here may still ask another agent (`sessionpipe ask off` removes it).");
+        // Clock rules run in it with no receiver at all (CONTROL.md §14.6).
+        else if (rulesOf(readRules())?.on)
+          out("  The daemon stays: your trigger rules run in it (`sessionpipe triggers off` stops them).");
         else uninstallService();
       }
       return;
