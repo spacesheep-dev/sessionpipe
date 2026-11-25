@@ -580,6 +580,37 @@ out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
     expect(runs().map((r) => r.triggered_by)).toEqual([null]);
   });
 
+  it("a run waiting in its session's line outlives a restart: still waiting, its count as it was, then it runs", async () => {
+    writeFake(1500);
+    transcript(SID);
+    file = {
+      v: 1,
+      on: true,
+      rules: [rule({ name: "cont", source: { every: "day 09:00" }, target: { continue: `claude-code:${SID}` } })],
+    };
+    await startDaemon();
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      () => {},
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    await d?.stop();
+    await asking.catch(() => {});
+    expect(record().waiting.map((w) => [w.rule, w.reason])).toEqual([["cont", "held"]]);
+    expect(record().rules.cont?.today?.runs).toBe(1);
+    expect(record().rules.cont?.history).toEqual([]);
+    writeFake();
+    await startDaemon();
+    await until(() => runs().some((r) => r.triggered_by === "cont"));
+    await until(() => record().rules.cont?.history[0]?.result === "ran");
+    expect(record().rules.cont?.today?.runs).toBe(1);
+    expect(record().waiting).toEqual([]);
+  });
+
   it("a window that takes the session while the run waits in its line: the run waits again, for the window", async () => {
     writeFake(1000);
     transcript(SID);

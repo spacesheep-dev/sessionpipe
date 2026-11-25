@@ -46,7 +46,7 @@ import {
 } from "@sessionpipe/core";
 import { parseSessionRef } from "@sessionpipe/core/control";
 import { dueTick, localDay, TICK_LATE_MS, type Zone, zoneOf } from "./clock.js";
-import { stateOf } from "./trigger-state.js";
+import { type DropWhy, stateOf } from "./trigger-state.js";
 
 export { stateOf } from "./trigger-state.js";
 
@@ -203,10 +203,44 @@ const STATE_RE = /^[a-z0-9_-]{1,32}$/;
  *  is a rule the pause no longer concerns (§14.7 step 11). */
 const shapeOf = (r: TriggerRule): string => JSON.stringify(r.target);
 
-/** A rule's fingerprint: a hash of its JSON with the switch it may flip left out. */
-const fingerprint = (r: TriggerRule): string =>
+/** A value in one spelling: keys sorted, a list of words as a set (sorted, once each), and what is
+ *  absent, empty or null left out, so a file written by hand or by another version reads the same. */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) {
+    const xs = v.map(canonical).filter((x) => x !== undefined);
+    // A rule's lists are lists of words (states, people, tools): a set, in one order.
+    return xs.length ? [...new Set(xs as string[])].sort() : undefined;
+  }
+  if (typeof v === "object" && v !== null) {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v).sort()) {
+      const x = canonical((v as Record<string, unknown>)[k]);
+      if (x !== undefined) out[k] = x;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return v === null || v === "" ? undefined : v;
+}
+
+/** A rule's fingerprint: a hash of what decides what a run of it does (where it comes from and
+ *  what it takes, what it runs, where, at which level, with which tools and words), in one
+ *  spelling. Its name, its cap and its pause are left out: none of them changes a run. */
+export const fingerprint = (r: TriggerRule): string =>
   createHash("sha256")
-    .update(JSON.stringify({ ...r, paused: false }))
+    .update(
+      JSON.stringify(
+        canonical({
+          source: r.source,
+          when: r.when,
+          subject: r.subject,
+          target: r.target,
+          folder: r.folder,
+          level: r.level,
+          tools: r.tools,
+          words: r.words,
+        }),
+      ),
+    )
     .digest("base64url");
 
 /** A history line as the record keeps it: only fields of the definition, and a notice's tokens
@@ -240,7 +274,11 @@ export class TriggerEngine {
 
   constructor(private readonly deps: TriggerDeps) {
     this.zone = zoneOf(deps.zone);
-    this.state = stateOf(deps.load(), { now: deps.now(), log: deps.log });
+    this.state = stateOf(deps.load(), {
+      now: deps.now(),
+      log: deps.log,
+      drop: (cause, why) => this.settle(cause, why),
+    });
     this.lastSaved = JSON.stringify(this.state);
   }
 
@@ -263,15 +301,7 @@ export class TriggerEngine {
       // must not wipe a rule's counts for the day, which would let it run past its cap.
       for (const name of Object.keys(this.state.rules))
         if (!file.rules.some((r) => r.name === name)) delete this.state.rules[name];
-      // A waiting run whose cause doesn't fit its rule's source (a tick for a notice rule) was
-      // never this rule's: a hand-edited record.
-      for (const w of [...this.waits]) {
-        const rule = file.rules.find((x) => x.name === w.rule);
-        if (rule && isNoticeSource(rule.source) !== (w.cause.kind === "notice")) {
-          this.waits.splice(this.waits.indexOf(w), 1);
-          this.deps.log(`trigger ${w.rule}: a waiting run whose cause does not fit the rule was dropped`);
-        }
-      }
+      this.fitWaits(file);
       for (const r of file.rules) {
         const st = this.ruleState(r.name);
         if (st.paused && st.paused.rule !== shapeOf(r)) delete st.paused;
@@ -280,21 +310,25 @@ export class TriggerEngine {
           st.clock = { every: st.clock.every, since: now };
       }
     }
-    // Off: a run still queued for the headless slot never began and is dropped like a waiting
-    // one; a run that has begun is stopped (§14.10).
-    if (!file?.on)
-      for (const run of [...this.running]) {
-        // A run whose turn has not begun ends without running: refused, its count given back.
-        if (!run.began) {
-          run.done = true;
-          this.running.delete(run);
-          this.end(run.w, "triggers_off");
-        }
-        run.cancel();
+    // Off: a run still queued (its session's line, the headless slot) never began and is dropped
+    // like a waiting one; a run that has begun is stopped (§14.10). A rule paused or removed drops
+    // its queued runs too, and lets a running one finish.
+    for (const run of [...this.running]) {
+      if (file?.on && (run.began || this.live(run.rule))) continue;
+      // A run whose turn has not begun ends without running: its count given back.
+      if (!run.began) {
+        run.done = true;
+        this.running.delete(run);
+        this.letGo(run.w);
       }
-    this.drop((w) => !this.live(w.rule), "triggers_off");
+      this.call("cancel", () => run.cancel());
+    }
+    for (const w of this.waits.filter((x) => !this.live(x.rule))) {
+      this.waits.splice(this.waits.indexOf(w), 1);
+      this.letGo(w);
+    }
     this.saved();
-    if (JSON.stringify(this.hellos(file)) !== said) this.deps.changed?.();
+    if (JSON.stringify(this.hellos(file)) !== said) this.changed();
   }
 
   /** The rules as they run: the file's, with the machine's own pauses on them. */
@@ -349,6 +383,24 @@ export class TriggerEngine {
    *  cooldown (notices only); the cap; the folder; the harness; the session to continue. Then
    *  it runs, or waits for a window to let go or for room under the machine's caps. */
   fire(name: string, cause: Cause): void {
+    let taken: Waiting | null = null;
+    try {
+      this.fireNow(name, cause, (w) => {
+        taken = w;
+      });
+    } catch (e) {
+      // Nothing in a rule's run may stop the engine: a run that could not begin, said once.
+      if (taken) this.fault(taken, e);
+      else {
+        this.deps.log(`trigger ${name}: the run could not begin: ${String(e)}`);
+        // Only a rule in the file gets this far (its look is what threw).
+        this.history(name, line(this.deps.now(), "failed", this.fields({ cause } as Waiting)));
+        this.tell(cause, { outcome: "failed" });
+      }
+    }
+  }
+
+  private fireNow(name: string, cause: Cause, counted: (w: Waiting) => void): void {
     if (!this.file?.on) {
       this.refuse(name, cause, "triggers_off");
       return;
@@ -383,7 +435,110 @@ export class TriggerEngine {
     today.runs++;
     if (key) today.keys.push(key);
     const until = n ? Date.parse(n.expires_at) : (cause as { due: number }).due + TICK_LATE_MS;
-    this.attempt({ rule: name, cause, until, reason: "start_limit", day, key, shape: fingerprint(rule) });
+    const w: Waiting = { rule: name, cause, until, reason: "start_limit", day, key, shape: fingerprint(rule) };
+    counted(w);
+    this.attempt(w);
+  }
+
+  /** A run's look threw (a dependency of the daemon's): what was handed over and never began is let
+   *  go of, and the run, not waiting and not running, could not begin. Its count goes back, since
+   *  nothing ran; its notice is told `failed`. */
+  private fault(w: Waiting, e: unknown): void {
+    this.deps.log(`trigger ${w.rule}: the run could not begin: ${String(e)}`);
+    this.unhand(w);
+    if (this.placed(w)) return;
+    this.giveBack(w);
+    this.history(w.rule, line(this.deps.now(), "failed", this.fields(w)));
+    this.tell(w.cause, { outcome: "failed" });
+  }
+
+  /** A run of `w` handed to the daemon whose turn never began: no longer the engine's. */
+  private unhand(w: Waiting): void {
+    for (const r of [...this.running])
+      if (r.w === w && !r.began) {
+        r.done = true;
+        this.running.delete(r);
+      }
+  }
+
+  /** `w` waits, or runs. */
+  private placed(w: Waiting): boolean {
+    return this.waits.includes(w) || [...this.running].some((r) => r.w === w && !r.done);
+  }
+
+  private fields(w: Waiting): { subject?: string; state?: string } {
+    const n = w.cause.kind === "notice" ? w.cause.notice : undefined;
+    return n ? { subject: n.subject, ...(n.state !== undefined ? { state: n.state } : {}) } : {};
+  }
+
+  /** Waiting runs read from the record that these rules could never have made, dropped and said,
+   *  their notices told: a cause of the other kind (a tick for a notice rule), a tick that is no
+   *  tick of its rule's clock, one there twice, or more for one rule and day than its cap (the
+   *  oldest kept). A hand-made record runs a rule no more than its rule allows. */
+  private fitWaits(file: TriggersFile): void {
+    const seen = new Set<string>();
+    const per = new Map<string, number>();
+    for (const w of [...this.waits]) {
+      const rule = file.rules.find((x) => x.name === w.rule);
+      if (!rule) continue;
+      const id = `${w.rule}\n${w.cause.kind === "tick" ? `tick ${w.cause.due}` : `${w.cause.receiver} ${w.cause.notice.id}`}`;
+      const day = `${w.rule}\n${w.day}`;
+      const n = (per.get(day) ?? 0) + 1;
+      let why: string | null = null;
+      if (isNoticeSource(rule.source) !== (w.cause.kind === "notice")) why = "its cause does not fit the rule";
+      else if (w.cause.kind === "tick" && !this.realTick(rule, w.cause.due))
+        why = "its tick is no tick of the rule's clock";
+      else if (seen.has(id)) why = "it is there twice";
+      else if (n > rule.cap.per_day) why = "more wait for that day than the rule's cap";
+      if (!why) {
+        seen.add(id);
+        per.set(day, n);
+        continue;
+      }
+      this.waits.splice(this.waits.indexOf(w), 1);
+      this.giveBack(w);
+      this.deps.log(`trigger ${w.rule}: a waiting run was dropped: ${why}`);
+      this.settle(w.cause, why.startsWith("more") ? "cap" : "no_match");
+    }
+  }
+
+  /** `due` is a tick the clock of `rule` has had: on its `every`, since the clock counts, and no
+   *  later than its last. */
+  private realTick(rule: TriggerRule, due: number): boolean {
+    const c = this.state.rules[rule.name]?.clock;
+    if (isNoticeSource(rule.source) || !c || c.every !== rule.source.every) return false;
+    if (c.last === undefined || due > c.last || due < c.since) return false;
+    const every = parseEvery(rule.source.every) as Every;
+    if (every.kind === "interval") return (due - c.since) % (every.minutes * 60_000) === 0;
+    return dueTick(every, this.zone, { now: due, after: due - 1, anchor: due }) === due;
+  }
+
+  /** A notice's final ack for a waiting run dropped before it could run: its rule is none, its
+   *  time is past, or it was one too many for its rule's cap. A tick is told nothing. */
+  private settle(cause: Cause, why: DropWhy): void {
+    this.tell(cause, why === "cap" ? { outcome: "refused", code: "cap" } : { outcome: why });
+  }
+
+  /** A waiting run whose rule no longer runs, its count given back. Off, it is refused
+   *  `triggers_off` (§14.10); the rule paused, removed or changed, its notice is told `no_match`,
+   *  as one that meets only a paused rule is (§14.7 step 6), and the rule's history says nothing. */
+  private letGo(w: Waiting): void {
+    if (!this.file?.on) {
+      this.end(w, "triggers_off");
+      return;
+    }
+    this.giveBack(w);
+    this.deps.log(`trigger ${w.rule}: a run that waited was dropped: the rule is paused, removed or changed`);
+    this.settle(w.cause, "no_match");
+  }
+
+  /** One call out to the daemon that may throw: said in the log, and the engine goes on. */
+  private call(what: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (e) {
+      this.deps.log(`trigger rules: ${what} failed (${String(e)}); the engine goes on`);
+    }
   }
 
   /** Why the rule can't run here now (§14.7 steps 9 to 11), or null. A session that is gone
@@ -417,7 +572,7 @@ export class TriggerEngine {
       why,
     };
     this.deps.log(`trigger ${rule.name}: the session it continues is gone; this computer paused the rule`);
-    if (JSON.stringify(this.hellos(this.file)) !== said) this.deps.changed?.();
+    if (JSON.stringify(this.hellos(this.file)) !== said) this.changed();
   }
 
   /** Begin it now, or wait. A start waits for room under the machine's caps; a session a
@@ -495,6 +650,8 @@ export class TriggerEngine {
         w.reason = why;
         if (!w.told) this.tell(w.cause, { outcome: "taken" });
         w.told = true;
+        // Its count is on disk from here, as a waiting run's is.
+        this.saved();
       },
       began: (session) => {
         if (running.done) return;
@@ -552,7 +709,11 @@ export class TriggerEngine {
   }
 
   private tell(cause: Cause, r: NoticeResult): void {
-    if (cause.kind === "notice") this.deps.ack?.(cause.receiver, cause.notice.id, r);
+    if (cause.kind === "notice") this.call("a notice's ack", () => this.deps.ack?.(cause.receiver, cause.notice.id, r));
+  }
+
+  private changed(): void {
+    this.call("the hello", () => this.deps.changed?.());
   }
 
   /** A refusal before anything was counted: a history line, and the notice's ack. */
@@ -589,7 +750,7 @@ export class TriggerEngine {
   private history(name: string, l: TriggerHistoryLine): TriggerHistoryLine {
     const st = this.ruleState(name);
     st.history = [l, ...st.history].slice(0, HISTORY_KEPT);
-    this.deps.noted?.(name, l);
+    this.call("a history line", () => this.deps.noted?.(name, l));
     this.saved();
     return l;
   }
@@ -619,27 +780,40 @@ export class TriggerEngine {
     // A run that ends inside a retry (a runner that answers at once) lets the next go then.
     if (this.retrying) return;
     this.retrying = true;
-    this.expire();
-    for (const w of this.waits.splice(0)) {
-      const rule = this.live(w.rule);
-      // Another rule under the same name meanwhile: this run was not its own. Nothing of it is
-      // written under the new rule; a notice is acked as no rule took it.
-      if (rule && w.shape !== undefined && w.shape !== fingerprint(rule)) {
-        this.deps.log(`trigger ${w.rule}: the rule changed while a run of it waited; the run was dropped`);
-        this.giveBack(w);
-        this.tell(w.cause, { outcome: "no_match" });
-      } else if (!rule) this.end(w, "triggers_off");
-      // Still waiting for what it waited for: kept as it is. Only a run that is let go is
-      // checked again (steps 9 to 11).
-      else if (this.blocked(w, rule)) this.waits.push(w);
-      else {
-        const why = this.cannot(rule);
-        if (why) this.end(w, why);
-        else this.attempt(w);
-      }
+    try {
+      this.expire();
+      for (const w of this.waits.splice(0))
+        try {
+          this.look(w);
+        } catch (e) {
+          // Its look threw: it waits on as it was, in its place, and its deadline still holds.
+          this.deps.log(`trigger ${w.rule}: a look at a run that waits failed (${String(e)}); it waits on`);
+          this.unhand(w);
+          if (!this.placed(w)) this.waits.push(w);
+        }
+    } finally {
+      this.retrying = false;
+      this.saved();
     }
-    this.retrying = false;
-    this.saved();
+  }
+
+  private look(w: Waiting): void {
+    const rule = this.live(w.rule);
+    // Another rule under the same name meanwhile: this run was not its own. Nothing of it is
+    // written under the new rule; a notice is acked as no rule took it.
+    if (rule && w.shape !== undefined && w.shape !== fingerprint(rule)) {
+      this.deps.log(`trigger ${w.rule}: the rule changed while a run of it waited; the run was dropped`);
+      this.giveBack(w);
+      this.settle(w.cause, "no_match");
+    } else if (!rule) this.letGo(w);
+    // Still waiting for what it waited for: kept as it is. Only a run that is let go is
+    // checked again (steps 9 to 11).
+    else if (this.blocked(w, rule)) this.waits.push(w);
+    else {
+      const why = this.cannot(rule);
+      if (why) this.end(w, why);
+      else this.attempt(w);
+    }
   }
 
   /** Waiting runs past their deadline end now, refused for what they last waited for (`held`
@@ -654,7 +828,7 @@ export class TriggerEngine {
     for (const x of [...this.running].filter((y) => y.queued && !y.began && !y.done && now >= y.w.until)) {
       x.done = true;
       this.running.delete(x);
-      x.cancel();
+      this.call("cancel", () => x.cancel());
       this.end(x.w, x.w.reason === "held" ? "held" : "start_limit");
     }
   }
@@ -666,14 +840,6 @@ export class TriggerEngine {
     if (isStart(rule.target)) return !this.deps.startRoom();
     const look = this.deps.session(rule.target.continue);
     return !look.gone && look.held;
-  }
-
-  /** Waiting runs that end now, refused with `code`: their notices are acked so. */
-  private drop(which: (w: Waiting) => boolean, code: TriggerRefusal): void {
-    for (const w of this.waits.filter(which)) {
-      this.waits.splice(this.waits.indexOf(w), 1);
-      this.end(w, code);
-    }
   }
 
   /** The running triggered turns, by rule (for `status`): handed over and not waiting there. */
@@ -703,29 +869,53 @@ export class TriggerEngine {
   check(): void {
     this.checks++;
     const now = this.deps.now();
-    for (const r of this.rules()) {
-      if (isNoticeSource(r.source)) continue;
-      const st = this.ruleState(r.name);
-      if (st.clock?.every !== r.source.every) st.clock = { every: r.source.every, since: now };
-      const c = st.clock;
-      if (r.paused) {
-        c.since = now;
-        delete c.last;
-        continue;
+    for (const r of this.rules())
+      try {
+        this.tick(r, now);
+      } catch (e) {
+        this.deps.log(`trigger ${r.name}: its clock could not be read (${String(e)}); the next look tries again`);
       }
-      const every = parseEvery(r.source.every) as Every;
-      const due = dueTick(every, this.zone, { now, after: c.last ?? c.since - 1, anchor: c.last ?? c.since });
-      if (due === null) continue;
-      c.last = due;
-      this.saved();
-      if (!this.file?.on) this.refuse(r.name, { kind: "tick", due }, "triggers_off");
-      else if (now - due >= TICK_LATE_MS) {
-        // Six hours late or more: a line in the history and nothing else (§14.6).
-        this.history(r.name, line(now, "missed", {}));
-        this.deps.log(`trigger ${r.name}: the tick of ${new Date(due).toISOString()} was missed`);
-      } else this.fire(r.name, { kind: "tick", due });
-    }
     this.retry();
+  }
+
+  /** One clock rule at one look of the clock. */
+  private tick(r: TriggerRule, now: number): void {
+    if (isNoticeSource(r.source)) return;
+    const st = this.ruleState(r.name);
+    if (st.clock?.every !== r.source.every) st.clock = { every: r.source.every, since: now };
+    const c = st.clock;
+    if (r.paused) {
+      c.since = now;
+      delete c.last;
+      return;
+    }
+    const every = parseEvery(r.source.every) as Every;
+    const due = dueTick(every, this.zone, { now, after: c.last ?? c.since - 1, anchor: c.last ?? c.since });
+    if (due === null) return;
+    c.last = due;
+    this.saved();
+    if (!this.file?.on) this.refuse(r.name, { kind: "tick", due }, "triggers_off");
+    else if (now - due >= TICK_LATE_MS) {
+      // Six hours late or more: a line in the history and nothing else (§14.6).
+      this.history(r.name, line(now, "missed", {}));
+      this.deps.log(`trigger ${r.name}: the tick of ${new Date(due).toISOString()} was missed`);
+    } else this.fire(r.name, { kind: "tick", due });
+  }
+
+  /** The daemon stops: a run handed over whose turn has not begun (in its session's line, or for
+   *  the headless slot) waits again, its count still held, so the next daemon takes it up as any
+   *  waiting run (§14.7, *A waiting run outlives a restart*). */
+  suspend(): void {
+    const back: Waiting[] = [];
+    for (const run of [...this.running])
+      if (!run.began && !run.done) {
+        run.done = true;
+        this.running.delete(run);
+        back.push(run.w);
+        this.call("cancel", () => run.cancel());
+      }
+    this.waits.unshift(...back);
+    this.saved();
   }
 
   // --- the person's resume of a machine's pause --------------------------------------
@@ -741,7 +931,7 @@ export class TriggerEngine {
     if (st.clock) st.clock = { every: st.clock.every, since: this.deps.now() };
     this.saved();
     this.deps.log(`trigger ${name}: resumed at the terminal; this computer's pause is let go`);
-    if (JSON.stringify(this.hellos(this.file)) !== said) this.deps.changed?.();
+    if (JSON.stringify(this.hellos(this.file)) !== said) this.changed();
     return true;
   }
 }

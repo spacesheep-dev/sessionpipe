@@ -84,7 +84,7 @@ interface Case {
   name: string;
   machine: Machine;
   triggers: unknown;
-  sessions?: Record<string, { level: StartPermission; held: boolean }>;
+  sessions?: Record<string, { level: StartPermission; held: boolean; folder?: string }>;
   seen?: { receiver: string; id: string; at: string }[];
   today?: { rule: string; subject: string; state?: string; at: string; result: string }[];
   starts?: { running: number; last_hour: number; headless?: number };
@@ -193,7 +193,11 @@ function play(c: Case): void {
     allowed: (f) => machine.folders.some((m) => f === m || f.startsWith(`${m}/`)),
     harnesses: () => machine.harnesses,
     offered: (h) => machine.levels?.[h],
-    session: (ref) => (sessions[ref] ? { held: sessions[ref].held, level: sessions[ref].level } : { gone: true }),
+    session: (ref) => {
+      const x = sessions[ref];
+      if (!x) return { gone: true };
+      return { held: x.held, level: x.level, ...(x.folder !== undefined ? { folder: x.folder } : {}) };
+    },
     startRoom: () => running < lim.concurrent && startTimes.filter((t) => now - t < H).length < lim.hour,
     run: (job, on) => {
       if ("continue" in job.run.target && headless >= slots) {
@@ -335,7 +339,7 @@ function play(c: Case): void {
 
 describe("conformance/triggers, through the engine", () => {
   it("every scenario file", () => {
-    expect(files).toHaveLength(14);
+    expect(files).toHaveLength(15);
   });
   for (const f of files) {
     const fx = JSON.parse(readFileSync(path.join(dir, f), "utf8")) as { cases: Case[] };

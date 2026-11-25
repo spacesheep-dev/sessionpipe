@@ -995,6 +995,9 @@ export class ControlDaemon {
     if (this.helloSoon) clearTimeout(this.helloSoon);
     if (this.ownTimer) clearInterval(this.ownTimer);
     if (this.triggerTimer) clearInterval(this.triggerTimer);
+    // A triggered run that waits in a session's line, or for the headless slot, waits again in the
+    // record: the next daemon takes it up (§14.7).
+    this.safely(() => this.triggers.suspend());
     for (const s of this.sdkSessions.values()) s.close();
     for (const l of this.live.values()) {
       l.waiter?.destroy();

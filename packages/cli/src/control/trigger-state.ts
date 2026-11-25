@@ -84,14 +84,24 @@ function cause(v: unknown): Cause | null {
   return null;
 }
 
-function waiting(v: unknown, now: number): Waiting | null {
-  if (!isObject(v) || typeof v.rule !== "string" || !NAME_RE.test(v.rule)) return null;
+/** Why a waiting run read from the record is dropped, as its notice's final ack says it: its rule
+ *  is none (`no_match`), its time is past (`expired`), or it is one too many (`cap`). */
+export type DropWhy = "no_match" | "expired" | "cap";
+
+/** One waiting run, read: the run, or what is left to say of one that does not fit (its cause,
+ *  when that much fits, so a notice acked `taken` still gets its final ack), or nothing. */
+function waiting(v: unknown, now: number): Waiting | { cause: Cause; why: DropWhy } | null {
+  if (!isObject(v)) return null;
   const c = cause(v.cause);
-  if (!c || !finite(v.until) || typeof v.day !== "string" || !DAY_RE.test(v.day)) return null;
-  if (v.reason !== "held" && v.reason !== "start_limit" && v.reason !== "busy") return null;
-  // Never past its cause's own deadline, whatever the file says.
+  if (!c) return null;
   const deadline = c.kind === "tick" ? c.due + TICK_WAIT_MS : Date.parse(c.notice.expires_at);
-  if (c.kind === "tick" && c.due > now) return null;
+  const no = (): { cause: Cause; why: DropWhy } => ({ cause: c, why: now >= deadline ? "expired" : "no_match" });
+  if (typeof v.rule !== "string" || !NAME_RE.test(v.rule)) return no();
+  if (!finite(v.until) || typeof v.day !== "string" || !DAY_RE.test(v.day)) return no();
+  if (v.reason !== "held" && v.reason !== "start_limit" && v.reason !== "busy") return no();
+  // A tick that has not come is no tick at all.
+  if (c.kind === "tick" && c.due > now) return no();
+  // Never past its cause's own deadline, whatever the file says.
   return {
     rule: v.rule,
     cause: c,
@@ -106,7 +116,15 @@ function waiting(v: unknown, now: number): Waiting | null {
 
 /** A saved record, read deeply: what does not fit is dropped and said once; a record of another
  *  version's shape is no record. Never throws. */
-export function stateOf(v: unknown, o: { now?: number; log?: (line: string) => void } = {}): TriggerState {
+export function stateOf(
+  v: unknown,
+  o: {
+    now?: number;
+    log?: (line: string) => void;
+    /** A waiting run dropped whose cause is still known: for its notice's final ack. */
+    drop?: (cause: Cause, why: DropWhy) => void;
+  } = {},
+): TriggerState {
   const now = o.now ?? Date.now();
   const dropped = new Set<string>();
   const say = (s: string) => dropped.add(s);
@@ -122,11 +140,14 @@ export function stateOf(v: unknown, o: { now?: number; log?: (line: string) => v
     if (r) rules[name] = r;
     else say(`a rule's record that does not fit (${JSON.stringify(name).slice(0, 44)})`);
   }
-  const list = Array.isArray(v.waiting) ? v.waiting.slice(0, WAITING_MAX) : [];
+  const list: unknown[] = Array.isArray(v.waiting) ? v.waiting : [];
   for (const w of list) {
     const ok = waiting(w, now);
-    if (ok) out.waiting.push(ok);
-    else say("a waiting run that does not fit");
+    if (ok && "rule" in ok && out.waiting.length < WAITING_MAX) out.waiting.push(ok);
+    else {
+      say(ok && "rule" in ok ? `more than ${WAITING_MAX} waiting runs` : "a waiting run that does not fit");
+      if (ok) o.drop?.(ok.cause, "rule" in ok ? "cap" : ok.why);
+    }
   }
   // A waiting run holds its count of the day: never fewer counted than wait.
   for (const w of out.waiting) {
