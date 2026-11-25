@@ -3,6 +3,7 @@
 // plus the few derived ones. Type-only: nothing here reaches the bundle a hook runs.
 import type { EventData } from "../gen/v1.js";
 
+export type * from "../gen/config.js";
 export type * from "../gen/v1.js";
 
 export type Tier = 0 | 1 | 2 | 3;

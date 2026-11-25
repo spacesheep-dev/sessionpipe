@@ -8,8 +8,8 @@ import { build, lint } from "./buf.js";
 import { schemaFiles } from "./jsonschema.js";
 import { Descriptors } from "./read.js";
 import { registryFile } from "./registry.js";
-import { schemasModuleFile } from "./schemasmodule.js";
-import { typesFile } from "./types.js";
+import { configSchemasModuleFile, schemasModuleFile } from "./schemasmodule.js";
+import { CONFIG_FILES, typesFile } from "./types.js";
 
 export interface RunOptions {
   /** The repository root. */
@@ -26,6 +26,12 @@ const MODULES: Record<string, (d: Descriptors) => string> = {
   "packages/core/gen/v1.ts": typesFile,
   "packages/core/gen/registry.ts": registryFile,
   "packages/core/gen/schemas.ts": schemasModuleFile,
+  "packages/core/gen/config.ts": (d) =>
+    typesFile(d, CONFIG_FILES, {
+      about: "The machine's own files' shapes as TypeScript (config.proto): never on the wire.",
+      from: "./v1.js",
+    }),
+  "packages/core/gen/config-schemas.ts": configSchemasModuleFile,
 };
 
 /** Throws when `rel`, or a folder on the way to it from the root, is a symbolic link. The

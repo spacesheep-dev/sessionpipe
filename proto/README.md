@@ -8,7 +8,8 @@ commands and the documentation from the same files.
 |---|---|---|
 | `sessionpipe/v1/events.proto` | the envelope (`Event`), `Session`, `Harness`, `Privacy`, one message per event type, `EventData` | `event.json`, `event-data.json`; the filter's tables in `packages/core/gen/registry.ts` |
 | `sessionpipe/v1/http.proto` | the well-known file, the batch and the receiver's answers | `well-known.json`, `batch.json`, `batch-response.json`, `error.json` |
-| `sessionpipe/v1/control.proto` | the signed command, its carrier, acks, pairing, hello | `control*.json` |
+| `sessionpipe/v1/control.proto` | the signed command, its carrier, acks, pairing, hello, a trigger's notice and its ack | `control*.json` |
+| `sessionpipe/v1/config.proto` | the machine's own files, never on the wire: the trigger rules file and what `trigger … --json` prints | `packages/core/gen/config.ts` and `config-schemas.ts`; nothing under `schemas/v1` |
 | `sessionpipe/v1/options.proto` | the few facts a type and its rules can't say (§ below) | |
 | `buf/validate/validate.proto`, `google/api/field_behavior.proto` | vendored, Apache-2.0: protovalidate's rules and Google's `REQUIRED` | |
 
@@ -20,8 +21,9 @@ npm run schemas -- --check # what CI runs: exit 1 when a committed schema differ
 `tools/doors/src/` is the generator, strict TypeScript under the repository's 100 % coverage
 rule: `buf.ts` runs buf, `read.ts` reads the descriptors and our options, `jsonschema.ts`
 writes the schemas (the mapping is in its header), `types.ts` writes `packages/core/gen/v1.ts`
-(decision 002), `registry.ts` the filter's tables and `schemasmodule.ts` the schemas as a module
-(decision 004), `main.ts` is the command; `tools/doors/schemas.mjs` bundles and runs it on
+(decision 002) and `packages/core/gen/config.ts` (config.proto's, importing what they name from
+`v1.ts`), `registry.ts` the filter's tables and `schemasmodule.ts` the schemas as a module
+(decision 004) and the machine-local ones as `config-schemas.ts`, `main.ts` is the command; `tools/doors/schemas.mjs` bundles and runs it on
 any Node the matrix has. The generated files are committed; a change to the protocol is a
 change to a `.proto`, then `npm run schemas`, then one commit with all of it.
 

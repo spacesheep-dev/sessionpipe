@@ -34,7 +34,7 @@ import {
 } from "./read.js";
 
 export const SCHEMA_BASE = "https://sessionpipe.org/schema/v1/";
-const DRAFT = "https://json-schema.org/draft/2020-12/schema";
+export const DRAFT = "https://json-schema.org/draft/2020-12/schema";
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 /** RFC 3339, UTC, three decimals: what FORMAT_DATE_TIME means (the pattern Zod's `iso.datetime` wrote). */
 export const DATE_TIME_PATTERN =
@@ -60,6 +60,13 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "control-hello": "ControlHello",
   "control-notice": "ControlNotice",
   "control-notice-ack": "ControlNoticeAck",
+};
+
+/** The machine's own files' schemas, by name, and the message each one is (config.proto). They
+ *  go into packages/core/gen/config-schemas.ts for the CLI and the daemon to check a file with,
+ *  and never under schemas/v1: nothing published says a machine-local file is the wire. */
+export const CONFIG_SCHEMAS: Readonly<Record<string, string>> = {
+  triggers: "TriggersFile",
 };
 
 type Schema = Record<string, unknown>;
