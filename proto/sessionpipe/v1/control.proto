@@ -174,6 +174,62 @@ enum PoolAccountStatus {
   POOL_ACCOUNT_STATUS_DISABLED = 4;
 }
 
+// What became of a notice (CONTROL.md §14). `taken` is not final; every other outcome is.
+// An ack never says which rule took a notice, nor its words, level, folder or filter.
+enum NoticeOutcome {
+  // None.
+  NOTICE_OUTCOME_UNSPECIFIED = 0;
+  // Not final: a rule took it and its run waits (for a window to let go of the session, or
+  // for the machine's caps on starts). A final ack follows by `expires_at`.
+  NOTICE_OUTCOME_TAKEN = 1;
+  // A rule took it and its run began; `session` names the session it ran in.
+  NOTICE_OUTCOME_RAN = 2;
+  // No rule of this machine takes it, so nothing ran.
+  NOTICE_OUTCOME_NO_MATCH = 3;
+  // The machine has seen its id before, so nothing ran again.
+  NOTICE_OUTCOME_DUPLICATE = 4;
+  // `expires_at` passed before it was read.
+  NOTICE_OUTCOME_EXPIRED = 5;
+  // The machine said no; `code` says why.
+  NOTICE_OUTCOME_REFUSED = 6;
+  // A rule took it and its run could not begin (the harness failed to start).
+  NOTICE_OUTCOME_FAILED = 7;
+}
+
+// Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14). A
+// clock tick missed by six hours or more is no refusal: its history line says `missed`.
+// Closed: a machine sends no other word, so a receiver can say each one to the person.
+enum TriggerRefusal {
+  // None.
+  TRIGGER_REFUSAL_UNSPECIFIED = 0;
+  // Triggers are off on this machine; the person turns them on at the machine.
+  TRIGGER_REFUSAL_TRIGGERS_OFF = 1;
+  // Not the notice's closed shape: a member it doesn't name, one that breaks its rule, a
+  // life over 24 hours, or more than 1 KiB.
+  TRIGGER_REFUSAL_BAD_NOTICE = 2;
+  // The rule already ran today for this subject in this state.
+  TRIGGER_REFUSAL_COOLDOWN = 3;
+  // The rule already ran today as often as its cap allows.
+  TRIGGER_REFUSAL_CAP = 4;
+  // The rule's folder is no longer on the machine's allowlist.
+  TRIGGER_REFUSAL_FOLDER = 5;
+  // The rule's harness can't be run on this machine now.
+  TRIGGER_REFUSAL_HARNESS = 6;
+  // The session the rule continues can't be continued: it is gone, or its recorded level is one
+  // this machine does not know. Either way the machine pauses the rule.
+  TRIGGER_REFUSAL_NO_SESSION = 7;
+  // The session the rule continues stayed held by a window until the notice expired.
+  TRIGGER_REFUSAL_HELD = 8;
+  // The machine's caps on starts, which asks and receivers' starts share, or (continuing a
+  // session) its headless slots, stayed full until the notice expired.
+  TRIGGER_REFUSAL_START_LIMIT = 9;
+  // Once `missed`, before a clock tick's lateness became a history result; never to be reused.
+  reserved 10;
+  // The rule's own earlier run was still going until the notice expired: a rule runs one at a
+  // time, so two runs never work on one task in one folder.
+  TRIGGER_REFUSAL_BUSY = 11;
+}
+
 // A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
 // (`GET {control}/files/{sha256}`); the signed hash is what the machine checks.
 // Beyond this shape the verifier also checks: the name's length after NFC, names
@@ -626,10 +682,65 @@ message ControlMessage {
   ];
 }
 
-// `GET {control}`: the messages waiting for the machine.
+// A notice (CONTROL.md §14): a receiver's word that something changed on a topic the
+// machine listed in its hello. Unsigned, and never a command: it carries no session, no
+// words, no folder, no level and no tool, only these short typed fields, and a notice that no
+// rule of the machine takes runs nothing. Strict: a machine refuses a member it doesn't
+// name (`bad_notice`). Beyond this shape the machine checks what a schema cannot: `at` is
+// before `expires_at`, at most 24 hours before it and at most 5 minutes ahead of the
+// machine's clock, and the notice is at most 1 KiB as JSON.
+message ControlNotice {
+  option (sessionpipe.v1.strict) = true;
+  // The receiver's id for this notice, a ULID: the ack key, and the key the machine
+  // deduplicates on (with the receiver) for 25 hours.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // What it is about, as the machine listed it in its hello (`acme/tasks`).
+  string topic = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._/-]{0,79}$"
+  ];
+  // What happened, in the receiver's word (`record.updated`).
+  string event = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9_.]{0,39}$"
+  ];
+  // The thing it happened to, in the receiver's id (`X-001`): a token, never text.
+  string subject = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+  ];
+  // The subject's state now, in the receiver's word (`todo`).
+  string state = 5 [(buf.validate.field).string.pattern = "^[a-z0-9_-]{1,32}$"];
+  // Who the subject is for (an assignee), as the receiver names them: a token.
+  string for = 6 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"];
+  // Who made the change, as the receiver names them: a token.
+  string by = 7 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"];
+  // The receiver's clock when it made the notice.
+  string at = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // After this the machine MUST NOT run anything for it and acks `expired`; at most 24 h
+  // after `at`.
+  string expires_at = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+}
+
+// `GET {control}`: the messages and notices waiting for the machine.
 message ControlPoll {
   // The messages, oldest first.
   repeated ControlMessage messages = 1 [(google.api.field_behavior) = REQUIRED];
+  // The notices for the topics the machine listed (CONTROL.md §14), oldest first, at most
+  // 50. Only to a machine whose last hello listed topics for this receiver: a daemon that
+  // predates notices ignores this member. A machine reads each notice on its own, so a
+  // broken one never stops a message or another notice, and leaves any past the 50th for
+  // the next poll.
+  repeated ControlNotice notices = 2 [(buf.validate.field).repeated.max_items = 50];
 }
 
 // taken, delivered of a start: the options it ran with (`model` only when one was
@@ -681,6 +792,41 @@ message Ack {
   int32 seq = 10 [(buf.validate.field).int32.gte = 0];
   // What a start ran with.
   Applied applied = 11;
+}
+
+// What became of one notice (CONTROL.md §14). Never the rule that took it, nor its words,
+// level, folder or filter. `session` comes only with `ran`, `code` only with `refused`:
+// rules the schema cannot say, which a receiver checks.
+message NoticeAck {
+  // The notice's id.
+  string id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9A-HJKMNP-TV-Z]{26}$"
+  ];
+  // The outcome.
+  NoticeOutcome outcome = 2 [(google.api.field_behavior) = REQUIRED];
+  // The machine's clock.
+  string at = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // ran: the session the run began in, `<harness>:<id>`, so the receiver can link the
+  // subject to it.
+  string session = 4 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // refused: why.
+  TriggerRefusal code = 5;
+}
+
+// `POST {control}/notices/ack`: what became of the notices (CONTROL.md §14).
+message ControlNoticeAck {
+  // One per notice, at most 50.
+  repeated NoticeAck acks = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 50
+    }
+  ];
 }
 
 // `POST {control}/ack`: what became of the messages.
@@ -899,6 +1045,27 @@ message ControlHelloPool {
   ];
 }
 
+// The machine's triggers as one receiver needs them (CONTROL.md §14): present in EVERY
+// hello of a daemon that knows triggers (`on: false`, `topics: []` when they are off), so a
+// receiver tells "off" from "an old daemon". A receiver learns topics, never a rule's
+// filter, words, target or level.
+message ControlHelloTriggers {
+  // Whether triggers are on at this machine.
+  bool on = 1 [(google.api.field_behavior) = REQUIRED];
+  // The topics of this machine's rules (not paused) whose source is THIS receiver: the only
+  // topics it may send notices on. Empty when triggers are off.
+  repeated string topics = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated = {
+      max_items: 50
+      unique: true
+      items: {
+        string: {pattern: "^[a-z0-9][a-z0-9._/-]{0,79}$"}
+      }
+    }
+  ];
+}
+
 // Per harness: the options a start may carry (CONTROL.md §2).
 message StartOptions {
   // The levels it starts at here, already capped by `mode`.
@@ -1012,4 +1179,8 @@ message ControlHello {
   bool ask = 15;
   // As in control-pair.json.
   bool handoff = 16;
+  // The machine's triggers for this receiver: whether they are on, and the topics it may
+  // send notices on (CONTROL.md §14). Sent again the moment a rule or the switch changes.
+  // A hello without it is a daemon that predates triggers: send it no notices.
+  ControlHelloTriggers triggers = 17;
 }

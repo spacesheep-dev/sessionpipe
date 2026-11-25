@@ -160,6 +160,8 @@ export async function hookMain(argv: string[], env: NodeJS.ProcessEnv, io: HookI
         "SESSIONPIPE_CONTROL_JOB",
         // The launcher a script named for a session it starts (PROTOCOL.md §3 launched_by).
         "SESSIONPIPE_LAUNCHED_BY",
+        // The person's rule the control daemon ran this one for (PROTOCOL.md §3 triggered_by).
+        "SESSIONPIPE_TRIGGERED_BY",
         // Devin's config file and session store are both resolved through these.
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",

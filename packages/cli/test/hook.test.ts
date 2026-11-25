@@ -118,7 +118,7 @@ async function daemon(sock: string, reply: (req: Record<string, unknown>) => unk
 }
 
 describe("the hook writes one job and spawns the worker", () => {
-  it("the job carries argv, stdin, the seven env keys and nothing else; the worker is detached", async () => {
+  it("the job carries argv, stdin, the eight env keys and nothing else; the worker is detached", async () => {
     const env = {
       CLAUDE_CODE_HOST_SESSION_ID: "host-1",
       CLAUDE_CONFIG_DIR: "/c",
@@ -127,6 +127,7 @@ describe("the hook writes one job and spawns the worker", () => {
       GEMINI_CLI_HOME: "/g",
       SESSIONPIPE_ASKED_BY: "codex:0199a8c0-1111-7000-8000-000000000001",
       SESSIONPIPE_LAUNCHED_BY: "claude-code:ed6c7665-589f-40c7-b7b4-e38ee662b7bc",
+      SESSIONPIPE_TRIGGERED_BY: "card-todo",
       HOME: "/not/copied",
     };
     await run(["claude-code", "UserPromptSubmit", "extra"], claude({ prompt: "hi" }), env);
@@ -140,7 +141,7 @@ describe("the hook writes one job and spawns the worker", () => {
       cwd: process.cwd(),
       ppid: process.ppid,
     });
-    expect(Object.keys(job?.env ?? {})).toHaveLength(7);
+    expect(Object.keys(job?.env ?? {})).toHaveLength(8);
     const jobFile = path.join(state, "jobs", readdirSync(path.join(state, "jobs"))[0] as string);
     // The job says which hook event it is, by the name its file was given: every copy of
     // it says the same (run.ts jobKey).

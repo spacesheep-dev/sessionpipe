@@ -236,6 +236,7 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
           parent_id: null,
           launched_by: "codex:l",
           delegated_by: "claude-code:d",
+          triggered_by: "card-todo",
         } as Event["session"],
       }),
       3,
@@ -249,6 +250,7 @@ describe("filterEvent: the allowlist is the spec's table (PRIVACY.md §1)", () =
       parent_id: null,
       launched_by: "codex:l",
       delegated_by: "claude-code:d",
+      triggered_by: "card-todo",
     });
   });
   it("is idempotent without pii", () => {

@@ -135,6 +135,10 @@ export const SCHEMAS = {
           "effort": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
+          },
+          "triggered_by": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
           }
         },
         "required": [
@@ -874,6 +878,10 @@ export const SCHEMAS = {
                 "effort": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
+                },
+                "triggered_by": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
                 }
               },
               "required": [
@@ -1148,6 +1156,9 @@ export const SCHEMAS = {
             "type": "boolean"
           },
           "inherit": {
+            "type": "boolean"
+          },
+          "notices": {
             "type": "boolean"
           }
         },
@@ -1899,6 +1910,62 @@ export const SCHEMAS = {
             "expires_at"
           ]
         }
+      },
+      "notices": {
+        "maxItems": 50,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "topic": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,79}$"
+            },
+            "event": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_.]{0,39}$"
+            },
+            "subject": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+            },
+            "state": {
+              "type": "string",
+              "pattern": "^[a-z0-9_-]{1,32}$"
+            },
+            "for": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+            },
+            "by": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            }
+          },
+          "required": [
+            "id",
+            "topic",
+            "event",
+            "subject",
+            "at",
+            "expires_at"
+          ],
+          "additionalProperties": false
+        }
       }
     },
     "required": [
@@ -2616,6 +2683,27 @@ export const SCHEMAS = {
       },
       "handoff": {
         "type": "boolean"
+      },
+      "triggers": {
+        "type": "object",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          },
+          "topics": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,79}$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "on",
+          "topics"
+        ]
       }
     },
     "required": [
@@ -2624,6 +2712,125 @@ export const SCHEMAS = {
       "modes",
       "keys",
       "version"
+    ]
+  },
+  "control-notice": {
+    "$id": "https://sessionpipe.org/schema/v1/control-notice.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+      },
+      "topic": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._/-]{0,79}$"
+      },
+      "event": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.]{0,39}$"
+      },
+      "subject": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+      },
+      "state": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]{1,32}$"
+      },
+      "for": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+      },
+      "by": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"
+      },
+      "at": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+      },
+      "expires_at": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+      }
+    },
+    "required": [
+      "id",
+      "topic",
+      "event",
+      "subject",
+      "at",
+      "expires_at"
+    ],
+    "additionalProperties": false
+  },
+  "control-notice-ack": {
+    "$id": "https://sessionpipe.org/schema/v1/control-notice-ack.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "acks": {
+        "minItems": 1,
+        "maxItems": 50,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "taken",
+                "ran",
+                "no_match",
+                "duplicate",
+                "expired",
+                "refused",
+                "failed"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}(?:Z))$"
+            },
+            "session": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "triggers_off",
+                "bad_notice",
+                "cooldown",
+                "cap",
+                "folder",
+                "harness",
+                "no_session",
+                "held",
+                "start_limit",
+                "busy"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "outcome",
+            "at"
+          ]
+        }
+      }
+    },
+    "required": [
+      "acks"
     ]
   },
 } as const satisfies Record<string, JsonSchema>;
