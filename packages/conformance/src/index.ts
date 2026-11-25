@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** @sessionpipe/conformance — runs the fixtures against an adapter (here) or a receiver URL (M3). */
+/** sessionpipe-conformance — runs the fixtures against an adapter (here) or a receiver URL (M3). */
 import { readFileSync } from "node:fs";
 import { adapterByName, readHook } from "@sessionpipe/core";
 

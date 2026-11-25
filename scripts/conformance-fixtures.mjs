@@ -3,7 +3,7 @@
 //  1. Shape: every expected event in conformance/harness/** fits the protocol's JSON
 //     Schemas (wildcards "*" substituted), and every delivery scenario parses.
 //     This runs from M1 on, so a fixture can never contradict the schema.
-//  2. Behaviour: when @sessionpipe/conformance is built (M2+), every adapter fixture
+//  2. Behaviour: when sessionpipe-conformance is built (M2+), every adapter fixture
 //     is run through core's adapter and the events compared.
 // Exits non-zero on any miss.
 import { existsSync, readFileSync } from "node:fs";

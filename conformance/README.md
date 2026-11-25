@@ -152,4 +152,4 @@
   there and keeps the rest (`SESSIONPIPE_WRITE_VECTORS=all` rewrites every one).
 
 Filled in M1. Run with `npm run conformance`, or against a live receiver with
-`npx @sessionpipe/conformance https://host`.
+`npx sessionpipe-conformance https://host`.
