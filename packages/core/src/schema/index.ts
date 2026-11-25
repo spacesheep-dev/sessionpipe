@@ -4,6 +4,8 @@
 import { type JsonSchema, SCHEMAS, type SchemaName } from "../../gen/schemas.js";
 import { problems } from "./validate.js";
 
+/** The machine's own files' schemas (config.proto: the trigger rules file), published nowhere. */
+export { CONFIG_SCHEMAS } from "../../gen/config-schemas.js";
 export { DATA_ALLOW, HARNESS_NAMES, KNOWN_TYPES, PROTOCOL, SESSION_KEYS, TYPE_TIER } from "../../gen/registry.js";
 export { type JsonSchema, SCHEMAS, type SchemaName } from "../../gen/schemas.js";
 export { problems } from "./validate.js";

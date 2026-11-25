@@ -136,6 +136,7 @@ import {
   tint,
   type Ui,
 } from "./style.js";
+import { defaultTriggerDeps, triggerMain } from "./triggers.js";
 import {
   execCapture,
   globalPrefix,
@@ -353,6 +354,9 @@ async function command(cmd: string): Promise<void> {
       if (code) process.exitCode = code;
       return;
     }
+    case "triggers":
+    case "trigger":
+      return triggerMain(args, { ui, say, print: out }, defaultTriggerDeps(distDir));
     case "channel":
       return channelMain(args, channelIo);
     case "hook":

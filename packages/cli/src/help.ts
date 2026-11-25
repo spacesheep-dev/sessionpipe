@@ -59,6 +59,22 @@ export function usageTable(harnesses: readonly string[]): Record<string, string>
     "ask status": "ask status (on or off, the daemon, the agents it can ask, the folders they may run in)",
     "ask setup":
       "ask setup [--remove] (write the section into ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md, or take it out)",
+    triggers:
+      "triggers on|off|status [--json] (whether this computer runs your trigger rules; off until you turn them on)",
+    "triggers on":
+      "triggers on [--no-service] (at this computer's terminal, with a typed yes: your rules may run here by themselves)",
+    "triggers off": "triggers off (no rule runs; a run that waits is dropped, a running one stopped)",
+    "triggers status":
+      "triggers status [--json] (on or off, the rules, the background service, the level they run at here)",
+    trigger: "trigger add|list|pause|resume|remove|test (use --help after a subcommand for its options)",
+    "trigger add":
+      "trigger add <name> --on <receiver> --topic <t> [--event <e>] | --every <when> [--when state=<s>] [--when for=<who>] [--when by=<who>] [--subject <pattern>] --start <agent> | --continue <agent>:<id> --folder <dir> [--level read|safe|edits|auto] [--tools mcp__<server>,…] [--cap <n>/day] --words <text> (at this computer's terminal, with a typed yes; a clock is mon 09:00, day 08:30 or 2h)",
+    "trigger list": "trigger list [--json] (each rule, the level it runs at here, its runs today and what it did)",
+    "trigger pause": "trigger pause <name>",
+    "trigger resume": "trigger resume <name> (at this computer's terminal, with a typed yes)",
+    "trigger remove": "trigger remove <name>",
+    "trigger test":
+      "trigger test <name> [--subject <id>] [--state <s>] [--for <who>] [--by <who>] [--json] (what a sample notice, or a tick, would run; runs nothing)",
     channel: "channel [--session claude-code:<id>] [--name N] (Claude Code runs it as a channel, with --channels)",
     worker: "worker <job-file> (internal: process one queued job)",
     hook: "hook (internal: harnesses run dist/hook.js directly)",

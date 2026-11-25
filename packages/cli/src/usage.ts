@@ -70,6 +70,16 @@ export const GROUPS: readonly { title: string; rows: readonly (readonly [string,
     ],
   },
   {
+    title: "Your rules",
+    rows: [
+      ["triggers on|off|status", "Let your rules run by themselves, or stop them"],
+      ["trigger add <name>", "A rule: on a receiver's notice or a clock"],
+      ["trigger list|test", "Each rule and what it did; what a test would run"],
+      ["trigger pause|resume", "Stop one, or let it run again"],
+      ["trigger remove <name>", "Take one away, with what it did"],
+    ],
+  },
+  {
     title: "Everywhere",
     rows: [
       ["-h, --help", "A command's usage, without running it"],
