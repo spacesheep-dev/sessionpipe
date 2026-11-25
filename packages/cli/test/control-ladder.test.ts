@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -374,8 +375,14 @@ describe.runIf(unix)("headless runs", () => {
       code: "permission",
       detail: "this machine is in auto mode, but its Claude Code has no auto permission mode",
     });
-    // Final at once: nothing was taken, nothing ran.
-    expect(rx.acks.filter((a) => a.id === s.id).map((a) => a.outcome)).toEqual(["refused"]);
+    // Final at once: nothing was taken, nothing ran. Every ack for it is the refusal, however
+    // many there are. Both sides repeat until they know the other has it: a receiver hands
+    // out again a message whose ack has not landed, and the daemon sends again an ack whose
+    // POST it could not confirm. On a slow machine the same refusal landed twice. How many
+    // land is the machine's speed; the rule is that no ack says anything else, and that
+    // Claude Code was never called.
+    expect(new Set(rx.acks.filter((a) => a.id === s.id).map((a) => a.outcome))).toEqual(new Set(["refused"]));
+    expect(existsSync(claudeLog)).toBe(false);
   });
 
   it("inherit mode: a resume and a start pass no permission flag, so Claude Code picks its own default", async () => {
