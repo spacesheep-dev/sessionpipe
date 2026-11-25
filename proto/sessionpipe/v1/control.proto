@@ -196,7 +196,8 @@ enum NoticeOutcome {
   NOTICE_OUTCOME_FAILED = 7;
 }
 
-// Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14).
+// Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14). A
+// clock tick missed by six hours or more is no refusal: its history line says `missed`.
 // Closed: a machine sends no other word, so a receiver can say each one to the person.
 enum TriggerRefusal {
   // None.
@@ -221,8 +222,6 @@ enum TriggerRefusal {
   // The machine's caps on starts, which asks and receivers' starts share, stayed reached
   // until the notice expired.
   TRIGGER_REFUSAL_START_LIMIT = 9;
-  // A clock tick more than six hours late. A rule's history only: never in a notice's ack.
-  TRIGGER_REFUSAL_MISSED = 10;
 }
 
 // A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver

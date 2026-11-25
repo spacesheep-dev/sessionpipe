@@ -5,7 +5,7 @@
 import type { ControlNotice, StartPermission, TriggerRefusal } from "./v1.js";
 
 /** What became of a run of a rule: a notice or a clock tick the rule took (CONTROL.md §14). */
-export type TriggerResult = "ran" | "refused" | "failed";
+export type TriggerResult = "ran" | "refused" | "failed" | "missed";
 
 /**
  * Which part of a rule a notice did not fit (`sessionpipe trigger test`). The machine's own
@@ -54,15 +54,21 @@ export interface ContinueTarget {
 export type TriggerTarget = StartTarget | ContinueTarget;
 
 /**
- * Which notices a rule takes beyond its source. Each list allows only its values, an absent
- * or empty list allows any, and a notice without the field fits no list.
+ * Which notices a rule takes beyond its source. Each list, when present, allows only its
+ * values, and a notice without that field fits it not at all; an absent list allows any
+ * value. A list is never empty. A filter is a limit, not a secret: a receiver that sends
+ * notices can learn it from the acks (CONTROL.md §14.4).
  */
 export interface TriggerWhen {
   /** The states it takes (`todo`). */
   state?: string[] | undefined;
   /** Whom the subject must be for (`studio-claude`). */
   for?: string[] | undefined;
-  /** Who must have made the change (`u-41c9`): how a rule keeps to the people it trusts. */
+  /**
+   * Who must have made the change (`u-41c9`), in the receiver's word: it keeps a rule to the
+   * people the person trusts on an honest receiver, and protects nothing against a receiver
+   * that was broken into, which can name anyone.
+   */
   by?: string[] | undefined;
 }
 
@@ -98,8 +104,13 @@ export interface TriggerRule {
   /** What it runs. */
   target: TriggerTarget;
   /**
-   * The folder it runs in: absolute, or `~` / `~/…` under the daemon's user's home. Checked
-   * against the machine's allowlist again at every run.
+   * The folder it runs in: absolute, or `~/…` under the daemon's user's home; never the home
+   * folder itself, nor a folder that holds sessionpipe's config or state folders or lies inside
+   * them (a session there could write itself a rule). Checked against the machine's allowlist
+   * again at every run. Text a person reads before saying `yes`, so no character that does not
+   * show: the pattern refuses every control character (C0, DEL, C1); the reader refuses the
+   * rest by Unicode's categories (format, line and paragraph separators, private use,
+   * unassigned, surrogates), which no pattern every reader runs can name.
    */
   folder: string;
   /**
@@ -111,7 +122,8 @@ export interface TriggerRule {
   /**
    * MCP servers or tools (`mcp__board`, `mcp__board__records_get`) its runs may use without
    * asking, as `control.session_tools` (HTTP.md §1) are: never a built-in tool, never a
-   * shell pattern.
+   * shell pattern. The pattern is the daemon's for `session_tools`, and so looser than the two
+   * shapes: any `mcp__` name of letters, digits, `_` and `-`.
    */
   tools?: string[] | undefined;
   /** How often it may run. */
@@ -119,7 +131,10 @@ export interface TriggerRule {
   /**
    * The person's words for the session. A notice rule's may name `{subject}`, `{state}`,
    * `{for}` and `{by}`, each filled with the notice's token in backticks; no other brace,
-   * and a clock rule's none. No control character but tab and line breaks.
+   * and a clock rule's none. What the person confirms is what the session gets, so no
+   * character that does not show but tab and line feed: the pattern refuses every other
+   * control character (C0 with carriage return, DEL, C1); the reader refuses the rest by
+   * Unicode's categories, as for `folder`.
    */
   words: string;
 }

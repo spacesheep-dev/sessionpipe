@@ -2,9 +2,9 @@
 // The person's trigger rules (spec/CONTROL.md §14): reading `<config>/triggers.json` against
 // the generated definition (config.proto), saying a rule in plain words, the topics a hello
 // lists, matching a notice, and the level a run gets. Pure functions: nothing here reads a
-// file, runs a harness or keeps a count. "A receiver decides whether to send. Only the machine
+// file, runs a harness or keeps a count (the places a folder may not be are passed in). "A receiver decides whether to send. Only the machine
 // decides whether to run" (CONTROL.md §1): every function here is the machine's side of that.
-
+import path from "node:path";
 import type {
   ClockSource,
   ContinueTarget,
@@ -24,10 +24,21 @@ import type {
   TriggerRefusal as Refusal,
   StartPermission,
 } from "../../gen/v1.js";
-import { HOME_RELATIVE_RE, levelRank, narrower, parseSessionRef } from "../control/verify.js";
+import { HOME_RELATIVE_RE, levelRank, narrower, parseSessionRef, START_PERMISSIONS } from "../control/verify.js";
+import { untilde } from "../paths.js";
 import { problems } from "../schema/validate.js";
 import { subjectPattern } from "./pattern.js";
+import { hiddenIn, visible } from "./text.js";
 import { composeWords, placeholdersIn } from "./words.js";
+
+/** The folders a rule's folder may not be, hold or lie in (CONTROL.md §14.1): the home folder,
+ *  and sessionpipe's config and state folders, where a session could write itself a rule.
+ *  Absolute paths; places.ts reads them for this machine. */
+export interface TriggerPlaces {
+  home: string;
+  config: string;
+  state: string;
+}
 
 /** A notice rule runs at most at this level: the receiver holds other people's text, and a rule
  *  a stranger's edit can set off must not run in the harness's auto mode (CONTROL.md §14). */
@@ -46,6 +57,9 @@ const DAY_NAMES: Record<string, string> = {
   sat: "Saturday",
 };
 
+const RULE = CONFIG_SCHEMAS.triggers.properties.rules.items;
+const EVERY_RE = new RegExp(RULE.properties.source.oneOf[1].properties.every.pattern);
+
 export const isNoticeSource = (s: TriggerRule["source"]): s is NoticeSource => "receiver" in s;
 export const isStart = (t: TriggerRule["target"]): t is StartTarget => "start" in t;
 
@@ -58,26 +72,50 @@ export type Every =
 
 /** A clock's `every`, read, or why it is refused (CONTROL.md §14, *The clock*). */
 export function parseEvery(every: string): Every | { error: string } {
-  const timed = /^(mon|tue|wed|thu|fri|sat|sun|day) ([01][0-9]|2[0-3]):([0-5][0-9])$/.exec(every);
-  if (timed) {
-    const at = Number(timed[2]) * 60 + Number(timed[3]);
-    return timed[1] === "day"
-      ? { kind: "day", at }
-      : { kind: "week", day: DAYS.indexOf(timed[1] as (typeof DAYS)[number]), at };
+  // The shape is the definition's (config.proto ClockSource.every); past it, the parts are fixed.
+  if (!EVERY_RE.test(every))
+    return { error: "a clock is `mon 09:00`, `day 08:30`, or an interval such as `30m` or `2h`" };
+  const [day, time] = every.split(" ");
+  if (time !== undefined) {
+    const at = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+    return day === "day" ? { kind: "day", at } : { kind: "week", day: DAYS.indexOf(day as (typeof DAYS)[number]), at };
   }
-  const span = /^([1-9][0-9]{0,4})([mh])$/.exec(every);
-  if (!span) return { error: "a clock is `mon 09:00`, `day 08:30`, or an interval such as `30m` or `2h`" };
-  const minutes = Number(span[1]) * (span[2] === "h" ? 60 : 1);
+  const minutes = Number(every.slice(0, -1)) * (every.endsWith("h") ? 60 : 1);
   if (minutes < EVERY_MIN_MINUTES || minutes > EVERY_MAX_MINUTES)
     return { error: `an interval is ${EVERY_MIN_MINUTES} minutes to 7 days` };
   return { kind: "interval", minutes };
 }
 
+/** Whether `a` is `b` or lies inside it, on whole path segments. */
+function within(a: string, b: string): boolean {
+  const r = path.relative(b, a);
+  return r === "" || (r !== ".." && !r.startsWith(`..${path.sep}`) && !path.isAbsolute(r));
+}
+
+/** Why a rule's folder is one a session could write itself a rule from, or null: the home folder
+ *  itself, or a folder that holds sessionpipe's config or state, or lies inside them. Compared as
+ *  written, normalised; the daemon compares real paths again at every run. */
+export function folderProblem(folder: string, places: TriggerPlaces): string | null {
+  const abs = path.resolve(untilde(folder, places.home));
+  if (abs === path.resolve(places.home)) return "the folder is the home folder: name a project folder under it";
+  for (const d of [places.config, places.state].map((p) => path.resolve(p)))
+    if (within(abs, d) || within(d, abs))
+      return "the folder holds sessionpipe's config or state, or lies inside it: a session there could write itself a rule";
+  return null;
+}
+
 /** Why one rule breaks what its schema can't say, or null. */
-function ruleProblem(r: TriggerRule): string | null {
+function ruleProblem(r: TriggerRule, places: TriggerPlaces): string | null {
   const notice = isNoticeSource(r.source);
   if (!(r.folder.startsWith("/") || /^[A-Za-z]:[\\/]/.test(r.folder) || HOME_RELATIVE_RE.test(r.folder)))
     return "the folder is absolute, or under ~";
+  const hiddenFolder = hiddenIn(r.folder);
+  if (hiddenFolder) return `the folder holds ${hiddenFolder}, a character that does not show`;
+  const hiddenWords = hiddenIn(r.words, "\t\n");
+  if (hiddenWords)
+    return `the words hold ${hiddenWords}, a character that does not show: what you confirm must be what runs`;
+  const placed = folderProblem(r.folder, places);
+  if (placed) return placed;
   if (!isStart(r.target) && !parseSessionRef((r.target as ContinueTarget).continue))
     return "the session to continue is <harness>:<id>, the id by its harness's rule";
   const names = placeholdersIn(r.words);
@@ -100,30 +138,33 @@ function ruleProblem(r: TriggerRule): string | null {
 
 /** A rules file, checked: the typed file, or every problem with it. A file that doesn't fit
  *  is refused whole, never read in part or guessed at (CONTROL.md §14). */
-export function checkTriggers(value: unknown): { ok: true; file: TriggersFile } | { ok: false; problems: string[] } {
+export function checkTriggers(
+  value: unknown,
+  places: TriggerPlaces,
+): { ok: true; file: TriggersFile } | { ok: false; problems: string[] } {
   const shape = problems(CONFIG_SCHEMAS.triggers, value);
-  if (shape.length) return { ok: false, problems: shape };
+  if (shape.length) return { ok: false, problems: shape.map(visible) };
   const file = value as TriggersFile;
   const out: string[] = [];
   const seen = new Set<string>();
   for (const [i, r] of file.rules.entries()) {
     if (seen.has(r.name)) out.push(`$.rules[${i}]: a second rule named ${r.name}`);
     seen.add(r.name);
-    const why = ruleProblem(r);
+    const why = ruleProblem(r, places);
     if (why) out.push(`$.rules[${i}] (${r.name}): ${why}`);
   }
   return out.length ? { ok: false, problems: out } : { ok: true, file };
 }
 
 /** The rules file's text, read and checked. */
-export function readTriggers(text: string): ReturnType<typeof checkTriggers> {
+export function readTriggers(text: string, places: TriggerPlaces): ReturnType<typeof checkTriggers> {
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     return { ok: false, problems: ["$: not JSON"] };
   }
-  return checkTriggers(value);
+  return checkTriggers(value, places);
 }
 
 /** What a hello to `receiver` says of the machine's triggers (CONTROL.md §14): whether they are
@@ -166,7 +207,8 @@ export function matchNotice(
 
 /** The rule that takes a notice: the first in the file's order, not paused, that matches; null
  *  when none does, and then nothing runs ("a notice that no rule matches runs nothing"). One
- *  notice runs at most one rule. Whether triggers are on is the caller's first check. */
+ *  notice runs at most one rule, and a match the cap or the cooldown then refuses does not fall
+ *  through to a later rule. Whether triggers are on is the caller's first check. */
 export function firstMatch(file: TriggersFile, receiver: string, n: ControlNotice): TriggerRule | null {
   return file.rules.find((r) => !r.paused && matchNotice(r, receiver, n).ok) ?? null;
 }
@@ -175,16 +217,34 @@ export function firstMatch(file: TriggersFile, receiver: string, n: ControlNotic
  *  be `safe` at most, as it does a start's (CONTROL.md §2). */
 const MODE_CEILING: Record<MachineMode, StartPermission> = { safe: "safe", auto: "auto", inherit: "safe" };
 
-/** The level a run of `rule` gets: the narrower of its own, the machine's mode and, continuing a
- *  session, that session's recorded level (`inherit` recorded caps nothing more). Never wider
- *  than any of them: "nothing is ever auto-allowed". */
+/** What the level of a run also depends on, beyond the rule and the mode. */
+export interface LevelFacts {
+  /** Continuing: the session's recorded level (`inherit` caps nothing more). */
+  recorded?: StartPermission | "inherit";
+  /** The levels the harness takes here (the hello's `start.<harness>.permissions`); a run gets
+   *  the widest of them that is no wider. Absent: not narrowed by the harness. */
+  offered?: readonly StartPermission[];
+}
+
+/** The widest a rule may run at by its source alone: a notice rule `edits`, a clock rule `auto`. */
+export const sourceCeiling = (rule: Pick<TriggerRule, "source">): StartPermission =>
+  isNoticeSource(rule.source) ? NOTICE_LEVEL_MAX : "auto";
+
+/** The level a run of `rule` gets: the narrowest of its own, its source's ceiling (a notice rule
+ *  `edits` at most, whether or not the file was checked), the machine's mode and, continuing a
+ *  session, that session's recorded level; then the widest the harness takes that is no wider.
+ *  Null when the harness takes none so narrow: the run is refused `harness`. Never wider than any
+ *  of them: "nothing is ever auto-allowed". */
 export function triggerLevel(
-  rule: Pick<TriggerRule, "level">,
+  rule: Pick<TriggerRule, "level" | "source">,
   mode: MachineMode,
-  recorded?: StartPermission | "inherit",
-): StartPermission {
-  const capped = narrower(rule.level, MODE_CEILING[mode]);
-  return recorded && recorded !== "inherit" ? narrower(capped, recorded) : capped;
+  o: LevelFacts = {},
+): StartPermission | null {
+  let level = narrower(narrower(rule.level, sourceCeiling(rule)), MODE_CEILING[mode]);
+  if (o.recorded && o.recorded !== "inherit") level = narrower(level, o.recorded);
+  if (!o.offered) return level;
+  const fits = START_PERMISSIONS.filter((l) => levelRank(l) <= levelRank(level) && o.offered!.includes(l));
+  return fits.at(-1) ?? null;
 }
 
 const quote = (s: string) => `“${s}”`;
@@ -201,8 +261,17 @@ function clockWords(every: Every): string {
   return every.kind === "day" ? `every day ${at}` : `every ${DAY_NAMES[DAYS[every.day]!]} ${at}`;
 }
 
+/** What a level means for a harness where its word alone would mislead (CONTROL.md §14.7). */
+const LEVEL_NOTES: Readonly<Record<string, Partial<Record<StartPermission, string>>>> = {
+  codex: {
+    safe: "for Codex, safe is its workspace sandbox, which writes files in the folder",
+    edits: "Codex has no edits level, so it runs at safe, its workspace sandbox, which writes files in the folder",
+  },
+};
+
 /** The rule in plain words: the sentence `trigger add` shows before it asks for `yes`, from the
- *  rule as it will be written, so what the person confirms is what runs. */
+ *  rule as it will be written, so what the person confirms is what runs. Every character that
+ *  does not show is written out (text.ts), whatever the file holds. */
 export function describeRule(r: TriggerRule): string {
   const s = r.source;
   let when: string;
@@ -226,9 +295,12 @@ export function describeRule(r: TriggerRule): string {
     : `continue ${(r.target as ContinueTarget).continue} (in ${r.folder})`;
   const tools = r.tools?.length ? `, with ${r.tools.join(", ")} allowed without asking` : "";
   const cap = r.cap.per_day === 1 ? "once a day at most" : `at most ${r.cap.per_day} times a day`;
-  return (
-    `${r.name}: ${when}, ${what} at ${r.level} or narrower${tools}, ${cap}, with these words: ${quote(r.words)}` +
-    (r.paused ? " (paused)" : "")
+  const level = narrower(r.level, sourceCeiling(r));
+  const harness = isStart(r.target) ? r.target.start : (r.target as ContinueTarget).continue.split(":")[0]!;
+  const note = LEVEL_NOTES[harness]?.[level];
+  return visible(
+    `${r.name}: ${when}, ${what} at ${level} or narrower${note ? ` (${note})` : ""}${tools}, ${cap}, with these words: ${quote(r.words)}` +
+      (r.paused ? " (paused)" : ""),
   );
 }
 
@@ -243,22 +315,19 @@ export function ruleWords(r: TriggerRule, n?: ControlNotice): string | null {
 }
 
 /** What a run of `rule` is on this machine: the target, folder, narrowed level, tools and framed
- *  words the daemon starts it with; null when the words can't be filled from `n`. */
+ *  words the daemon starts it with. Null when the words can't be filled from `n`, or when the
+ *  harness takes no level so narrow (`o.offered`; the run is refused `harness`). The words are
+ *  the session's, unescaped: show them to a person through `visible`. */
 export function triggerRun(
   rule: TriggerRule,
   mode: MachineMode,
   n?: ControlNotice,
-  recorded?: StartPermission | "inherit",
+  o: LevelFacts = {},
 ): TriggerRun | null {
   const words = ruleWords(rule, n);
-  if (words === null) return null;
-  return {
-    target: rule.target,
-    folder: rule.folder,
-    level: triggerLevel(rule, mode, recorded),
-    tools: rule.tools ?? [],
-    words,
-  };
+  const level = triggerLevel(rule, mode, o);
+  if (words === null || level === null) return null;
+  return { target: rule.target, folder: rule.folder, level, tools: rule.tools ?? [], words };
 }
 
 /** A notice as `trigger test` makes one for a notice rule: the rule's topic and event (`sample`
@@ -282,12 +351,16 @@ export function sampleNotice(
  *  off, the cap, the folder). It runs nothing and records nothing. */
 export function testAnswer(
   rule: TriggerRule,
-  o: { mode: MachineMode; receiver?: string; notice?: ControlNotice; refusal?: Refusal },
+  o: { mode: MachineMode; receiver?: string; notice?: ControlNotice; refusal?: Refusal } & LevelFacts,
 ): TriggerTestAnswer {
   const n = o.notice;
   const m = n ? matchNotice(rule, o.receiver ?? "", n) : isNoticeSource(rule.source) ? null : { ok: true as const };
-  const base = { rule: rule.name, ...(n ? { notice: n } : {}), ...(o.refusal ? { refusal: o.refusal } : {}) };
-  if (!m) return { ...base, matches: false, miss: "receiver" };
-  if (!m.ok) return { ...base, matches: false, miss: m.miss };
-  return { ...base, matches: true, run: triggerRun(rule, o.mode, n)! };
+  const base = { rule: rule.name, ...(n ? { notice: n } : {}) };
+  const refused = o.refusal ? { refusal: o.refusal } : {};
+  if (!m) return { ...base, ...refused, matches: false, miss: "receiver" };
+  if (!m.ok) return { ...base, ...refused, matches: false, miss: m.miss };
+  const run = triggerRun(rule, o.mode, n, o);
+  // A match the harness takes no level for is refused `harness`, as the daemon would.
+  if (!run) return { ...base, refusal: o.refusal ?? "harness", matches: true };
+  return { ...base, ...refused, matches: true, run };
 }

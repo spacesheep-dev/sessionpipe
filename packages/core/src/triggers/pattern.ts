@@ -14,14 +14,20 @@
 //
 // No groups, no alternation, no backreferences, no lookaround, no lazy quantifier: a pattern
 // that uses one is refused, never read some other way. A pattern is at most 100 characters
-// and a subject at most 40, so a match is at most a few hundred thousand steps.
+// and a subject at most 40, so a match is at most a few hundred thousand steps. `*`, `+` and
+// `{n,}` take at most 40 of a piece, so a compiled pattern refuses any longer input outright
+// rather than mean something else than the RegExp it reads as.
+import { CONFIG_SCHEMAS } from "../../gen/config-schemas.js";
+import { visible } from "./text.js";
 
-/** The longest pattern. */
-export const SUBJECT_PATTERN_MAX = 100;
-/** The largest count a quantifier may name; a subject is never longer. */
-const COUNT_MAX = 40;
-/** The subject's own alphabet (control.proto `ControlNotice.subject`). */
-const SUBJECT_CHAR = /^[A-Za-z0-9_-]$/;
+/** The longest pattern: config.proto's `TriggerRule.subject` says it. */
+export const SUBJECT_PATTERN_MAX: number = CONFIG_SCHEMAS.triggers.properties.rules.items.properties.subject.maxLength;
+/** The longest subject, which is also the largest count a quantifier may name. Held equal to
+ *  control.proto's `ControlNotice.subject` pattern by a test: a count can't be read out of it. */
+export const SUBJECT_MAX = 40;
+const COUNT_MAX = SUBJECT_MAX;
+/** The subject's own alphabet (control.proto `ControlNotice.subject`), held to it by a test. */
+export const SUBJECT_CHAR = /^[A-Za-z0-9_-]$/;
 
 interface Piece {
   /** The characters the atom takes, by code. */
@@ -52,7 +58,7 @@ function classOf(body: string): ((c: number) => boolean) | string {
   const parts: ((c: number) => boolean)[] = [];
   for (let i = 0; i < body.length; i++) {
     const c = body[i]!;
-    if (!SUBJECT_CHAR.test(c)) return `"${c}" in a class: a class holds letters, digits, _ and -`;
+    if (!SUBJECT_CHAR.test(c)) return `"${visible(c)}" in a class: a class holds letters, digits, _ and -`;
     // A `-` between two characters is a range; first or last it is itself.
     if (body[i + 1] === "-" && i + 2 < body.length) {
       const hi = body[i + 2]!;
@@ -83,7 +89,7 @@ export function subjectPattern(source: string): SubjectPattern | { error: string
       const e = body[i + 1];
       if (e === "d") takes = DIGIT;
       else if (e === "w") takes = WORD;
-      else return no(`\\${e ?? ""}: the only escapes are \\d and \\w`);
+      else return no(`\\${visible(e ?? "")}: the only escapes are \\d and \\w`);
       i += 2;
     } else if (c === "[") {
       const end = body.indexOf("]", i + 1);
@@ -97,7 +103,7 @@ export function subjectPattern(source: string): SubjectPattern | { error: string
       const code = c.charCodeAt(0);
       takes = (x) => x === code;
       i++;
-    } else return no(`"${c}" is not part of the pattern language: no groups, alternation or anchors inside`);
+    } else return no(`"${visible(c)}" is not part of the pattern language: no groups, alternation or anchors inside`);
     // The quantifier, if any.
     let min = 1;
     let max = 1;
@@ -119,7 +125,7 @@ export function subjectPattern(source: string): SubjectPattern | { error: string
       return no("one quantifier to a piece: no lazy or stacked quantifiers");
     pieces.push({ takes, min, max });
   }
-  return { source, test: (subject) => matches(pieces, subject) };
+  return { source, test: (subject) => subject.length <= SUBJECT_MAX && matches(pieces, subject) };
 }
 
 /** Whether `pieces` match all of `s`: the positions each piece can end at, piece by piece. */

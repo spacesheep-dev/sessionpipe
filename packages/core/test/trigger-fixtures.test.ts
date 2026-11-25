@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { SCHEMAS, validate } from "../src/schema/index.js";
 import { noticeId, noticesIn, parseNotice } from "../src/triggers/notice.js";
 import { subjectPattern } from "../src/triggers/pattern.js";
-import { checkTriggers, firstMatch, helloTriggers, triggerRun } from "../src/triggers/rules.js";
+import { checkTriggers, firstMatch, helloTriggers, type TriggerPlaces, triggerRun } from "../src/triggers/rules.js";
 import type { ControlNotice, MachineMode, TriggerRule, TriggersFile } from "../src/types.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -57,7 +57,7 @@ interface Step {
 }
 interface Case {
   name: string;
-  machine: { mode: MachineMode; folders: string[]; harnesses: string[]; receivers: string[] };
+  machine: { mode: MachineMode; folders: string[]; harnesses: string[]; receivers: string[]; places: TriggerPlaces };
   triggers: unknown;
   triggers_ok?: boolean;
   sessions?: Record<string, { level: "read" | "safe" | "edits" | "auto"; held: boolean }>;
@@ -67,9 +67,9 @@ const STEP_KINDS = ["poll", "hello", "change", "tick", "wake", "release", "start
 const AT = "2026-11-24T09:14:05.000Z";
 
 /** The rules file as the machine reads it: refused or absent is no rules, triggers off. */
-function rulesOf(v: unknown, expectOk = true): TriggersFile | null {
+function rulesOf(v: unknown, places: TriggerPlaces, expectOk = true): TriggersFile | null {
   if (v === null) return null;
-  const r = checkTriggers(v);
+  const r = checkTriggers(v, places);
   expect(r.ok, JSON.stringify(r.ok ? "" : r.problems)).toBe(expectOk);
   return r.ok ? r.file : null;
 }
@@ -104,7 +104,8 @@ describe("conformance/triggers: the scenario files", () => {
       expect(fx.spec).toMatch(/^CONTROL\.md §14/);
       expect(fx.note.length).toBeGreaterThan(40);
       for (const c of fx.cases) {
-        let file = rulesOf(c.triggers, c.triggers_ok ?? true);
+        const places = c.machine.places;
+        let file = rulesOf(c.triggers, places, c.triggers_ok ?? true);
         // What a notice an earlier step took was, by id: for the runs a later step starts.
         const taken = new Map<string, { notice: ControlNotice; rule: TriggerRule }>();
         for (const s of c.steps) {
@@ -114,7 +115,7 @@ describe("conformance/triggers: the scenario files", () => {
           const acks = s.expect.acks ?? [];
           for (const a of acks)
             expect(validate("control-notice-ack", { acks: [sent(a)] }), `${c.name}: ${JSON.stringify(a)}`).toEqual([]);
-          if (s.change !== undefined) file = rulesOf(s.change);
+          if (s.change !== undefined) file = rulesOf(s.change, places);
           if (s.hello) {
             const t = helloTriggers(file, s.hello);
             expect(s.expect.triggers, c.name).toEqual(t);
@@ -177,14 +178,14 @@ describe("conformance/triggers: the scenario files", () => {
             const recorded = target.continue ? c.sessions?.[target.continue]?.level : undefined;
             expect(want, c.name).toEqual({
               rule: rule.name,
-              run: triggerRun(rule, c.machine.mode, by?.notice, recorded),
+              run: triggerRun(rule, c.machine.mode, by?.notice, recorded ? { recorded } : {}),
               env: { SESSIONPIPE_TRIGGERED_BY: rule.name },
             });
             if (by)
               expect(ran[i]!.session, c.name).toBe(target.continue ?? `${(rule.target as { start: string }).start}:*`);
           });
           for (const h of s.expect.history ?? []) {
-            expect(["ran", "refused", "failed"]).toContain(h.result);
+            expect(["ran", "refused", "failed", "missed"]).toContain(h.result);
             if (h.code)
               expect(
                 validate("control-notice-ack", {
@@ -218,8 +219,11 @@ describe("conformance/triggers/subject-patterns.json", () => {
 });
 
 describe("conformance/triggers/rules-file.json", () => {
-  const fx = read("rules-file.json") as { cases: { name: string; file: unknown; ok: boolean }[] };
+  const fx = read("rules-file.json") as {
+    places: TriggerPlaces;
+    cases: { name: string; file: unknown; ok: boolean }[];
+  };
   it(`${fx.cases.length} files, each read whole or refused whole`, () => {
-    for (const c of fx.cases) expect(checkTriggers(c.file).ok, c.name).toBe(c.ok);
+    for (const c of fx.cases) expect(checkTriggers(c.file, fx.places).ok, c.name).toBe(c.ok);
   });
 });

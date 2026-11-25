@@ -3,7 +3,8 @@
 // a JavaScript RegExp gives it, matched without backtracking, so a subject an attacker picks can
 // never make a match slow. Everything outside the subset is refused, never read another way.
 import { describe, expect, it } from "vitest";
-import { SUBJECT_PATTERN_MAX, subjectPattern } from "../src/triggers/pattern.js";
+import { SCHEMAS } from "../src/schema/index.js";
+import { SUBJECT_CHAR, SUBJECT_MAX, SUBJECT_PATTERN_MAX, subjectPattern } from "../src/triggers/pattern.js";
 
 const compiled = (src: string) => {
   const p = subjectPattern(src);
@@ -114,5 +115,33 @@ describe("subjectPattern", () => {
     expect(compiled("^.+$").test("a b")).toBe(false);
     expect(compiled("^[^a]$").test("!")).toBe(false);
     expect(compiled("^a?$").test("")).toBe(true);
+  });
+});
+
+describe("the pattern language keeps to the definition", () => {
+  const SUBJECT = new RegExp(SCHEMAS["control-notice"].properties.subject.pattern);
+  it("its alphabet is the subject's, and its longest subject the subject's longest", () => {
+    for (let code = 0; code < 0x250; code++) {
+      const c = String.fromCodePoint(code);
+      expect(SUBJECT_CHAR.test(c), `U+${code.toString(16)}`).toBe(SUBJECT.test(`A${c}`));
+    }
+    expect(SUBJECT.test("A".repeat(SUBJECT_MAX))).toBe(true);
+    expect(SUBJECT.test("A".repeat(SUBJECT_MAX + 1))).toBe(false);
+    expect(SUBJECT_PATTERN_MAX).toBe(100);
+  });
+  it("a compiled pattern refuses anything longer than a subject, so it never means something else", () => {
+    const p = compiled("^a*$");
+    expect(p.test("a".repeat(SUBJECT_MAX))).toBe(true);
+    expect(p.test("a".repeat(SUBJECT_MAX + 1))).toBe(false);
+    expect(/^a*$/.test("a".repeat(SUBJECT_MAX + 1))).toBe(true);
+  });
+  it("a refusal that quotes a character shows it", () => {
+    expect(subjectPattern("^a\u202eb$")).toEqual({
+      error: '"\\u{202e}" is not part of the pattern language: no groups, alternation or anchors inside',
+    });
+    expect(subjectPattern("^[a\u200b]$")).toEqual({
+      error: '"\\u{200b}" in a class: a class holds letters, digits, _ and -',
+    });
+    expect(subjectPattern("^\\\u0007$")).toEqual({ error: "\\\\u{7}: the only escapes are \\d and \\w" });
   });
 });

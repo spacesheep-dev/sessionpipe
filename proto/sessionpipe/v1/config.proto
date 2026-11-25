@@ -22,6 +22,9 @@ enum TriggerResult {
   TRIGGER_RESULT_REFUSED = 2;
   // The run could not begin: the harness failed to start.
   TRIGGER_RESULT_FAILED = 3;
+  // A clock tick six hours late or more, so nothing ran (CONTROL.md §14.6). Only a clock rule's
+  // history has it, and no ack ever does.
+  TRIGGER_RESULT_MISSED = 4;
 }
 
 // Which part of a rule a notice did not fit (`sessionpipe trigger test`). The machine's own
@@ -117,8 +120,10 @@ message TriggerTarget {
   ContinueTarget continue = 2;
 }
 
-// Which notices a rule takes beyond its source. Each list allows only its values, an absent
-// or empty list allows any, and a notice without the field fits no list.
+// Which notices a rule takes beyond its source. Each list, when present, allows only its
+// values, and a notice without that field fits it not at all; an absent list allows any
+// value. A list is never empty. A filter is a limit, not a secret: a receiver that sends
+// notices can learn it from the acks (CONTROL.md §14.4).
 message TriggerWhen {
   option (sessionpipe.v1.strict) = true;
   // The states it takes (`todo`).
@@ -139,7 +144,9 @@ message TriggerWhen {
       string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"}
     }
   }];
-  // Who must have made the change (`u-41c9`): how a rule keeps to the people it trusts.
+  // Who must have made the change (`u-41c9`), in the receiver's word: it keeps a rule to the
+  // people the person trusts on an honest receiver, and protects nothing against a receiver
+  // that was broken into, which can name anyone.
   repeated string by = 3 [(buf.validate.field).repeated = {
     min_items: 1
     max_items: 20
@@ -190,13 +197,19 @@ message TriggerRule {
   }];
   // What it runs.
   TriggerTarget target = 6 [(google.api.field_behavior) = REQUIRED];
-  // The folder it runs in: absolute, or `~` / `~/…` under the daemon's user's home. Checked
-  // against the machine's allowlist again at every run.
+  // The folder it runs in: absolute, or `~/…` under the daemon's user's home; never the home
+  // folder itself, nor a folder that holds sessionpipe's config or state folders or lies inside
+  // them (a session there could write itself a rule). Checked against the machine's allowlist
+  // again at every run. Text a person reads before saying `yes`, so no character that does not
+  // show: the pattern refuses every control character (C0, DEL, C1); the reader refuses the
+  // rest by Unicode's categories (format, line and paragraph separators, private use,
+  // unassigned, surrogates), which no pattern every reader runs can name.
   string folder = 7 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 1024
+      pattern: "^[^\\x00-\\x1f\\x7f-\\x9f]+$"
     }
   ];
   // The widest level it runs at; a run gets the narrower of this, the machine's mode and,
@@ -205,7 +218,8 @@ message TriggerRule {
   StartPermission level = 8 [(google.api.field_behavior) = REQUIRED];
   // MCP servers or tools (`mcp__board`, `mcp__board__records_get`) its runs may use without
   // asking, as `control.session_tools` (HTTP.md §1) are: never a built-in tool, never a
-  // shell pattern.
+  // shell pattern. The pattern is the daemon's for `session_tools`, and so looser than the two
+  // shapes: any `mcp__` name of letters, digits, `_` and `-`.
   repeated string tools = 9 [(buf.validate.field).repeated = {
     max_items: 8
     unique: true
@@ -217,13 +231,16 @@ message TriggerRule {
   TriggerCap cap = 10 [(google.api.field_behavior) = REQUIRED];
   // The person's words for the session. A notice rule's may name `{subject}`, `{state}`,
   // `{for}` and `{by}`, each filled with the notice's token in backticks; no other brace,
-  // and a clock rule's none. No control character but tab and line breaks.
+  // and a clock rule's none. What the person confirms is what the session gets, so no
+  // character that does not show but tab and line feed: the pattern refuses every other
+  // control character (C0 with carriage return, DEL, C1); the reader refuses the rest by
+  // Unicode's categories, as for `folder`.
   string words = 11 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
       min_len: 1
       max_len: 4000
-      pattern: "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]+$"
+      pattern: "^[^\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]+$"
     }
   ];
 }

@@ -8,11 +8,13 @@ import { SCHEMAS } from "../../gen/schemas.js";
 import type { ControlNotice, NoticeAck, TriggerRefusal } from "../../gen/v1.js";
 import { SKEW_MS } from "../control/verify.js";
 import { problems } from "../schema/validate.js";
+import { visible } from "./text.js";
 
 /** A notice is at most this many bytes, as JSON in UTF-8. */
 export const NOTICE_MAX_BYTES = 1024;
-/** A poll answer carries at most this many notices; a machine leaves the rest for the next poll. */
-export const NOTICES_PER_POLL = 50;
+/** A poll answer carries at most this many notices (control.proto `ControlPoll.notices`); a
+ *  machine leaves the rest for the next poll. */
+export const NOTICES_PER_POLL: number = SCHEMAS["control-poll"].properties.notices.maxItems;
 /** A notice lives at most this long: `expires_at` at most a day after `at`. */
 export const NOTICE_MAX_LIFE_MS = 24 * 3600_000;
 /** How long a machine remembers a notice's id: longer than its longest life plus the clock slack. */
@@ -34,7 +36,8 @@ export function noticeId(raw: unknown): string | null {
   return typeof id === "string" && ID_RE.test(id) ? id : null;
 }
 
-/** The size of a value as JSON in UTF-8 bytes; Infinity when it is not JSON at all. */
+/** The size of a value as JSON in UTF-8 bytes, serialised with no whitespace (the notice as
+ *  received, parsed and written again: CONTROL.md §14.2); Infinity when it is not JSON at all. */
 function jsonBytes(raw: unknown): number {
   try {
     const text = JSON.stringify(raw);
@@ -54,13 +57,14 @@ export function parseNotice(raw: unknown, now: number): NoticeReading {
   // The size first, so nothing larger than a notice is matched against a pattern.
   if (jsonBytes(raw) > NOTICE_MAX_BYTES) return bad(`a notice is at most ${NOTICE_MAX_BYTES} bytes`);
   const shape = problems(SCHEMA, raw);
-  if (shape.length) return bad(shape[0]!);
+  // A value the receiver sent may be quoted in the reason: shown as it is, nothing hidden.
+  if (shape.length) return bad(visible(shape[0]!));
   const n = raw as ControlNotice;
   const at = Date.parse(n.at);
   const until = Date.parse(n.expires_at);
   if (until <= at) return bad("a notice expires after it was made");
   if (until - at > NOTICE_MAX_LIFE_MS) return bad("a notice lives at most 24 hours");
-  if (at > now + SKEW_MS) return bad("a notice made in the future");
+  if (at > now + SKEW_MS) return bad("a notice made more than 5 minutes ahead of this machine's clock");
   if (now >= until) return { ok: false, code: "expired", id, why: "the notice expired" };
   return { ok: true, notice: n };
 }

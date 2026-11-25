@@ -2816,8 +2816,7 @@ export const SCHEMAS = {
                 "harness",
                 "no_session",
                 "held",
-                "start_limit",
-                "missed"
+                "start_limit"
               ]
             }
           },

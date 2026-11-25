@@ -4,5 +4,7 @@
  *  the machine decides whether anything runs. */
 export * from "./notice.js";
 export * from "./pattern.js";
+export * from "./places.js";
 export * from "./rules.js";
+export * from "./text.js";
 export * from "./words.js";

@@ -145,7 +145,8 @@ export const CONFIG_SCHEMAS = {
             "folder": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1024
+              "maxLength": 1024,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]+$"
             },
             "level": {
               "type": "string",
@@ -183,7 +184,7 @@ export const CONFIG_SCHEMAS = {
               "type": "string",
               "minLength": 1,
               "maxLength": 4000,
-              "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]+$"
+              "pattern": "^[^\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]+$"
             }
           },
           "required": [

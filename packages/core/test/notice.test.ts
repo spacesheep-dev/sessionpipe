@@ -121,7 +121,7 @@ describe("parseNotice (CONTROL.md §14)", () => {
     expect(parseNotice(NOTICE, AT - 5 * 60_000).ok).toBe(true);
     expect(parseNotice(NOTICE, AT - 5 * 60_000 - 1)).toMatchObject({
       code: "bad_notice",
-      why: "a notice made in the future",
+      why: "a notice made more than 5 minutes ahead of this machine's clock",
     });
     const until = Date.parse(NOTICE.expires_at);
     expect(parseNotice(NOTICE, until - 1).ok).toBe(true);

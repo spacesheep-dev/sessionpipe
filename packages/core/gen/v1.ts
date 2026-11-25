@@ -670,10 +670,11 @@ export type PoolAccountStatus = "ready" | "limited" | "error" | "disabled";
 export type NoticeOutcome = "taken" | "ran" | "no_match" | "duplicate" | "expired" | "refused" | "failed";
 
 /**
- * Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14).
+ * Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14). A
+ * clock tick missed by six hours or more is no refusal: its history line says `missed`.
  * Closed: a machine sends no other word, so a receiver can say each one to the person.
  */
-export type TriggerRefusal = "triggers_off" | "bad_notice" | "cooldown" | "cap" | "folder" | "harness" | "no_session" | "held" | "start_limit" | "missed";
+export type TriggerRefusal = "triggers_off" | "bad_notice" | "cooldown" | "cap" | "folder" | "harness" | "no_session" | "held" | "start_limit";
 
 /**
  * A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver

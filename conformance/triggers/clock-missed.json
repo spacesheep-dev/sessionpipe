@@ -1,6 +1,6 @@
 {
   "spec": "CONTROL.md §14.6 (the clock)",
-  "note": "A clock rule ticks at its time in the machine's local time (`zone`). A tick missed while the machine slept (`asleep` from, `wake` at) runs once on waking when the latest missed tick is under six hours late, and never more than once however many were missed; later than that it is refused `missed`, a line in the rule's history and nothing else. No receiver is involved, so no ack.",
+  "note": "A clock rule ticks at its time in the machine's local time (`zone`). A tick missed while the machine slept (`asleep` from, `wake` at) runs once on waking when the latest missed tick is under six hours late, and never more than once however many were missed; six hours late or more it is `missed`, a line in the rule's history and nothing else. No receiver is involved, so no ack.",
   "cases": [
     {
       "name": "on time",
@@ -16,7 +16,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -87,7 +92,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -159,7 +169,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -231,7 +246,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -266,8 +286,7 @@
             "history": [
               {
                 "rule": "monday-report",
-                "result": "refused",
-                "code": "missed"
+                "result": "missed"
               }
             ]
           }
@@ -288,7 +307,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -363,7 +387,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,

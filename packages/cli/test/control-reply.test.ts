@@ -648,6 +648,23 @@ describe("sessionToolsFrom", () => {
     ).toEqual(["mcp__spacesheep", "mcp__x__y", "mcp__plugin_spacesheep_spacesheep"]);
     expect(sessionToolsFrom("mcp__spacesheep")).toEqual([]);
   });
+  it("keeps exactly what the definition's pattern takes, the one a trigger rule's tools use too", async () => {
+    const { sessionToolsFrom } = await import("../src/control/daemon.js");
+    const { SCHEMAS } = await import("@sessionpipe/core/schema");
+    const re = new RegExp(SCHEMAS["well-known"].properties.control.properties.session_tools.items.pattern);
+    const samples = [
+      "mcp__a",
+      "mcp__",
+      "mcp__a__b",
+      "mcp__a-b_c",
+      "mcp__a b",
+      "Mcp__a",
+      "mcp_a",
+      `mcp__${"a".repeat(64)}`,
+    ];
+    samples.push(`mcp__${"a".repeat(65)}`, "mcp__a.b", "mcp__a(x)", "mcp__é");
+    for (const t of samples) expect(sessionToolsFrom([t]).length === 1, t).toBe(re.test(t));
+  });
 });
 
 describe("a Stop block as Codex records it (conformance/transcripts/codex/stop-block.jsonl)", () => {

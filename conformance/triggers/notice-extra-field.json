@@ -16,7 +16,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -104,7 +109,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -192,7 +202,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -280,7 +295,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -368,7 +388,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -456,7 +481,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -544,7 +574,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -632,7 +667,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -722,7 +762,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -810,7 +855,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -898,7 +948,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
@@ -986,7 +1041,12 @@
         "receivers": [
           "board.example",
           "tasks.example"
-        ]
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe"
+        }
       },
       "triggers": {
         "v": 1,
