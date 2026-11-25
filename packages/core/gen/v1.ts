@@ -92,6 +92,15 @@ export interface Session {
    * bare word: tier 0 is not redacted, so the shape is the only guard.
    */
   effort?: string | undefined;
+  /**
+   * The name of the person's rule (`sessionpipe trigger`, CONTROL.md §14) that the machine's
+   * daemon started or resumed this session for, from the run's environment
+   * (`SESSIONPIPE_TRIGGERED_BY`). On every event of that run. Lineage, never authority: a
+   * receiver shows it ("started by trigger card-todo") and nothing branches on it to allow
+   * anything. A rule is no session, so this is never `launched_by`. A bare word (lowercase
+   * letters, digits, `_`, `-`; at most 40): tier 0 is not redacted, so the shape is the only guard.
+   */
+  triggered_by?: string | undefined;
 }
 
 /** What ran on the event before it left the machine. */

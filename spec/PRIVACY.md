@@ -10,7 +10,7 @@ a sink gets a tier, the tier is an allowlist, and two rulesets scrub what remain
 
 | Tier | Name | Carries |
 |-----:|------|---------|
-| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`, `delegation.*` with who asked whom and how it went: `ask_id`, `via`, `harness`, `to`, `ok`, `ms`, `error`, `relayed`), timing, machine, cwd, repo, branch, model, effort, title, url, account_id, attended, launched_by, delegated_by. Enough for "working / needs you / done" and a link to open the session. `turn.started` carries `submitted_by` and `injected`: who started the turn, and whether its prompt was the harness's own block — never any of the prompt's words, but `injected` is one bit read off the prompt's first characters, where the prompt's bare length (`prompt_chars`) is tier 1. `submitted_by` is a bare word (PROTOCOL.md §4) because tier 0 is not scrubbed by `secrets@1`. |
+| 0 | presence | Session id, state events (`session.*`, `turn.started`, `turn.ended`, `attention.*` with only `attention_id` and `kind`, `delegation.*` with who asked whom and how it went: `ask_id`, `via`, `harness`, `to`, `ok`, `ms`, `error`, `relayed`), timing, machine, cwd, repo, branch, model, effort, title, url, account_id, attended, launched_by, delegated_by, triggered_by. Enough for "working / needs you / done" and a link to open the session. `turn.started` carries `submitted_by` and `injected`: who started the turn, and whether its prompt was the harness's own block — never any of the prompt's words, but `injected` is one bit read off the prompt's first characters, where the prompt's bare length (`prompt_chars`) is tier 1. `submitted_by` is a bare word (PROTOCOL.md §4) because tier 0 is not scrubbed by `secrets@1`. |
 | 1 | actions | + tool names, `call_id`, durations, ok/error text, `files.changed` paths, attention `tool`, `message` (redacted, ≤ 200 chars) and `agent_id`, `prompt_chars`, subagents, compactions, the account's usage limits (`limits.observed`: percentages, reset times, plan), what an ask asked (`delegation.started.text`, redacted, ≤ 200 chars). Enough for an activity feed. |
 | 2 | conversation | + `turn.transcript`: the person's prompts and the assistant's text, redacted, ≤ 20 000 chars a side, `turn.progress`, the same for a turn still running, and what an asked agent answered (`delegation.ended.reply`, redacted, ≤ 20 000 chars). Enough for memory, search, recaps. |
 | 3 | full | + tool `input` and `output` (≤ 64 KB each), thinking where the harness exposes it, the native lane's raw lines. Full replay; meant for a receiver you own. |
@@ -139,6 +139,9 @@ are the controller of what it stores.
 - **`launched_by` can name a session you never saw.** The launcher and the session it
   started may report to different sinks. The id is opaque: it says the two are related
   and nothing else.
+- **`triggered_by` names one of the person's rules.** A rule's name is the person's own
+  word, typed at the machine (CONTROL.md §14), and every sink of the machine sees it on
+  the events of a run the rule started. Name rules as you would name a folder others see.
 
 ## 5. What sessionpipe itself never does
 

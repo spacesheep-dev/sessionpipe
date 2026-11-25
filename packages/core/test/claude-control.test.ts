@@ -320,6 +320,7 @@ describe("env, login and hints", () => {
       SESSIONPIPE_ASKED_BY: "codex:a1",
       SESSIONPIPE_ASK_CHAIN: "codex:a1",
       SESSIONPIPE_LAUNCHED_BY: "codex:a1",
+      SESSIONPIPE_TRIGGERED_BY: "card-todo",
     };
     expect(claudeEnv(undefined, base)).toEqual({
       PATH: "/bin",

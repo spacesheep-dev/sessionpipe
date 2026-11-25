@@ -135,6 +135,10 @@ export const SCHEMAS = {
           "effort": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
+          },
+          "triggered_by": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
           }
         },
         "required": [
@@ -874,6 +878,10 @@ export const SCHEMAS = {
                 "effort": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$"
+                },
+                "triggered_by": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
                 }
               },
               "required": [

@@ -21,7 +21,10 @@ export {
   LAUNCHED_BY_ENV,
   LINEAGE_ENV,
   launchedBy,
+  RULE_NAME_RE,
   readHook,
+  TRIGGERED_BY_ENV,
+  triggeredBy,
   withoutLineage,
 } from "./launched-by.js";
 export {
