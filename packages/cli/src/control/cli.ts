@@ -35,6 +35,7 @@ import { ControlDaemon, DaemonRunning, type Status } from "./daemon.js";
 import { ask, socketPath } from "./local.js";
 import { installService, off, pair, removeKey, uninstallService, withoutInherit } from "./pair.js";
 import { CLAUDE_NOT_FOUND } from "./route.js";
+import { readRules, rulesOf, triggersFile } from "./rules-file.js";
 import { loadSdk } from "./sdk.js";
 import {
   askOn,
@@ -370,6 +371,8 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
   // With no receiver the daemon still serves `sessionpipe ask` on the local socket
   // (CONTROL.md §13), and the pool; only with both off is there nothing for it to do.
   const asking = !!paired && askOn(paired);
+  // The person's trigger rules run here too, on a clock with no receiver at all (§14.6).
+  const triggering = !!rulesOf(readRules())?.on;
   const log = (s: string) => out(`${new Date().toISOString()} ${s}`);
   let d: ControlDaemon | null = null;
   const upstream = testUpstream(process.env);
@@ -393,7 +396,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     ...(upstream ? { upstream } : {}),
   });
   if (upstream) log(`pool requests go to ${upstream} (SESSIONPIPE_POOL_UPSTREAM, tests only)`);
-  if (!paired?.receivers.length && !asking) {
+  if (!paired?.receivers.length && !asking && !triggering) {
     if (!pool.config.on) {
       out(
         paired
@@ -458,6 +461,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     // Two daemons started at once and the other one holds the socket: leave it to it.
     onLostSocket: () => process.exit(0),
     pool,
+    rules: () => rulesOf(readRules()),
   });
   try {
     await d.start();
@@ -486,6 +490,8 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     const next = readControl();
     if (next) d.reload(next);
   });
+  // The rules file, as the control file is: the CLI writes it whole, so a change is read whole.
+  watchFile(triggersFile(), { interval: 5000 }, () => d.reloadRules());
   let stopping = false;
   const bye = async () => {
     if (stopping) return;
@@ -504,6 +510,7 @@ async function runDaemon(out: (s?: string) => void, distDir: string): Promise<vo
     updater?.stop();
     clearInterval(drainTimer);
     unwatchFile(controlFile());
+    unwatchFile(triggersFile());
     for (const sig of signals) process.off(sig, bye);
     await d.stop();
     const via = restartVia({ env: process.env, platform: process.platform, pid: process.pid, ppid: process.ppid });

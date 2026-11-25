@@ -61,6 +61,10 @@ export type LocalRequest =
    *  the rest are CONTROL.md §6's actions, plus `import` (reads this machine's own
    *  Claude Code logins, which no receiver may ask for). */
   | { op: "pool"; action: PoolOp; account?: string; order?: string[]; code?: string }
+  /** `sessionpipe trigger resume <name>` at the terminal, for a rule the machine paused itself
+   *  (its session was gone, CONTROL.md §14.7): the daemon lets go of its own pause; `ok`, or
+   *  `none` when it had none. It never touches the rules file, the person's. */
+  | { op: "trigger"; action: "resume"; name: string }
   /** `sessionpipe ask` (CONTROL.md §13): a session here hands a task to another agent on
    *  this machine and gets the answer back on this connection. */
   | AskRequest;

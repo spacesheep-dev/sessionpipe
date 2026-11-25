@@ -2,24 +2,36 @@
 // `sessionpipe control run` with no paired receiver: the daemon still serves asks on the
 // local socket (CONTROL.md §13), so it runs unless asking is off too. The daemon, the
 // updater and the SDK loader are stand-ins, as in control-run.test.ts.
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, watchFile } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlMain } from "../src/control/cli.js";
+import { triggersFile, writeRules } from "../src/control/rules-file.js";
 import { writeControl } from "../src/control/store.js";
 
-const seen = vi.hoisted(() => ({ daemons: [] as { cfg: { receivers: unknown[]; ask?: boolean } }[] }));
+const seen = vi.hoisted(() => ({
+  daemons: [] as { cfg: { receivers: unknown[]; ask?: boolean }; deps: { rules?: () => unknown }; reloaded: number }[],
+}));
 
 vi.mock("../src/control/daemon.js", async (original) => {
   const real = await original<typeof import("../src/control/daemon.js")>();
   class ControlDaemon {
-    constructor(readonly cfg: { receivers: unknown[]; ask?: boolean }) {
+    reloaded = 0;
+    constructor(
+      readonly cfg: { receivers: unknown[]; ask?: boolean },
+      _dir: string,
+      _sock: string,
+      readonly deps: { rules?: () => unknown },
+    ) {
       seen.daemons.push(this);
     }
     async start() {}
     async stop() {}
     reload() {}
+    reloadRules() {
+      this.reloaded++;
+    }
   }
   return { ...real, ControlDaemon };
 });
@@ -109,5 +121,33 @@ describe("control run with no receiver", () => {
     await run();
     expect(seen.daemons).toHaveLength(2);
     expect(seen.daemons[1]?.cfg.receivers).toEqual([]);
+  });
+
+  it("triggers on, with nothing else: the daemon runs for the rules' clock, and reads the rules file when it changes", async () => {
+    unpaired(false);
+    writeRules({
+      v: 1,
+      on: true,
+      rules: [
+        {
+          name: "monday-report",
+          paused: false,
+          source: { every: "mon 09:00" },
+          target: { start: "codex" },
+          // Not tmp itself: it holds the config and state folders, which no rule's folder may.
+          folder: path.join(tmp, "work"),
+          level: "safe",
+          cap: { per_day: 1 },
+          words: "Make the report.",
+        },
+      ],
+    });
+    await run();
+    expect(seen.daemons).toHaveLength(1);
+    const d = seen.daemons[0]!;
+    expect(d.deps.rules?.()).toMatchObject({ on: true });
+    const watched = vi.mocked(watchFile).mock.calls.find((c) => c[0] === triggersFile());
+    (watched as unknown as [string, unknown, () => void])[2]();
+    expect(d.reloaded).toBe(1);
   });
 });
