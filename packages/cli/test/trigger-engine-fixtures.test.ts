@@ -22,6 +22,7 @@ import {
   noticesIn,
   parseNotice,
   type StartPermission,
+  type TriggerHistoryLine,
   type TriggerPlaces,
   type TriggersFile,
 } from "@sessionpipe/core";
@@ -183,6 +184,7 @@ function play(c: Case): void {
   const runs: TriggerJob[] = [];
   let cancelled: number[] = [];
   let changed = 0;
+  const noted: { rule: string; l: TriggerHistoryLine }[] = [];
   let saved: TriggerState = seeded(c, file);
   const e = new TriggerEngine({
     now: () => now,
@@ -197,7 +199,7 @@ function play(c: Case): void {
       if ("continue" in job.run.target && headless >= slots) {
         const q = { job, on, gone: false };
         queue.push(q);
-        on.queued();
+        on.queued("start_limit");
         return {
           cancel: () => {
             q.gone = true;
@@ -218,17 +220,17 @@ function play(c: Case): void {
     },
     log: () => {},
     changed: () => changed++,
+    noted: (rule, l) => noted.push({ rule, l }),
   });
   e.load(file);
   e.check();
-  const lines = () => Object.entries(saved.rules).flatMap(([rule, st]) => st.history.map((l) => ({ ...l, rule })));
   for (const [si, s] of c.steps.entries()) {
     const where = `${c.name}, step ${si + 1}`;
     if (s.asleep) {
       now = Date.parse(s.asleep);
       e.check();
     }
-    const known = new Set(lines().map((l) => JSON.stringify(l)));
+    noted.length = 0;
     const before = { acks: acks.length, runs: runs.length, changed, paused: e.pausedByMachine() };
     cancelled = [];
     now = Date.parse(s.at);
@@ -266,14 +268,10 @@ function play(c: Case): void {
     grant();
     e.retry();
     if (s.permission) {
-      // The engine has no way to answer a permission prompt; the daemon's test sends one into
-      // a triggered run and sees no answer.
+      // What the scenario says; it is proven where a prompt can be answered at all: the daemon's
+      // test, whose stand-in raises one during a triggered turn and gets no allow
+      // (control-triggers.test.ts, "nothing answers a permission prompt").
       expect(s.expect.answered_by_machine, where).toBe(false);
-      const names = Object.getOwnPropertyNames(Object.getPrototypeOf(e));
-      expect(
-        names.filter((m) => /answer|allow|permi|decid/i.test(m)),
-        where,
-      ).toEqual([]);
     }
     if (s.poll) {
       const { notices, left } = noticesIn(s.poll.body);
@@ -311,14 +309,21 @@ function play(c: Case): void {
     const byId = (l: Ack[]) => [...l].sort((a, b) => a.id.localeCompare(b.id));
     expect(byId(acks.slice(before.acks)), `${where}: acks`).toEqual(byId(x.acks ?? []));
     expect(runs.slice(before.runs), `${where}: runs`).toEqual(x.runs ?? []);
-    // The files state the history of clock rules only: the lines of a notice's run or refusal
-    // (which carry its subject, and which `trigger list` shows) are not in them.
+    // Every line the step wrote, a notice's with its subject and state: in the order written
+    // within one rule, the rules side by side as the files list them.
+    const sorted = (xs: object[]) => xs.map((x) => JSON.stringify(x)).sort();
     expect(
-      lines()
-        .filter((l) => !known.has(JSON.stringify(l)) && l.subject === undefined)
-        .map((l) => ({ rule: l.rule, result: l.result, ...(l.code ? { code: l.code } : {}) })),
+      sorted(
+        noted.splice(0).map(({ rule, l }) => ({
+          rule,
+          result: l.result,
+          ...(l.code ? { code: l.code } : {}),
+          ...(l.subject ? { subject: l.subject } : {}),
+          ...(l.state ? { state: l.state } : {}),
+        })),
+      ),
       `${where}: history`,
-    ).toEqual(x.history ?? []);
+    ).toEqual(sorted(x.history ?? []));
     expect(
       e.pausedByMachine().filter((n) => !before.paused.includes(n)),
       `${where}: paused`,

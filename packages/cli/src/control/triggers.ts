@@ -20,6 +20,8 @@
 // words, and of a notice only its own closed set of validated tokens. The rules file is the
 // person's, written by the CLI only: the machine's own pause lives here, so
 // `<config>/triggers.json` stays exactly what the person confirmed.
+
+import { createHash } from "node:crypto";
 import {
   type ControlHelloTriggers,
   type ControlNotice,
@@ -44,6 +46,9 @@ import {
 } from "@sessionpipe/core";
 import { parseSessionRef } from "@sessionpipe/core/control";
 import { dueTick, localDay, TICK_LATE_MS, type Zone, zoneOf } from "./clock.js";
+import { stateOf } from "./trigger-state.js";
+
+export { stateOf } from "./trigger-state.js";
 
 /** What made a rule run: its clock (`due` is the tick's instant), or a notice a rule took from
  *  `receiver` (steps 1 to 6 of §14.7 are the caller's: the id read, the shape, the expiry, the
@@ -66,8 +71,9 @@ export interface TriggerJob {
 /** What the daemon says of a run it was handed, in order: `began` (the session it runs in) or
  *  `failed` or `refused`, then `ended` once it is over (after `began` only). */
 export interface RunEvents {
-  /** Handed over, and waiting for the machine's headless slot: nothing runs yet. */
-  queued(): void;
+  /** Handed over and waiting, nothing run yet: in its session's line (`held`), or for the
+   *  machine's headless slot (`start_limit`). */
+  queued(why: "held" | "start_limit"): void;
   began(session: string): void;
   failed(detail: string): void;
   /** Nothing ran. `held` and `start_limit` put the run back to wait. */
@@ -77,15 +83,27 @@ export interface RunEvents {
 
 /** How a rule's session to continue stands: gone (its transcript is not there), or there,
  *  with whether a window holds it now and the level the session was recorded at. */
-export type SessionLook = { gone: true } | { gone?: false; held: boolean; level?: StartPermission | "inherit" };
+export type SessionLook =
+  | { gone: true }
+  | {
+      gone?: false;
+      held: boolean;
+      level?: StartPermission | "inherit";
+      /** The folder a run of it really uses (its transcript's); null when that folder is not one
+       *  the machine allows. Absent: not known here. */
+      folder?: string | null;
+    };
 
 export interface TriggerDeps {
   now(): number;
   /** The machine's time zone; its own when unsaid. */
   zone?: string;
   mode(): MachineMode;
-  /** The folder is on the machine's allowlist (§5 step 6). */
+  /** The folder is on the machine's allowlist (§5 step 6) and over the floor, by its real path. */
   allowed(folder: string): boolean;
+  /** Two folders name the same one, by their real paths (a continued session's folder against
+   *  its rule's). Plain equality when unsaid. */
+  sameFolder?(a: string, b: string): boolean;
   /** The harnesses this machine runs headlessly now (§6 `start`). */
   harnesses(): string[];
   session(ref: string): SessionLook;
@@ -106,6 +124,8 @@ export interface TriggerDeps {
   log(line: string): void;
   /** What a hello says of triggers may have changed (a rule, a pause, the switch). */
   changed?(): void;
+  /** Each history line as it is written (the record keeps the latest HISTORY_KEPT). */
+  noted?(rule: string, line: TriggerHistoryLine): void;
 }
 
 /** A rule's runs today: how many, and for which subject in which state (the cooldown). */
@@ -141,6 +161,9 @@ export interface Waiting {
   key: string | null;
   /** Its notice was acked `taken`: said once, however often it waits again. */
   told?: boolean;
+  /** The rule as it was taken (a hash of its JSON): one changed under the same name meanwhile
+   *  is another rule, and this run is not its own. */
+  shape?: string;
 }
 
 /** The engine's record (triggers-state.json). */
@@ -161,6 +184,8 @@ interface Running {
   cancel(): void;
   w: Waiting;
   queued: boolean;
+  /** Its turn began: from here a stop keeps its count. */
+  began: boolean;
   /** Over, as far as the engine is concerned: what the daemon says of it later changes nothing. */
   done: boolean;
 }
@@ -177,6 +202,12 @@ const STATE_RE = /^[a-z0-9_-]{1,32}$/;
 /** What a machine's pause is kept against: the rule's target. A rule pointed at another session
  *  is a rule the pause no longer concerns (§14.7 step 11). */
 const shapeOf = (r: TriggerRule): string => JSON.stringify(r.target);
+
+/** A rule's fingerprint: a hash of its JSON with the switch it may flip left out. */
+const fingerprint = (r: TriggerRule): string =>
+  createHash("sha256")
+    .update(JSON.stringify({ ...r, paused: false }))
+    .digest("base64url");
 
 /** A history line as the record keeps it: only fields of the definition, and a notice's tokens
  *  only where they fit their pattern (never anything a receiver could have put there). */
@@ -195,14 +226,6 @@ function line(
   };
 }
 
-/** A saved record, read: anything that isn't one is no record. */
-export function stateOf(v: unknown): TriggerState {
-  const s = v as Partial<TriggerState> | undefined;
-  if (!s || s.v !== 1 || typeof s.rules !== "object" || s.rules === null || Array.isArray(s.rules))
-    return { v: 1, rules: {}, waiting: [] };
-  return { v: 1, rules: s.rules, waiting: Array.isArray(s.waiting) ? s.waiting : [] };
-}
-
 /** A daemon's refusal of a run (its ack's code) that a rule's history says as it is; any other
  *  is a run that could not begin. */
 const REFUSAL_CODES: ReadonlySet<string> = new Set<TriggerRefusal>(["folder", "harness", "no_session"]);
@@ -213,9 +236,12 @@ export class TriggerEngine {
   private readonly zone: Zone;
   private readonly running = new Set<Running>();
 
+  private lastSaved = "";
+
   constructor(private readonly deps: TriggerDeps) {
     this.zone = zoneOf(deps.zone);
-    this.state = stateOf(deps.load());
+    this.state = stateOf(deps.load(), { now: deps.now(), log: deps.log });
+    this.lastSaved = JSON.stringify(this.state);
   }
 
   private get waits(): Waiting[] {
@@ -237,6 +263,15 @@ export class TriggerEngine {
       // must not wipe a rule's counts for the day, which would let it run past its cap.
       for (const name of Object.keys(this.state.rules))
         if (!file.rules.some((r) => r.name === name)) delete this.state.rules[name];
+      // A waiting run whose cause doesn't fit its rule's source (a tick for a notice rule) was
+      // never this rule's: a hand-edited record.
+      for (const w of [...this.waits]) {
+        const rule = file.rules.find((x) => x.name === w.rule);
+        if (rule && isNoticeSource(rule.source) !== (w.cause.kind === "notice")) {
+          this.waits.splice(this.waits.indexOf(w), 1);
+          this.deps.log(`trigger ${w.rule}: a waiting run whose cause does not fit the rule was dropped`);
+        }
+      }
       for (const r of file.rules) {
         const st = this.ruleState(r.name);
         if (st.paused && st.paused.rule !== shapeOf(r)) delete st.paused;
@@ -249,7 +284,8 @@ export class TriggerEngine {
     // one; a run that has begun is stopped (§14.10).
     if (!file?.on)
       for (const run of [...this.running]) {
-        if (run.queued) {
+        // A run whose turn has not begun ends without running: refused, its count given back.
+        if (!run.began) {
           run.done = true;
           this.running.delete(run);
           this.end(run.w, "triggers_off");
@@ -301,8 +337,9 @@ export class TriggerEngine {
   }
 
   private ruleState(name: string): RuleState {
-    this.state.rules[name] ??= { history: [] };
-    return this.state.rules[name];
+    // `rules` has no prototype (trigger-state.ts): `constructor` is a name like any other.
+    if (!Object.hasOwn(this.state.rules, name)) this.state.rules[name] = { history: [] };
+    return this.state.rules[name] as RuleState;
   }
 
   // --- one run ------------------------------------------------------------------------
@@ -346,7 +383,7 @@ export class TriggerEngine {
     today.runs++;
     if (key) today.keys.push(key);
     const until = n ? Date.parse(n.expires_at) : (cause as { due: number }).due + TICK_LATE_MS;
-    this.attempt({ rule: name, cause, until, reason: "start_limit", day, key });
+    this.attempt({ rule: name, cause, until, reason: "start_limit", day, key, shape: fingerprint(rule) });
   }
 
   /** Why the rule can't run here now (§14.7 steps 9 to 11), or null. A session that is gone
@@ -355,9 +392,18 @@ export class TriggerEngine {
     if (!this.deps.allowed(rule.folder)) return "folder";
     const harness = isStart(rule.target) ? rule.target.start : parseSessionRef(rule.target.continue)?.harness;
     if (!harness || !this.deps.harnesses().includes(harness)) return "harness";
-    if (!isStart(rule.target) && this.deps.session(rule.target.continue).gone) {
-      this.pause(rule, "gone");
-      return "no_session";
+    if (!isStart(rule.target)) {
+      const look = this.deps.session(rule.target.continue);
+      if (look.gone) {
+        this.pause(rule, "gone");
+        return "no_session";
+      }
+      // The folder the run really uses is the session's: it is the rule's, allowed and over the
+      // floor, or the run is refused (§14.1 `folder`).
+      if (look.folder === null) return "folder";
+      const same = this.deps.sameFolder ?? ((a: string, b: string) => a === b);
+      if (look.folder !== undefined && !(same(look.folder, rule.folder) && this.deps.allowed(look.folder)))
+        return "folder";
     }
     return null;
   }
@@ -421,7 +467,14 @@ export class TriggerEngine {
     const fields = n ? { subject: n.subject, state: n.state } : {};
     let entry: TriggerHistoryLine | null = null;
     let handle: { cancel(): void } | null = null;
-    const running: Running = { rule: w.rule, cancel: () => handle?.cancel(), w, queued: false, done: false };
+    const running: Running = {
+      rule: w.rule,
+      cancel: () => handle?.cancel(),
+      w,
+      queued: false,
+      began: false,
+      done: false,
+    };
     /** The run is over: what waits behind it (the rule's next run) gets its turn. */
     const over = (): boolean => {
       if (running.done) return false;
@@ -435,15 +488,18 @@ export class TriggerEngine {
     };
     this.running.add(running);
     handle = this.deps.run(job, {
-      queued: () => {
-        // Waiting for the headless slot: taken, under the run's own deadline.
+      queued: (why) => {
+        // Handed over and waiting (the session's line, the headless slot): taken, under the
+        // run's own deadline, refused for what it waits for when that passes.
         running.queued = true;
+        w.reason = why;
         if (!w.told) this.tell(w.cause, { outcome: "taken" });
         w.told = true;
       },
       began: (session) => {
         if (running.done) return;
         running.queued = false;
+        running.began = true;
         entry = this.history(w.rule, line(this.deps.now(), "ran", { ...fields, session }));
         this.deps.log(`trigger ${w.rule}: ran in ${session}`);
         this.tell(w.cause, { outcome: "ran", session });
@@ -510,12 +566,17 @@ export class TriggerEngine {
 
   /** A run that was taken and ends without running: what it held of the day goes back. */
   private end(w: Waiting, code: TriggerRefusal): void {
+    this.giveBack(w);
+    this.refuse(w.rule, w.cause, code);
+  }
+
+  /** A run that ends without running gives its count of the day back, and its cooldown key. */
+  private giveBack(w: Waiting): void {
     const st = this.state.rules[w.rule];
     if (st?.today?.day === w.day) {
       st.today.runs = Math.max(0, st.today.runs - 1);
       if (w.key) st.today.keys = st.today.keys.filter((k) => k !== w.key);
     }
-    this.refuse(w.rule, w.cause, code);
   }
 
   private today(name: string, day: string): Today {
@@ -528,6 +589,7 @@ export class TriggerEngine {
   private history(name: string, l: TriggerHistoryLine): TriggerHistoryLine {
     const st = this.ruleState(name);
     st.history = [l, ...st.history].slice(0, HISTORY_KEPT);
+    this.deps.noted?.(name, l);
     this.saved();
     return l;
   }
@@ -536,8 +598,12 @@ export class TriggerEngine {
   private saved(): void {
     const old = new Date(this.deps.now() - HISTORY_MS).toISOString();
     for (const st of Object.values(this.state.rules)) st.history = st.history.filter((l) => l.at >= old);
+    // Written only when something changed: the clock comes round every half minute.
+    const now = JSON.stringify(this.state);
+    if (now === this.lastSaved) return;
     try {
       this.deps.save(this.state);
+      this.lastSaved = now;
     } catch (e) {
       this.deps.log(`couldn't save the triggers' record: ${(e as Error).message}`);
     }
@@ -556,7 +622,13 @@ export class TriggerEngine {
     this.expire();
     for (const w of this.waits.splice(0)) {
       const rule = this.live(w.rule);
-      if (!rule) this.end(w, "triggers_off");
+      // Another rule under the same name meanwhile: this run was not its own. Nothing of it is
+      // written under the new rule; a notice is acked as no rule took it.
+      if (rule && w.shape !== undefined && w.shape !== fingerprint(rule)) {
+        this.deps.log(`trigger ${w.rule}: the rule changed while a run of it waited; the run was dropped`);
+        this.giveBack(w);
+        this.tell(w.cause, { outcome: "no_match" });
+      } else if (!rule) this.end(w, "triggers_off");
       // Still waiting for what it waited for: kept as it is. Only a run that is let go is
       // checked again (steps 9 to 11).
       else if (this.blocked(w, rule)) this.waits.push(w);
@@ -579,11 +651,11 @@ export class TriggerEngine {
       this.end(w, w.reason === "busy" ? BUSY : w.reason);
     }
     // A run still queued for the headless slot at its deadline never began: it is let go.
-    for (const x of [...this.running].filter((y) => y.queued && !y.done && now >= y.w.until)) {
+    for (const x of [...this.running].filter((y) => y.queued && !y.began && !y.done && now >= y.w.until)) {
       x.done = true;
       this.running.delete(x);
       x.cancel();
-      this.end(x.w, "start_limit");
+      this.end(x.w, x.w.reason === "held" ? "held" : "start_limit");
     }
   }
 
@@ -604,14 +676,18 @@ export class TriggerEngine {
     }
   }
 
-  /** The running triggered turns, by rule (for `status`). */
+  /** The running triggered turns, by rule (for `status`): handed over and not waiting there. */
   runningNow(): string[] {
-    return [...this.running].filter((r) => !r.done).map((r) => r.rule);
+    return [...this.running].filter((r) => !r.done && !r.queued).map((r) => r.rule);
   }
 
-  /** The runs that wait, by rule. */
+  /** The runs that wait, by rule: on this engine's list, and handed over but waiting there (in
+   *  the session's line, for the headless slot). */
   waitingNow(): string[] {
-    return this.waits.map((w) => w.rule);
+    return [
+      ...this.waits.map((w) => w.rule),
+      ...[...this.running].filter((r) => !r.done && r.queued).map((r) => r.rule),
+    ];
   }
 
   // --- the clock --------------------------------------------------------------------
@@ -621,7 +697,11 @@ export class TriggerEngine {
    *  late; later it is refused `missed`. Off, a tick is refused `triggers_off`. A paused rule's
    *  tick is nothing. The tick is recorded before anything runs, so a restart never runs it
    *  twice. Then the runs that wait get another look. */
+  /** How many times the clock has come round: what a test waits on, never the wall clock. */
+  checks = 0;
+
   check(): void {
+    this.checks++;
     const now = this.deps.now();
     for (const r of this.rules()) {
       if (isNoticeSource(r.source)) continue;

@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   harnessSession,
+  RULES_MAX_BYTES,
   readRules,
   rulesOf,
   triggerStateFile,
@@ -53,6 +54,10 @@ describe("the rules file", () => {
     const r = readRules(env);
     expect(r.state).toBe("refused");
     expect(rulesOf(r)).toBeNull();
+    // Larger than any honest file: refused whole, never parsed, and read as no rules, off.
+    writeFileSync(triggersFile(env), " ".repeat(RULES_MAX_BYTES + 1));
+    expect(readRules(env)).toEqual({ state: "refused", problems: [`$: larger than ${RULES_MAX_BYTES} bytes`] });
+    expect(rulesOf(readRules(env))).toBeNull();
   });
   it.skipIf(!unix)("one it may not read is refused, and says why", () => {
     writeRules({ v: 1, on: false, rules: [] }, env);
@@ -60,7 +65,7 @@ describe("the rules file", () => {
     const r = readRules(env);
     chmodSync(triggersFile(env), 0o600);
     // A test run as root reads it all the same.
-    if (r.state === "refused") expect(r.problems[0]).toMatch(/^\$: can't be read: /);
+    if (r.state === "refused") expect(r.problems[0]).toMatch(/^\$: can't be read \(E[A-Z]+\)$/);
     else expect(r.state).toBe("ok");
   });
   it.skipIf(!unix)("is written 0600 and renamed into place, nothing left beside it", () => {

@@ -9,7 +9,7 @@
 // "The mode, like the folders, is the person's choice at the machine's own terminal, and no
 // command changes it" (CONTROL.md §2): the same goes for these rules, so every command that
 // changes them refuses inside a harness session (`harnessSession`).
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { checkTriggers, configFile, readTriggers, type TriggersFile, triggerPlaces } from "@sessionpipe/core";
 import { controlState, writePrivate } from "./store.js";
@@ -29,16 +29,33 @@ export type RulesRead =
   | { state: "ok"; file: TriggersFile }
   | { state: "refused"; problems: string[] };
 
+/** The rules file is at most this large: 50 rules of 4 000 characters of words each, every one
+ *  of them written out as a six-byte JSON escape at worst, with every other field at its limit,
+ *  is under 1.3 MB. A larger file is refused whole, never parsed. */
+export const RULES_MAX_BYTES = 2 * 1024 * 1024;
+
 export function readRules(env: NodeJS.ProcessEnv = process.env): RulesRead {
+  return readRulesText(env).read;
+}
+
+/** The rules file as read, and its exact text (null when it is not there): what a command
+ *  compares after the person said `yes`, so a change made meanwhile is never written over. */
+export function readRulesText(env: NodeJS.ProcessEnv = process.env): { read: RulesRead; text: string | null } {
   let text: string;
   try {
+    if (statSync(triggersFile(env)).size > RULES_MAX_BYTES)
+      return { read: { state: "refused", problems: [`$: larger than ${RULES_MAX_BYTES} bytes`] }, text: null };
     text = readFileSync(triggersFile(env), "utf8");
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { state: "none" };
-    return { state: "refused", problems: [`$: can't be read: ${(e as Error).message}`] };
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { read: { state: "none" }, text: null };
+    // The system's own words name the file and why (EACCES, EISDIR): no text from inside it.
+    return {
+      read: { state: "refused", problems: [`$: can't be read (${(e as NodeJS.ErrnoException).code})`] },
+      text: null,
+    };
   }
   const r = readTriggers(text, triggerPlaces(env));
-  return r.ok ? { state: "ok", file: r.file } : { state: "refused", problems: r.problems };
+  return { read: r.ok ? { state: "ok", file: r.file } : { state: "refused", problems: r.problems }, text };
 }
 
 /** The file a machine runs: the rules, or null for none (triggers off). */

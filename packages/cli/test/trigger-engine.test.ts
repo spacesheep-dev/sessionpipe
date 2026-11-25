@@ -259,6 +259,74 @@ describe("one run", () => {
     expect(s.acks.at(-1)).toMatchObject({ id: notice().id, outcome: "refused", code: "folder" });
     expect(s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 0, keys: [] });
   });
+  it("a run that waits meets only its own rule: one changed under the same name drops it, written nowhere", () => {
+    const { e, s, take } = rig();
+    s.room = false;
+    e.load(file(card()));
+    take();
+    expect(e.waitingNow()).toEqual(["card"]);
+    // The same name, other words: the run waited for the rule it was fired for, not this one.
+    e.load(file(card({ words: "Something else." })));
+    s.room = true;
+    e.retry();
+    expect(s.jobs).toHaveLength(0);
+    expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+    expect(lines(s)).toEqual([]);
+    expect(s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 0, keys: [] });
+    expect(s.logs).toContain("trigger card: the rule changed while a run of it waited; the run was dropped");
+    // The same rule as fired: it runs.
+    s.room = false;
+    take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G4N" }));
+    s.room = true;
+    e.retry();
+    expect(s.jobs).toHaveLength(1);
+  });
+  it("a continued session's own folder is the run's: the rule's, and allowed, or refused folder", () => {
+    const { e, s, take } = rig({ session: { held: false, folder: "~/work" } });
+    e.load(file(card({ target: { continue: SID } })));
+    take();
+    expect(s.jobs).toHaveLength(1);
+    s.session = { held: false, folder: "~/elsewhere" };
+    take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G4P", subject: "X-002" }));
+    expect(s.acks.at(-1)).toMatchObject({ outcome: "refused", code: "folder" });
+    s.session = { held: false, folder: null };
+    take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G4R", subject: "X-003" }));
+    expect(s.acks.at(-1)).toMatchObject({ outcome: "refused", code: "folder" });
+    expect(s.jobs).toHaveLength(1);
+  });
+  it("a run waiting in its session's line is taken, and at its deadline is stopped and refused held", () => {
+    const { e, s, take } = rig({ answer: (on) => on.queued("held") });
+    e.load(file(card({ target: { continue: SID } })));
+    take(notice({ expires_at: "2026-11-24T10:00:00.000Z" }));
+    expect(s.acks).toEqual([{ id: notice().id, outcome: "taken" }]);
+    expect(e.waitingNow()).toEqual(["card"]);
+    s.now = Date.parse("2026-11-24T10:00:00.000Z");
+    e.expire();
+    expect(s.cancelled).toBe(1);
+    expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "refused", code: "held" });
+    expect(s.saved?.rules.card?.today?.runs).toBe(0);
+  });
+  it("a waiting run whose cause does not fit its rule's source is dropped when read", () => {
+    const { e, s } = rig({
+      saved: {
+        v: 1,
+        rules: {},
+        waiting: [
+          {
+            rule: "card",
+            cause: { kind: "tick", due: T0 - 60_000 },
+            until: T0 + 3600_000,
+            reason: "held",
+            day: "2026-11-24",
+            key: null,
+          },
+        ],
+      },
+    });
+    e.load(file(card()));
+    expect(e.waitingNow()).toEqual([]);
+    expect(s.logs).toContain("trigger card: a waiting run whose cause does not fit the rule was dropped");
+  });
   it("a clock rule's run is acked to nobody", () => {
     const { e, s } = rig({ answer: (on) => on.refused("folder", "no") });
     e.load(file(card({ source: { every: "day 09:00" }, words: "Go." })));
@@ -328,11 +396,12 @@ describe("one run", () => {
     first.refused("held", "late");
   });
   it("a run queued for the headless slot is taken; at its deadline it is stopped and refused start_limit", () => {
-    const { e, s, take } = rig({ answer: (on) => on.queued() });
+    const { e, s, take } = rig({ answer: (on) => on.queued("start_limit") });
     e.load(file(card({ target: { continue: SID } })));
     take(notice({ expires_at: "2026-11-24T10:00:00.000Z" }));
     expect(s.acks).toEqual([{ id: notice().id, outcome: "taken" }]);
-    expect(e.runningNow()).toEqual(["card"]);
+    expect(e.runningNow()).toEqual([]);
+    expect(e.waitingNow()).toEqual(["card"]);
     s.now = Date.parse("2026-11-24T10:00:00.000Z");
     e.expire();
     expect(s.cancelled).toBe(1);

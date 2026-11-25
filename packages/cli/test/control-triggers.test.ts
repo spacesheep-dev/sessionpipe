@@ -59,17 +59,38 @@ const until = async (ok: () => boolean, ms = 8000) => {
   throw new Error("waited too long");
 };
 
-function writeFake(slow = 0): void {
+/** The stand-in `claude`. It logs how it was run; `slow` makes its turn take that long. A
+ *  triggered run (SESSIONPIPE_TRIGGERED_BY in its environment) may also, as `act` says: raise a
+ *  permission prompt over the daemon's socket as Claude Code's hook does, and answer from what
+ *  came back (`permission`); or ask another agent from its own environment (`ask`). */
+function writeFake(slow = 0, act: "permission" | "ask" | null = null): void {
   writeFileSync(
     fakeClaude,
     `#!/usr/bin/env node
-const fs = require("fs");
+const fs = require("fs"), net = require("net");
 const a = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ argv: a, cwd: process.cwd(),
-  triggered_by: process.env.SESSIONPIPE_TRIGGERED_BY || null, asked_by: process.env.SESSIONPIPE_ASKED_BY || null }) + "\\n");
+const log = (o) => fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(o) + "\\n");
+log({ argv: a, cwd: process.cwd(), triggered_by: process.env.SESSIONPIPE_TRIGGERED_BY || null, asked_by: process.env.SESSIONPIPE_ASKED_BY || null });
 const i = a.indexOf("--resume"), j = a.indexOf("--session-id");
 const sid = i >= 0 ? a[i + 1] : j >= 0 ? a[j + 1] : "x";
-setTimeout(() => process.stdout.write(JSON.stringify({ type: "result", result: "done", session_id: sid, is_error: false })), ${slow});
+const done = (result) => setTimeout(() => process.stdout.write(JSON.stringify({ type: "result", result, session_id: sid, is_error: false })), ${slow});
+const act = process.env.SESSIONPIPE_TRIGGERED_BY ? ${JSON.stringify(act)} : null;
+const talk = (req, ms, then) => {
+  const c = net.connect(${JSON.stringify(sock)}); let got = "";
+  c.on("data", (b) => { got += b; }); c.on("error", () => then(null));
+  c.write(JSON.stringify(req) + "\\n");
+  setTimeout(() => { c.destroy(); then(got || null); }, ms);
+};
+if (act === "permission")
+  talk({ op: "permission", session: "claude-code:" + sid, attention: "perm-1", tool: "Bash" }, 1500, (got) => {
+    const reply = got && got.includes("allow") ? "ran Bash" : "denied: Bash (git push), which needs a person's approval";
+    log({ permission_answer: got, reply });
+    done(reply);
+  });
+else if (act === "ask")
+  talk({ op: "ask", harness: "claude-code", text: "check this", cwd: process.cwd(), from: "claude-code:" + sid,
+    chain: (process.env.SESSIONPIPE_ASK_CHAIN || "").split(",").filter(Boolean) }, 4000, (got) => { log({ asked: got }); done("asked"); });
+else done("done");
 `,
   );
   chmodSync(fakeClaude, 0o755);
@@ -191,35 +212,35 @@ describe.skipIf(!unix)("trigger runs, through the ask path", () => {
       result: "ran",
       session: expect.stringMatching(/^claude-code:/),
     });
-    expect(d?.status().triggers).toEqual({ on: true, rules: 1, paused: 0, waiting: 0, running: 0 });
-    // The same tick is never run twice: not by the clock coming round, not after a restart.
+    expect(d?.status().triggers).toMatchObject({ on: true, rules: 1, paused: 0, waiting: 0, running: 0 });
+    // The same tick is never run twice: not by the clock coming round, not after a restart. The
+    // engine is waited on (its clock coming round twice more), never the wall clock.
     await d?.stop();
     await startDaemon();
-    await new Promise((res) => setTimeout(res, 200));
+    const at = d?.status().triggers?.checks ?? 0;
+    await until(() => (d?.status().triggers?.checks ?? 0) >= at + 2);
     expect(runs()).toHaveLength(1);
   });
 
-  it("on a safe machine the same rule runs at safe; a triggered session's own ask is an ask, safe at most", async () => {
+  it("on a safe machine the same rule runs at safe; the triggered session's own ask is an ask, safe at most", async () => {
+    // The triggered run asks another agent itself, from its own environment, as a session does.
+    writeFake(0, "ask");
     file = { v: 1, on: true, rules: [rule({ source: { every: "day 09:00" } })] };
-    await startDaemon({ mode: "safe" });
+    await startDaemon({ mode: "auto" });
     // The rule is first seen at 09:00:10: its first tick is tomorrow's.
     clock = MON_0900 + 24 * 3600_000;
-    await until(() => runs().length === 1);
-    expect(runs()[0]?.argv).toContain("dontAsk");
-    expect(runs()[0]?.argv).not.toContain("acceptEdits");
-    // An ask, from the session that rule started: nothing of the trigger carries over.
-    const replies: LocalReply[] = [];
-    await askMany(
-      sock,
-      { op: "ask", harness: "claude-code", text: "check this", cwd: project, chain: [], from: `claude-code:${SID}` },
-      (x) => replies.push(x),
-      8000,
-    );
-    expect(replies.at(-1)).toMatchObject({ op: "answer" });
-    const asked = runs()[1] as Run;
+    await until(() => runs().length === 2);
+    const [triggered, asked] = runs() as [Run, Run];
+    expect(triggered.triggered_by).toBe("monday-report");
+    expect(triggered.argv).toContain("acceptEdits");
+    const sid = triggered.argv[triggered.argv.indexOf("--session-id") + 1];
+    // The ask: safe at most on this auto machine, no trigger mark, asked by the triggered session.
     expect(asked.argv).toContain("dontAsk");
+    expect(asked.argv.join(" ")).not.toContain("mcp__board");
     expect(asked.triggered_by).toBeNull();
-    expect(asked.asked_by).toBe(`claude-code:${SID}`);
+    expect(asked.asked_by).toBe(`claude-code:${sid}`);
+    await until(() => jsonLines<{ asked?: string }>(calls).some((x) => x.asked));
+    expect(jsonLines<{ asked?: string }>(calls).find((x) => x.asked)?.asked).toContain('"op":"answer"');
   });
 
   it("a rule that continues a session waits while a window holds it, then resumes it in place, never a copy", async () => {
@@ -280,27 +301,27 @@ describe.skipIf(!unix)("trigger runs, through the ask path", () => {
     expect(logs.some((l) => l.includes("trigger rules changed"))).toBe(true);
   });
 
-  it("nothing answers a permission prompt a triggered run raises", async () => {
-    writeFake(1500);
+  it("nothing answers a permission prompt a triggered run raises: it is denied, and the reply says what", async () => {
+    // The stand-in raises the prompt itself, mid-turn, as Claude Code's PermissionRequest hook
+    // does, and answers from what comes back: an allow from anywhere would show here.
+    writeFake(0, "permission");
     file = { v: 1, on: true, rules: [rule({ source: { every: "day 09:00" } })] };
     await startDaemon();
     clock = MON_0900 + 24 * 3600_000;
-    await until(() => runs().length === 1);
-    const session = runs()[0]?.argv[(runs()[0]?.argv.indexOf("--session-id") ?? 0) + 1] as string;
-    const said: string[] = [];
-    const hook = net.connect(sock);
-    hook.on("data", (b) => said.push(b.toString()));
-    hook.write(
-      `${JSON.stringify({ op: "permission", session: `claude-code:${session}`, attention: "perm-1", tool: "Bash" })}\n`,
+    await until(() => jsonLines<{ permission_answer?: string | null }>(calls).some((x) => "permission_answer" in x));
+    const answer = jsonLines<{ permission_answer?: string | null; reply?: string }>(calls).find(
+      (x) => "permission_answer" in x,
     );
-    await new Promise((r) => setTimeout(r, 2500));
-    expect(said).toEqual([]);
-    hook.destroy();
+    expect(answer?.permission_answer ?? "").not.toContain("allow");
+    expect(answer?.reply).toBe("denied: Bash (git push), which needs a person's approval");
+    await until(() => logs.some((l) => /ack \S+ delivered/.test(l)));
+    expect(logs.some((l) => l.includes("allow"))).toBe(false);
   });
 
-  it("through the Agent SDK: a session it holds is continued only at no wider a level than it was opened with", async () => {
+  it("through the Agent SDK: no turn runs with another cause's tools, level or mark, either way", async () => {
     const opened: { session: string; permission: string; allowedTools?: string[]; env?: Record<string, string> }[] = [];
     const sent: string[] = [];
+    let closed = 0;
     let slow = false;
     let interrupted = 0;
     const sdk: SdkHost = {
@@ -313,44 +334,98 @@ describe.skipIf(!unix)("trigger runs, through the ask path", () => {
           send: async (text: string) => {
             s.busy = true;
             sent.push(text);
-            if (slow) await new Promise((r) => setTimeout(r, 1500));
+            if (slow) await until(() => interrupted > 0 || !slow, 20_000);
             s.busy = false;
             return { reply: "done" };
           },
           interrupt: async () => {
             interrupted++;
           },
-          close: () => {},
+          close: () => {
+            closed++;
+          },
         };
         return s;
       },
     };
-    file = { v: 1, on: true, rules: [rule({ name: "a", source: { every: "day 09:00" } })] };
+    const day = (name: string, over: Partial<TriggerRule> = {}) =>
+      rule({ name, source: { every: "day 09:00" }, ...over });
+    const next = () => {
+      d?.reloadRules();
+      clock += 24 * 3600_000;
+    };
+    file = { v: 1, on: true, rules: [day("a")] };
     await startDaemon({ extra: { sdk } });
-    clock = MON_0900 + 24 * 3600_000;
-    await until(() => sent.length === 1);
+    clock += 24 * 3600_000;
+    await until(() => closed === 1);
     expect(opened[0]).toMatchObject({
       permission: "edits",
       allowedTools: ["mcp__board"],
       env: { SESSIONPIPE_TRIGGERED_BY: "a" },
     });
-    const held = `claude-code:${opened[0]?.session}`;
-    const b = rule({ name: "b", source: { every: "day 09:00" }, target: { continue: held }, level: "safe" });
-    file = { v: 1, on: true, rules: [rule({ name: "a", source: { every: "day 09:00" }, paused: true }), b] };
-    d?.reloadRules();
-    clock += 24 * 3600_000;
-    await until(() => d?.status().triggers?.waiting === 1);
+    // Rule a's session was closed with its turn. Rule b continues it at its own level, tools
+    // and mark: a cold resume (claude -p), never a send into a's session.
+    const aSession = `claude-code:${opened[0]?.session}`;
+    file = { v: 1, on: true, rules: [day("b", { target: { continue: aSession }, level: "safe", tools: [] })] };
+    next();
+    await until(() => runs().length === 1);
     expect(sent).toHaveLength(1);
-    // At the level it was opened with, it goes through the held session.
-    file = { v: 1, on: true, rules: [file.rules[0] as TriggerRule, { ...b, level: "edits" }] };
+    const b = runs()[0] as Run;
+    expect(b.argv).toContain("--resume");
+    expect(b.argv).toContain("dontAsk");
+    expect(b.argv.join(" ")).not.toContain("mcp__board");
+    expect(b.triggered_by).toBe("b");
+    // While rule c's own turn runs in a session it opened, an ask into that session is not sent
+    // there; once c's turn is over, the ask resumes it cold, at safe, with no tools and no mark.
     slow = true;
-    d?.reloadRules();
+    file = { v: 1, on: true, rules: [day("c")] };
+    next();
     await until(() => sent.length === 2);
-    expect(sent[1]?.startsWith("Sent by trigger b (sessionpipe trigger).")).toBe(true);
-    // Turned off mid-turn: the held session is interrupted.
+    await until(() => record().rules.c?.history[0]?.result === "ran");
+    const cSession = `claude-code:${opened[1]?.session}`;
+    const during = await ask(
+      sock,
+      { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [], session: cSession },
+      4000,
+    );
+    expect(during).toMatchObject({ op: "failed", detail: expect.stringContaining("for its own turn") });
+    expect(sent).toHaveLength(2);
+    // Turned off mid-turn: the held session is interrupted, and the run keeps its count.
     file = { ...file, on: false };
     d?.reloadRules();
     expect(interrupted).toBe(1);
+    await until(() => closed === 2);
+    expect(record().rules.c?.today?.runs).toBe(1);
+    slow = false;
+    const after: LocalReply[] = [];
+    await askMany(
+      sock,
+      { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [], session: cSession },
+      (x) => after.push(x),
+      8000,
+    );
+    expect(after.at(-1)).toMatchObject({ op: "answer" });
+    const asked = runs().at(-1) as Run;
+    expect(asked.argv).toContain("dontAsk");
+    expect(asked.argv.join(" ")).not.toContain("mcp__board");
+    expect(asked.triggered_by).toBeNull();
+    expect(sent).toHaveLength(2);
+    // A session someone else opened (an ask) and the daemon holds: a rule's turn never goes into
+    // it. It waits, as for a window, and nothing is sent.
+    const opener: LocalReply[] = [];
+    await askMany(
+      sock,
+      { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [] },
+      (x) => opener.push(x),
+      8000,
+    );
+    expect(sent).toHaveLength(3);
+    const askSession = `claude-code:${opened[2]?.session}`;
+    expect(opened[2]?.env?.SESSIONPIPE_TRIGGERED_BY).toBeUndefined();
+    file = { v: 1, on: true, rules: [day("d", { target: { continue: askSession } })] };
+    next();
+    await until(() => d?.status().triggers?.waiting === 1);
+    expect(sent).toHaveLength(3);
   });
 
   it("Codex: a session continued runs at the level its start recorded, and waits while Codex has the thread locked", async () => {
@@ -459,7 +534,8 @@ out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
     };
     await startDaemon({ limits: { headless: 1 } });
     clock = MON_0900 + 24 * 3600_000;
-    await until(() => runs().length === 1 && d?.status().triggers?.running === 2);
+    await until(() => runs().length === 1 && d?.status().triggers?.running === 1);
+    expect(d?.status().triggers?.waiting).toBe(1);
     // One has the slot and runs; the other is handed over and waits for it.
     const first = Object.entries(record().rules)
       .filter(([, st]) => st.history.length)
@@ -467,5 +543,194 @@ out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
     expect(first).toHaveLength(1);
     await until(() => runs().length === 2);
     await until(() => Object.values(record().rules).every((st) => st.history[0]?.result === "ran"));
+  });
+
+  it("a continue rule waiting in its session's line, behind another turn, is a waiting run: off drops it", async () => {
+    writeFake(1500);
+    transcript(SID);
+    file = {
+      v: 1,
+      on: true,
+      rules: [rule({ name: "cont", source: { every: "day 09:00" }, target: { continue: `claude-code:${SID}` } })],
+    };
+    await startDaemon();
+    // An ask into the same session: a turn the daemon runs itself, so the session's line is taken.
+    const replies: LocalReply[] = [];
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      (x) => replies.push(x),
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    expect(d?.status().triggers).toMatchObject({ waiting: 1, running: 0 });
+    expect(record().rules.cont?.today?.runs).toBe(1);
+    file = { ...file, on: false };
+    d?.reloadRules();
+    expect(d?.status().triggers).toMatchObject({ waiting: 0, running: 0 });
+    expect(record().rules.cont?.history[0]).toMatchObject({ result: "refused", code: "triggers_off" });
+    expect(record().rules.cont?.today?.runs).toBe(0);
+    await asking;
+    expect(replies.at(-1)).toMatchObject({ op: "answer" });
+    // The session's line is free again, and the run it held never comes.
+    const at = d?.status().triggers?.checks ?? 0;
+    await until(() => (d?.status().triggers?.checks ?? 0) >= at + 2);
+    expect(runs().map((r) => r.triggered_by)).toEqual([null]);
+  });
+
+  it("a window that takes the session while the run waits in its line: the run waits again, for the window", async () => {
+    writeFake(1000);
+    transcript(SID);
+    file = {
+      v: 1,
+      on: true,
+      rules: [rule({ name: "cont", source: { every: "day 09:00" }, target: { continue: `claude-code:${SID}` } })],
+    };
+    await startDaemon();
+    const replies: LocalReply[] = [];
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      (x) => replies.push(x),
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    // A window opens the session while the run waits behind the ask.
+    holds(SID);
+    await asking;
+    await until(() => logs.some((l) => l.includes("trigger cont: the daemon said no (held)")));
+    expect(d?.status().triggers).toMatchObject({ waiting: 1, running: 0 });
+    expect(runs()).toHaveLength(1);
+    rmSync(path.join(configDir, "sessions", `${process.pid}.json`));
+    await until(() => runs().length === 2);
+    expect(runs()[1]?.triggered_by).toBe("cont");
+    expect(runs()[1]?.argv).not.toContain("--fork-session");
+  });
+
+  it("a session that goes while the run waits in its line: refused no_session, and the rule paused", async () => {
+    writeFake(1000);
+    transcript(SID);
+    file = {
+      v: 1,
+      on: true,
+      rules: [rule({ name: "cont", source: { every: "day 09:00" }, target: { continue: `claude-code:${SID}` } })],
+    };
+    await startDaemon();
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      () => {},
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    rmSync(path.join(configDir, "projects"), { recursive: true });
+    await asking;
+    await until(() => record().rules.cont?.history[0]?.code === "no_session");
+    expect(record().rules.cont?.paused).toMatchObject({ code: "no_session", why: "gone" });
+    expect(runs()).toHaveLength(1);
+  });
+
+  it("a continue rule runs in its session's folder only when that is the rule's, allowed and over the floor", async () => {
+    // The session's folder is not the rule's: refused folder, nothing runs.
+    const sub = path.join(project, "sub");
+    mkdirSync(sub);
+    transcript(SID, sub);
+    const cont = (folder: string) =>
+      rule({ name: "cont", source: { every: "day 09:00" }, target: { continue: `claude-code:${SID}` }, folder });
+    file = { v: 1, on: true, rules: [cont(project)] };
+    await startDaemon();
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => record().rules.cont?.history.length === 1);
+    expect(record().rules.cont?.history[0]).toMatchObject({ result: "refused", code: "folder" });
+    // The session's folder is the rule's and allowed, but lies inside the harness's own folder.
+    await d?.stop();
+    rmSync(path.join(tmp, "state"), { recursive: true });
+    const inside = path.join(configDir, "work");
+    mkdirSync(inside);
+    rmSync(path.join(configDir, "projects"), { recursive: true });
+    transcript(SID, inside);
+    file = { v: 1, on: true, rules: [cont(inside)] };
+    clock = MON_0900;
+    await startDaemon({ extra: {} });
+    d?.reload({ name: "studio-mac", folders: [project, inside], mode: "auto", receivers: [] });
+    d?.reloadRules();
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => record().rules.cont?.history.length === 1);
+    expect(record().rules.cont?.history[0]).toMatchObject({ result: "refused", code: "folder" });
+    expect(runs()).toHaveLength(0);
+  });
+
+  it("a rule named constructor is a rule like any other: it ticks, runs, is recorded and survives a restart", async () => {
+    const CTOR: string = "constructor";
+    file = { v: 1, on: true, rules: [rule({ name: "constructor", source: { every: "day 09:00" } })] };
+    await startDaemon();
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => typeof record().rules[CTOR]?.history[0]?.ms === "number");
+    expect(runs()[0]?.triggered_by).toBe("constructor");
+    expect(Object.keys(record().rules)).toEqual(["constructor"]);
+    await d?.stop();
+    await startDaemon();
+    const at = d?.status().triggers?.checks ?? 0;
+    await until(() => (d?.status().triggers?.checks ?? 0) >= at + 2);
+    expect(runs()).toHaveLength(1);
+    expect(d?.status().triggers).toMatchObject({ on: true, rules: 1, waiting: 0 });
+    expect(record().rules[CTOR]?.today?.runs).toBe(1);
+  });
+
+  it("a triggers' record of any wrong shape never stops the daemon: it starts and answers an ask", async () => {
+    const dir = path.join(tmp, "state", "control");
+    const shapes: string[] = [
+      "not json",
+      "[]",
+      "null",
+      '"v1"',
+      JSON.stringify({ v: 2, rules: {}, waiting: [] }),
+      JSON.stringify({ v: 1, rules: { "monday-report": { history: {} } }, waiting: [] }),
+      JSON.stringify({ v: 1, rules: [], waiting: {} }),
+      JSON.stringify({ v: 1, rules: { constructor: null, __proto__: { history: [] } }, waiting: [null, 1, "x"] }),
+      JSON.stringify({
+        v: 1,
+        rules: { "monday-report": { history: [{ at: 5 }], today: { day: "x", runs: -9 }, clock: { since: "y" } } },
+        waiting: [{ rule: "monday-report", cause: { kind: "tick", due: "z" }, until: 1e99, reason: "held" }],
+      }),
+      " ".repeat(4 * 1024 * 1024 + 1),
+    ];
+    // And a rules file no reader would have let through: the engine throws, the daemon goes on.
+    mkdirSync(dir, { recursive: true });
+    file = { v: 1, on: true, rules: [{ name: "x" } as never] };
+    await startDaemon();
+    expect(logs.some((l) => /^trigger rules: .+; the rest of this computer goes on$/.test(l))).toBe(true);
+    const first: LocalReply[] = [];
+    await askMany(
+      sock,
+      { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [] },
+      (x) => first.push(x),
+      8000,
+    );
+    expect(first.at(-1)).toMatchObject({ op: "answer" });
+    file = { v: 1, on: true, rules: [rule({ source: { every: "day 09:00" } })] };
+    for (const shape of shapes) {
+      // The one before stopped first: afterEach stops the last.
+      await d?.stop();
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "triggers-state.json"), shape);
+      clock = MON_0900;
+      await startDaemon();
+      const replies: LocalReply[] = [];
+      await askMany(
+        sock,
+        { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [] },
+        (x) => replies.push(x),
+        8000,
+      );
+      expect(replies.at(-1), shape.slice(0, 60)).toMatchObject({ op: "answer" });
+      expect(d?.status().triggers, shape.slice(0, 60)).toMatchObject({ on: true, rules: 1, waiting: 0 });
+    }
   });
 });
