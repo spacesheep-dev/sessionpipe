@@ -112,7 +112,16 @@
                 "code": "cap"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-003",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -161,6 +170,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-003",
+                "state": "todo"
               }
             ]
           }

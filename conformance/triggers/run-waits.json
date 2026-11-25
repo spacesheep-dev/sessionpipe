@@ -132,6 +132,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-review"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -266,6 +274,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -369,7 +385,16 @@
             "paused": [
               "card-review"
             ],
-            "hello": true
+            "hello": true,
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "refused",
+                "code": "no_session",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -515,7 +540,16 @@
                 "code": "held"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "refused",
+                "code": "held",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]
@@ -646,6 +680,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }
@@ -787,6 +829,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-review"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -908,7 +958,16 @@
                 "code": "start_limit"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "refused",
+                "code": "start_limit",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -962,6 +1021,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-review"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "ran",
+                "subject": "X-152",
+                "state": "todo"
               }
             ]
           }
@@ -1094,6 +1161,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-153",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -1127,6 +1202,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-154",
+                "state": "todo"
               }
             ]
           }
@@ -1260,6 +1343,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-155",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -1273,7 +1364,16 @@
                 "code": "busy"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "busy",
+                "subject": "X-156",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -1329,6 +1429,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-157",
+                "state": "todo"
               }
             ]
           }
@@ -1428,7 +1536,16 @@
                 "code": "folder"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "folder",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]
@@ -1546,7 +1663,16 @@
                 "code": "cap"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-136",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -1577,6 +1703,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-135",
+                "state": "todo"
               }
             ]
           }
@@ -1693,7 +1827,16 @@
                 "code": "start_limit"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "start_limit",
+                "subject": "X-137",
+                "state": "todo"
+              }
+            ]
           }
         },
         {
@@ -1750,6 +1893,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-138",
+                "state": "todo"
               }
             ]
           }
@@ -1880,7 +2031,16 @@
                 "code": "folder"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "refused",
+                "code": "folder",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]
@@ -1977,7 +2137,16 @@
                 "code": "harness"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "harness",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]

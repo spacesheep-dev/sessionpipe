@@ -9,7 +9,7 @@
 // the daemon's tests run the same files against the daemon. What neither checks here is listed in
 // conformance/README.md: a clock in another time zone, a restart while a run waits, and a
 // permission prompt left unanswered (the files say what must happen; only a daemon can show it).
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,9 @@ import type { ControlNotice, MachineMode, StartPermission, TriggerRule, Triggers
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dir = path.join(root, "conformance/triggers");
 const read = (f: string) => JSON.parse(readFileSync(path.join(dir, f), "utf8"));
+/** `SESSIONPIPE_WRITE_TRIGGER_HISTORY=1`: write each step's history as this model reads it into
+ *  the files (as `npm run vectors` writes the control vectors), for a person to review in the diff. */
+const WRITE = process.env.SESSIONPIPE_WRITE_TRIGGER_HISTORY === "1";
 const PURE = new Set(["subject-patterns.json", "rules-file.json"]);
 const scenarios = readdirSync(dir)
   .filter((f) => f.endsWith(".json") && !PURE.has(f))
@@ -51,6 +54,9 @@ interface History {
   rule: string;
   result: string;
   code?: string;
+  /** A notice's run or refusal: its subject, and its state when it had one. */
+  subject?: string;
+  state?: string;
 }
 interface Machine {
   mode: MachineMode;
@@ -252,12 +258,16 @@ function runCase(c: Case) {
       } else headless++;
       stillRunning.add(triggered.push(r) - 1);
       if (id) acks.push({ id, outcome: "ran", session: ref(r) ?? `${harnessOf(r)}:*` });
-      else history.push({ rule: r.name, result: "ran" });
+      history.push({ rule: r.name, result: "ran", ...of(n) });
     };
-    const refuse = (w: { id?: string; rule: TriggerRule }, code: string) =>
-      w.id
-        ? acks.push({ id: w.id, outcome: "refused", code })
-        : history.push({ rule: w.rule.name, result: "refused", code });
+    /** A notice's subject and state, as its rule's history keeps them. */
+    const of = (n: ControlNotice | undefined) =>
+      n ? { subject: n.subject, ...(n.state !== undefined ? { state: n.state } : {}) } : {};
+    /** Every run and refusal of a rule that took the cause goes to its history (§14.10). */
+    const refuse = (w: { id?: string; rule: TriggerRule; notice?: ControlNotice }, code: string) => {
+      if (w.id) acks.push({ id: w.id, outcome: "refused", code });
+      history.push({ rule: w.rule.name, result: "refused", code, ...of(w.notice) });
+    };
     /** Steps 9 to 11 (CONTROL.md §14.7), at a run's first check and again when it is let go. */
     const recheck = (r: TriggerRule): string | null => {
       if (!allowed(r.folder)) return "folder";
@@ -378,15 +388,15 @@ function runCase(c: Case) {
         // One (rule, subject, state) a day: two notices with no state are the same state.
         const today = counted.filter((x) => x.rule === rule.name && x.day === day(now));
         if (today.some((x) => x.subject === n.subject && x.state === n.state)) {
-          acks.push({ id, outcome: "refused", code: "cooldown" });
+          refuse({ id, rule, notice: n }, "cooldown");
           continue;
         }
         if (today.length >= rule.cap.per_day) {
-          acks.push({ id, outcome: "refused", code: "cap" });
+          refuse({ id, rule, notice: n }, "cap");
           continue;
         }
         const why = recheck(rule);
-        if (why) acks.push({ id, outcome: "refused", code: why });
+        if (why) refuse({ id, rule, notice: n }, why);
         else take({ key, id, rule, notice: n }, Date.parse(n.expires_at));
       }
       const past = (s.poll.body.notices ?? []).slice(50).map((n) => (n as { id: string }).id);
@@ -420,7 +430,10 @@ function runCase(c: Case) {
 
     expect(byId(s.expect.acks ?? []), `${where}: acks`).toEqual(byId(acks));
     expect(s.expect.runs ?? [], `${where}: runs`).toEqual(runs);
-    expect(s.expect.history ?? [], `${where}: history`).toEqual(history);
+    if (WRITE) {
+      if (history.length) s.expect.history = history;
+      else delete s.expect.history;
+    } else expect(s.expect.history ?? [], `${where}: history`).toEqual(history);
     expect(s.expect.paused ?? [], `${where}: paused`).toEqual(paused);
     expect(s.expect.cancelled, `${where}: cancelled`).toEqual(cancelled);
     // A hello goes at once when what some receiver's `triggers` says changes, and not otherwise.
@@ -459,6 +472,7 @@ describe("conformance/triggers: the scenario files", () => {
       expect(fx.spec).toMatch(/^CONTROL\.md §14/);
       expect(fx.note.length).toBeGreaterThan(40);
       for (const c of fx.cases) runCase(c);
+      if (WRITE) writeFileSync(path.join(dir, f), `${JSON.stringify(fx, null, 2)}\n`);
     });
   }
 });

@@ -210,6 +210,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -326,7 +334,16 @@
                 "code": "held"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "refused",
+                "code": "held",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]
@@ -440,7 +457,16 @@
                 "code": "start_limit"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "start_limit",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]

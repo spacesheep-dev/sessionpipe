@@ -67,6 +67,8 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
  *  and never under schemas/v1: nothing published says a machine-local file is the wire. */
 export const CONFIG_SCHEMAS: Readonly<Record<string, string>> = {
   triggers: "TriggersFile",
+  "trigger-list": "TriggerList",
+  "trigger-test": "TriggerTestAnswer",
 };
 
 type Schema = Record<string, unknown>;

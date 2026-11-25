@@ -439,6 +439,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-124",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -495,6 +503,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-125",
+                "state": "todo"
               }
             ]
           }
@@ -679,6 +695,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-122",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -731,7 +755,16 @@
             "cancelled": [
               0
             ],
-            "hello": true
+            "hello": true,
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "triggers_off",
+                "subject": "X-123",
+                "state": "todo"
+              }
+            ]
           }
         },
         {

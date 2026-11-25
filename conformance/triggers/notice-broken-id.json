@@ -160,6 +160,14 @@
             ],
             "message_acks": [
               "01KB4M2Q8V3T6Y9C0D1E2F3G4H"
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-010",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -1082,6 +1090,329 @@
             "unacked": [
               "01KB4M2Q8V3T6Y9C0D1E2F007T",
               "01KB4M2Q8V3T6Y9C0D1E2F007V"
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-100",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-105",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-106",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-107",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-108",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-109",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-110",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-111",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-112",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-113",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-114",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-115",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-116",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-117",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-118",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-119",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-120",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-121",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-122",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-123",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-124",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-125",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-126",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-127",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-128",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-129",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-130",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-131",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-132",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-133",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-134",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-135",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-136",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-137",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-138",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-139",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-140",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-141",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-142",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-143",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-144",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-145",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-146",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-147",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-148",
+                "state": "todo"
+              },
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cap",
+                "subject": "X-149",
+                "state": "todo"
+              }
             ]
           }
         }

@@ -114,6 +114,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -146,7 +154,16 @@
                 "code": "cooldown"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cooldown",
+                "subject": "X-001",
+                "state": "todo"
+              }
+            ]
           }
         }
       ]
@@ -264,6 +281,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         },
@@ -320,6 +345,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "review"
               }
             ]
           }
@@ -434,6 +467,13 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001"
+              }
             ]
           }
         },
@@ -465,7 +505,15 @@
                 "code": "cooldown"
               }
             ],
-            "runs": []
+            "runs": [],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "refused",
+                "code": "cooldown",
+                "subject": "X-001"
+              }
+            ]
           }
         }
       ]
@@ -590,6 +638,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }

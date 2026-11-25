@@ -113,6 +113,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -228,6 +236,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }
@@ -345,6 +361,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -460,6 +484,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }
@@ -582,6 +614,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-review"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-review",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }
@@ -893,6 +933,14 @@
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
               }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
+              }
             ]
           }
         }
@@ -1008,6 +1056,14 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
+              }
+            ],
+            "history": [
+              {
+                "rule": "card-todo",
+                "result": "ran",
+                "subject": "X-001",
+                "state": "todo"
               }
             ]
           }

@@ -180,8 +180,9 @@
   (`{ id, outcome, code?, session? }`, the machine's clock aside; `"<harness>:*"` is a session the
   run made), `runs` (`{ rule, run, env }`, `run` being `config.proto`'s `TriggerRun` and `env` what
   the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
-  `history` (`{ rule, result, code? }`, lines a rule's history gains; `result` is `ran`,
-  `refused`, `failed` or `missed`), and `unacked` (ids past the fiftieth), `cancelled` (the
+  `history` (`{ rule, result, code?, subject?, state? }`, lines a rule's history gains, every
+  run and refusal of a rule that took the cause, a notice's with its subject and state; `result`
+  is `ran`, `refused`, `failed` or `missed`), and `unacked` (ids past the fiftieth), `cancelled` (the
   indexes, in the case's order, of the triggered runs a `triggers off` cancels), `paused` (rules
   the machine paused), `message_acks` (the poll's messages, which the command path acks) and
   `answered_by_machine` where a case says them. An absent list means none, and `hello` absent
