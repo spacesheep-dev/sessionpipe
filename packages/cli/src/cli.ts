@@ -70,6 +70,7 @@ import {
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
 import { placeService } from "./control/pair.js";
+import { type RulesRead, readRules, rulesOf } from "./control/rules-file.js";
 import {
   controlFile,
   controlState,
@@ -94,7 +95,7 @@ import { binTarget, remove, same } from "./reinstall/ours.js";
 import { found, leftAlone, planned, usedBy } from "./reinstall/page.js";
 import { cutOff, type Facts, idle, plan, slotIn, twins, typedAs, typing } from "./reinstall/plan.js";
 import { carryOut } from "./reinstall/run.js";
-import { brief, type Group, inOrder, page, type Todo, verdict } from "./report.js";
+import { brief, type Group, inOrder, page, type Row, type Todo, verdict } from "./report.js";
 import {
   atRest,
   buildSinks,
@@ -136,7 +137,7 @@ import {
   tint,
   type Ui,
 } from "./style.js";
-import { defaultTriggerDeps, triggerMain } from "./triggers.js";
+import { defaultTriggerDeps, readRecord, triggerMain } from "./triggers.js";
 import {
   execCapture,
   globalPrefix,
@@ -1318,7 +1319,8 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   const live = await serviceStatus();
   const health = controlHealth(live);
   report.control = health;
-  const wanted = !!control?.receivers.length || poolCfg.on || control?.ask === true;
+  const rules = readRules();
+  const wanted = !!control?.receivers.length || poolCfg.on || control?.ask === true || !!rulesOf(rules)?.on;
   if (health && !health.running)
     warnings.push("the control daemon is not running or not responding; polling is stopped");
   // The copy the service's file names: the same one a person types, or another install.
@@ -1388,6 +1390,14 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       label: "background service",
       value: "not set up: nothing here needs it yet",
     });
+
+  // --- the person's trigger rules (CONTROL.md §14): a line once there is a rules file ------
+  const triggers = triggersRow(rules);
+  if (triggers) {
+    computer.rows.push(triggers.row);
+    report.triggers = triggers.report;
+    if (triggers.todo) todo.push(triggers.todo);
+  }
 
   // --- the disk, and what only the service's log knew -------------------------------
   const troubles: Trouble[] = deep ? logTroubles(serviceLog(), now) : [];
@@ -1937,6 +1947,32 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
   return { report, groups: [computer, agents, reports, messages, accounts, updates], todo };
 }
 
+/** The triggers in one row: on or off, how many rules, how many paused (by the person or by this
+ *  computer); nothing at all until there is a rules file. */
+function triggersRow(rules: RulesRead): { row: Row; report: Record<string, unknown>; todo?: Todo } | null {
+  if (rules.state === "none") return null;
+  if (rules.state === "refused")
+    return {
+      row: { mark: "warn", label: "triggers", value: `off: the rules file can't be read (${rules.problems[0]})` },
+      report: { on: false, readable: false },
+      todo: {
+        order: 5,
+        say: "The trigger rules file can't be read, so no rule runs. Fix it, or move it away and add the rules again. `sessionpipe trigger list` says what is wrong:",
+        run: "sessionpipe trigger list",
+      },
+    };
+  const machinePaused = readRecord(process.env).rules;
+  const n = rules.file.rules.length;
+  const paused = rules.file.rules.filter((r) => r.paused || machinePaused[r.name]?.paused).length;
+  const count = `${n} rule${n === 1 ? "" : "s"}${paused ? `, ${paused} paused` : ""}`;
+  return {
+    row: rules.file.on
+      ? { mark: "ok", label: "triggers", value: `on · ${count}`, brief: `triggers on (${count})` }
+      : { mark: "info", label: "triggers", value: `off · ${count} · \`sessionpipe triggers on\` turns them on` },
+    report: { on: rules.file.on, readable: true, rules: n, paused },
+  };
+}
+
 /** As far as doctor counts the jobs folder: past this it says "or more", and stays quick. */
 const WAITING_MAX = 1000;
 
@@ -2260,10 +2296,11 @@ async function newest(): Promise<string> {
   }
 }
 
-/** Something on this computer needs the background service: a receiver, the pool, asking. */
+/** Something on this computer needs the background service: a receiver, the pool, asking, or
+ *  the person's trigger rules (CONTROL.md §14). */
 function serviceWanted(): boolean {
   const control = readControl();
-  return !!control?.receivers.length || readPool().on || control?.ask === true;
+  return !!control?.receivers.length || readPool().on || control?.ask === true || !!rulesOf(readRules())?.on;
 }
 
 /** What `update` and `reinstall` hand `bringCurrent` for the copy in one dist folder: this
