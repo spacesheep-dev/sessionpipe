@@ -136,5 +136,18 @@ export function visible(text: string): string {
 /** What a refusal says of a hidden character (`the words hold`, `the folder holds`): which, where,
  *  and what the person can do. A no-break space pasted from a page is the likely honest case. */
 export function hiddenProblem(what: string, h: Hidden): string {
-  return `${what} ${h.code} at character ${h.at} (shown as ${h.escape}), which does not show as itself, so what you confirm would not be what runs: retype that character (a space pasted from a web page or a document is often one)`;
+  return `${what} ${h.code} at character ${h.at} (shown as ${h.escape}), which does not show as itself, so what you confirm would not be what runs: ${hiddenHint(Number.parseInt(h.code.slice(2), 16))}`;
+}
+
+/** What to do about a hidden character, by its kind: the honest case each kind usually is. */
+function hiddenHint(cp: number): string {
+  const c = String.fromCodePoint(cp);
+  // A space other than U+0020: pasted from a page or a document.
+  if (/\p{Zs}/u.test(c)) return "retype that space (a space pasted from a web page or a document is often one)";
+  // A variation selector or a zero-width joiner: part of an emoji (a red heart, a family).
+  if ((cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef) || cp === 0x200d)
+    return "leave the emoji out, or write it in words (an emoji such as a red heart carries one)";
+  // A combining mark past the fourth on one character.
+  if (/\p{M}/u.test(c)) return "take out the marks stacked on that character";
+  return "retype the text around it (text copied from a chat, a web page or a document can carry one)";
 }

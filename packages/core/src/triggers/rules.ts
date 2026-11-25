@@ -412,8 +412,10 @@ export function describeRule(r: TriggerRule, o: { width?: number } = {}): RuleDe
     const pieces = wrapColumns(visible(text), width - head.length - RULE_TEXT_MARK.length);
     return pieces.map((p, i) => `${i ? "        " : head}${i ? RULE_TEXT_MORE : RULE_TEXT_MARK}${p}`);
   };
+  // The sentence holds only pattern-bound tokens, cut to the width at spaces here, so every
+  // machine prints it the same; its lines start at the left edge, never behind a mark.
   const lines = [
-    visible(sentence),
+    ...wrapColumns(visible(sentence), width).map((l) => l.trimEnd()),
     ...block("folder", r.folder),
     ...r.words.split("\n").flatMap((l, i) => block(i ? "" : "words", l)),
   ];

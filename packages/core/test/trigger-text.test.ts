@@ -69,9 +69,19 @@ describe("hiddenIn", () => {
     expect(hiddenIn(`e${"\u0301".repeat(MARKS_MAX)} e\u0301`)).toBeNull();
     expect(hiddenIn(`e${"\u0336".repeat(300)}`)).toEqual({ code: "U+0336", escape: "\\u{336}", at: 1, codePoint: 5 });
   });
+  it("hiddenProblem's hint is the honest case of each kind of character", () => {
+    const hint = (text: string) =>
+      hiddenProblem("the words hold", hiddenIn(text) as NonNullable<ReturnType<typeof hiddenIn>>);
+    expect(hint("Thanks \u2764\ufe0f")).toContain("leave the emoji out, or write it in words");
+    expect(hint("a\u200dfamily")).toContain("leave the emoji out");
+    expect(hint(`e${"\u0301".repeat(5)}`)).toContain("take out the marks stacked on that character");
+    expect(hint("zero\u200bwidth")).toContain("retype the text around it");
+    expect(hint("thin\u2009space")).toContain("retype that space");
+    expect(hint("Thanks \u2764\ufe0f")).not.toContain("a space pasted");
+  });
   it("hiddenProblem says which, where and what to do", () => {
     expect(hiddenProblem("the words hold", { code: "U+00A0", escape: "\\u{a0}", at: 12, codePoint: 11 })).toBe(
-      "the words hold U+00A0 at character 12 (shown as \\u{a0}), which does not show as itself, so what you confirm would not be what runs: retype that character (a space pasted from a web page or a document is often one)",
+      "the words hold U+00A0 at character 12 (shown as \\u{a0}), which does not show as itself, so what you confirm would not be what runs: retype that space (a space pasted from a web page or a document is often one)",
     );
   });
 });

@@ -1722,7 +1722,9 @@ could write itself a standing, self-renewing clock rule. That is the limit `cont
 folders, the mode) has today, and this document claims no more for `triggers.json`. What the
 definition does close is narrower: a rule's folder must clear the floor below, so no triggered run
 is handed the rules file's folder, a harness's settings or the home folder's own settings to
-write in.
+write in. For the same reason the daemon's local socket may lift a pause the machine made itself
+(§14.7 step 11) without a terminal test, as `trigger resume` asks it to: any process of the person's
+user can edit these files already, and the next run checks the rule again.
 
 The rules live in `<config>/triggers.json` (mode `0600`), written by the CLI only and read by the
 daemon, as the mode and the folders are. The CLI MUST write it whole and at once: to a file beside
@@ -1739,7 +1741,7 @@ them. A rule (`config.proto`'s `TriggerRule`):
 | `when` | A notice rule only. `state`, `for`, `by`: lists of allowed values (1 to 20 each, the notice's patterns; a list is never empty). An absent list allows any value; a notice without the field fits no list. `by` trusts the receiver's word for who made the change: it keeps a rule to the people the person trusts on an honest receiver, and protects nothing against a receiver that was broken into. |
 | `subject` | A notice rule only. The subjects it takes, in the pattern language of §14.8. |
 | `target` | Exactly one of `{"start": "<harness>"}` (a new session) or `{"continue": "<harness>:<id>"}` (an existing one, the id by its adapter's rule, §3.1). |
-| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. |
+| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. A rule that continues a session runs in that session's own folder, so its `folder` IS the session's recorded folder: `add` writes that folder and refuses another, and at every run the floor and the allowlist are checked on the folder the run really uses, refused `folder` when it is no longer the rule's. |
 | `level` | `read`, `safe`, `edits` or `auto`: the widest the rule runs at (§14.7). A notice rule's is `edits` at most: the receiver holds other people's text. `auto` is for clock rules only. |
 | `tools` | Up to 8 MCP servers or tools a run may use without asking, `^mcp__[A-Za-z0-9_-]{1,64}$` (`mcp__board`, `mcp__board__records_get`), as `control.session_tools` are (§6): never a built-in tool, never a shell pattern, since a command line holding the person's sign-in can do whatever that command can. The pattern is the daemon's for `session_tools`, so looser than the two shapes: any `mcp__` name of those characters. |
 | `cap` | `{"per_day": n}`, 1 to 50 runs a machine-local day. |
@@ -1966,8 +1968,9 @@ and a flood collapses.
 
 A clock rule's `every` is `mon 09:00` to `sun 09:00` (once a week), `day 08:30` (every day), both
 in the machine's local time, or an interval, `30m` or `2h`, from 15 minutes to 7 days, counted
-from the rule's last tick (or from when it was made or resumed). A clock tick is like a notice
-with no receiver, no fields and no ack.
+from the rule's last tick (or from when it was made or resumed). A rule records no time it was
+made, so a clock rule's first tick is the first after the daemon has seen the rule. A clock tick
+is like a notice with no receiver, no fields and no ack.
 
 A tick missed while the machine was asleep or the daemon stopped runs **once** on waking, however
 many ticks were missed, when the latest missed tick is less than six hours late. Six hours late or
