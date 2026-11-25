@@ -405,7 +405,6 @@ export interface SdkHost {
     permission: RunLevel;
     /** The model, when the start asked for one. */
     model?: string;
-    configDir?: string;
     allowedTools?: string[];
     /** Over the process's own: an ask's lineage for the session's hooks (CONTROL.md §13). */
     env?: Record<string, string>;

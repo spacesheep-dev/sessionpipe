@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { claudeControl, withoutLineage } from "@sessionpipe/core";
+import { claudeControl } from "@sessionpipe/core";
 import type { Picture, RunLevel, StartPermission } from "@sessionpipe/core/control";
 import type { SdkHost, SdkSession } from "./daemon.js";
 
@@ -105,7 +105,6 @@ export async function loadSdk(o: {
       cwd: string;
       permission: RunLevel;
       model?: string;
-      configDir?: string;
       allowedTools?: string[];
       /** Over the process's own: an ask's lineage for the session's hooks (CONTROL.md §13). */
       env?: Record<string, string>;
@@ -142,8 +141,11 @@ export async function loadSdk(o: {
           ...(sources ? { settingSources: [...claudeControl.SETTING_SOURCES] } : {}),
           // Read only for Claude Code's word that it left out the folder's allow rules.
           stderr: lines,
-          // Ours without the lineage this process may carry, then the session's own (jobEnv).
-          env: { ...withoutLineage(o.env ?? process.env), ...env, SESSIONPIPE_CONTROL_JOB: "1" },
+          // Ours as a `claude -p` run gets it (claudeEnv): without the lineage this process
+          // may carry and without the markers of a Claude Code session around it (a daemon
+          // started from one would hand on CLAUDECODE and its entrypoint, and the session
+          // would take itself for a nested one), then the session's own (jobEnv).
+          env: { ...claudeControl.claudeEnv(undefined, o.env ?? process.env), ...env, SESSIONPIPE_CONTROL_JOB: "1" },
         },
       });
       const waiting: { resolve: (v: { reply: string; error?: string; note?: string }) => void }[] = [];

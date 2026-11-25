@@ -5,6 +5,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { claudeControl } from "@sessionpipe/core";
 import { type Picture, pictureFacts } from "@sessionpipe/core/control";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSdk, sdkVersion } from "../src/control/sdk.js";
@@ -181,6 +182,40 @@ describe("loadSdk", () => {
       SESSIONPIPE_CONTROL_JOB: "1",
     });
     s.close();
+  });
+
+  it("a daemon started inside a Claude Code session hands the session none of its markers, as `claude -p` does", async () => {
+    const env = {
+      SESSIONPIPE_AGENT_SDK: sdkFile,
+      HOME: tmp,
+      PATH: "/usr/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "outer",
+      CLAUDE_CODE_HOST_SESSION_ID: "outer-host",
+      CLAUDE_CODE_ENTRYPOINT: "cli",
+      CLAUDE_CODE_SESSION_ATTENDED: "1",
+      CLAUDE_CODE_SSE_PORT: "4242",
+      SESSIONPIPE_ASKED_BY: "codex:stale",
+      CLAUDE_CONFIG_DIR: "/cfg",
+    };
+    const host = await loadSdk({ claudeBin: null, env, log: () => {} });
+    host!.start({ session: "sid", cwd: tmp, permission: "safe", env: { SESSIONPIPE_ASKED_BY: "codex:a1" } }).close();
+    // The same environment a `claude -p` start is given (daemon.ts: claudeEnv, then the
+    // session's own), and the control mark kept whatever the session's own says.
+    expect(seen.options[0]!.env).toEqual({
+      ...claudeControl.claudeEnv(undefined, env),
+      SESSIONPIPE_ASKED_BY: "codex:a1",
+    });
+    expect(seen.options[0]!.env).toEqual({
+      SESSIONPIPE_AGENT_SDK: sdkFile,
+      HOME: tmp,
+      PATH: "/usr/bin",
+      CLAUDE_CONFIG_DIR: "/cfg",
+      SESSIONPIPE_ASKED_BY: "codex:a1",
+      SESSIONPIPE_CONTROL_JOB: "1",
+    });
+    host!.start({ session: "s2", cwd: tmp, permission: "safe", env: { SESSIONPIPE_CONTROL_JOB: "0" } }).close();
+    expect((seen.options[1]!.env as NodeJS.ProcessEnv).SESSIONPIPE_CONTROL_JOB).toBe("1");
   });
 
   it("replies, errors and silence: each result answers the message that waited for it", async () => {
