@@ -54,12 +54,24 @@ describe("hiddenIn", () => {
       // Its own character, or hidden inside the one before it when it extends that one.
       expect([2, 3], JSON.stringify(c)).toContain(hiddenIn(`ab${c}c`)?.at);
     }
-    expect(hiddenIn("a\u202eb")).toEqual({ code: "U+202E", escape: "\\u{202e}", at: 2, codePoint: 1 });
+    expect(hiddenIn("a\u202eb")).toEqual({ code: "U+202E", escape: "\\u{202e}", at: 2, codePoint: 1, why: "hidden" });
     // A tag character hides inside the character it follows: the person looks at the sheep.
-    expect(hiddenIn("🐑\u{e0041}")).toEqual({ code: "U+E0041", escape: "\\u{e0041}", at: 1, codePoint: 1 });
-    expect(hiddenIn("tab\tand\nline")).toEqual({ code: "U+0009", escape: "\\t", at: 4, codePoint: 3 });
+    expect(hiddenIn("🐑\u{e0041}")).toEqual({
+      code: "U+E0041",
+      escape: "\\u{e0041}",
+      at: 1,
+      codePoint: 1,
+      why: "hidden",
+    });
+    expect(hiddenIn("tab\tand\nline")).toEqual({ code: "U+0009", escape: "\\t", at: 4, codePoint: 3, why: "hidden" });
     // A person counts characters as they show: a flag, a family, a letter and its accent are one each.
-    expect(hiddenIn("🇫🇷👍🏽e\u0301\u00a0")).toEqual({ code: "U+00A0", escape: "\\u{a0}", at: 4, codePoint: 6 });
+    expect(hiddenIn("🇫🇷👍🏽e\u0301\u00a0")).toEqual({
+      code: "U+00A0",
+      escape: "\\u{a0}",
+      at: 4,
+      codePoint: 6,
+      why: "hidden",
+    });
     expect(hiddenIn("x\ny")?.escape).toBe("\\n");
     expect(hiddenIn("x\ry")?.escape).toBe("\\r");
     expect(hiddenIn("tab\tand\nline", "\t\n")).toBeNull();
@@ -67,7 +79,13 @@ describe("hiddenIn", () => {
   });
   it("lets four combining marks stand on one character, and finds the fifth", () => {
     expect(hiddenIn(`e${"\u0301".repeat(MARKS_MAX)} e\u0301`)).toBeNull();
-    expect(hiddenIn(`e${"\u0336".repeat(300)}`)).toEqual({ code: "U+0336", escape: "\\u{336}", at: 1, codePoint: 5 });
+    expect(hiddenIn(`e${"\u0336".repeat(300)}`)).toEqual({
+      code: "U+0336",
+      escape: "\\u{336}",
+      at: 1,
+      codePoint: 5,
+      why: "stacked",
+    });
   });
   it("hiddenProblem's hint is the honest case of each kind of character", () => {
     const hint = (text: string) =>
@@ -78,9 +96,19 @@ describe("hiddenIn", () => {
     expect(hint("zero\u200bwidth")).toContain("retype the text around it");
     expect(hint("thin\u2009space")).toContain("retype that space");
     expect(hint("Thanks \u2764\ufe0f")).not.toContain("a space pasted");
+    // By why it was refused, not by what kind of code point: an invisible mark alone on a letter is
+    // hidden, not stacked; a variation selector that is no emoji's is a glyph variant.
+    for (const c of ["\u034f", "\u17b4", "\u17b5", "\u180b", "\u180c", "\u180d", "\u180f"])
+      expect(hint(`a${c}b`), c).toContain("retype the text around it");
+    for (const c of ["\u{e0100}", "\u{e01ef}", "\ufe00", "\ufe0d"])
+      expect(hint(`葛${c}`), c).toContain("a variation selector: retype the character before it");
+    expect(hint("\u{1f3f4}\u{e0067}\u{e0062}\u{e007f}")).toContain("leave the emoji out");
+    expect(hint("\u2764\ufe0e")).toContain("leave the emoji out");
   });
   it("hiddenProblem says which, where and what to do", () => {
-    expect(hiddenProblem("the words hold", { code: "U+00A0", escape: "\\u{a0}", at: 12, codePoint: 11 })).toBe(
+    expect(
+      hiddenProblem("the words hold", { code: "U+00A0", escape: "\\u{a0}", at: 12, codePoint: 11, why: "hidden" }),
+    ).toBe(
       "the words hold U+00A0 at character 12 (shown as \\u{a0}), which does not show as itself, so what you confirm would not be what runs: retype that space (a space pasted from a web page or a document is often one)",
     );
   });
@@ -119,6 +147,12 @@ describe("graphemes, columnsOf and wrapColumns", () => {
     expect(columnsOf("a")).toBe(1);
     expect(columnsOf("字")).toBe(2);
     expect(columnsOf("🐑")).toBe(2);
+    // A spacing mark takes a column, a non-spacing one none; Unicode 16's wide ones take two.
+    expect(columnsOf("क\u093e")).toBe(2);
+    expect(columnsOf("e\u0301")).toBe(1);
+    expect(columnsOf("\u20dd")).toBe(0);
+    for (const c of ["\u2630", "\u2637", "\u268a", "\u268f", "\u{1d300}", "\u{1d376}", "\u{16ff0}"])
+      expect(columnsOf(c), c).toBe(2);
     expect(columnsOf("e\u0301")).toBe(1);
     expect(columnsOf("Ｗ")).toBe(2);
   });

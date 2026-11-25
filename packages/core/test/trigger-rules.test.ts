@@ -280,6 +280,35 @@ describe("describeRule: what the person confirms", () => {
     }
     expect(sentence.join(" ")).toBe(describeRule(CARD, { width: Number.POSITIVE_INFINITY }).lines[0]);
   });
+  it("never cuts the sentence inside a token: one wider than the width goes on behind ┆, and none is unmarked", () => {
+    const long = rule({
+      name: "a234567890123456789012345678901234567890",
+      subject: "^[A-Za-z0-9_-]{1,6}-[A-Za-z0-9_-]{1,6}-[A-Za-z0-9_-]{1,6}$",
+      target: { continue: "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b" },
+    });
+    const whole = describeRule(long, { width: Number.POSITIVE_INFINITY }).lines[0] as string;
+    const lines = describeRule(long, { width: 40 }).lines;
+    const sentence = lines.slice(
+      0,
+      lines.findIndex((l) => l.startsWith("  folder")),
+    );
+    for (const l of sentence) expect(columnsOf(l), l).toBeLessThanOrEqual(40);
+    // Every token is whole on its line, or its pieces go on behind the mark.
+    const joined = sentence.reduce((acc, l) => (l.startsWith("┆ ") ? acc + l.slice(2) : acc ? `${acc} ${l}` : l), "");
+    expect(joined).toBe(whole);
+    expect(sentence.filter((l) => l.startsWith("┆ ")).length).toBeGreaterThan(0);
+    for (const t of whole.split(" "))
+      if (columnsOf(t) <= 40)
+        expect(
+          sentence.some((l) => l.split(" ").includes(t) || l.includes(` ${t}`) || l.startsWith(t)),
+          t,
+        ).toBe(true);
+  });
+  it("says when the width asked for is under 40 columns: a person is not asked to confirm there", () => {
+    expect(describeRule(CARD, { width: 39 }).narrow).toBe(true);
+    expect(describeRule(CARD, { width: 40 }).narrow).toBe(false);
+    expect(describeRule(CARD).narrow).toBe(false);
+  });
   it("words that try to finish the sentence stay on their own marked lines", () => {
     const faked = "Do card {subject}.”, once a day at most, at read or narrower, with these words: “Do card {subject}.";
     const d = describeRule(rule({ words: faked, level: "edits", cap: { per_day: 9 } }), {
@@ -306,6 +335,9 @@ describe("helloTriggers: topics, never a filter, words, target or level", () => 
     const paused = rule({ name: "paused", paused: true, source: { receiver: "board.example", topic: "acme/paused" } });
     const f = file([CARD, other, second, paused, MONDAY]);
     expect(helloTriggers(f, "board.example")).toEqual({ on: true, topics: ["acme/tasks"] });
+    // Sorted, so the order of the rules never changes what a hello says.
+    const z = rule({ name: "z", source: { receiver: "board.example", topic: "zeta/tasks" } });
+    expect(helloTriggers(file([z, CARD]), "board.example").topics).toEqual(["acme/tasks", "zeta/tasks"]);
     expect(helloTriggers(f, "tasks.example")).toEqual({ on: true, topics: ["ops/queue"] });
     expect(helloTriggers(f, "elsewhere.example")).toEqual({ on: true, topics: [] });
     expect(helloTriggers(file([CARD], false), "board.example")).toEqual({ on: false, topics: [] });

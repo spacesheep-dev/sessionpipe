@@ -27,7 +27,7 @@ import type {
 import { HOME_RELATIVE_RE, levelRank, narrower, parseSessionRef, START_PERMISSIONS } from "../control/verify.js";
 import { problems } from "../schema/validate.js";
 import { subjectPattern } from "./pattern.js";
-import { hiddenIn, hiddenProblem, visible, wrapColumns } from "./text.js";
+import { columnsOf, graphemes, hiddenIn, hiddenProblem, visible, wrapColumns } from "./text.js";
 import { composeWords, placeholdersIn } from "./words.js";
 
 /** What a rule's folder is checked against (CONTROL.md §14.1, *The folder's floor*): the places a
@@ -227,7 +227,8 @@ export function helloTriggers(file: TriggersFile | null, receiver: string): Cont
   const topics = new Set<string>();
   for (const r of file.rules)
     if (!r.paused && isNoticeSource(r.source) && r.source.receiver === receiver) topics.add(r.source.topic);
-  return { on: true, topics: [...topics] };
+  // Sorted, so a hello says the same whatever order the rules are in (§14.3).
+  return { on: true, topics: [...topics].sort() };
 }
 
 /** Whether a rule takes a notice that came from `receiver`: its source, its filters, its subject
@@ -344,12 +345,16 @@ const LEVEL_NOTES: Readonly<Record<string, Partial<Record<StartPermission, strin
   },
 };
 
-/** A rule in plain words, as a person confirms it: `lines[0]` is the sentence about the rule, and
- *  every line after it is a marked line of the folder or the words, so nothing in the folder or the
- *  words can read as part of the sentence or as a line of its own. Print `lines` whole (or the
- *  description itself: it prints as all of its lines); never one of them alone. */
+/** A rule in plain words, as a person confirms it: first the sentence about the rule, at the left
+ *  edge, cut at spaces (a token wider than the width goes on behind `┆ `, never unmarked), then
+ *  every marked line of the folder and the words, so nothing in the folder or the words can read as
+ *  part of the sentence or as a line of its own. Print `lines` whole (or the description itself: it
+ *  prints as all of its lines); never one of them alone. `narrow`: the width asked for is under
+ *  RULE_TEXT_MIN_WIDTH, so the lines (laid out to that) would wrap at the terminal, and a person
+ *  is not asked to confirm them there (§14.1). */
 export interface RuleDescription {
   readonly lines: readonly string[];
+  readonly narrow: boolean;
   toString(): string;
 }
 
@@ -373,6 +378,7 @@ export const RULE_TEXT_MIN_WIDTH = 40;
  *  show as itself is written out (text.ts). */
 export function describeRule(r: TriggerRule, o: { width?: number } = {}): RuleDescription {
   const width = Math.max(RULE_TEXT_MIN_WIDTH, o.width ?? RULE_TEXT_WIDTH);
+  const narrow = (o.width ?? RULE_TEXT_WIDTH) < RULE_TEXT_MIN_WIDTH;
   const s = r.source;
   let when: string;
   if (isNoticeSource(s)) {
@@ -413,13 +419,42 @@ export function describeRule(r: TriggerRule, o: { width?: number } = {}): RuleDe
     return pieces.map((p, i) => `${i ? "        " : head}${i ? RULE_TEXT_MORE : RULE_TEXT_MARK}${p}`);
   };
   // The sentence holds only pattern-bound tokens, cut to the width at spaces here, so every
-  // machine prints it the same; its lines start at the left edge, never behind a mark.
+  // machine prints it the same; its lines start at the left edge, and a token wider than the
+  // width goes on behind `┆ `.
   const lines = [
-    ...wrapColumns(visible(sentence), width).map((l) => l.trimEnd()),
+    ...sentenceLines(visible(sentence), width),
     ...block("folder", r.folder),
     ...r.words.split("\n").flatMap((l, i) => block(i ? "" : "words", l)),
   ];
-  return Object.freeze({ lines: Object.freeze(lines), toString: () => lines.join("\n") });
+  return Object.freeze({ lines: Object.freeze(lines), narrow, toString: () => lines.join("\n") });
+}
+
+/** The sentence cut to `width` at spaces only. A token wider than the width (a session's id, a
+ *  long pattern) starts a line of its own and goes on behind `┆ `, so no piece of it starts
+ *  unmarked and none reads as a token of its own. */
+function sentenceLines(text: string, width: number): string[] {
+  const more = RULE_TEXT_MORE.trimStart();
+  const out: string[] = [];
+  let line = "";
+  const span = (t: string) => graphemes(t).reduce((n, g) => n + columnsOf(g), 0);
+  for (const token of text.split(" ")) {
+    if (line && span(line) + 1 + span(token) <= width) {
+      line += ` ${token}`;
+      continue;
+    }
+    if (line) out.push(line);
+    if (span(token) <= width) {
+      line = token;
+      continue;
+    }
+    const [first = ""] = wrapColumns(token, width);
+    out.push(first);
+    const rest = wrapColumns(token.slice(first.length), width - more.length).map((p) => more + p);
+    line = rest.pop() as string;
+    out.push(...rest);
+  }
+  out.push(line);
+  return out;
 }
 
 /** The words a matching notice (or a clock tick) gives the session, framed (words.ts). */
