@@ -11,5 +11,7 @@
 - Every command that changes a rule refuses inside a coding session. Characters that don't show are written out wherever a rule is shown.
 - A rule that continues a session takes that session's folder: `add` shows it on the folder line and refuses another `--folder`.
 - When the rules change in another terminal while you read a rule before typing `yes`, nothing is written: "The rules changed while you were reading. Nothing was written. Run the command again."
+- `sessionpipe trigger line <name>` prints the one `sessionpipe trigger add …` command that makes the rule again, on a line of its own (`| pbcopy` takes it whole), to make the same rule on another computer: the flags in one fixed order, a value quoted only when it must be. `--json` prints it with its words.
+- Two commands never write the rules over each other: a command that changes them takes a lock, and another command meanwhile says "Another sessionpipe command is changing the rules. Run it again."
 - `sessionpipe ask off` and `sessionpipe control off` keep the background service while triggers are on.
 - `sessionpipe-core` exports the machine's own files' schemas (`CONFIG_SCHEMAS`).

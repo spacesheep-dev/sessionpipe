@@ -48,6 +48,7 @@ import {
   sampleNotice,
   stateDir,
   type TriggerHistoryLine,
+  type TriggerLine,
   type TriggerList,
   type TriggerMiss,
   type TriggerRefusal,
@@ -70,6 +71,7 @@ import { installService } from "./control/pair.js";
 import { HEADLESS } from "./control/route.js";
 import {
   harnessSession,
+  lockRules,
   type RulesRead,
   readRulesText,
   triggerStateFile,
@@ -97,7 +99,11 @@ export const TRIGGER_HELP = `  sessionpipe triggers on | off | status [--json]  
       (--start <agent> | --continue <agent>:<id>) --folder <dir> [--level read|safe|edits|auto]
       [--tools mcp__<server>[__<tool>],…] [--cap <n>/day] --words "<text>"
   sessionpipe trigger list [--json] | pause <name> | resume <name> | remove <name>
-  sessionpipe trigger test <name> [--subject X-001 --state todo --for <who> --by <who>] [--json]`;
+  sessionpipe trigger test <name> [--subject X-001 --state todo --for <who> --by <who>] [--json]
+  sessionpipe trigger line <name> [--json]   (the one add command that makes the rule again: the
+      flags in this order: --on --topic --event --every --when state= --when for= --when by=
+      --subject --start --continue --folder --level --tools --cap --words; a value with anything
+      but A-Z a-z 0-9 _ . / : @ = + - in single quotes, a ' in it as '\\'')`;
 
 /** What the commands reach beyond this process; tests stand in for each. */
 export interface TriggerDeps {
@@ -397,8 +403,41 @@ function editable(h: Here, d: TriggerDeps): TriggersFile {
 function ruleOf(f: TriggersFile, name: string | undefined, verb: string): TriggerRule {
   if (!name) throw new Refusal(`which rule? \`sessionpipe trigger ${verb} <name>\``, "sessionpipe trigger list");
   const r = f.rules.find((x) => x.name === name);
-  if (!r) throw new Refusal(`there is no rule named ${visible(name)} on this computer`, "sessionpipe trigger list");
+  if (!r) {
+    const near = nearest(
+      name,
+      f.rules.map((x) => x.name),
+    );
+    throw new Refusal(
+      `there is no rule named ${visible(name)} on this computer${near.length ? ` (the nearest: ${near.join(", ")})` : ""}`,
+      "sessionpipe trigger list",
+    );
+  }
   return r;
+}
+
+/** The names nearest `typed`, three at most: within two edits, or sharing its first three letters. */
+function nearest(typed: string, names: string[]): string[] {
+  const edits = (a: string, b: string): number => {
+    let row = Array.from({ length: b.length + 1 }, (_x, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j++)
+        next[j] = Math.min(
+          (row[j] as number) + 1,
+          (next[j - 1] as number) + 1,
+          (row[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1),
+        );
+      row = next;
+    }
+    return row[b.length] as number;
+  };
+  return names
+    .map((n) => ({ n, d: edits(typed, n) }))
+    .filter(({ n, d }) => d <= 2 || (typed.length >= 3 && n.startsWith(typed.slice(0, 3))))
+    .sort((a, b) => a.d - b.d || a.n.localeCompare(b.n))
+    .slice(0, 3)
+    .map(({ n }) => n);
 }
 
 /** A problem in sessionpipe's own words, which may quote a value: every character in it that
@@ -425,6 +464,26 @@ function unchanged(h: Here, d: TriggerDeps, o: TriggerOut): boolean {
     "The rules changed while you were reading. Nothing was written. Run the command again.",
   );
   return false;
+}
+
+/** The change written, under the rules' lock: only when the file is still exactly what was shown
+ *  (`unchanged`), and never while another command writes it. */
+function commit(h: Here, d: TriggerDeps, o: TriggerOut, next: TriggersFile): boolean {
+  const lock = lockRules(d.env, (age) =>
+    say(
+      o,
+      `  ${mark(o.ui, "info")} `,
+      `A lock on the rules ${Math.round(age / 1000)} s old, left by a command that ended, was broken.`,
+    ),
+  );
+  if (!lock) throw new Refusal("Another sessionpipe command is changing the rules. Run it again.", "");
+  try {
+    if (!unchanged(h, d, o)) return false;
+    writeRules(next, d.env);
+    return true;
+  } finally {
+    lock.release();
+  }
 }
 
 /** At the terminal, with a `yes`: no flag skips it. */
@@ -460,8 +519,8 @@ const sayWords = (o: TriggerOut, first: string, body: string, then?: string) => 
  *  it fits. */
 export function printJson(
   o: TriggerOut,
-  name: "trigger-list" | "trigger-test",
-  value: TriggerList | TriggerTestAnswer,
+  name: "trigger-list" | "trigger-test" | "trigger-line",
+  value: TriggerList | TriggerTestAnswer | TriggerLine,
 ): void {
   const bad = problems(CONFIG_SCHEMAS[name] as never, value);
   if (bad.length) throw new Error(`the JSON would not fit its definition: ${said(bad[0] as string)}`);
@@ -559,8 +618,10 @@ export async function triggerMain(argv: string[], o: TriggerOut, d: TriggerDeps)
       return resume(p.words[1], o, d);
     case "test":
       return test(p, o, d);
+    case "line":
+      return lineOf(p, o, d);
     default:
-      throw new Refusal(`trigger takes add, list, pause, resume, remove or test`, "sessionpipe trigger --help");
+      throw new Refusal(`trigger takes add, list, pause, resume, remove, test or line`, "sessionpipe trigger --help");
   }
 }
 
@@ -795,8 +856,7 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   for (const w of warn) say(o, `  ${mark(o.ui, "warn")} `, w);
   o.say("");
   if (!(await confirmed(d, o, "Adding a rule", "Type yes to add it, anything else to stop:"))) return;
-  if (!unchanged(h, d, o)) return;
-  writeRules(next, d.env);
+  if (!commit(h, d, o, next)) return;
   say(
     o,
     `  ${mark(o.ui, "ok")} `,
@@ -804,6 +864,52 @@ async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
       ? `Added ${name}. The background service reads it within seconds.`
       : `Added ${name}. Triggers are off, so it runs once you turn them on: \`sessionpipe triggers on\`.`,
   );
+}
+
+// --- the line that makes a rule again ---------------------------------------------------------
+
+/** A value as one POSIX shell word: bare when it holds only `A-Za-z0-9_./:@=+-` (and is not
+ *  empty), else in single quotes, a `'` in it written `'\''`. A newline stays itself inside the
+ *  quotes: no other POSIX spelling reads one back. */
+export function shellWord(v: string): string {
+  const bare = v !== "" && [...v].every((c) => BARE.has(c));
+  return bare ? v : `'${v.replaceAll("'", "'\\''")}'`;
+}
+const BARE = new Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./:@=+-");
+
+/** The words of the one `trigger add` that makes `r` again, in the fixed order (CONTROL.md
+ *  §14.1): --on --topic --event | --every, --when state= for= by=, --subject, --start |
+ *  --continue, --folder, --level, --tools, --cap, --words. Every field is written, defaults too,
+ *  so the line never depends on what a version's defaults are; a rule is made unpaused. */
+export function lineArgv(r: TriggerRule): string[] {
+  const a = ["trigger", "add", r.name];
+  const src = r.source;
+  if (isNoticeSource(src)) {
+    a.push("--on", src.receiver, "--topic", src.topic);
+    if (src.event !== undefined) a.push("--event", src.event);
+  } else a.push("--every", src.every);
+  for (const k of ["state", "for", "by"] as const) {
+    const v = r.when?.[k];
+    if (v?.length) a.push("--when", `${k}=${v.join(",")}`);
+  }
+  if (r.subject !== undefined) a.push("--subject", r.subject);
+  if (isStart(r.target)) a.push("--start", r.target.start);
+  else a.push("--continue", r.target.continue);
+  a.push("--folder", r.folder, "--level", r.level);
+  if (r.tools?.length) a.push("--tools", r.tools.join(","));
+  a.push("--cap", `${r.cap.per_day}/day`, "--words", r.words);
+  return a;
+}
+
+/** `trigger line <name>`: that line, alone on stdout (so it can be piped), or as `TriggerLine`
+ *  with `--json`. It changes nothing, so it runs anywhere and asks nothing. */
+async function lineOf(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
+  const h = await here(d);
+  const r = ruleOf(editable(h, d), p.words[1], "line");
+  const argv = lineArgv(r);
+  const line = `sessionpipe ${argv.map(shellWord).join(" ")}`;
+  if (p.flags.has("--json")) return printJson(o, "trigger-line", { line, argv });
+  o.print(line);
 }
 
 /** The first problem with a rules file, in the person's words, or null: the reader's own check,
@@ -951,8 +1057,7 @@ async function on(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
     }
     o.say("");
     if (!(await confirmed(d, o, "Turning triggers on", "Type yes to turn them on, anything else to stop:"))) return;
-    if (!unchanged(h, d, o)) return;
-    writeRules({ ...f, on: true }, d.env);
+    if (!commit(h, d, o, { ...f, on: true })) return;
     // The background service reads its settings from control.json: one that never paired has
     // none, and asking stays as it was (off where nothing was set up).
     if (!control) writeControl({ name: machine, folders: [], mode: "safe", receivers: [], ask: false }, d.env);
@@ -980,7 +1085,7 @@ async function off(o: TriggerOut, d: TriggerDeps): Promise<void> {
     say(o, `  ${mark(o.ui, "info")} `, "Triggers are off already.");
     return;
   }
-  writeRules({ ...h.file, on: false }, d.env);
+  if (!commit(h, d, o, { ...h.file, on: false })) return;
   say(
     o,
     `  ${mark(o.ui, "ok")} `,
@@ -999,7 +1104,7 @@ async function narrow(
   const f = editable(h, d);
   const r = ruleOf(f, name, verb);
   if (verb === "remove") {
-    writeRules({ ...f, rules: f.rules.filter((x) => x !== r) }, d.env);
+    if (!commit(h, d, o, { ...f, rules: f.rules.filter((x) => x !== r) })) return;
     say(o, `  ${mark(o.ui, "ok")} `, `Removed ${r.name}. What it did goes with it.`);
     return;
   }
@@ -1007,7 +1112,7 @@ async function narrow(
     say(o, `  ${mark(o.ui, "info")} `, `${r.name} is paused already.`);
     return;
   }
-  writeRules({ ...f, rules: f.rules.map((x) => (x === r ? { ...x, paused: true } : x)) }, d.env);
+  if (!commit(h, d, o, { ...f, rules: f.rules.map((x) => (x === r ? { ...x, paused: true } : x)) })) return;
   say(o, `  ${mark(o.ui, "ok")} `, `Paused ${r.name}: it runs nothing until \`sessionpipe trigger resume ${r.name}\`.`);
 }
 
@@ -1037,8 +1142,9 @@ async function resume(name: string | undefined, o: TriggerOut, d: TriggerDeps): 
   showRule(o, { ...r, paused: false }, h, machine);
   o.say("");
   if (!(await confirmed(d, o, "Resuming a rule", "Type yes to resume it, anything else to stop:"))) return;
-  if (!unchanged(h, d, o)) return;
-  if (r.paused) writeRules({ ...f, rules: f.rules.map((x) => (x === r ? { ...x, paused: false } : x)) }, d.env);
+  if (r.paused) {
+    if (!commit(h, d, o, { ...f, rules: f.rules.map((x) => (x === r ? { ...x, paused: false } : x)) })) return;
+  } else if (!unchanged(h, d, o)) return;
   if (byMachine) {
     // The pause is the background service's own: it lets go of it; with none running, nothing
     // else writes its record, and the pause is taken out of it here.

@@ -6,10 +6,19 @@
 // config.proto's messages. The terminal, the background service, the receiver's well-known file
 // and the sessions on this computer are stand-ins (TriggerDeps); the rules file and the daemon's
 // record are real files under the test's own home.
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { TriggerRule } from "@sessionpipe/core";
+import { isStart, type TriggerRule } from "@sessionpipe/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { readRules, triggerStateFile, triggersFile, writeRules } from "../src/control/rules-file.js";
 import { controlState, readControl, writeControl, writePrivate } from "../src/control/store.js";
@@ -21,10 +30,12 @@ import {
   hostOf,
   levelHere,
   levelMeans,
+  lineArgv,
   printJson,
   readRecord,
   sessionFolder,
   sessionThere,
+  shellWord,
   type TriggerDeps,
   triggerMain,
 } from "../src/triggers.js";
@@ -1085,5 +1096,284 @@ describe("what the review found", () => {
       "go",
     ]);
     expect(text()).not.toContain("first tick");
+  });
+});
+
+describe("trigger line", () => {
+  const CONT = "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b";
+  /** A POSIX shell's word splitting of one command line, for what `line` prints: single quotes,
+   *  double quotes and backslashes as sh reads them; anything sh would act on, left bare, fails. */
+  function shSplit(line: string): string[] {
+    const out: string[] = [];
+    let cur = "";
+    let word = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i] as string;
+      if (c === "'") {
+        const j = line.indexOf("'", i + 1);
+        if (j < 0) throw new Error("an open single quote");
+        cur += line.slice(i + 1, j);
+        i = j;
+        word = true;
+      } else if (c === '"') {
+        for (i++; line[i] !== '"'; i++) {
+          if (i >= line.length) throw new Error("an open double quote");
+          if (line[i] === "$" || line[i] === "`") throw new Error("an expansion inside double quotes");
+          if (line[i] === "\\" && '$`"\\\n'.includes(line[i + 1] as string)) i++;
+          cur += line[i];
+        }
+        word = true;
+      } else if (c === "\\") {
+        if (line[i + 1] !== "\n") cur += line[i + 1];
+        i++;
+        word = true;
+      } else if (c === " " || c === "\t" || c === "\n") {
+        if (word) out.push(cur);
+        cur = "";
+        word = false;
+      } else if ("|&;<>()$`*?[#~".includes(c) && !word) throw new Error(`a bare ${c}`);
+      else if ("|&;<>()$`*?[".includes(c)) throw new Error(`a bare ${c}`);
+      else {
+        cur += c;
+        word = true;
+      }
+    }
+    if (word) out.push(cur);
+    return out;
+  }
+  const lineFor = async (name: string): Promise<string> => {
+    printed = [];
+    lines = [];
+    await run(["trigger", "line", name]);
+    expect(lines).toEqual([]);
+    expect(printed).toHaveLength(1);
+    return printed[0] as string;
+  };
+  /** The rule, written alone; its line; the rule removed; the line's words given to `add`: the rule
+   *  `add` writes is the rule, unpaused. */
+  const roundTrip = async (rule: TriggerRule, over: Partial<TriggerDeps> = {}) => {
+    writeRules({ v: 1, on: true, rules: [rule] });
+    const line = await lineFor(rule.name);
+    expect(line.includes("\u001b") || line.endsWith(" "), rule.name).toBe(false);
+    if (!rule.words.includes("\n")) expect(line).not.toContain("\n");
+    const argv = shSplit(line);
+    expect(argv[0]).toBe("sessionpipe");
+    expect(argv.slice(1, 3)).toEqual(["trigger", "add"]);
+    writeRules({ v: 1, on: true, rules: [] });
+    typed = "yes";
+    await run(argv.slice(1), over);
+    const back = readRules();
+    expect(back.state === "ok" && back.file.rules[0], line).toEqual({ ...rule, paused: false });
+    return line;
+  };
+  const sessionAt = (folder: string): Partial<TriggerDeps> => ({
+    sessionThere: () => true,
+    sessionFolder: () => path.join(home, folder.replace(/^~\//, "")),
+  });
+  beforeEach(() => {
+    mkdirSync(path.join(home, "work", "sales"), { recursive: true });
+    const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
+    const rx = c.receivers[0] as (typeof c.receivers)[number];
+    writeControl({
+      ...c,
+      receivers: [...c.receivers, { ...rx, url: "https://tasks.example", rpId: "tasks.example", machine: "m_def" }],
+    });
+  });
+
+  it("is the add command, alone on stdout, in one fixed order, read back as the same rule", async () => {
+    const line = await roundTrip(card);
+    expect(line).toBe(
+      "sessionpipe trigger add card-todo --on board.example --topic acme/tasks --event record.updated --when state=todo --subject '^X-[0-9]{1,6}$' --start claude-code --folder '~/work/acme' --level edits --tools mcp__board --cap 5/day --words 'Card {subject} is yours and in TODO.'",
+    );
+    expect(await roundTrip(clock)).toBe(
+      "sessionpipe trigger add monday-report --every 'mon 09:00' --start codex --folder '~/work/acme' --level safe --cap 1/day --words 'Make last week'\\''s sales report.'",
+    );
+    await roundTrip(
+      { ...clock, name: "nightly", target: { continue: CONT }, folder: "~/work/acme" },
+      sessionAt("~/work/acme"),
+    );
+  });
+
+  it("round-trips hostile rules: quotes, expansions, separators, a leading dash, newlines, every flag", async () => {
+    const hostile: TriggerRule[] = [
+      { ...clock, name: "q", words: `It's "done" $(rm -rf ~) \`whoami\`; echo hi && x | y > z < w # not a comment` },
+      { ...clock, name: "dash", words: "--json -x --words" },
+      { ...clock, name: "nl", words: "First line.\nSecond line,\tand a tab.\n\n'quoted' end" },
+      { ...clock, name: "a".repeat(40), words: "Forty." },
+      { ...clock, name: "every-flag-0_", source: { every: "2h" }, cap: { per_day: 50 }, level: "read", words: "''" },
+      {
+        ...card,
+        name: "all",
+        source: { receiver: "tasks.example", topic: "acme/tasks", event: "record.updated" },
+        when: { state: ["todo", "doing"], for: ["studio-claude", "u-41c9"], by: ["u-1"] },
+        subject: "^[A-Z]+-[0-9]{1,6}$",
+        tools: ["mcp__board", "mcp__board__read"],
+        level: "edits",
+        cap: { per_day: 50 },
+        words: "Card {subject} in {state}: $HOME $x \\n \\ end\\",
+      },
+    ];
+    const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
+    writeControl({ ...c, mode: "auto" });
+    for (const r of hostile) await roundTrip(r);
+    await roundTrip({ ...card, name: "cont", target: { continue: CONT } }, sessionAt("~/work/acme"));
+  });
+
+  it("round-trips every rule in the scenario files", async () => {
+    const dir = path.resolve(import.meta.dirname, "../../../conformance/triggers");
+    const rules = new Map<string, TriggerRule>();
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+      const fx = JSON.parse(readFileSync(path.join(dir, f), "utf8")) as {
+        cases?: {
+          triggers?: { rules?: TriggerRule[] };
+          triggers_ok?: boolean;
+          steps?: { change?: { rules?: TriggerRule[] } }[];
+        }[];
+      };
+      for (const c of fx.cases ?? []) {
+        if (c.triggers_ok === false) continue;
+        for (const r of [...(c.triggers?.rules ?? []), ...(c.steps ?? []).flatMap((s) => s.change?.rules ?? [])])
+          rules.set(JSON.stringify(r), r);
+      }
+    }
+    expect(rules.size).toBeGreaterThan(20);
+    const ctl = readControl() as NonNullable<ReturnType<typeof readControl>>;
+    writeControl({ ...ctl, mode: "auto" });
+    for (const r of rules.values()) await roundTrip(r, isStart(r.target) ? {} : sessionAt(r.folder));
+  });
+
+  it("--json is TriggerLine; a name it doesn't know, or a file it can't read, is refused", async () => {
+    writeRules({ v: 1, on: true, rules: [card, clock] });
+    printed = [];
+    await run(["trigger", "line", "card-todo", "--json"]);
+    const j = JSON.parse(printed.join("\n"));
+    expect(Object.keys(j)).toEqual(["line", "argv"]);
+    expect(shSplit(j.line).slice(1)).toEqual(j.argv);
+    const r = await refusal(run(["trigger", "line", "monday-reprot"]));
+    expect(r.message).toBe("there is no rule named monday-reprot on this computer (the nearest: monday-report)");
+    expect((await refusal(run(["trigger", "line", "zzz"]))).message).toBe(
+      "there is no rule named zzz on this computer",
+    );
+    expect((await refusal(run(["trigger", "line"]))).message).toBe("which rule? `sessionpipe trigger line <name>`");
+    writeFileSync(triggersFile(), "{");
+    expect((await refusal(run(["trigger", "line", "card-todo"]))).message).toMatch(/^the rules file can't be read/);
+    // Read-only: it needs no terminal, and runs inside a session.
+    writeRules({ v: 1, on: true, rules: [card] });
+    env.CLAUDECODE = "1";
+    printed = [];
+    await run(["trigger", "line", "card-todo"], { interactive: () => false });
+    expect(printed).toHaveLength(1);
+  });
+
+  it("quotes a word only when it must", () => {
+    expect(shellWord("abc-XYZ_0.9/:@=+")).toBe("abc-XYZ_0.9/:@=+");
+    expect(shellWord("")).toBe("''");
+    expect(shellWord("a b")).toBe("'a b'");
+    expect(shellWord("it's")).toBe("'it'\\''s'");
+    expect(shellWord("~/w")).toBe("'~/w'");
+    expect(lineArgv({ ...clock, when: { state: [] }, tools: [] })).not.toContain("--when");
+  });
+});
+
+describe("the rules' lock", () => {
+  const lock = () => `${triggersFile()}.lock`;
+  it("another command holding it: every writer refuses and writes nothing", async () => {
+    writeRules({ v: 1, on: false, rules: [clock, { ...card, paused: true }] });
+    const before = readFileSync(triggersFile(), "utf8");
+    writeFileSync(lock(), "1\n");
+    const said = "Another sessionpipe command is changing the rules. Run it again.";
+    for (const argv of [
+      ["trigger", "add", "x", "--every", "day 03:00", "--start", "codex", "--folder", "~/work/acme", "--words", "go"],
+      ["triggers", "on"],
+      ["trigger", "pause", "monday-report"],
+      ["trigger", "remove", "monday-report"],
+      ["trigger", "resume", "card-todo"],
+    ])
+      expect((await refusal(run(argv))).message, argv.join(" ")).toBe(said);
+    writeRules({ v: 1, on: true, rules: [clock] });
+    const on = readFileSync(triggersFile(), "utf8");
+    expect((await refusal(run(["triggers", "off"]))).message).toBe(said);
+    expect(readFileSync(triggersFile(), "utf8")).toBe(on);
+    expect(before).not.toBe(on);
+  });
+  it("a change made while a command waits for the lock is never written over: off, pause, remove, resume", async () => {
+    // A stale lock is broken first; the line that says so is when another terminal changes the file.
+    const meanwhile = (argv: string[], over: Partial<TriggerDeps> = {}) => {
+      writeFileSync(lock(), "1\n");
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(lock(), old, old);
+      lines = [];
+      return triggerMain(
+        argv,
+        {
+          ui: PLAIN,
+          say: (l = "") => {
+            lines.push(l);
+            if (l.includes("was broken")) writeRules({ v: 1, on: true, rules: [clock, { ...card, name: "other" }] });
+          },
+          print: (l) => printed.push(l),
+        },
+        deps(over),
+      );
+    };
+    for (const argv of [
+      ["triggers", "off"],
+      ["trigger", "pause", "monday-report"],
+      ["trigger", "remove", "monday-report"],
+    ]) {
+      writeRules({ v: 1, on: true, rules: [clock] });
+      await meanwhile(argv);
+      expect(text(), argv.join(" ")).toContain("The rules changed while you were reading. Nothing was written.");
+      expect(readRules()).toEqual({
+        state: "ok",
+        file: { v: 1, on: true, rules: [clock, { ...card, name: "other" }] },
+      });
+    }
+    // resume of a rule only this computer paused: nothing in the file to write, and still checked.
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: {
+        "monday-report": {
+          history: [],
+          paused: { at: "2026-11-24T09:00:00.000Z", code: "no_session", rule: JSON.stringify(clock.target) },
+        },
+      },
+      waiting: [],
+    });
+    lines = [];
+    await run(["trigger", "resume", "monday-report"], {
+      confirm: async () => {
+        writeRules({ v: 1, on: false, rules: [clock] });
+        return "yes";
+      },
+    });
+    expect(text()).toContain("The rules changed while you were reading.");
+    expect(readRecord(env).rules["monday-report"]?.paused).toBeDefined();
+  });
+  it("names the nearest rules, nearest first", async () => {
+    writeRules({ v: 1, on: true, rules: ["abce", "abcd", "abzz", "xyz"].map((name) => ({ ...clock, name })) });
+    expect((await refusal(run(["trigger", "line", "abcx"]))).message).toBe(
+      "there is no rule named abcx on this computer (the nearest: abcd, abce, abzz)",
+    );
+  });
+  it("one left by a command that ended is broken, said, and the change is written; it is let go after", async () => {
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writeFileSync(lock(), "1\n");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock(), old, old);
+    await run(["trigger", "pause", "monday-report"]);
+    expect(text()).toMatch(/A lock on the rules 6\d s old, left by a command that ended, was broken\./);
+    expect(readRules()).toMatchObject({ file: { rules: [{ paused: true }] } });
+    expect(existsSync(lock())).toBe(false);
+    // Let go of when nothing is written, too.
+    await run(["trigger", "resume", "monday-report"], {
+      confirm: async () => {
+        writeRules({ v: 1, on: false, rules: [{ ...clock, paused: true }] });
+        return "yes";
+      },
+    });
+    expect(text()).toContain("The rules changed while you were reading.");
+    expect(existsSync(lock())).toBe(false);
   });
 });

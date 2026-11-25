@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   harnessSession,
+  lockRules,
   RULES_MAX_BYTES,
   readRules,
   rulesOf,
@@ -67,6 +68,29 @@ describe("the rules file", () => {
     // A test run as root reads it all the same.
     if (r.state === "refused") expect(r.problems[0]).toMatch(/^\$: can't be read \(E[A-Z]+\)$/);
     else expect(r.state).toBe("ok");
+  });
+  it.skipIf(!unix)("its lock is taken once, let go of, and a folder it can't write in is said as it is", () => {
+    const one = lockRules(env);
+    expect(one).not.toBeNull();
+    expect(lockRules(env)).toBeNull();
+    one?.release();
+    const two = lockRules(env);
+    expect(two).not.toBeNull();
+    two?.release();
+    const dir = path.dirname(triggersFile(env));
+    chmodSync(dir, 0o500);
+    try {
+      // A test run as root writes there all the same.
+      let threw: unknown = null;
+      try {
+        lockRules(env)?.release();
+      } catch (e) {
+        threw = e;
+      }
+      if (threw) expect((threw as NodeJS.ErrnoException).code).toMatch(/^E[A-Z]+$/);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
   });
   it.skipIf(!unix)("is written 0600 and renamed into place, nothing left beside it", () => {
     writeRules({ v: 1, on: false, rules: [] }, env);

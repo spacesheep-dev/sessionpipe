@@ -9,7 +9,7 @@
 // "The mode, like the folders, is the person's choice at the machine's own terminal, and no
 // command changes it" (CONTROL.md §2): the same goes for these rules, so every command that
 // changes them refuses inside a harness session (`harnessSession`).
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import { checkTriggers, configFile, readTriggers, type TriggersFile, triggerPlaces } from "@sessionpipe/core";
 import { controlState, writePrivate } from "./store.js";
@@ -67,6 +67,42 @@ export function writeRules(file: TriggersFile, env: NodeJS.ProcessEnv = process.
   const r = checkTriggers(file, triggerPlaces(env));
   if (!r.ok) throw new Error(`the rules would not read back: ${r.problems.join("; ")}`);
   writePrivate(triggersFile(env), file);
+}
+
+/** A lock this old was left by a command that ended without letting go: it is broken. */
+export const RULES_LOCK_STALE_MS = 30_000;
+
+/** The rules file's lock (`triggers.json.lock`, made exclusively): held around a writer's last
+ *  read and its write, so two commands never write over each other's change. Null when another
+ *  command holds it; one older than RULES_LOCK_STALE_MS is broken first, and `stale` told its age. */
+export function lockRules(
+  env: NodeJS.ProcessEnv = process.env,
+  stale?: (ageMs: number) => void,
+): { release(): void } | null {
+  const f = `${triggersFile(env)}.lock`;
+  mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const fd = openSync(f, "wx", 0o600);
+      writeSync(fd, `${process.pid}\n`);
+      closeSync(fd);
+      return { release: () => rmSync(f, { force: true }) };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    let age: number;
+    try {
+      age = Date.now() - statSync(f).mtimeMs;
+    } catch {
+      /* v8 ignore next -- let go of between the two calls: taken on the next try */
+      continue;
+    }
+    if (age <= RULES_LOCK_STALE_MS) return null;
+    stale?.(age);
+    rmSync(f, { force: true });
+  }
+  /* v8 ignore next -- broken, and taken again by another command in the same instant */
+  return null;
 }
 
 /** The harness session this command runs inside, by the variable that says so, or null: the
