@@ -11,13 +11,17 @@ import { expandFolder, folderProblem, type TriggerPlaces } from "./rules.js";
 /** This machine's places, from the environment the CLI or the daemon runs in: the home folder,
  *  the folder config.json (and triggers.json) is in, the state folder, and the folder each
  *  adapter's own config files are in (`~/.claude`, or `CLAUDE_CONFIG_DIR`; `~/.codex`, or
- *  `CODEX_HOME`; …), read from the adapters rather than listed here. */
+ *  `CODEX_HOME`; …), read from the adapters rather than listed here, and on Windows `%APPDATA%`
+ *  and `%LOCALAPPDATA%`. Read from the environment of the process that checks: `trigger add` sees
+ *  the person's shell and the daemon its own (CONTROL.md §14.1), and a rule must pass both. */
 export function triggerPlaces(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): TriggerPlaces {
   const harnesses = [...new Set(ADAPTERS.flatMap((a) => a.configFiles(env)).map((f) => path.dirname(f)))];
-  return { home: homeDir(), config: path.dirname(configFile(env)), state: stateDir(env), harnesses, platform };
+  // On Windows, where the system starts things from and reads at sign-in.
+  const system = platform === "win32" ? [env.APPDATA, env.LOCALAPPDATA].filter((d): d is string => !!d) : [];
+  return { home: homeDir(), config: path.dirname(configFile(env)), state: stateDir(env), harnesses, system, platform };
 }
 
 /** A path with every link resolved and in the case the file system keeps (`realpathSync.native`:
@@ -40,6 +44,7 @@ export function realFolderProblem(folder: string, places: TriggerPlaces): string
     config: realPath(places.config),
     state: realPath(places.state),
     harnesses: places.harnesses.map(realPath),
+    system: places.system.map(realPath),
     platform: places.platform,
   });
 }

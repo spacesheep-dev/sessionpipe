@@ -27,7 +27,7 @@ import type {
 import { HOME_RELATIVE_RE, levelRank, narrower, parseSessionRef, START_PERMISSIONS } from "../control/verify.js";
 import { problems } from "../schema/validate.js";
 import { subjectPattern } from "./pattern.js";
-import { hiddenIn, hiddenProblem, visible } from "./text.js";
+import { hiddenIn, hiddenProblem, visible, wrapColumns } from "./text.js";
 import { composeWords, placeholdersIn } from "./words.js";
 
 /** What a rule's folder is checked against (CONTROL.md §14.1, *The folder's floor*): the places a
@@ -42,6 +42,10 @@ export interface TriggerPlaces {
   /** Each harness's own folders (`~/.claude` or `CLAUDE_CONFIG_DIR`, `~/.codex` or `CODEX_HOME`,
    *  …): where its settings, allow rules and hooks are, which every later session reads. */
   harnesses: string[];
+  /** Folders that hold what the platform starts for the person or reads at sign-in: on Windows
+   *  `%APPDATA%` and `%LOCALAPPDATA%` (the Startup folder is in the first, as LaunchAgents are in
+   *  `~/Library` on macOS). Empty elsewhere. */
+  system: string[];
   /** The platform whose paths these are: `win32` paths are read as Windows paths, and on `darwin`
    *  and `win32` folders are compared without regard to case, as their file systems usually do. */
   platform: NodeJS.Platform;
@@ -109,8 +113,19 @@ export function expandFolder(folder: string, home: string, platform: NodeJS.Plat
  *  allowlist stays the person's control. */
 export function folderProblem(folder: string, places: TriggerPlaces): string | null {
   const P = places.platform === "win32" ? path.win32 : path.posix;
-  const fold = places.platform === "darwin" || places.platform === "win32";
-  const norm = (p: string) => (fold ? P.resolve(p).toLowerCase() : P.resolve(p));
+  const win = places.platform === "win32";
+  const fold = places.platform === "darwin" || win;
+  // Resolved, in one Unicode form (a name typed decomposed is the same name), without the trailing
+  // dots and spaces Windows ignores in every segment, and in one case where the disk ignores case.
+  const norm = (p: string) => {
+    let n = P.resolve(p).normalize("NFC");
+    if (win)
+      n = n
+        .split(P.sep)
+        .map((seg) => seg.replace(/[. ]+$/, ""))
+        .join(P.sep);
+    return fold ? n.toLowerCase() : n;
+  };
   const within = (a: string, b: string) => {
     const r = P.relative(b, a);
     return r === "" || (r !== ".." && !r.startsWith(`..${P.sep}`) && !P.isAbsolute(r));
@@ -118,11 +133,13 @@ export function folderProblem(folder: string, places: TriggerPlaces): string | n
   const home = norm(places.home);
   const abs = norm(expandFolder(folder, places.home, places.platform));
   if (abs === home) return "the folder is the home folder: name a project folder under it";
+  if (win && abs === norm(P.parse(abs).root)) return "the folder is a drive's root: name a project folder";
   if (within(home, abs)) return "the folder holds the home folder: name a project folder under it";
   for (const [d, what] of [
     [places.config, "sessionpipe's config folder"],
     [places.state, "sessionpipe's state folder"],
     ...places.harnesses.map((h) => [h, "a harness's own folder, whose settings and hooks every later session reads"]),
+    ...places.system.map((f) => [f, "a folder of what the system starts or reads at sign-in"]),
   ] as [string, string][]) {
     const n = norm(d);
     // A harness folder that is the home folder or holds it is no floor of its own: home's rule says it.
@@ -247,6 +264,8 @@ export function firstMatch(file: TriggersFile, receiver: string, n: ControlNotic
 /** The widest level the machine's mode lets a named level run at: `inherit` lets a named level
  *  be `safe` at most, as it does a start's (CONTROL.md §2). */
 const MODE_CEILING: Record<MachineMode, StartPermission> = { safe: "safe", auto: "auto", inherit: "safe" };
+/** Whether `m` is one of the machine's modes: an own key of the table, never `__proto__`. */
+const isMode = (m: unknown): m is MachineMode => typeof m === "string" && Object.hasOwn(MODE_CEILING, m);
 
 /** What the level of a run also depends on, beyond the rule and the mode. */
 export interface LevelFacts {
@@ -275,7 +294,7 @@ export function levelRefusal(
   mode: MachineMode,
   o: LevelFacts = {},
 ): Refusal | null {
-  if (!isLevel(rule.level)) return "triggers_off";
+  if (!isLevel(rule.level) || !isMode(mode)) return "triggers_off";
   if (o.recorded !== undefined && o.recorded !== "inherit" && !isLevel(o.recorded)) return "no_session";
   return triggerLevel(rule, mode, o) === null ? "harness" : null;
 }
@@ -291,7 +310,7 @@ export function triggerLevel(
   mode: MachineMode,
   o: LevelFacts = {},
 ): StartPermission | null {
-  if (!isLevel(rule.level)) return null;
+  if (!isLevel(rule.level) || !isMode(mode)) return null;
   if (o.recorded !== undefined && o.recorded !== "inherit" && !isLevel(o.recorded)) return null;
   let level = narrower(narrower(rule.level, sourceCeiling(rule)), MODE_CEILING[mode]);
   if (o.recorded && o.recorded !== "inherit") level = narrower(level, o.recorded);
@@ -333,12 +352,23 @@ export interface RuleDescription {
 /** The mark every line of the folder and the words begins with. */
 export const RULE_TEXT_MARK = " │ ";
 
+/** The mark a line of the folder or the words begins with when it goes on from the line above
+ *  (cut to the width), so a cut line never reads as a new one. */
+export const RULE_TEXT_MORE = " ┆ ";
+/** The width `describeRule` lays its lines out to when it is given none, and the least it takes. */
+export const RULE_TEXT_WIDTH = 80;
+export const RULE_TEXT_MIN_WIDTH = 40;
+
 /** The rule in plain words: what `trigger add` shows before it asks for `yes`, from the rule as
  *  it will be written, so what the person confirms is what runs. The sentence holds only what the
  *  definition's patterns keep to plain tokens (and a subject pattern only when it compiles); the
- *  folder and the words, free text, stand apart on marked lines, one line of the words per line
- *  of output. Every character that does not show as itself is written out (text.ts). */
-export function describeRule(r: TriggerRule): RuleDescription {
+ *  folder and the words, free text, stand apart on marked lines: each line of the words begins
+ *  with `│`, and a line cut to fit `width` columns (80 by default, never less than 40; Infinity
+ *  for a pipe, which gets whole lines) goes on behind `┆`, so a terminal never wraps a line of
+ *  free text to the left edge where it could read as the sentence. Every character that does not
+ *  show as itself is written out (text.ts). */
+export function describeRule(r: TriggerRule, o: { width?: number } = {}): RuleDescription {
+  const width = Math.max(RULE_TEXT_MIN_WIDTH, o.width ?? RULE_TEXT_WIDTH);
   const s = r.source;
   let when: string;
   if (isNoticeSource(s)) {
@@ -372,10 +402,16 @@ export function describeRule(r: TriggerRule): RuleDescription {
     at = `at ${level} or narrower${note ? ` (${note})` : ""}`;
   } else at = "at a level that is none of read, safe, edits and auto, so it would never run";
   const sentence = `${r.name}: ${when}, ${what} ${at}${tools}, ${cap}, in the folder and with the words below${r.paused ? " (paused)" : ""}:`;
+  /** One line of free text behind its label, cut to the width, each further piece behind `┆`. */
+  const block = (label: string, text: string) => {
+    const head = `  ${label.padEnd(6)}`;
+    const pieces = wrapColumns(visible(text), width - head.length - RULE_TEXT_MARK.length);
+    return pieces.map((p, i) => `${i ? "        " : head}${i ? RULE_TEXT_MORE : RULE_TEXT_MARK}${p}`);
+  };
   const lines = [
     visible(sentence),
-    `  folder${RULE_TEXT_MARK}${visible(r.folder)}`,
-    ...r.words.split("\n").map((l, i) => `  ${i ? "      " : "words "}${RULE_TEXT_MARK}${visible(l)}`),
+    ...block("folder", r.folder),
+    ...r.words.split("\n").flatMap((l, i) => block(i ? "" : "words", l)),
   ];
   return Object.freeze({ lines: Object.freeze(lines), toString: () => lines.join("\n") });
 }

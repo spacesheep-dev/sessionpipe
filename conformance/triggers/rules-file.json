@@ -9,6 +9,7 @@
       "/home/sam/.claude",
       "/home/sam/.codex"
     ],
+    "system": [],
     "platform": "linux"
   },
   "cases": [
@@ -4254,6 +4255,7 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
       }
     },
@@ -4303,6 +4305,7 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
       }
     },
@@ -4433,6 +4436,7 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
       }
     },
@@ -4483,6 +4487,7 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
       }
     },
@@ -4533,6 +4538,7 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
       }
     },
@@ -4583,6 +4589,7 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
       }
     },
@@ -4633,6 +4640,7 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
       }
     },
@@ -4682,6 +4690,7 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
       }
     },
@@ -4731,6 +4740,7 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
       }
     },
@@ -4780,7 +4790,429 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
+      }
+    },
+    {
+      "name": "under the folder's floor: %APPDATA% on Windows (C:\\Users\\Sam\\AppData\\Roaming)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "C:\\Users\\Sam\\AppData\\Roaming",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: the Startup folder, inside %APPDATA% (C:\\Users\\Sam\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "C:\\Users\\Sam\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: inside %LOCALAPPDATA% (~\\AppData\\Local\\Programs)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~\\AppData\\Local\\Programs",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: a drive's root (D:\\)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "D:\\",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: the config folder with a trailing dot Windows ignores (C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe.)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe.",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: Claude Code's folder with trailing dots and spaces (C:\\Users\\Sam\\.claude. .)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "C:\\Users\\Sam\\.claude. .",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: home in another case, with a trailing space, on Windows (c:\\users\\sam )",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "c:\\users\\sam ",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "under the folder's floor: Claude Code's folder typed decomposed, under an NFC home (/Users/josé/.claude)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "/Users/josé/.claude",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": false,
+      "places": {
+        "home": "/Users/josé",
+        "config": "/Users/josé/.config/sessionpipe",
+        "state": "/Users/josé/.local/state/sessionpipe",
+        "harnesses": [
+          "/Users/josé/.claude"
+        ],
+        "system": [],
+        "platform": "darwin"
       }
     },
     {
@@ -4989,6 +5421,7 @@
         "harnesses": [
           "/opt/codex-home"
         ],
+        "system": [],
         "platform": "linux"
       }
     },
@@ -5039,7 +5472,114 @@
           "/Users/sam/.claude",
           "/Users/sam/.codex"
         ],
+        "system": [],
         "platform": "darwin"
+      }
+    },
+    {
+      "name": "over the floor: a project folder on another drive (D:\\work\\acme)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "D:\\work\\acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": true,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
+      }
+    },
+    {
+      "name": "over the floor: a project folder in home on Windows (~\\work\\acme)",
+      "file": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~\\work\\acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "ok": true,
+      "places": {
+        "home": "C:\\Users\\Sam",
+        "config": "C:\\Users\\Sam\\AppData\\Roaming\\sessionpipe",
+        "state": "C:\\Users\\Sam\\AppData\\Local\\sessionpipe",
+        "harnesses": [
+          "C:\\Users\\Sam\\.claude"
+        ],
+        "system": [
+          "C:\\Users\\Sam\\AppData\\Roaming",
+          "C:\\Users\\Sam\\AppData\\Local"
+        ],
+        "platform": "win32"
       }
     }
   ]

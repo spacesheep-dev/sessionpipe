@@ -1754,15 +1754,23 @@ whole path segments after `~` is expanded and `.` and `..` are resolved:
   `CLAUDE_CONFIG_DIR`, `~/.codex` or `CODEX_HOME`, `~/.gemini`, …), a folder inside one, or one
   that holds one: its allow rules and hooks reach every later session;
 - a dot-folder directly in the home folder (`~/.ssh`, `~/.dotfiles`), or a folder inside one;
-- on macOS, `~/Library` or a folder inside it (`~/Library/LaunchAgents`).
+- on macOS, `~/Library` or a folder inside it (`~/Library/LaunchAgents`);
+- on Windows, `%APPDATA%` or `%LOCALAPPDATA%`, a folder inside either (the Startup folder is in the
+  first), or one that holds either; and a drive's root (`D:\`).
 
-On macOS and Windows, whose file systems usually ignore case, folders are compared without regard
-to case (`~/.Config/sessionpipe` is the config folder). A check on paths as written cannot see
+Names are compared in one Unicode form (NFC: a name typed decomposed is the same name). On macOS
+and Windows, whose file systems usually ignore case, folders are compared without regard to case
+(`~/.Config/sessionpipe` is the config folder), and on Windows without the dots and spaces it
+ignores at the end of every segment (`…\sessionpipe.` is the config folder). A check on paths as written cannot see
 links, so both `trigger add` and the daemon, at every run, MUST compare **real** paths: the
 folder's and each place's, resolved with every link followed and in the case the file system keeps
 (Node's `fs.realpathSync.native`; plain `realpathSync` keeps the case it was typed in). This list is
 a floor, not a guarantee: the machine's folder allowlist stays the person's control, and a folder a
-rule may run in is one the person chose to let sessions write in.
+rule may run in is one the person chose to let sessions write in. The places are read from the
+environment of the process that checks: `trigger add` checks with the person's own (their shell's
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `APPDATA`), the daemon with its own, which under a service manager
+(launchd, systemd, a Windows service) may not see what the person's shell sets. A rule must pass
+both: `add` refuses what it finds, and the daemon refuses the run (`folder`) for what it finds.
 
 **What the person confirms is what runs.** A rule's `words` hold no character that does not show as
 itself but tab and line feed, and its `folder` none at all:
@@ -1781,8 +1789,9 @@ itself but tab and line feed, and its `folder` none at all:
 
 The schema's patterns say the control characters; the reader says the rest with Unicode's tables,
 which no pattern every reader runs can name. A refusal names the character, `U+00A0`, as an escape,
-`\u{a0}`, and its place in the text, counted in characters, so the person can retype it (a space
-pasted from a web page is the likely one). Whatever a file holds, a machine that shows a rule, a
+`\u{a0}`, and its place in the text, counted in characters as a person sees them (grapheme
+clusters: a hidden mark or joiner is in the character it follows), so the person can retype it (a
+space pasted from a web page is the likely one). Whatever a file holds, a machine that shows a rule, a
 refusal or the words of a test to a person MUST write every such character out as an escape
 (`\r`, `\u{202e}`), and a backslash that could be read as the start of one as two (`\\n` is a
 typed backslash and `n`, `\n` a line feed).
@@ -1790,9 +1799,16 @@ typed backslash and `n`, `\n` a line feed).
 **The rule in plain words.** What `trigger add` shows before it asks for `yes` is a sentence about
 the rule and, apart from it, the folder and the words, each on lines of their own that begin with
 a label and a mark (`  folder │ `, `  words  │ `, and `         │ ` for each further line of the
-words). The sentence holds only fields whose patterns keep them to plain tokens; the free text is
-never inside it, so no text in the words or the folder can read as part of the sentence (a level or
-a cap other than the rule's) or as a line of its own. A machine MUST show the description whole.
+words). A line longer than the terminal is cut by the machine itself, never left for the terminal
+to wrap to its left edge: each further piece goes on behind `         ┆ `, so a person tells a cut
+line from a new one, and no piece starts unmarked. Lines are cut between characters as a person
+sees them (never inside a surrogate pair or between a letter and its marks), at a space where one
+falls late enough, and measured high: a wide or full-width character and a pictograph count two
+columns, a combining mark none. The width is the terminal's (80 when unknown, never under 40); a
+pipe gets whole lines. The sentence holds only fields whose patterns keep them to plain tokens; the
+free text is never inside it, so no text in the words or the folder can read as part of the
+sentence (a level or a cap other than the rule's) or as a line of its own. A machine MUST show the
+description whole.
 
 A machine MUST read the file whole or not at all: a file that does not fit this, or is not there,
 is read as no rules with triggers **off**, and the machine says why in `trigger list` and in its
@@ -1800,7 +1816,7 @@ log. It never runs part of a file, and never guesses what a rule meant
 (`conformance/triggers/rules-file.json`).
 
 `trigger list` shows each rule in plain words with its runs today against its cap, whether the
-machine paused it (step 11), and its latest history lines (ran, refused with its code, failed,
+machine paused it and why (step 11: `gone` or `unknown_level`), and its latest history lines (ran, refused with its code, failed,
 missed; the subject, the session, when). `trigger
 test` shows what a sample notice, or a tick, would run, running nothing and recording nothing.
 Their `--json` output is `config.proto`'s `TriggerList` and `TriggerTestAnswer`.
@@ -1900,9 +1916,10 @@ predates notices reads `messages` only, and would be handed the same notices on 
 | `cap` | The rule already ran today as often as its `cap` allows. |
 | `folder` | The rule's folder is no longer on the machine's allowlist. |
 | `harness` | The rule's harness cannot be run headlessly on this machine now. |
-| `no_session` | The session the rule continues is gone. The machine pauses the rule. |
+| `no_session` | The session the rule continues can't be continued: it is gone, or its recorded level is one this machine does not know (§14.7, *The level*). Either way the machine pauses the rule, and `trigger list` says which. |
 | `held` | The session the rule continues stayed held by a window until the notice expired. |
-| `start_limit` | The machine's caps on starts stayed reached until the notice expired. |
+| `start_limit` | The machine's caps on starts, or (continuing a session) its headless slots, stayed full until the notice expired. |
+| `busy` | The rule's own earlier run was still going until the notice expired: a rule runs one at a time. |
 
 The list of codes is closed. An ack carries `session` only with `ran` and `code` only with
 `refused`. It MUST NOT carry the rule's name, words, level, folder, tools or filter: the receiver
@@ -1986,8 +2003,11 @@ fails:
 11. Continuing: the session exists, its transcript still there; else `refused` `no_session`, and
     the machine pauses the rule. That pause is kept in the daemon's own state and never written to
     `triggers.json` (the CLI alone writes the file): the rule's topic leaves the hello at once,
-    `trigger list` shows it paused by the machine and why. The pause ends with `trigger resume` at
-    the terminal, with the rule's removal, or when the person changes the rule's target.
+    `trigger list` shows it paused by the machine and why: `gone` (the session is gone) or
+    `unknown_level` (its recorded level is one this machine does not know; `config.proto`'s
+    `TriggerPause`). The pause ends with `trigger resume` at the terminal, with the rule's removal,
+    or when the person changes the rule's target; for `unknown_level` only a new target clears it
+    for good, since the same session would pause the rule again.
 
 A clock tick takes, in order: a paused rule's tick (in the file or by the machine) is nothing, on
 or off; step 2 (off: a history line `refused` `triggers_off`); its lateness (§14.6: six hours or
@@ -1999,7 +2019,7 @@ when it begins, or, when it must wait, when it is acked `taken`. So two notices 
 the run of the first waits are counted one after the other, and the second is refused `cap` when
 the first used the last run of the day. Every run that counted stays counted whether it then works
 or fails. A count is given back when, and only when, a run that was taken ends without running at
-all: refused `held` or `start_limit` at its deadline, dropped by `triggers off`, or refused
+all: refused `held`, `start_limit` or `busy` at its deadline, dropped by `triggers off`, or refused
 `folder`, `harness` or `no_session` when it is let go. When a waiting run is let go (the window
 lets go of the session, a start ends, the hour has room), steps 9 to 11 are checked **again**, and a
 run that now fails one is refused with that step's code. A count lent to a waiting run can refuse
@@ -2037,11 +2057,12 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   does (§13 `start_limit`): a rule that **starts** a session takes a start, counted against
   `start_concurrent` (2 by default) while that start is in progress and against `start_per_hour`
   (10 by default) for the sliding hour after it began, the same count a receiver's start and an
-  ask's start take; a rule that **continues** a session takes no start, and its turn waits for the
-  machine's headless slot (`headless`, 3 by default) as an ask's turn does. Where an ask beyond the
-  start caps is refused `start_limit`, a triggered start waits, acked `taken`, until the caps allow
-  it (a start ends, or the sliding hour has room), the notice expires (`refused` `start_limit`) or,
-  for a tick, six hours pass.
+  ask's start take; a rule that **continues** a session takes no start, and its turn waits for one
+  of the machine's headless slots (`headless`, 3 by default) as an ask's turn does. Where an ask
+  beyond the start caps is refused `start_limit`, a triggered run waits, acked `taken`, until the
+  caps or a slot allow it (a start or a headless turn ends, or the sliding hour has room); at its
+  deadline (the notice's `expires_at`, six hours for a tick) it is refused `start_limit` and its
+  count given back.
 - **A session a window holds.** A rule continues a session only through a path where the daemon
   runs the turn at the rule's level: `sdk`, `api` or `resume` (§6). Never `waiter`, `turn`, `inbox`,
   a channel or Codex's own queue, where the window's own mode would apply, and never a `fork`, which
@@ -2049,6 +2070,12 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   the run **waits**, acked `taken`, until nothing holds it, within the notice's expiry (`refused`
   `held`) or six hours for a tick. A machine SHOULD tell the window once, at its next prompt, as
   context, that a triggered run waits for it.
+- **One run of a rule at a time.** A rule's next run waits while its last one runs, acked `taken`,
+  under the same deadlines (the notice's `expires_at`, six hours for a tick), and at its deadline is
+  refused `busy`, its count given back. Waiting runs of one rule are let go in the order they were
+  taken. Two runs of one rule would set two agents on one task in one folder, which is why a rule
+  never forks a session either: a `15m` clock whose run takes forty minutes has its later ticks
+  wait behind it, each refused `busy` if the run outlasts that tick's six hours.
 - **Off.** Turning triggers off drops every waiting run (§14.10).
 - **What an `edits` run can leave for later runs.** A run at `edits` writes in its folder, and some
   of what a folder holds can widen what later sessions there may do: Claude Code's

@@ -27,6 +27,18 @@ enum TriggerResult {
   TRIGGER_RESULT_MISSED = 4;
 }
 
+// Why the machine itself paused a rule (CONTROL.md §14.7 step 11), kept in the daemon's state and
+// never in the rules file.
+enum TriggerPause {
+  // None.
+  TRIGGER_PAUSE_UNSPECIFIED = 0;
+  // The session the rule continues is gone. `trigger resume` clears it, once that session is back.
+  TRIGGER_PAUSE_GONE = 1;
+  // The session's recorded level is one this machine does not know. Changing the rule's target
+  // (`trigger remove` and `trigger add` again) clears it; resuming would only pause it again.
+  TRIGGER_PAUSE_UNKNOWN_LEVEL = 2;
+}
+
 // Which part of a rule a notice did not fit (`sessionpipe trigger test`). The machine's own
 // word, for the person at its terminal: never in an ack, which says `no_match` alone.
 enum TriggerMiss {
@@ -302,6 +314,8 @@ message TriggerListEntry {
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).repeated.max_items = 20
   ];
+  // When the machine paused it itself: why. Absent when it didn't.
+  TriggerPause machine_paused = 4;
 }
 
 // `sessionpipe trigger list --json`.

@@ -25,6 +25,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -122,6 +123,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -184,6 +186,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -281,6 +284,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -347,6 +351,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -404,17 +409,6 @@
                   "by": "u-41c9",
                   "at": "2026-11-24T09:14:02.000Z",
                   "expires_at": "2026-11-25T09:14:02.000Z"
-                },
-                {
-                  "id": "01KB4M2Q8V3T6Y9C0D1E2F003X",
-                  "topic": "acme/tasks",
-                  "event": "record.updated",
-                  "subject": "X-125",
-                  "state": "todo",
-                  "for": "studio-claude",
-                  "by": "u-41c9",
-                  "at": "2026-11-24T09:14:02.000Z",
-                  "expires_at": "2026-11-25T09:14:02.000Z"
                 }
               ]
             }
@@ -423,11 +417,6 @@
             "acks": [
               {
                 "id": "01KB4M2Q8V3T6Y9C0D1E2F003W",
-                "outcome": "ran",
-                "session": "claude-code:*"
-              },
-              {
-                "id": "01KB4M2Q8V3T6Y9C0D1E2F003X",
                 "outcome": "ran",
                 "session": "claude-code:*"
               }
@@ -449,7 +438,47 @@
                 "env": {
                   "SESSIONPIPE_TRIGGERED_BY": "card-todo"
                 }
-              },
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-11-24T09:15:00.000Z",
+          "run_ended": [
+            0
+          ],
+          "expect": {}
+        },
+        {
+          "at": "2026-11-24T09:15:30.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F003X",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-125",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F003X",
+                "outcome": "ran",
+                "session": "claude-code:*"
+              }
+            ],
+            "runs": [
               {
                 "rule": "card-todo",
                 "run": {
@@ -469,13 +498,6 @@
               }
             ]
           }
-        },
-        {
-          "at": "2026-11-24T09:15:00.000Z",
-          "run_ended": [
-            0
-          ],
-          "expect": {}
         },
         {
           "at": "2026-11-24T09:16:00.000Z",
@@ -547,6 +569,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },

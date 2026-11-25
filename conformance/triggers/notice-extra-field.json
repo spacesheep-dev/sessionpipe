@@ -25,6 +25,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -123,6 +124,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -221,6 +223,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -319,6 +322,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -417,6 +421,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -515,6 +520,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -613,6 +619,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -711,6 +718,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -811,6 +819,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -909,6 +918,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -1007,6 +1017,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -1105,6 +1116,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },

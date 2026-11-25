@@ -215,15 +215,19 @@ enum TriggerRefusal {
   TRIGGER_REFUSAL_FOLDER = 5;
   // The rule's harness can't be run on this machine now.
   TRIGGER_REFUSAL_HARNESS = 6;
-  // The session the rule continues is gone; the machine pauses the rule.
+  // The session the rule continues can't be continued: it is gone, or its recorded level is one
+  // this machine does not know. Either way the machine pauses the rule.
   TRIGGER_REFUSAL_NO_SESSION = 7;
   // The session the rule continues stayed held by a window until the notice expired.
   TRIGGER_REFUSAL_HELD = 8;
-  // The machine's caps on starts, which asks and receivers' starts share, stayed reached
-  // until the notice expired.
+  // The machine's caps on starts, which asks and receivers' starts share, or (continuing a
+  // session) its headless slots, stayed full until the notice expired.
   TRIGGER_REFUSAL_START_LIMIT = 9;
   // Once `missed`, before a clock tick's lateness became a history result; never to be reused.
   reserved 10;
+  // The rule's own earlier run was still going until the notice expired: a rule runs one at a
+  // time, so two runs never work on one task in one folder.
+  TRIGGER_REFUSAL_BUSY = 11;
 }
 
 // A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver

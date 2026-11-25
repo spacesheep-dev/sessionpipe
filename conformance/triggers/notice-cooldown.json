@@ -25,6 +25,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -173,6 +174,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -266,6 +268,13 @@
           }
         },
         {
+          "at": "2026-11-24T10:00:00.000Z",
+          "run_ended": [
+            0
+          ],
+          "expect": {}
+        },
+        {
           "at": "2026-11-24T11:00:00.000Z",
           "poll": {
             "receiver": "board.example",
@@ -340,6 +349,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },
@@ -483,6 +493,7 @@
             "/home/sam/.claude",
             "/home/sam/.codex"
           ],
+          "system": [],
           "platform": "linux"
         }
       },

@@ -72,6 +72,7 @@ interface Step {
   release?: string;
   start_ended?: number;
   run_ended?: number[];
+  headless_ended?: number;
   resume?: string;
   permission?: unknown;
   expect: {
@@ -95,8 +96,8 @@ interface Case {
   sessions?: Record<string, { level: StartPermission; held: boolean }>;
   seen?: { receiver: string; id: string; at: string }[];
   today?: { rule: string; subject?: string; state?: string; at: string; result: string }[];
-  starts?: { running: number; last_hour: number };
-  limits?: { start_concurrent?: number };
+  starts?: { running: number; last_hour: number; headless?: number };
+  limits?: { start_concurrent?: number; headless?: number };
   last_tick?: Record<string, string>;
   zone?: string;
   steps: Step[];
@@ -111,6 +112,7 @@ const STEP_KINDS = [
   "wake",
   "release",
   "start_ended",
+  "headless_ended",
   "run_ended",
   "permission",
 ];
@@ -183,6 +185,9 @@ function runCase(c: Case) {
   let running = c.starts?.running ?? 0;
   const startTimes: number[] = Array(c.starts?.last_hour ?? 0).fill(firstAt);
   const concurrent = c.limits?.start_concurrent ?? 2;
+  // The headless slots: turns the daemon runs as its own child, a continued run's among them.
+  let headless = c.starts?.headless ?? 0;
+  const slots = c.limits?.headless ?? 3;
   const lastTick = new Map(Object.entries(c.last_tick ?? {}).map(([k, v]) => [k, Date.parse(v)]));
   const machinePaused = new Set<string>();
   type Waiting = {
@@ -190,7 +195,7 @@ function runCase(c: Case) {
     id?: string;
     rule: TriggerRule;
     notice?: ControlNotice;
-    why: "held" | "start_limit";
+    why: "held" | "start_limit" | "busy";
     until: number;
   };
   let waiting: Waiting[] = [];
@@ -202,6 +207,16 @@ function runCase(c: Case) {
   const ref = (r: TriggerRule) => (isStart(r.target) ? null : r.target.continue);
   const allowed = (f: string) => machine.folders.some((a) => f === a || f.startsWith(`${a}/`));
   const free = (now: number) => running < concurrent && startTimes.filter((t) => now - t < H).length < 10;
+  /** What a run waits for, or null when it may begin: its own rule's earlier run (one at a time,
+   *  in the order they were taken), a window, the start caps or (continuing) a headless slot. */
+  const blocker = (w: { key: string; rule: TriggerRule }, now: number): Waiting["why"] | null => {
+    const ahead = waiting.findIndex((x) => x.rule.name === w.rule.name);
+    if ([...stillRunning].some((i) => triggered[i]!.name === w.rule.name)) return "busy";
+    if (ahead >= 0 && waiting[ahead]!.key !== w.key) return "busy";
+    if (ref(w.rule) !== null && sessions[ref(w.rule)!]!.held) return "held";
+    if (isStart(w.rule.target) ? !free(now) : headless >= slots) return "start_limit";
+    return null;
+  };
   const giveBack = (key: string) => {
     const i = counted.findIndex((x) => x.key === key);
     if (i >= 0) counted.splice(i, 1);
@@ -234,7 +249,7 @@ function runCase(c: Case) {
       if (isStart(r.target)) {
         running++;
         startTimes.push(now);
-      }
+      } else headless++;
       stillRunning.add(triggered.push(r) - 1);
       if (id) acks.push({ id, outcome: "ran", session: ref(r) ?? `${harnessOf(r)}:*` });
       else history.push({ rule: r.name, result: "ran" });
@@ -258,11 +273,19 @@ function runCase(c: Case) {
     const take = (w: Omit<Waiting, "why" | "until">, until: number) => {
       const n = w.notice;
       counted.push({ rule: w.rule.name, subject: n?.subject, state: n?.state, day: day(now), key: w.key });
-      const held = ref(w.rule) !== null && sessions[ref(w.rule)!]!.held;
-      if (held || (isStart(w.rule.target) && !free(now))) {
-        waiting.push({ ...w, why: held ? "held" : "start_limit", until });
+      const why = blocker(w, now);
+      if (why) {
+        waiting.push({ ...w, why, until });
         if (w.id) acks.push({ id: w.id, outcome: "taken" });
       } else begin(w.rule, n, w.id);
+    };
+    /** Every waiting run that may begin now, in the order they were taken. */
+    const drain = () => {
+      for (const w of [...waiting]) {
+        const why = blocker(w, now);
+        if (why) w.why = why;
+        else letGo(w);
+      }
     };
     const letGo = (w: Waiting) => {
       waiting = waiting.filter((x) => x !== w);
@@ -273,15 +296,16 @@ function runCase(c: Case) {
       } else begin(w.rule, w.notice, w.id);
     };
     // Time passes first. A deadline is exclusive: at its own instant a waiting run has expired,
-    // before anything else at that instant; its count is given back.
+    // before anything else at that instant, refused for what it waited for; its count is given back.
     for (const w of [...waiting])
       if (now >= w.until) {
+        const why = blocker(w, now) ?? w.why;
         waiting = waiting.filter((x) => x !== w);
         giveBack(w.key);
-        refuse(w, w.why);
+        refuse(w, why);
       }
     // The sliding hour may have room again.
-    for (const w of waiting.filter((x) => x.why === "start_limit")) if (free(now)) letGo(w);
+    drain();
 
     if (s.machine) Object.assign(machine, s.machine);
     if (s.resume) machinePaused.delete(s.resume);
@@ -310,22 +334,20 @@ function runCase(c: Case) {
       expect(stillRunning.has(i), `${where}: run ${i} is running`).toBe(true);
       stillRunning.delete(i);
       if (isStart(triggered[i]!.target)) running--;
+      else headless--;
     }
+    if (s.headless_ended) headless -= s.headless_ended;
     if (s.hello) {
+      expect(machine.receivers, `${where}: a hello goes to a receiver the machine is paired with`).toContain(s.hello);
       const t = helloTriggers(active(), s.hello);
       expect(s.expect.triggers, where).toEqual(t);
       const hi = { name: "studio-mac", harnesses: [], modes: [], keys: [], version: "1", triggers: t };
       expect(validate("control-hello", hi)).toEqual([]);
       expect(Object.keys(t).sort()).toEqual(["on", "topics"]);
     }
-    if (s.release) {
-      sessions[s.release]!.held = false;
-      for (const w of waiting.filter((x) => x.why === "held" && ref(x.rule) === s.release)) letGo(w);
-    }
-    if (s.start_ended) {
-      running -= s.start_ended;
-      for (const w of waiting.filter((x) => x.why === "start_limit")) if (free(now)) letGo(w);
-    }
+    if (s.release) sessions[s.release]!.held = false;
+    if (s.start_ended) running -= s.start_ended;
+    drain();
     if (s.permission !== undefined) expect(s.expect.answered_by_machine, where).toBe(false);
     if (s.poll) {
       const { notices, left } = noticesIn(s.poll.body);

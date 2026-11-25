@@ -674,7 +674,7 @@ export type NoticeOutcome = "taken" | "ran" | "no_match" | "duplicate" | "expire
  * clock tick missed by six hours or more is no refusal: its history line says `missed`.
  * Closed: a machine sends no other word, so a receiver can say each one to the person.
  */
-export type TriggerRefusal = "triggers_off" | "bad_notice" | "cooldown" | "cap" | "folder" | "harness" | "no_session" | "held" | "start_limit";
+export type TriggerRefusal = "triggers_off" | "bad_notice" | "cooldown" | "cap" | "folder" | "harness" | "no_session" | "held" | "start_limit" | "busy";
 
 /**
  * A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver

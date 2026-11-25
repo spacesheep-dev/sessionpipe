@@ -8,6 +8,12 @@ import type { ControlNotice, StartPermission, TriggerRefusal } from "./v1.js";
 export type TriggerResult = "ran" | "refused" | "failed" | "missed";
 
 /**
+ * Why the machine itself paused a rule (CONTROL.md §14.7 step 11), kept in the daemon's state and
+ * never in the rules file.
+ */
+export type TriggerPause = "gone" | "unknown_level";
+
+/**
  * Which part of a rule a notice did not fit (`sessionpipe trigger test`). The machine's own
  * word, for the person at its terminal: never in an ack, which says `no_match` alone.
  */
@@ -184,6 +190,8 @@ export interface TriggerListEntry {
   today: number;
   /** Its latest lines, newest first. */
   recent: TriggerHistoryLine[];
+  /** When the machine paused it itself: why. Absent when it didn't. */
+  machine_paused?: TriggerPause | undefined;
 }
 
 /** `sessionpipe trigger list --json`. */

@@ -22,12 +22,15 @@ export const MARKS_MAX = 4;
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}⠀￼]|(?! )\p{Zs}/u;
 const MARK = /\p{M}/u;
 
-/** A character a person can't see as itself, where it is in the text (1 for the first character,
- *  counted in characters, not code units), as `U+XXXX` and as `visible` writes it. */
+/** A character a person can't see as itself: as `U+XXXX`, as `visible` writes it, and where it
+ *  is. `at` counts what a person counts, characters as they show (grapheme clusters, by
+ *  `Intl.Segmenter` where the runtime has it, else code points), 1 for the first; `codePoint` is
+ *  its index among the text's code points, from 0, for tools. */
 export interface Hidden {
   code: string;
   escape: string;
   at: number;
+  codePoint: number;
 }
 
 const codeOf = (c: string): string => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -47,12 +50,67 @@ function* walk(text: string): Generator<{ c: string; hidden: boolean }> {
 /** The first character of `text` a person can't see as itself, other than those `allowed` lets
  *  through (`"\t\n"` for a rule's words); null when there is none. */
 export function hiddenIn(text: string, allowed = ""): Hidden | null {
-  let at = 0;
+  let index = 0;
   for (const { c, hidden } of walk(text)) {
-    at++;
-    if (hidden && !allowed.includes(c)) return { code: codeOf(c), escape: escapeOf(c), at };
+    if (hidden && !allowed.includes(c)) {
+      // The character as it shows that holds it: a mark or a joiner hides inside the one before.
+      const upTo = [...text].slice(0, index + 1).join("");
+      return { code: codeOf(c), escape: escapeOf(c), at: graphemes(upTo).length, codePoint: index };
+    }
+    index++;
   }
   return null;
+}
+
+/** `text` split into what a person counts as characters: grapheme clusters where the runtime
+ *  has `Intl.Segmenter`, else code points with each combining mark kept on its base. */
+export function graphemes(text: string): string[] {
+  if (typeof Intl.Segmenter === "function")
+    return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map((g) => g.segment);
+  const out: string[] = [];
+  for (const c of text)
+    if (MARK.test(c) && out.length) out[out.length - 1] += c;
+    else out.push(c);
+  return out;
+}
+
+/** Columns one character takes at a terminal, counted high so a line never wraps where this says
+ *  it fits: 0 for a combining mark, 2 for an East Asian wide or full-width character or a
+ *  pictograph, 1 for the rest. (The CLI's own `cols` counts code points; text a person confirms
+ *  is measured here, since wide padding would otherwise push a line past the edge.) */
+export function columnsOf(cluster: string): number {
+  let n = 0;
+  for (const c of cluster) n += MARK.test(c) ? 0 : WIDE.test(c) ? 2 : 1;
+  return n;
+}
+const WIDE =
+  /[\u1100-\u115f\u231a\u231b\u2329\u232a\u23e9-\u23ec\u23f0\u23f3\u25fd\u25fe\u2614\u2615\u2648-\u2653\u267f\u2693\u26a1\u26aa\u26ab\u26bd\u26be\u26c4\u26c5\u26ce\u26d4\u26ea\u26f2\u26f3\u26f5\u26fa\u26fd\u2705\u270a\u270b\u2728\u274c\u274e\u2753-\u2755\u2757\u2795-\u2797\u27b0\u27bf\u2b1b\u2b1c\u2b50\u2b55\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\ua960-\ua97f\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6\u{16fe0}-\u{1b2ff}\u{1f000}-\u{1faff}\u{20000}-\u{3fffd}]|\p{Extended_Pictographic}/u;
+
+/** `text` cut into pieces of at most `room` columns, never inside a character as a person sees it
+ *  (a surrogate pair, a base and its combining marks), at the last space when one falls in the
+ *  second half of the piece. Each piece is at least one character, so a character wider than
+ *  `room` is a piece of its own. */
+export function wrapColumns(text: string, room: number): string[] {
+  const out: string[] = [];
+  let piece: string[] = [];
+  let used = 0;
+  for (const g of graphemes(text)) {
+    const w = columnsOf(g);
+    // At the last space when it is in the piece's second half, else all of it. What a cut at a
+    // space leaves is at most the piece's second half, and the first half holds at least two
+    // columns, so this character always has room after it.
+    if (piece.length && used + w > room) {
+      const at = piece.lastIndexOf(" ");
+      const cut = at >= piece.length / 2 ? at + 1 : piece.length;
+      out.push(piece.slice(0, cut).join(""));
+      piece = piece.slice(cut);
+      used = piece.reduce((n, x) => n + columnsOf(x), 0);
+    }
+    piece.push(g);
+    used += w;
+  }
+  out.push(piece.join(""));
+  return out;
 }
 
 /** Whether a backslash before `next` could be read as the start of an escape `visible` writes. */
@@ -62,7 +120,9 @@ const startsEscape = (next: { c: string; hidden: boolean } | undefined): boolean
 /** `text` with every character a person can't see as itself written out (`\n`, `\t`, `\r`, and
  *  `\u{…}` for the rest), and a backslash written as two wherever it could start one of those
  *  (before `n`, `t`, `r`, `u`, another backslash, or a character written out), so a typed `\n` never reads as a line break
- *  written out, while a pattern's `\d` or a folder's `C:\work` still reads as typed. For anything
+ *  written out, while a pattern's `\d` or a folder's `C:\work` still reads as typed (a Windows
+ *  path does show a doubled backslash before a segment starting `n`, `t`, `r` or `u`: `C:\\new`,
+ *  the price of the output being one-to-one with the input). For anything
  *  shown at a terminal: a rule in plain words, a refusal that quotes a value, the words a test
  *  would send. */
 export function visible(text: string): string {

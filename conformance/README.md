@@ -151,7 +151,7 @@
   a case is `{ name, machine, triggers, steps }` and what the machine knew before it:
   - `machine`: `{ mode, folders, harnesses, receivers, places, levels? }`, the machine's mode
     (`safe`, `auto`, `inherit`), its allowed folders, the harnesses it runs headlessly, the
-    receivers it is paired with (by host), `places` (`{ home, config, state, harnesses, platform }`,
+    receivers it is paired with (by host), `places` (`{ home, config, state, harnesses, system, platform }`,
     what a rule's folder is checked against: CONTROL.md §14.1, *The folder's floor*) and, where a
     case needs it, `levels` (per harness, the levels it takes here, as a hello's
     `start.<harness>.permissions`);
@@ -160,20 +160,23 @@
   - optional: `sessions` (`{ "<harness>:<id>": { level, held } }`, the sessions a rule continues,
     their recorded level and whether a window holds one; a session not listed is gone), `seen`
     (notice ids already seen, `{ receiver, id, at }`), `today` (the rules' runs earlier that local
-    day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour }`, the starts
-    counted against the machine's caps: in progress, and in the sliding hour, the latter made at
-    the first step's instant), `last_tick` (per clock rule), `zone` (the machine's time
+    day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour, headless? }`, the
+    starts counted against the machine's caps: in progress, and in the sliding hour, the latter
+    made at the first step's instant; and the headless turns no trigger made in the machine's
+    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule), `zone` (the machine's time
     zone, for the day and the clock).
   Each step has an `at` and at most one of: `poll` (`{ receiver, body }`, a poll answer that
   receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
   person changed it at the machine), `tick` (a clock rule's time came), `wake` with `asleep` (the
   machine slept from `asleep` and woke at `at`), `release` (a window let go of that session),
-  `start_ended` (that many starts no trigger made ended), `run_ended` (the indexes of triggered
-  runs that ended), `machine` (the machine's settings as the person changed them at its terminal,
+  `start_ended` (that many starts no trigger made ended), `headless_ended` (that many headless
+  turns no trigger made ended), `run_ended` (the indexes of triggered runs that ended), `machine` (the machine's settings as the person changed them at its terminal,
   the fields given), `resume` (the person ran `trigger resume` for that rule), `permission` (a
   triggered run raised a prompt); a step with none is time passing to `at`. Within a step, waiting
-  runs whose deadline passed (a deadline is exclusive) are settled first, then waiting starts the
-  sliding hour now has room for, then what the step does. Its `expect` holds what must follow: `acks`
+  runs whose deadline passed (a deadline is exclusive) are settled first, refused for what they
+  waited for (`busy`, `held`, `start_limit`), then every waiting run that may begin does, in the
+  order taken, then what the step does, then again every waiting run that may begin. A `hello`
+  goes only to a receiver in `machine.receivers`. Its `expect` holds what must follow: `acks`
   (`{ id, outcome, code?, session? }`, the machine's clock aside; `"<harness>:*"` is a session the
   run made), `runs` (`{ rule, run, env }`, `run` being `config.proto`'s `TriggerRun` and `env` what
   the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
