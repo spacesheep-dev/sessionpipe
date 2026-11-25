@@ -1,5 +1,25 @@
 # sessionpipe
 
+## 0.18.6
+
+### Patch Changes
+
+- 49e7898: Each pooled Claude account shows its Fable week, and keeps every limit it has between checks
+  
+  - A pooled account's Fable weekly limit was never shown. Anthropic reports it under names the pool did not read: on each response as the `7d_oi` window, which the pool passed on as a model called "Oi", and in the account's usage as a row of a list. Both are read now, as one window, `seven_day_fable`, which the desktop app and any other receiver already show as "This week, Fable only". Any other model with its own weekly limit in that list is shown the same way, under its own name.
+  - The windows only the usage check reports (Extra usage, the Sonnet week, and Fable where a response does not carry it) went away at the account's next request, so an account in use showed only "5 hours" and "This week, all models". Now a request's numbers update the windows it carries and the others stay, and every account is checked every five minutes whether it is in use or not. A window whose reset has passed, or that the usage check stopped reporting, goes; so do the usage check's own windows when it has not answered for fifteen minutes. A number that reads the same again, or that a fresher one from a request is within a point of, is left as it is, so the app does not flicker; a window the account is limited by is always one it shows. When a request's numbers and the usage check differ by a point or more on one window, the background service's log says so, at most once an hour per account and window, with the pool's short id for the account, the window and the two numbers.
+  - Which account serves a request is decided exactly as before, on the same numbers as before: a model's week from the usage list is shown and never moves a session. A full Fable week that a response's own headers carry takes the account out of the rotation, as it did before under the name "Oi".
+  - A request that arrived just as the five-minute check asked for the same account could be told the account's sign-in could not be refreshed; it now refreshes it as it would on its own.
+  - `sessionpipe pool status` shows each model's week after "7d" ("7d Fable  33%"), for every account once any account has one, under the name the usage check gives it.
+- d28fb08: A `safe` run says why a folder's own allow rule did nothing
+  
+  - Claude Code leaves out the allow rules in a folder's `.claude/settings.json` and `.claude/settings.local.json` until a person has trusted that folder in Claude Code, and says so only on its error output. A session asked or started at `safe` in such a folder was denied what the folder allows, and its reply did not say why. When a turn was denied something, its reply now says that Claude Code left those rules out, and why, in sessionpipe's own fixed words: nothing of Claude Code's error output is copied into a reply. It never tells anyone to trust a folder, and sessionpipe never trusts one for anyone.
+  - A session started through the Agent SDK now names what it was denied after its reply, as a `claude -p` run always has.
+  - A reply too long for its acknowledgement is cut before that note, never through it and never through a character, so what was denied is still named, and a reply is never longer than the 20 000 characters an acknowledgement may carry, however long the note.
+  - A note about what was denied names at most 20 actions, then says how many more there were.
+  - The Agent SDK is told which settings files a session reads (the person's own, then the folder's, as `claude -p` reads them) only when it is release 0.2.89 or later, whose own default already reads those three: nothing is read that was not read before. Releases before 0.2.89, and an SDK whose version can't be read, are told nothing, as before, and their sessions still read no settings files at all, so they get neither the folder's allow rules nor the hooks in the person's own settings. The daemon's log says so when it finds such an SDK.
+- fad93f0: A session started through the Agent SDK gets the same environment as a `claude -p` run: a daemon started from inside a Claude Code session no longer hands it that session's markers (`CLAUDECODE`, its entrypoint and port), which made the new session take itself for one nested in another.
+
 ## 0.18.5
 
 ### Patch Changes
