@@ -157,8 +157,10 @@
     `start.<harness>.permissions`);
   - `triggers`: `<config>/triggers.json` exactly (`null`: no file). `triggers_ok: false` marks a
     file the machine must refuse whole, and so read as triggers off;
-  - optional: `sessions` (`{ "<harness>:<id>": { level, held } }`, the sessions a rule continues,
-    their recorded level and whether a window holds one; a session not listed is gone), `seen`
+  - optional: `sessions` (`{ "<harness>:<id>": { level, held, folder? } }`, the sessions a rule
+    continues, their recorded level, whether a window holds one and, where a case says it, the
+    folder the session runs in, which a run of a rule continuing it uses; a session not listed is
+    gone), `seen`
     (notice ids already seen, `{ receiver, id, at }`), `today` (the rules' runs earlier that local
     day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour, headless? }`, the
     starts counted against the machine's caps: in progress, and in the sliding hour, the latter

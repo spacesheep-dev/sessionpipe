@@ -1741,7 +1741,7 @@ them. A rule (`config.proto`'s `TriggerRule`):
 | `when` | A notice rule only. `state`, `for`, `by`: lists of allowed values (1 to 20 each, the notice's patterns; a list is never empty). An absent list allows any value; a notice without the field fits no list. `by` trusts the receiver's word for who made the change: it keeps a rule to the people the person trusts on an honest receiver, and protects nothing against a receiver that was broken into. |
 | `subject` | A notice rule only. The subjects it takes, in the pattern language of §14.8. |
 | `target` | Exactly one of `{"start": "<harness>"}` (a new session) or `{"continue": "<harness>:<id>"}` (an existing one, the id by its adapter's rule, §3.1). |
-| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. A rule that continues a session runs in that session's own folder, so its `folder` IS the session's recorded folder: `add` writes that folder and refuses another, and at every run the floor and the allowlist are checked on the folder the run really uses, refused `folder` when it is no longer the rule's. |
+| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. A rule that continues a session runs in that session's own folder, so its `folder` IS the session's recorded folder: `add` writes that folder and refuses another, and at every run the floor and the allowlist are checked on the folder the run really uses, refused `folder` when it is no longer the rule's (`conformance/triggers/run-session-folder.json`). |
 | `level` | `read`, `safe`, `edits` or `auto`: the widest the rule runs at (§14.7). A notice rule's is `edits` at most: the receiver holds other people's text. `auto` is for clock rules only. |
 | `tools` | Up to 8 MCP servers or tools a run may use without asking, `^mcp__[A-Za-z0-9_-]{1,64}$` (`mcp__board`, `mcp__board__records_get`), as `control.session_tools` are (§6): never a built-in tool, never a shell pattern, since a command line holding the person's sign-in can do whatever that command can. The pattern is the daemon's for `session_tools`, so looser than the two shapes: any `mcp__` name of those characters. |
 | `cap` | `{"per_day": n}`, 1 to 50 runs a machine-local day. |
@@ -2080,6 +2080,11 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   never forks a session either: a `15m` clock whose run takes forty minutes has its later ticks
   wait behind it, each refused `busy` if the run outlasts that tick's six hours.
 - **Off.** Turning triggers off drops every waiting run (§14.10).
+- **Paused, removed or changed.** A rule the person pauses or removes drops its waiting runs, and a
+  rule changed under the same name (in anything that decides what a run does) drops the runs that
+  waited for the rule as it was, each giving its count back. A notice among them is acked
+  `no_match`, as a notice that meets only a paused rule is (step 6), never `triggers_off`: the
+  switch is on.
 - **What an `edits` run can leave for later runs.** A run at `edits` writes in its folder, and some
   of what a folder holds can widen what later sessions there may do: Claude Code's
   `.claude/settings.json`, `.git/hooks`. A triggered run can write those for the next run of the
@@ -2172,7 +2177,7 @@ itself through the board.
 - `conformance/triggers/`: `notice-no-rule.json`, `notice-extra-field.json`,
   `notice-other-receiver.json`, `notice-duplicate.json`, `notice-expired.json`, `notice-cap.json`,
   `notice-cooldown.json`, `notice-broken-id.json`, `run-level-capped.json`, `run-waits.json`,
-  `hello-topics-only.json`, `clock-missed.json`, `triggers-off.json`: scenarios, each a machine,
+  `run-session-folder.json`, `hello-topics-only.json`, `clock-missed.json`, `triggers-off.json`: scenarios, each a machine,
   its rules file and steps (a poll, a hello, a tick, a wake, a change at the machine) with the acks,
   runs and hellos they must give, and `notice-bad-shape.json`, notices that are not the closed
   shape in every way §14.2 names. `rules-file.json`: which rules files a machine reads.

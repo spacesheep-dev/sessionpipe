@@ -99,7 +99,7 @@ interface Case {
   machine: Machine;
   triggers: unknown;
   triggers_ok?: boolean;
-  sessions?: Record<string, { level: StartPermission; held: boolean }>;
+  sessions?: Record<string, { level: StartPermission; held: boolean; folder?: string }>;
   seen?: { receiver: string; id: string; at: string }[];
   today?: { rule: string; subject?: string; state?: string; at: string; result: string }[];
   starts?: { running: number; last_hour: number; headless?: number };
@@ -277,6 +277,9 @@ function runCase(c: Case) {
         paused.push(r.name);
         return "no_session";
       }
+      // A continued session runs in its own folder (§14.1): it is the rule's and allowed, or no run.
+      const there = ref(r) ? sessions[ref(r)!]!.folder : undefined;
+      if (there !== undefined && (there !== r.folder || !allowed(there))) return "folder";
       return null;
     };
     /** A run that passed its checks: counted now, then begun, or waiting (taken) for a window or the caps. */
@@ -462,6 +465,7 @@ describe("conformance/triggers: the scenario files", () => {
       "notice-no-rule.json",
       "notice-other-receiver.json",
       "run-level-capped.json",
+      "run-session-folder.json",
       "run-waits.json",
       "triggers-off.json",
     ]);
