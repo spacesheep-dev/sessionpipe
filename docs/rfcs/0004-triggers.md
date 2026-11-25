@@ -1,8 +1,8 @@
 # RFC 0004 · Triggers: a rule made at the machine, run on a notice or a clock
 
-- **Status:** Draft for the owner's and the maintainers' review
+- **Status:** Accepted 2026-11-25 (the owner's go-ahead), being built in the order of §12. The spec proposal for its three protocol parts is #339; its seven days of lazy consensus end 2026-12-02
 - **Written:** 2026-11-24, against `main` (`fa6f537`, after 0.18.4)
-- **Depends on:** CONTROL.md as on `main`; RFC 0003 (`tell`, tree caps, its frame); two spec proposals (§12)
+- **Depends on:** CONTROL.md as on `main`; RFC 0003 (`tell`, tree caps, its frame); one spec proposal in three parts (#339, §12)
 - **Scope:** local rules, the notice that picks when one runs, the clock, the run, the mark, the tool gap at `safe`
 
 ## 0. In one paragraph
