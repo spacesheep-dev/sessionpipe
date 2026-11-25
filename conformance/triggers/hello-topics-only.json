@@ -1,0 +1,581 @@
+{
+  "spec": "CONTROL.md §14.3 (topics in the hello), §1: choices at the terminal",
+  "note": "What each hello says of the machine's triggers to one receiver: `on`, and the topics of the rules (not paused) whose source is that receiver, once each. Never a filter, words, target, level, folder, tool or rule name. A machine that knows triggers says `triggers` in every hello, `on: false` with no topics when they are off (the default). A `change` step is the person changing rules or the switch at the machine; a hello goes to every receiver at once.",
+  "cases": [
+    {
+      "name": "two receivers, each told its own topics only",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "ops-queue",
+            "paused": false,
+            "source": {
+              "receiver": "tasks.example",
+              "topic": "ops/queue"
+            },
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "card-done",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "done"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "card-old",
+            "paused": true,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/archive"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "monday-report",
+            "paused": false,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": [
+                "acme/tasks"
+              ]
+            }
+          }
+        },
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "tasks.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": [
+                "ops/queue"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "off, the default: no topics",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": {
+        "v": 1,
+        "on": false,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": false,
+              "topics": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "no rules file at all is off",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": null,
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": false,
+              "topics": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "on, but no rule for this receiver",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          },
+          {
+            "name": "monday-report",
+            "paused": false,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "tasks.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a rule paused leaves the hello at once",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": [
+                "acme/tasks"
+              ]
+            }
+          }
+        },
+        {
+          "at": "2026-11-24T09:20:00.000Z",
+          "change": {
+            "v": 1,
+            "on": true,
+            "rules": [
+              {
+                "name": "card-todo",
+                "paused": true,
+                "source": {
+                  "receiver": "board.example",
+                  "topic": "acme/tasks",
+                  "event": "record.updated"
+                },
+                "when": {
+                  "state": [
+                    "todo"
+                  ],
+                  "for": [
+                    "studio-claude"
+                  ]
+                },
+                "subject": "^X-[0-9]{1,6}$",
+                "target": {
+                  "start": "claude-code"
+                },
+                "folder": "~/work/acme",
+                "level": "edits",
+                "tools": [
+                  "mcp__board"
+                ],
+                "cap": {
+                  "per_day": 5
+                },
+                "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+              }
+            ]
+          },
+          "expect": {
+            "hello": true
+          }
+        },
+        {
+          "at": "2026-11-24T09:20:00.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "turned on at the machine: a hello at once with the topics",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ]
+      },
+      "triggers": {
+        "v": 1,
+        "on": false,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "change": {
+            "v": 1,
+            "on": true,
+            "rules": [
+              {
+                "name": "card-todo",
+                "paused": false,
+                "source": {
+                  "receiver": "board.example",
+                  "topic": "acme/tasks",
+                  "event": "record.updated"
+                },
+                "when": {
+                  "state": [
+                    "todo"
+                  ],
+                  "for": [
+                    "studio-claude"
+                  ]
+                },
+                "subject": "^X-[0-9]{1,6}$",
+                "target": {
+                  "start": "claude-code"
+                },
+                "folder": "~/work/acme",
+                "level": "edits",
+                "tools": [
+                  "mcp__board"
+                ],
+                "cap": {
+                  "per_day": 5
+                },
+                "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+              }
+            ]
+          },
+          "expect": {
+            "hello": true
+          }
+        },
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "hello": "board.example",
+          "expect": {
+            "triggers": {
+              "on": true,
+              "topics": [
+                "acme/tasks"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

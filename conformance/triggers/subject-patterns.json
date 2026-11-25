@@ -1,0 +1,163 @@
+{
+  "spec": "CONTROL.md §14.8 (the subject pattern)",
+  "note": "Which subject patterns a machine takes, and what each matches. `ok: false` is a pattern a rules file holding it is refused for. A pattern means what a JavaScript RegExp gives it, over the subject's alphabet; `matches` and `misses` are subjects that pass the notice's own pattern.",
+  "cases": [
+    {
+      "pattern": "^X-[0-9]{1,6}$",
+      "ok": true,
+      "matches": [
+        "X-1",
+        "X-001",
+        "X-123456"
+      ],
+      "misses": [
+        "X-",
+        "X-1234567",
+        "x-1",
+        "XX-1",
+        "X-1a"
+      ]
+    },
+    {
+      "pattern": "^[A-Z]{2,}-\\d+$",
+      "ok": true,
+      "matches": [
+        "AB-1",
+        "ABC-0042"
+      ],
+      "misses": [
+        "A-1",
+        "ab-1",
+        "AB-"
+      ]
+    },
+    {
+      "pattern": "^[^0-9]+$",
+      "ok": true,
+      "matches": [
+        "abc",
+        "A_b-c"
+      ],
+      "misses": [
+        "a1",
+        "1"
+      ]
+    },
+    {
+      "pattern": "^\\w{3}$",
+      "ok": true,
+      "matches": [
+        "a_1",
+        "XYZ"
+      ],
+      "misses": [
+        "a-1",
+        "ab"
+      ]
+    },
+    {
+      "pattern": "^.*$",
+      "ok": true,
+      "matches": [
+        "X-001",
+        "a"
+      ],
+      "misses": []
+    },
+    {
+      "pattern": "^a[-_]x$",
+      "ok": true,
+      "matches": [
+        "a-x",
+        "a_x"
+      ],
+      "misses": [
+        "abx",
+        "ax"
+      ]
+    },
+    {
+      "pattern": "^a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*b$",
+      "ok": true,
+      "matches": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+      ],
+      "misses": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "note": "would backtrack for ever in a regular expression engine; here it is one pass a piece"
+    },
+    {
+      "pattern": "X-1",
+      "ok": false
+    },
+    {
+      "pattern": "^X-1",
+      "ok": false
+    },
+    {
+      "pattern": "^(a+)+$",
+      "ok": false
+    },
+    {
+      "pattern": "^a|b$",
+      "ok": false
+    },
+    {
+      "pattern": "^(?=a)a$",
+      "ok": false
+    },
+    {
+      "pattern": "^\\1$",
+      "ok": false
+    },
+    {
+      "pattern": "^\\s$",
+      "ok": false
+    },
+    {
+      "pattern": "^[a$",
+      "ok": false
+    },
+    {
+      "pattern": "^[]$",
+      "ok": false
+    },
+    {
+      "pattern": "^[z-a]$",
+      "ok": false
+    },
+    {
+      "pattern": "^[A-z]$",
+      "ok": false
+    },
+    {
+      "pattern": "^a{41}$",
+      "ok": false
+    },
+    {
+      "pattern": "^a{3,2}$",
+      "ok": false
+    },
+    {
+      "pattern": "^a{,3}$",
+      "ok": false
+    },
+    {
+      "pattern": "^a*?$",
+      "ok": false
+    },
+    {
+      "pattern": "^a{2}{3}$",
+      "ok": false
+    },
+    {
+      "pattern": "^a b$",
+      "ok": false
+    },
+    {
+      "pattern": "^aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$",
+      "ok": false
+    }
+  ]
+}

@@ -146,6 +146,35 @@
   poll's messages arriving together, the running one finishing, one being refused. Run by
   `packages/cli/test/control-line.test.ts`; a second implementation of the machine runs the
   same file.
+- `triggers/*.json` — the person's trigger rules, the notices a receiver sends, their acks, the
+  hello's topics and the clock (spec/CONTROL.md §14). A scenario file is `{ spec, note, cases }`;
+  a case is `{ name, machine, triggers, steps }` and what the machine knew before it:
+  - `machine`: `{ mode, folders, harnesses, receivers }`, the machine's mode (`safe`, `auto`,
+    `inherit`), its allowed folders, the harnesses it runs headlessly and the receivers it is
+    paired with (by host);
+  - `triggers`: `<config>/triggers.json` exactly (`null`: no file). `triggers_ok: false` marks a
+    file the machine must refuse whole, and so read as triggers off;
+  - optional: `sessions` (`{ "<harness>:<id>": { level, held } }`, the sessions a rule continues,
+    their recorded level and whether a window holds one; a session not listed is gone), `seen`
+    (notice ids already seen, `{ receiver, id, at }`), `today` (the rules' runs earlier that local
+    day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour }`, the starts
+    counted against the machine's caps), `last_tick` (per clock rule), `zone` (the machine's time
+    zone, for the day and the clock).
+  Each step has an `at` and at most one of: `poll` (`{ receiver, body }`, a poll answer that
+  receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
+  person changed it at the machine), `tick` (a clock rule's time came), `wake` with `asleep` (the
+  machine slept from `asleep` and woke at `at`), `release` (a window let go of that session),
+  `start_ended` (that many of the machine's starts ended), `permission` (a triggered run raised a
+  prompt); a step with none is time passing to `at`. Its `expect` holds what must follow: `acks`
+  (`{ id, outcome, code?, session? }`, the machine's clock aside; `"<harness>:*"` is a session the
+  run made), `runs` (`{ rule, run, env }`, `run` being `config.proto`'s `TriggerRun` and `env` what
+  the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
+  `history` (lines a rule's history gains), and `unacked`, `cancelled`, `paused`, `message_acks`,
+  `answered_by_machine` where a case says them. `rules-file.json` (`{ name, file, ok }`) and
+  `subject-patterns.json` (`{ pattern, ok, matches?, misses? }`) are the reader's alone. Run by
+  `packages/core/test/trigger-fixtures.test.ts` for every part the pure functions decide (which
+  file is read, a broken, expired or unmatched notice, triggers off, the run a match makes, the
+  hello's topics, every ack's shape); the daemon's tests run the same files for the rest.
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet

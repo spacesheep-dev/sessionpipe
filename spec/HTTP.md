@@ -38,7 +38,7 @@ it at most daily (24 h cache); a receiver MAY set `Cache-Control`.
 | `endpoints` | Paths relative to the origin, or absolute URLs. |
 | `batch` | The largest request the receiver takes. A sender MUST NOT exceed either bound. Defaults when absent: 50 / 262 144. |
 | `tools` | Optional: the tool events the receiver would rather be sent (PROTOCOL.md §4, *Thinned tool events*): `all` (every one, what an absent field means), `main` (a subagent's thinned to at most one `tool.ended` per session per minute), `beat` (every session's thinned so). A sender SHOULD honour it unless the sink's owner chose otherwise, and SHOULD read it again at least daily; a sender that predates the field sends every tool event. A receiver that meters requests per machine SHOULD say `main`. |
-| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `signing.key_types`: OPTIONAL, the kinds of key the receiver stores and carries whole (`passkey`, `device`; CONTROL.md §2); absent means `["passkey"]`. `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). `inherit`: OPTIONAL; `true` when it shows a machine whose `mode` is `inherit` as that, on its pairing page and wherever it shows the mode, and never as `safe` or `auto`; a daemon pairs in `inherit` mode only with a receiver that says so. ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment)) |
+| `control` | Required when `capabilities` lists `control`. `wait_max_s`: the longest long-poll it will hold. `signing.rp_id`: the WebAuthn rp id control keys are enrolled for; `signing.algs`: the COSE algorithms it accepts (`-7`, `-257`). `signing.key_types`: OPTIONAL, the kinds of key the receiver stores and carries whole (`passkey`, `device`; CONTROL.md §2); absent means `["passkey"]`. `files`: OPTIONAL, informational; `true` when it accepts `files` on a `start` and serves `{control}/files/{sha256}` (§3). `inherit`: OPTIONAL; `true` when it shows a machine whose `mode` is `inherit` as that, on its pairing page and wherever it shows the mode, and never as `safe` or `auto`; a daemon pairs in `inherit` mode only with a receiver that says so. `notices`: OPTIONAL, informational; `true` when it sends notices for the person's trigger rules on the topics a machine lists and takes `{control}/notices/ack` (§3); a machine tells a person making a rule for a receiver that doesn't say so that it sends none. ([CONTROL.md §2](CONTROL.md#2-keys-and-enrollment), [§14](CONTROL.md#14-triggers)) |
 
 Schema: [`well-known.json`](https://sessionpipe.org/schema/v1/well-known.json).
 
@@ -111,18 +111,28 @@ long-poll per receiver, whatever the number of sessions.
 | `POST {control}/pair` | the person's sink token, or none (with a `poll_key`) where `control.open_pairing` | [`control-pair.json`](https://sessionpipe.org/schema/v1/control-pair.json) → `201` [`control-pair-started.json`](https://sessionpipe.org/schema/v1/control-pair-started.json) |
 | `GET {control}/pair?code=<code>` | the person's sink token, or the `poll_key` for an open pairing | → `200` [`control-paired.json`](https://sessionpipe.org/schema/v1/control-paired.json) (`pending`, `paired` with key, proof and, on a machine's first pairing, its token; `expired`) |
 | `POST {control}/hello` | the machine's token | [`control-hello.json`](https://sessionpipe.org/schema/v1/control-hello.json) → `204` |
-| `GET {control}?machine=<id>&wait=<s>` | the machine's token | → `200` [`control-poll.json`](https://sessionpipe.org/schema/v1/control-poll.json) when a message is waiting, `204` when none arrived within `wait` (≤ `wait_max_s`) |
+| `GET {control}?machine=<id>&wait=<s>` | the machine's token | → `200` [`control-poll.json`](https://sessionpipe.org/schema/v1/control-poll.json) when a message or a notice is waiting, `204` when none arrived within `wait` (≤ `wait_max_s`) |
 | `POST {control}/ack` | the machine's token | [`control-ack.json`](https://sessionpipe.org/schema/v1/control-ack.json) → `202` |
+| `POST {control}/notices/ack` | the machine's token | [`control-notice-ack.json`](https://sessionpipe.org/schema/v1/control-notice-ack.json) → `202` |
 | `POST {control}/off` | the machine's token | → `204`; the machine, its token and its queue are gone |
 | `GET {control}/files/{sha256}` | the machine's token | → `200` with the file's bytes and its `content-type`; `404` when there is no such file for this machine's account (never uploaded, or expired) |
 
-- The machine's token opens these machine calls (hello, poll, ack, off, files) for
+- The machine's token opens these machine calls (hello, poll, ack, notice ack, off, files) for
   that one machine and nothing else of the account. A receiver MUST refuse a sink
   token on them, and the machine's token everywhere else.
 - A receiver MUST keep re-delivering a message on every poll until it is acked or its
   `expires_at` passes, then drop it. A `taken` ack pauses redelivery for 35 minutes
   (CONTROL.md §10); a final ack ends it. A machine MAY receive the same message twice; the
   signed nonce makes the second one a `replay`.
+- **Notices.** A receiver that says `control.notices` MAY put notices for the person's
+  trigger rules in a poll answer's `notices`, beside `messages` (which is still REQUIRED, `[]`
+  when there are none): at most 50 an answer, each at most 1 KiB, only on the topics the
+  machine's last hello listed for this receiver and only to a machine whose hello says
+  `triggers` with `on: true` (CONTROL.md §14.2, §14.3). A notice is unsigned and never a
+  command. A receiver MUST keep re-delivering a notice until a final ack, a `taken` (which
+  pauses it until `expires_at`), or its `expires_at`, and keeps at most the latest per (topic,
+  subject), 200 a machine (CONTROL.md §14.4, §14.5). A daemon that predates notices reads
+  `messages` only.
 - A poll is also the machine's heartbeat: a receiver MAY show a machine that polled
   within `2 × wait_max_s` as online, and SHOULD hand a session the waiter (CONTROL.md
   §8) only while its machine is online.
