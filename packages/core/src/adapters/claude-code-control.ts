@@ -16,6 +16,7 @@ import { withoutLineage } from "../launched-by.js";
 import { reducePii } from "../privacy/pii.js";
 import { redactSecrets } from "../privacy/secrets.js";
 import {
+  deniedNote,
   isExe,
   JOB_TIMEOUT_MS,
   type Login,
@@ -25,9 +26,10 @@ import {
   type RunOptions,
   type RunResult,
   runHeadless,
+  STDERR_KEPT,
 } from "./headless.js";
 
-export { JOB_TIMEOUT_MS, type Login, type Mode, type RunResult };
+export { JOB_TIMEOUT_MS, type Login, type Mode, type RunResult, STDERR_KEPT };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A transcript someone else wrote this recently is in use. */
@@ -238,6 +240,122 @@ export function offeredLevels(mode: Mode, caps: Caps): StartPermission[] {
 
 /** What a start that names no level gets: what the machine's mode means for Claude Code. */
 export const defaultLevel = (mode: Mode): RunLevel => mode;
+
+/** The settings files a run reads, besides managed settings: the person's own, then the
+ *  folder's `.claude/settings.json` and `.claude/settings.local.json`. That is what
+ *  `claude -p` reads when it is given no `--setting-sources` (2.1.327). The daemon says it
+ *  to the Agent SDK only where the SDK's own default already reads the same three
+ *  (`sdkReadsAllSettings`), so saying it widens nothing: it only keeps a later SDK from
+ *  reading fewer. Never fewer, never others. */
+export const SETTING_SOURCES: readonly string[] = ["user", "project", "local"];
+
+/** The first Agent SDK whose `query()` reads every settings file when it is not told which:
+ *  0.2.87 and every release before it set `settingSources ?? []` there and so pass
+ *  `--setting-sources ""` (no settings files at all); 0.2.89 (0.2.88 was never published)
+ *  passes the flag only when it was given, and the Claude Code it bundles reads user,
+ *  project and local unless the flag says otherwise. Read in each release's shipped
+ *  `sdk.mjs` and `cli.js`. */
+export const SDK_ALL_SETTINGS_FROM = "0.2.89";
+
+/** Whether an Agent SDK of this version already reads all of SETTING_SOURCES by default,
+ *  so that naming them changes nothing. A version that is not plain `x.y.z` is not known
+ *  to: an older SDK is told nothing, as before, and still reads no settings at all. */
+export function sdkReadsAllSettings(version: unknown): boolean {
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) return false;
+  return cmpVersion(version, SDK_ALL_SETTINGS_FROM) >= 0;
+}
+
+/** Why Claude Code left out the allow rules of the folder's own settings, as one of the
+ *  reasons it gives (2.1.327), or `other` for one it gives that this list does not know. */
+export type DroppedRules = "untrusted" | "no_folder" | "trust_ignored" | "moved" | "other";
+
+/** Claude Code's own line on stderr when it left out those rules, printed once per process
+ *  in `-p` and under the Agent SDK alike: `Ignoring 1 permissions.allow entry from
+ *  .claude/settings.json: this workspace has not been trusted. Run Claude Code …`
+ *  (conformance/control-claude-folder-rules.json). Only the kind of reason is taken from
+ *  it, never its words: what reaches a reply is sessionpipe's own fixed text. */
+const DROPPED_LINE = /^Ignoring \d{1,6} permissions\.allow entr(?:y|ies) from [^:\n]{1,200}: (.+)$/;
+const REASONS: [string, DroppedRules][] = [
+  ["this workspace has not been trusted.", "untrusted"],
+  ["a session with no working directory is never trusted.", "no_folder"],
+  ["no workspace trust record counts in this process", "trust_ignored"],
+  ["this session has moved and still reads its project settings", "moved"],
+];
+/** The longest line read: Claude Code's own is under 400 characters. */
+export const STDERR_LINE_MAX = 2000;
+
+/** Whether ONE whole line of stderr is Claude Code saying it left the rules out, and why. */
+export function droppedRules(line: string): DroppedRules | null {
+  if (line.length > STDERR_LINE_MAX) return null;
+  const m = DROPPED_LINE.exec(line);
+  if (!m) return null;
+  return REASONS.find(([start]) => (m[1] as string).startsWith(start))?.[1] ?? "other";
+}
+
+/** The same, over what a run kept of its stderr: whole lines only. When `cut` (the text is
+ *  the end of a longer stream), its first line may be the tail of a longer one and is not
+ *  read; a last line with no newline yet is not whole and is not read either. */
+export function droppedInStderr(stderr: string | null | undefined, cut: boolean): DroppedRules | null {
+  const lines = String(stderr || "").split("\n");
+  lines.pop();
+  for (const line of cut ? lines.slice(1) : lines) {
+    const d = droppedRules(line);
+    if (d) return d;
+  }
+  return null;
+}
+
+/** Reads a stream of stderr chunks as whole lines, handing each to `onLine`. A line longer
+ *  than STDERR_LINE_MAX is skipped whole, its end included, so no tail of a long line is
+ *  ever read as a line of its own. */
+export function stderrLines(onLine: (line: string) => void): (chunk: string) => void {
+  let part = "";
+  let long = false;
+  return (chunk) => {
+    let text = chunk;
+    for (let nl = text.indexOf("\n"); nl >= 0; nl = text.indexOf("\n")) {
+      const line = part + text.slice(0, nl);
+      if (!long && line.length <= STDERR_LINE_MAX) onLine(line);
+      part = "";
+      long = false;
+      text = text.slice(nl + 1);
+    }
+    part += text;
+    if (part.length > STDERR_LINE_MAX) {
+      part = "";
+      long = true;
+    }
+  };
+}
+
+/** What a reply says when Claude Code had left out the folder's own allow rules: one fixed
+ *  sentence for each reason, in sessionpipe's words. It never tells anyone to trust a
+ *  folder: the folder is whatever a receiver or an asking session named, and trusting it
+ *  lets its hooks, MCP servers and settings run in every later run there. */
+export const DROPPED_NOTES: Record<DroppedRules, string> = {
+  untrusted:
+    "(Claude Code left out the allow rules in this folder's own settings: it counts them only in a folder a person has trusted in Claude Code. Trusting a folder also lets its hooks, MCP servers and settings run, for every later run there; do it only for a folder whose `.claude` settings you have read.)",
+  no_folder:
+    "(Claude Code left out the allow rules in this folder's own settings: it never counts them for a session that has no working folder.)",
+  trust_ignored:
+    "(Claude Code left out the allow rules in this folder's own settings: it was started so that no folder counts as trusted.)",
+  moved:
+    "(Claude Code left out the allow rules in this folder's own settings: the session had moved from the folder it started in, and it counts them only when both folders are trusted.)",
+  other:
+    "(Claude Code left out the allow rules in this folder's own settings, for a reason Claude Code gave on its error output.)",
+};
+
+/** What a turn that nobody was there to approve says after its reply (spec/CONTROL.md
+ *  §3.1: what would ask "is denied and named in the reply"): the tools it was denied, and,
+ *  when Claude Code had left out the folder's own allow rules, that it did and why, in the
+ *  fixed words above. Nothing when nothing was denied: the rules left out then stopped
+ *  nothing. */
+export function refusedNote(denials: unknown, dropped: DroppedRules | null): string {
+  const list = (Array.isArray(denials) ? denials : []) as ({ tool_name?: unknown } | null)[];
+  if (!list.length) return "";
+  const names = [...new Set(list.map((d) => d?.tool_name).filter((n): n is string => typeof n === "string"))];
+  return deniedNote(names, list.length) + (dropped ? `\n\n${DROPPED_NOTES[dropped]}` : "");
+}
 
 /** How a headless run prints: streamed where this Claude Code can, else one JSON at the end. */
 export function outputArgs(caps: { stream?: boolean }): string[] {

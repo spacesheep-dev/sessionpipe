@@ -28,9 +28,11 @@ export { DEVIN_EVENTS, devinConfigDir, devinDataDir, readDevinChain } from "./de
 export { GROK_EVENTS, grokHome, isGrokPayload } from "./grok-build.js";
 export {
   deniedNote,
+  fitReply,
   JOB_TIMEOUT_MS,
   jobEnv,
   type Login,
+  REPLY_MAX,
   type Reading,
   type RunOptions,
   type RunResult,

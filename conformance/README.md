@@ -95,6 +95,14 @@
   are installed (spec/ADAPTERS.md, *Codex*, Mapping): `{ ends, reported }`, the ends as the
   harness says them, each `[road, turn id]`, and the `turn.ended` events that go out. Run by
   `packages/cli/test/run-turn-end-once.test.ts`.
+- `control-claude-folder-rules.json` — what a `safe` run of Claude Code may do that the folder's
+  own settings allow (spec/CONTROL.md §3.1), recorded on Claude Code 2.1.327 and the Agent SDK
+  0.3.332, through `claude -p` and the SDK as the daemon starts each: `runs`, each `{ name, path,
+  trusted, user_allow, argv, stderr, result, expect }`, whether the person had trusted the folder
+  in Claude Code, how it was started, what it printed, and what ran, what was denied, why Claude
+  Code said it left the folder's allow rules out, and the note after the reply. Run by
+  `packages/core/test/claude-control.test.ts`, `packages/cli/test/control-poll.test.ts` and
+  `packages/cli/test/control-sdk.test.ts`.
 - `control-codex-exec-stream.json` — what `codex exec --json` and `codex exec resume --json` print
   (spec/ADAPTERS.md, *Codex*, Control), recorded on codex-cli 0.171.0: `runs`, each `{ name, exit,
   lines, expect }`, stdout line for line and what a reader takes from it (`session`, `warnings`,
