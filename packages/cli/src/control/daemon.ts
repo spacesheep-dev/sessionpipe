@@ -84,6 +84,7 @@ import { fetchFiles, picturesOf, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
+import { type Held, takeLock as takeLockFile } from "./lockfile.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import {
   type Following,
@@ -899,7 +900,10 @@ export class ControlDaemon {
   private readonly asks = new Map<string, { from: string | null; to: string }>();
   /** The person's trigger rules at work (control/triggers.ts): fed the rules file, its clock
    *  looked at every half minute, its runs begun through `runTrigger`. */
-  private readonly triggers: TriggerEngine;
+  /** The engine of the person's rules, once this daemon holds their claim (claimTriggers). */
+  private triggers: TriggerEngine | null = null;
+  private triggerClaim: Held | null = null;
+  private claimSaid = false;
   private rulesNow: TriggersFile | null = null;
   private triggerTimer: NodeJS.Timeout | null = null;
   /** Triggered runs waiting for the headless slot, by message id: told when they have it. */
@@ -920,7 +924,31 @@ export class ControlDaemon {
     // read here. It is taken up once the socket is this daemon's (`takeUp`).
     this.state = readState(path.join(dir, "state.json"), deps.now());
     this.aliases = readAliases(aliasFile(dir));
-    const record = path.join(dir, "triggers-state.json");
+  }
+
+  /** The person's rules run in one daemon only: the one that holds the record's claim
+   *  (`triggers-state.lock`, lockfile.ts), taken once this daemon has started and before it reads
+   *  the record. Two daemons started at once never both run a tick, and the one that steps aside
+   *  never read, ran or wrote the record. Tried again at each look of the clock until held. */
+  private claimTriggers(): void {
+    if (this.triggers || !this.running) return;
+    let claim: Held | null = null;
+    try {
+      claim = takeLockFile(path.join(this.dir, "triggers-state.lock"), {
+        broke: (why) => this.deps.log(`the triggers' claim of a daemon that is gone (${why}) was let go of`),
+      });
+    } catch (e) {
+      this.deps.log(`the triggers' claim can't be taken (${String(e)}); no rule runs here`);
+      return;
+    }
+    if (!claim) {
+      if (!this.claimSaid) this.deps.log("another daemon runs the trigger rules; this one runs none until it stops");
+      this.claimSaid = true;
+      return;
+    }
+    this.triggerClaim = claim;
+    const deps = this.deps;
+    const record = path.join(this.dir, "triggers-state.json");
     this.triggers = new TriggerEngine({
       now: deps.now,
       ...(deps.triggerZone ? { zone: deps.triggerZone } : {}),
@@ -945,6 +973,10 @@ export class ControlDaemon {
       log: (l) => deps.log(l),
       changed: () => this.triggersChanged(),
     });
+    this.safely(() => {
+      this.triggers?.load(this.rulesNow);
+      this.triggers?.check();
+    });
   }
 
   // --- lifecycle ------------------------------------------------------------------
@@ -966,7 +998,14 @@ export class ControlDaemon {
     // The person's rules, and their clock: looked at now (a tick missed while the daemon was
     // stopped is run or refused `missed` at once) and every half minute after.
     this.reloadRules();
-    this.triggerTimer = setInterval(() => this.safely(() => this.triggers.check()), this.deps.triggerCheckMs ?? 30_000);
+    this.triggerTimer = setInterval(
+      () =>
+        this.safely(() => {
+          this.claimTriggers();
+          this.triggers?.check();
+        }),
+      this.deps.triggerCheckMs ?? 30_000,
+    );
     this.triggerTimer.unref();
     const idle = setInterval(() => this.closeIdleSdk(), Math.min(60_000, this.deps.sdkIdleMs ?? 60_000));
     idle.unref();
@@ -997,7 +1036,10 @@ export class ControlDaemon {
     if (this.triggerTimer) clearInterval(this.triggerTimer);
     // A triggered run that waits in a session's line, or for the headless slot, waits again in the
     // record: the next daemon takes it up (§14.7).
-    this.safely(() => this.triggers.suspend());
+    // Only the daemon that holds the claim ever wrote the record, and it lets go of the claim.
+    this.safely(() => this.triggers?.suspend());
+    this.triggerClaim?.release();
+    this.triggerClaim = null;
     for (const s of this.sdkSessions.values()) s.close();
     for (const l of this.live.values()) {
       l.waiter?.destroy();
@@ -1322,10 +1364,11 @@ export class ControlDaemon {
         on: !!this.rulesNow?.on,
         rules: this.rulesNow?.rules.length ?? 0,
         paused:
-          this.rulesNow?.rules.filter((x) => x.paused || this.triggers.pausedByMachine().includes(x.name)).length ?? 0,
-        waiting: this.triggers.waitingNow().length,
-        running: this.triggers.runningNow().length,
-        checks: this.triggers.checks,
+          this.rulesNow?.rules.filter((x) => x.paused || (this.triggers?.pausedByMachine() ?? []).includes(x.name))
+            .length ?? 0,
+        waiting: this.triggers?.waitingNow().length ?? 0,
+        running: this.triggers?.runningNow().length ?? 0,
+        checks: this.triggers?.checks ?? 0,
       },
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
@@ -1614,7 +1657,7 @@ export class ControlDaemon {
       this.unpark(named);
       l.ended = this.deps.now();
       // A window let go of a session: a rule's run may be waiting for it.
-      this.safely(() => this.triggers.retry());
+      this.safely(() => this.triggers?.retry());
     }
     // `Interrupt` is Codex's: the person stopped the turn, and no Stop follows.
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd" || e.event === "Interrupt") {
@@ -4416,7 +4459,7 @@ export class ControlDaemon {
     } finally {
       this.startsRunning--;
       // A run of a rule may have been waiting for exactly this.
-      this.safely(() => this.triggers.retry());
+      this.safely(() => this.triggers?.retry());
     }
   }
 
@@ -4468,11 +4511,14 @@ export class ControlDaemon {
       if (got === null) return;
       const text = got.text;
       if (this.deps.sdk) {
-        // A session the daemon will hold: from here a Stop is that session's interrupt.
-        this.letGo(run);
         const sdk = this.deps.sdk;
         const extra = this.childEnv(r, cmd);
         const out = await this.slot(async () => {
+          // Stopped while it waited for the slot (a cancel, `triggers off`, its deadline): it never
+          // starts. Until here it is a run in hand, as a claude -p run is until ownRun's slot.
+          if (run.ctl.signal.aborted) return null;
+          // A session the daemon will hold: from here a Stop is that session's interrupt.
+          this.letGo(run);
           const s = sdk.start({
             session: ref.id,
             cwd,
@@ -4486,6 +4532,7 @@ export class ControlDaemon {
           this.picturesSaid(id, got.pictures.length, sent.native ?? 0, "image blocks");
           return sent;
         }, id);
+        if (out === null) return this.finish(r, id, UNSTARTED_ACK, sent);
         return this.finish(
           r,
           id,
@@ -5039,8 +5086,9 @@ export class ControlDaemon {
   reloadRules(): void {
     this.rulesNow = this.deps.rules?.() ?? null;
     this.safely(() => {
-      this.triggers.load(this.rulesNow);
-      this.triggers.check();
+      this.claimTriggers();
+      this.triggers?.load(this.rulesNow);
+      this.triggers?.check();
     });
   }
 
@@ -5060,7 +5108,7 @@ export class ControlDaemon {
   private liftPause(name: string): boolean {
     let lifted = false;
     this.safely(() => {
-      lifted = this.triggers.lift(name);
+      lifted = this.triggers?.lift(name) ?? false;
     });
     return lifted;
   }
@@ -5136,6 +5184,13 @@ export class ControlDaemon {
     const begin = () => {
       /* v8 ignore next -- a run has one slot (slot() calls this once); the guard keeps it so */
       if (began) return;
+      // Checked again the moment it would begin: its rule, folder and level as they are now
+      // (§14.7). No: it is stopped here, before anything starts, as a cancel stops it.
+      if (!on.ready()) {
+        stopped = true;
+        this.stopTriggered(id, session);
+        return;
+      }
       began = true;
       on.began(session);
     };

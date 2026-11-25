@@ -141,8 +141,20 @@ export function stateOf(
     else say(`a rule's record that does not fit (${JSON.stringify(name).slice(0, 44)})`);
   }
   const list: unknown[] = Array.isArray(v.waiting) ? v.waiting : [];
+  // One waiting run per cause: a notice is one run's however often a record names it, and gets
+  // one final ack, so a copy is dropped and told nothing.
+  const causes = new Set<string>();
   for (const w of list) {
     const ok = waiting(w, now);
+    if (ok && "rule" in ok) {
+      const c = ok.cause;
+      const id = c.kind === "tick" ? `${ok.rule}\ntick ${c.due}` : `${c.receiver}\n${c.notice.id}`;
+      if (causes.has(id)) {
+        say("a waiting run there twice");
+        continue;
+      }
+      causes.add(id);
+    }
     if (ok && "rule" in ok && out.waiting.length < WAITING_MAX) out.waiting.push(ok);
     else {
       say(ok && "rule" in ok ? `more than ${WAITING_MAX} waiting runs` : "a waiting run that does not fit");

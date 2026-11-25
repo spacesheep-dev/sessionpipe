@@ -146,8 +146,18 @@ describe("the triggers' record, read", () => {
     expect(s.waiting[0]?.shape).toBeUndefined();
     expect(log).toEqual(["the triggers' record held what does not fit, dropped: a waiting run that does not fit"]);
     expect(
-      read({ v: 1, rules: {}, waiting: Array.from({ length: WAITING_MAX + 5 }, () => wait()) }).s.waiting,
+      read({
+        v: 1,
+        rules: {},
+        waiting: Array.from({ length: WAITING_MAX + 5 }, (_x, i) =>
+          wait({ cause: { kind: "tick", due: tick.due - i } }),
+        ),
+      }).s.waiting,
     ).toHaveLength(WAITING_MAX);
+    // One run a cause: a copy is dropped as it is read, and said.
+    const twice = read({ v: 1, rules: {}, waiting: [wait(), wait(), wait({ rule: "other" })] });
+    expect(twice.s.waiting.map((w) => w.rule)).toEqual(["card", "other"]);
+    expect(twice.log).toEqual(["the triggers' record held what does not fit, dropped: a waiting run there twice"]);
   });
 
   it("on disk: missing, not JSON or over the size cap reads as nothing; the cap is said", () => {

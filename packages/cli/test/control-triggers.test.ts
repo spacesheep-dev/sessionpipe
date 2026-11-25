@@ -764,4 +764,206 @@ out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
       expect(d?.status().triggers, shape.slice(0, 60)).toMatchObject({ on: true, rules: 1, waiting: 0 });
     }
   });
+
+  /** An Agent SDK stand-in: what each session was opened with and sent. */
+  const sdkStandIn = () => {
+    const opened: { session: string; env?: Record<string, string> }[] = [];
+    const sent: string[] = [];
+    const sdk: SdkHost = {
+      start: (o) => {
+        opened.push(o);
+        transcript(o.session);
+        return {
+          busy: false,
+          lastUsed: Date.now(),
+          send: async (text: string) => {
+            sent.push(text);
+            return { reply: "done" };
+          },
+          interrupt: async () => {},
+          close: () => {},
+        };
+      },
+    };
+    return { sdk, opened, sent };
+  };
+
+  it("through the Agent SDK, a start waiting for the headless slot is stopped by off and by its deadline", async () => {
+    for (const how of ["off", "deadline"] as const) {
+      await d?.stop();
+      writeFake(1500);
+      rmSync(path.join(tmp, "state"), { recursive: true, force: true });
+      rmSync(calls, { force: true });
+      const { sdk, sent } = sdkStandIn();
+      file = { v: 1, on: true, rules: [rule({ name: "a", source: { every: "day 09:00" } })] };
+      clock = MON_0900;
+      await startDaemon({ limits: { headless: 1, start_concurrent: 5 }, extra: { sdk } });
+      // An ask holds the one slot (through claude -p: it continues a session the SDK doesn't hold).
+      transcript(SID);
+      const asking = askMany(
+        sock,
+        { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+        () => {},
+        15_000,
+      );
+      await until(() => runs().length === 1);
+      clock = MON_0900 + 24 * 3600_000;
+      await until(() => d?.status().triggers?.waiting === 1);
+      expect(record().rules.a?.today?.runs).toBe(1);
+      if (how === "off") {
+        file = { ...file, on: false };
+        d?.reloadRules();
+        expect(record().rules.a?.history[0]).toMatchObject({ result: "refused", code: "triggers_off" });
+      } else {
+        clock += 6 * 3600_000;
+        const at = d?.status().triggers?.checks ?? 0;
+        await until(() => (d?.status().triggers?.checks ?? 0) >= at + 1);
+        expect(record().rules.a?.history[0]).toMatchObject({ result: "refused", code: "start_limit" });
+      }
+      expect(record().rules.a?.today?.runs).toBe(0);
+      await asking;
+      // The slot is free: the rule's turn never starts.
+      const at = d?.status().triggers?.checks ?? 0;
+      await until(() => (d?.status().triggers?.checks ?? 0) >= at + 3);
+      expect(sent.filter((t) => t.startsWith("Started by trigger a"))).toEqual([]);
+    }
+  });
+
+  it("a stop while a start waits for the slot: the record has it waiting, and the stopped daemon never runs it", async () => {
+    writeFake(1500);
+    transcript(SID);
+    file = { v: 1, on: true, rules: [rule({ name: "a", source: { every: "day 09:00" } })] };
+    await startDaemon({ limits: { headless: 1, start_concurrent: 5 } });
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      () => {},
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    await d?.stop();
+    // Read the moment stop() is over, as the service manager's exit would leave it.
+    expect(record().waiting.map((w) => w.rule)).toEqual(["a"]);
+    expect(record().rules.a?.today?.runs).toBe(1);
+    expect(record().rules.a?.history).toEqual([]);
+    await asking.catch(() => {});
+    await new Promise<void>((r) => setImmediate(r));
+    expect(runs().filter((r) => r.triggered_by === "a")).toEqual([]);
+    d = null;
+  });
+
+  it("two daemons started at once: one runs the rules, the other never reads, runs or writes them", async () => {
+    file = { v: 1, on: true, rules: [rule({ source: { every: "day 09:00" } })] };
+    await startDaemon();
+    const first = d as ControlDaemon;
+    const other = new ControlDaemon(
+      { name: "studio-mac", folders: [project], mode: "auto", receivers: [] },
+      path.join(tmp, "state", "control"),
+      path.join(tmp, "other.sock"),
+      {
+        now: () => clock,
+        fetch,
+        log: (l) => logs.push(`[other] ${l}`),
+        claudeDirs: () => [configDir],
+        claude: () => ({
+          bin: fakeClaude,
+          caps: {
+            hasMode: true,
+            modes: ["default", "dontAsk", "acceptEdits", "plan", "auto"],
+            promptsNone: false,
+            fork: true,
+          },
+        }),
+        run: runHeadless,
+        env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+        harnesses: () => ["claude-code"],
+        rules: () => file,
+        triggerZone: "UTC",
+        triggerCheckMs: 50,
+      },
+    );
+    await other.start();
+    try {
+      expect(logs).toContain("[other] another daemon runs the trigger rules; this one runs none until it stops");
+      clock = MON_0900 + 24 * 3600_000;
+      await until(() => runs().length === 1);
+      await until(() => typeof record().rules["monday-report"]?.history[0]?.ms === "number");
+      const before = readFileSync(path.join(tmp, "state", "control", "triggers-state.json"), "utf8");
+      const at = first.status().triggers?.checks ?? 0;
+      await until(() => (first.status().triggers?.checks ?? 0) >= at + 3);
+      expect(runs()).toHaveLength(1);
+      expect(other.status().triggers).toMatchObject({ waiting: 0, running: 0, checks: 0 });
+      await other.stop({ leaveSocket: true });
+      expect(readFileSync(path.join(tmp, "state", "control", "triggers-state.json"), "utf8")).toBe(before);
+    } finally {
+      await other.stop();
+    }
+  });
+
+  it("a rule's turn never goes into a session the SDK holds, even when the look said it was free", async () => {
+    const { sdk, sent, opened } = sdkStandIn();
+    await startDaemon({ extra: { sdk } });
+    // An ask opens a session the daemon holds.
+    await askMany(sock, { op: "ask", harness: "claude-code", text: "hi", cwd: project, chain: [] }, () => {}, 8000);
+    const held = `claude-code:${opened[0]?.session}`;
+    // The look is made to say it is free: only prompt()'s own check stands between.
+    (d as unknown as { triggerSession: () => unknown }).triggerSession = () => ({ held: false, folder: project });
+    file = {
+      v: 1,
+      on: true,
+      rules: [rule({ name: "into", source: { every: "day 09:00" }, target: { continue: held } })],
+    };
+    d?.reloadRules();
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => logs.some((l) => l.includes("trigger into: the daemon said no (held)")));
+    expect(sent).toHaveLength(1);
+    expect(d?.status().triggers?.waiting).toBe(1);
+  });
+
+  it("a run waiting for the slot is checked again when it gets it: the machine narrowed meanwhile, it is dropped", async () => {
+    writeFake(1500);
+    transcript(SID);
+    file = { v: 1, on: true, rules: [rule({ name: "a", source: { every: "day 09:00" } })] };
+    await startDaemon({ limits: { headless: 1, start_concurrent: 5 } });
+    const asking = askMany(
+      sock,
+      { op: "ask", harness: "claude-code", session: `claude-code:${SID}`, text: "long job", cwd: project, chain: [] },
+      () => {},
+      15_000,
+    );
+    await until(() => runs().length === 1);
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => d?.status().triggers?.waiting === 1);
+    // The person narrows the machine to safe: the run was taken at edits.
+    d?.reload({ name: "studio-mac", folders: [project], mode: "safe", receivers: [] });
+    await asking;
+    await until(() => record().rules.a?.history[0]?.result === "dropped");
+    expect(record().rules.a?.today?.runs).toBe(0);
+    const at = d?.status().triggers?.checks ?? 0;
+    await until(() => (d?.status().triggers?.checks ?? 0) >= at + 2);
+    expect(runs().filter((r) => r.triggered_by === "a")).toEqual([]);
+  });
+
+  it("the claim of a daemon that is gone is let go of; a folder where it goes leaves the rules unrun, said", async () => {
+    const claim = path.join(tmp, "state", "control", "triggers-state.lock");
+    mkdirSync(path.dirname(claim), { recursive: true });
+    writeFileSync(claim, "999999 gone\n");
+    file = { v: 1, on: true, rules: [rule({ source: { every: "day 09:00" } })] };
+    await startDaemon();
+    expect(logs).toContain("the triggers' claim of a daemon that is gone (its command has ended) was let go of");
+    clock = MON_0900 + 24 * 3600_000;
+    await until(() => runs().length === 1);
+    await d?.stop();
+    rmSync(claim, { force: true });
+    mkdirSync(claim);
+    logs = [];
+    await startDaemon();
+    expect(
+      logs.some((l) => l.startsWith("the triggers' claim can't be taken (Error: ") && l.endsWith("no rule runs here")),
+    ).toBe(true);
+    expect(d?.status().triggers).toMatchObject({ waiting: 0, running: 0, checks: 0 });
+    expect(await ask(sock, { op: "trigger", action: "resume", name: "monday-report" }, 2000)).toEqual({ op: "none" });
+  });
 });

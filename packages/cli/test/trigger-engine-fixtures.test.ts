@@ -32,7 +32,7 @@ import { type RunEvents, TriggerEngine, type TriggerJob, type TriggerState } fro
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const dir = path.join(root, "conformance/triggers");
-const PURE = new Set(["subject-patterns.json", "rules-file.json"]);
+const PURE = new Set(["subject-patterns.json", "rules-file.json", "trigger-line.json"]);
 const files = readdirSync(dir)
   .filter((f) => f.endsWith(".json") && !PURE.has(f))
   .sort();
@@ -122,7 +122,7 @@ function seeded(c: Case, file: TriggersFile | null): TriggerState {
     });
   }
   // An interval clock with no last tick: its time comes at the case's first tick of it, so it
-  // counts from one interval before that.
+  // counts from one interval before that. With none, the engine first sees it as the case begins.
   for (const r of file?.rules ?? []) {
     const every = (r.source as { every?: string }).every;
     const first = c.steps.find((x) => x.tick === r.name);
@@ -196,7 +196,7 @@ function play(c: Case): void {
     session: (ref) => {
       const x = sessions[ref];
       if (!x) return { gone: true };
-      return { held: x.held, level: x.level, ...(x.folder !== undefined ? { folder: x.folder } : {}) };
+      return { held: x.held, level: x.level, folder: x.folder ?? null };
     },
     startRoom: () => running < lim.concurrent && startTimes.filter((t) => now - t < H).length < lim.hour,
     run: (job, on) => {
@@ -314,10 +314,14 @@ function play(c: Case): void {
     expect(byId(acks.slice(before.acks)), `${where}: acks`).toEqual(byId(x.acks ?? []));
     expect(runs.slice(before.runs), `${where}: runs`).toEqual(x.runs ?? []);
     // Every line the step wrote, a notice's with its subject and state: in the order written
-    // within one rule, the rules side by side as the files list them.
-    const sorted = (xs: object[]) => xs.map((x) => JSON.stringify(x)).sort();
+    // within one rule; only the order between rules is free.
+    const byRule = (xs: { rule: string }[]) => {
+      const out: Record<string, string[]> = {};
+      for (const x of xs) out[x.rule] = [...(out[x.rule] ?? []), JSON.stringify(x)];
+      return out;
+    };
     expect(
-      sorted(
+      byRule(
         noted.splice(0).map(({ rule, l }) => ({
           rule,
           result: l.result,
@@ -327,7 +331,7 @@ function play(c: Case): void {
         })),
       ),
       `${where}: history`,
-    ).toEqual(sorted(x.history ?? []));
+    ).toEqual(byRule(x.history ?? []));
     expect(
       e.pausedByMachine().filter((n) => !before.paused.includes(n)),
       `${where}: paused`,

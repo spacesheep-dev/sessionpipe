@@ -57,10 +57,11 @@ function rig(
     logs: [] as string[],
     allowed: true,
     room: true,
-    session: o.session ?? ({ held: false } as SessionLook),
+    session: o.session ?? ({ held: false, folder: "~/work" } as SessionLook),
     saved: o.saved as TriggerState | undefined,
     changed: 0,
     cancelled: 0,
+    received: true,
     /** The last run's events, for a test to end it. */
     on: null as RunEvents | null,
   };
@@ -80,6 +81,8 @@ function rig(
       return { cancel: () => s.cancelled++ };
     },
     ack: (_r, id, r) => s.acks.push({ id, ...r }),
+    // Every notice a record names was received here, unless a test says otherwise.
+    received: () => s.received,
     load: () => s.saved,
     save:
       o.save ??
@@ -181,9 +184,10 @@ describe("one run", () => {
     take();
     expect(s.acks).toEqual([{ id: notice().id, outcome: "refused", code: "triggers_off" }]);
     e.load(file(card({ paused: true })));
-    take();
+    // A notice gets one final ack: another notice, then.
+    take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G51" }));
     e.fire("card", { kind: "tick", due: T0 });
-    expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+    expect(s.acks.at(-1)).toEqual({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G51", outcome: "no_match" });
     expect(s.jobs).toEqual([]);
   });
   it("a notice without a state has its own cooldown key", () => {
@@ -206,7 +210,7 @@ describe("one run", () => {
     let held = true;
     const { e, s, take } = rig({
       answer: (on) => (held ? on.refused("held", "a window has it") : on.began(SID)),
-      session: { held: false },
+      session: { held: false, folder: "~/work" },
     });
     e.load(file(card({ target: { continue: SID } })));
     take();
@@ -236,8 +240,8 @@ describe("one run", () => {
     expect(s.acks.at(-1)).toMatchObject({ outcome: "refused", code: "no_session" });
     expect(e.lift("card")).toBe(true);
     expect(e.lift("card")).toBe(false);
-    take(notice({ subject: "X-009" }));
-    expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "failed" });
+    take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G52", subject: "X-009" }));
+    expect(s.acks.at(-1)).toEqual({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G52", outcome: "failed" });
   });
   it("a run that waits is dropped when its rule goes, or its folder is no longer allowed", () => {
     const { e, s, take } = rig();
@@ -275,9 +279,10 @@ describe("one run", () => {
     e.retry();
     expect(s.jobs).toHaveLength(0);
     expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
-    expect(lines(s)).toEqual([]);
+    // Its history says it was dropped; the count goes back.
+    expect(lines(s)).toEqual([{ at: "2026-11-24T09:14:05.000Z", result: "dropped", subject: "X-001" }]);
     expect(s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 0, keys: [] });
-    expect(s.logs).toContain("trigger card: the rule changed while a run of it waited; the run was dropped");
+    expect(s.logs).toContain("trigger card: a run that waited was dropped: the rule is paused, removed or changed");
     // The same rule as fired: it runs.
     s.room = false;
     take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G4N" }));
@@ -372,7 +377,7 @@ describe("one run", () => {
   });
 
   it("a session recorded at a level the machine doesn't know can't be continued: no_session, and the rule paused", () => {
-    const { e, s, take } = rig({ session: { held: false, level: "AUTO" as never } });
+    const { e, s, take } = rig({ session: { held: false, level: "AUTO" as never, folder: "~/work" } });
     e.load(file(card({ target: { continue: SID } })));
     take();
     expect(s.acks).toEqual([{ id: notice().id, outcome: "refused", code: "no_session" }]);
@@ -443,7 +448,7 @@ describe("what the second review found", () => {
     ...over,
   });
 
-  it("a hand-made record runs a rule no more than its cap, and only for ticks its clock had", () => {
+  it("a hand-made record runs a rule no more than its cap: no stored day is trusted", () => {
     // Six waiting ticks at 14:59:59 for a day-09:00 rule of cap 1: none is a tick of its clock.
     const fake = rig({
       now: WED_1500,
@@ -452,103 +457,179 @@ describe("what the second review found", () => {
         rules: {
           daily: { history: [], clock: { every: "day 09:00", since: WED_1500 - 3600_000, last: WED_1500 - 3600_000 } },
         },
-        waiting: Array.from({ length: 6 }, () => tickWait(WED_1500 - 1000)),
+        waiting: Array.from({ length: 6 }, (_x, i) => tickWait(WED_1500 - 1000 - i)),
       },
     });
     fake.e.load(file(DAILY));
     fake.e.check();
     expect(fake.s.jobs).toHaveLength(0);
     expect(fake.s.logs.filter((l) => l.endsWith("its tick is no tick of the rule's clock"))).toHaveLength(6);
-    expect(fake.s.saved?.rules.daily?.today?.runs ?? 0).toBe(0);
-    // Six copies of its real 09:00 tick: one is kept (the rest are there twice), and it runs once.
-    const nine = Date.parse("2026-11-25T09:00:00.000Z");
-    const real = rig({
+    // Twenty-three real ticks of a 15-minute clock, each labelled with another day: all are today's.
+    const every = card({ name: "daily", source: { every: "15m" }, cap: { per_day: 1 }, words: "Do it." });
+    const since = WED_1500 - (5 * 60 + 45) * 60_000;
+    const labelled = rig({
       now: WED_1500,
       saved: {
         v: 1,
-        rules: { daily: { history: [], clock: { every: "day 09:00", since: nine - 86400_000, last: nine } } },
-        waiting: Array.from({ length: 6 }, () => tickWait(nine)),
+        rules: { daily: { history: [], clock: { every: "15m", since, last: WED_1500 } } },
+        waiting: Array.from({ length: 23 }, (_x, i) =>
+          tickWait(since + (i + 1) * 15 * 60_000, { day: `2026-10-${String(i + 1).padStart(2, "0")}` }),
+        ),
       },
     });
-    real.s.room = false;
-    real.e.load(file(DAILY));
-    expect(real.e.waitingNow()).toEqual(["daily"]);
-    expect(real.s.logs.filter((l) => l.endsWith("it is there twice"))).toHaveLength(5);
-    expect(real.s.saved?.rules.daily?.today?.runs).toBe(1);
-    // Four real ticks of a 15-minute clock waiting for one day, cap 2: the two oldest are kept.
-    const every = card({ name: "daily", source: { every: "15m" }, cap: { per_day: 2 }, words: "Do it." });
-    const since = WED_1500 - 3600_000;
-    const four = rig({
+    labelled.s.room = false;
+    labelled.e.load(file(every));
+    expect(labelled.e.waitingNow()).toEqual(["daily"]);
+    expect(labelled.s.saved?.rules.daily?.today).toEqual({ day: "2026-11-25", runs: 1, keys: [] });
+    // Ten notices each labelled with its own day, for a rule of cap 1: one waits.
+    const notices = rig({
+      now: T0,
+      saved: {
+        v: 1,
+        rules: {},
+        waiting: Array.from({ length: 10 }, (_x, i) => ({
+          rule: "card",
+          cause: {
+            kind: "notice",
+            receiver: "board.example",
+            notice: notice({ id: `01KB4M2Q8V3T6Y9C0D1E2F3G${10 + i}`, subject: `X-${100 + i}` }),
+          },
+          until: T0 + 3600_000,
+          reason: "start_limit",
+          day: `2026-10-${String(i + 1).padStart(2, "0")}`,
+          key: `X-${100 + i}/`,
+        })),
+      },
+    });
+    notices.s.room = false;
+    notices.e.load(file(card({ cap: { per_day: 1 } })));
+    expect(notices.e.waitingNow()).toEqual(["card"]);
+    expect(notices.s.acks.filter((x) => x.outcome === "refused")).toHaveLength(9);
+    // A record from a zone a day ahead: its day is no day here; what ran and what waits count today.
+    const ahead = rig({
+      now: Date.parse("2026-11-25T20:00:00.000Z"),
+      saved: {
+        v: 1,
+        rules: {
+          daily: {
+            history: [],
+            clock: {
+              every: "15m",
+              since: Date.parse("2026-11-25T18:00:00.000Z"),
+              last: Date.parse("2026-11-25T19:45:00.000Z"),
+            },
+            today: { day: "2026-11-26", runs: 1, keys: [] },
+          },
+        },
+        waiting: [tickWait(Date.parse("2026-11-25T19:45:00.000Z"), { day: "2026-11-26" })],
+      },
+    });
+    ahead.e.load(file(every));
+    expect(ahead.e.waitingNow()).toEqual([]);
+    expect(ahead.s.saved?.rules.daily?.today).toEqual({ day: "2026-11-25", runs: 1, keys: [] });
+    // A notice its rule would not take (another receiver, another state), and one past its time.
+    const taken = (id: string, n: Partial<ControlNotice>, receiver = "board.example") => ({
+      rule: "card",
+      cause: { kind: "notice", receiver, notice: notice({ id, ...n }) },
+      until: T0 + 3600_000,
+      reason: "start_limit",
+      day: "2026-11-24",
+      key: null,
+    });
+    const odd = rig({
+      saved: {
+        v: 1,
+        rules: {},
+        waiting: [
+          taken("01KB4M2Q8V3T6Y9C0D1E2F3G61", {}, "evil.example"),
+          taken("01KB4M2Q8V3T6Y9C0D1E2F3G62", { state: "done" }),
+          taken("01KB4M2Q8V3T6Y9C0D1E2F3G63", {
+            at: "2026-11-24T08:00:00.000Z",
+            expires_at: "2026-11-24T09:00:00.000Z",
+          }),
+          taken("01KB4M2Q8V3T6Y9C0D1E2F3G64", {
+            at: "2026-11-24T09:00:00.000Z",
+            expires_at: "2026-11-26T09:00:00.000Z",
+          }),
+        ],
+      },
+    });
+    odd.e.load(file(card({ when: { state: ["todo"] } })));
+    expect(odd.e.waitingNow()).toEqual([]);
+    expect(odd.s.acks.map((x) => x.outcome)).toEqual(["no_match", "no_match", "expired", "expired"]);
+    // A tick six hours old waits no more.
+    const old = rig({
       now: WED_1500,
       saved: {
         v: 1,
-        rules: { daily: { history: [], clock: { every: "15m", since, last: since + 60 * 60_000 } } },
-        waiting: [1, 2, 3, 4].map((k) => tickWait(since + k * 15 * 60_000)),
+        rules: { daily: { history: [], clock: { every: "15m", since: WED_1500 - 8 * 3600_000, last: WED_1500 } } },
+        waiting: [tickWait(WED_1500 - 6 * 3600_000)],
       },
     });
-    four.s.room = false;
-    four.e.load(file(every));
-    expect(four.e.waitingNow()).toEqual(["daily", "daily"]);
-    expect(four.s.logs.filter((l) => l.endsWith("more wait for that day than the rule's cap"))).toHaveLength(2);
-    // An interval tick off its clock's step, and one before the clock began, are no ticks either.
-    const off = rig({
-      now: WED_1500,
-      saved: {
-        v: 1,
-        rules: { daily: { history: [], clock: { every: "15m", since, last: since + 60 * 60_000 } } },
-        waiting: [tickWait(since + 7 * 60_000), tickWait(since - 15 * 60_000), tickWait(since + 30 * 60_000)],
-      },
-    });
-    off.s.room = false;
-    off.e.load(file(every));
-    expect(off.e.waitingNow()).toEqual(["daily"]);
-    // A clock rule whose record has no clock: no tick of it can have waited.
-    const none = rig({ now: WED_1500, saved: { v: 1, rules: {}, waiting: [tickWait(nine)] } });
-    none.e.load(file(DAILY));
-    expect(none.e.waitingNow()).toEqual([]);
+    old.e.load(file(every));
+    expect(old.e.waitingNow()).toEqual([]);
+    expect(old.s.logs).toContain("trigger daily: a waiting run was dropped: its tick is six hours old or more");
   });
 
-  it("every waiting run the record or the rules drop gets its notice's final ack", () => {
-    const n = (id: string, over: Partial<ControlNotice> = {}) => notice({ id, ...over });
+  it("every waiting run the record or the rules drop gets its notice's final ack, and only a received one", () => {
     const nw = (id: string, over: Record<string, unknown> = {}, nOver: Partial<ControlNotice> = {}) => ({
       rule: "card",
-      cause: { kind: "notice", receiver: "board.example", notice: n(id, nOver) },
+      cause: { kind: "notice", receiver: "board.example", notice: notice({ id, ...nOver }) },
       until: T0 + 3600_000,
       reason: "start_limit",
       day: "2026-11-24",
       key: null,
       ...over,
     });
-    const { e, s } = rig({
-      saved: {
-        v: 1,
-        rules: {},
-        waiting: [
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G41", { rule: "Not A Name" }),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G42", { reason: "bored" }, { expires_at: "2026-11-24T09:00:00.000Z" }),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G43"),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G43"),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G44", { key: "X-002/" }, { subject: "X-002" }),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G45", { key: "X-003/" }, { subject: "X-003" }),
-          nw("01KB4M2Q8V3T6Y9C0D1E2F3G46", { rule: "gone" }),
-        ],
-      },
-    });
-    // Read: a rule's name that is none, and a run past its time, are told so at once.
+    const saved = {
+      v: 1,
+      rules: {},
+      waiting: [
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G41", { rule: "Not A Name" }),
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G42", { reason: "bored" }, { expires_at: "2026-11-24T09:00:00.000Z" }),
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G43"),
+        // A copy of a run: dropped as it is read, and told nothing (one final ack a notice).
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G43"),
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G44", { key: "X-002/" }, { subject: "X-002" }),
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G45", { key: "X-003/" }, { subject: "X-003" }),
+        nw("01KB4M2Q8V3T6Y9C0D1E2F3G46", { rule: "gone" }),
+      ],
+    };
+    const { e, s } = rig({ saved });
     expect(s.acks).toEqual([
       { id: "01KB4M2Q8V3T6Y9C0D1E2F3G41", outcome: "no_match" },
       { id: "01KB4M2Q8V3T6Y9C0D1E2F3G42", outcome: "expired" },
     ]);
     s.room = false;
     e.load(file(card({ cap: { per_day: 2 } })));
-    // Against the rules: one there twice is no rule's run; one past the cap is refused cap; one
-    // for a rule that is not there met no rule.
     expect(s.acks.slice(2)).toEqual([
-      { id: "01KB4M2Q8V3T6Y9C0D1E2F3G43", outcome: "no_match" },
       { id: "01KB4M2Q8V3T6Y9C0D1E2F3G45", outcome: "refused", code: "cap" },
       { id: "01KB4M2Q8V3T6Y9C0D1E2F3G46", outcome: "no_match" },
     ]);
     expect(e.waitingNow()).toEqual(["card", "card"]);
+    // Notices this machine never received are told nothing, whatever becomes of them.
+    const said: string[] = [];
+    const quiet = new TriggerEngine({
+      now: () => T0,
+      zone: "UTC",
+      mode: () => "auto",
+      allowed: () => true,
+      harnesses: () => ["codex"],
+      session: () => ({ held: false, folder: "~/work" }),
+      startRoom: () => true,
+      run: (_j, on) => {
+        on.began("codex:x");
+        return { cancel: () => {} };
+      },
+      ack: (_r, id) => said.push(id),
+      received: () => false,
+      load: () => saved,
+      save: () => {},
+      log: () => {},
+    });
+    quiet.load(file(card({ cap: { per_day: 2 } })));
+    quiet.retry();
+    expect(said).toEqual([]);
     // More than the record keeps: refused cap, each told.
     const many = rig({
       saved: {
@@ -561,9 +642,15 @@ describe("what the second review found", () => {
       { id: "01KB4M2Q8V3T6Y9C0D1E2F2500", outcome: "refused", code: "cap" },
       { id: "01KB4M2Q8V3T6Y9C0D1E2F2501", outcome: "refused", code: "cap" },
     ]);
+    // One final ack a notice, however often it is said.
+    const twice = rig();
+    twice.e.load(file(card()));
+    twice.take();
+    twice.take();
+    expect(twice.s.acks).toEqual([{ id: notice().id, outcome: "ran", session: "codex:new" }]);
   });
 
-  it("a rule paused or removed drops its waiting and queued runs as no_match; off is triggers_off", () => {
+  it("a rule paused, removed or changed drops its waiting and queued runs as no_match, with a line; off is triggers_off", () => {
     const { e, s, take } = rig({ answer: () => {} });
     s.room = false;
     e.load(file(card()));
@@ -572,14 +659,31 @@ describe("what the second review found", () => {
     e.load(file(card({ paused: true })));
     expect(s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
     expect(s.saved?.rules.card?.today?.runs).toBe(0);
-    expect(lines(s)).toEqual([]);
-    // Queued in the daemon (its session's line): dropped the same way, and cancelled.
+    expect(lines(s)).toEqual([{ at: "2026-11-24T09:14:05.000Z", result: "dropped", subject: "X-001" }]);
+    // Queued in the daemon (its session's line): removed, dropped the same way and cancelled, with
+    // no line (the rule's history went with it).
     const q = rig({ answer: (on) => on.queued("held") });
     q.e.load(file(card()));
     q.take();
     q.e.load(file());
     expect(q.s.cancelled).toBe(1);
     expect(q.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+    // Queued, and the rule changed under the same name (a narrower level): dropped, never begun as
+    // the rule it was.
+    const c = rig({ answer: (on) => on.queued("start_limit") });
+    c.e.load(file(card({ level: "edits", words: "OLD words." })));
+    c.take();
+    c.e.load(file(card({ level: "read", words: "NEW words." })));
+    expect(c.s.cancelled).toBe(1);
+    expect(c.e.waitingNow()).toEqual([]);
+    expect(c.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+    expect(lines(c.s)[0]).toMatchObject({ result: "dropped" });
+    // A queued run whose rule is the same, written another way, stays.
+    const same = rig({ answer: (on) => on.queued("start_limit") });
+    same.e.load(file(card()));
+    same.take();
+    same.e.load(file(card({ cap: { per_day: 9 }, tools: [] })));
+    expect(same.s.cancelled).toBe(0);
     // A running one is left to finish when its rule is paused; turned off, it is stopped.
     const r = rig({ answer: (on) => on.began("codex:x") });
     r.e.load(file(card()));
@@ -597,21 +701,78 @@ describe("what the second review found", () => {
     expect(o.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "refused", code: "triggers_off" });
   });
 
+  it("a run handed over is checked again the moment it would begin", () => {
+    let held: RunEvents | null = null;
+    const answer = (on: RunEvents) => {
+      held = on;
+      on.queued("start_limit");
+    };
+    const go = (change: (x: ReturnType<typeof rig>) => void) => {
+      const x = rig({ answer });
+      x.e.load(file(card()));
+      x.take();
+      change(x);
+      return { x, ok: (held as unknown as RunEvents).ready() };
+    };
+    // Unchanged: it may begin.
+    expect(go(() => {}).ok).toBe(true);
+    // The rule changed in what decides a run, paused, its folder no longer allowed, or the
+    // machine's mode narrowed: it may not, and it is dropped as no_match with its count back.
+    const changes: ((x: ReturnType<typeof rig>) => void)[] = [
+      (x) => {
+        x.s.allowed = false;
+      },
+      (x) => {
+        x.e.load(file(card({ paused: true })));
+      },
+      (x) => {
+        x.e.load(file(card({ words: "Other." })));
+      },
+    ];
+    for (const change of changes) {
+      const { x, ok } = go(change);
+      expect(ok).toBe(false);
+      expect(x.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+      expect(x.s.saved?.rules.card?.today?.runs ?? 0).toBe(0);
+    }
+    // The level is what it would be now: a session found recorded at a narrower level is another run.
+    const narrowed = rig({ answer, session: { held: false, level: "edits", folder: "~/work" } });
+    narrowed.e.load(file(card({ level: "edits", target: { continue: SID } })));
+    narrowed.take();
+    narrowed.s.session = { held: false, level: "read", folder: "~/work" };
+    expect((held as unknown as RunEvents).ready()).toBe(false);
+    expect(narrowed.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
+    // Said again after it was dropped: still no.
+    expect((held as unknown as RunEvents).ready()).toBe(false);
+    // A look that throws: it may not begin, and that is said.
+    const shaky = rig({ answer });
+    shaky.e.load(file(card({ target: { continue: SID } })));
+    shaky.take();
+    Object.defineProperty(shaky.s, "session", {
+      get: () => {
+        throw new Error("no look");
+      },
+    });
+    expect((held as unknown as RunEvents).ready()).toBe(false);
+    expect(shaky.s.logs).toContain("trigger card: a look before its turn failed (Error: no look)");
+  });
+
   it("the fingerprint is of what a run does: key order, defaults and the pause change nothing", () => {
     const r = card({ when: { state: ["todo", "review"] }, tools: ["mcp__a", "mcp__b"] });
     const shuffled = JSON.parse(
-      '{"words":"Card {subject}.","tools":["mcp__b","mcp__a","mcp__a"],"cap":{"per_day":9},"level":"safe","folder":"~/work","target":{"start":"codex"},"subject":"","when":{"for":[],"state":["review","todo"]},"source":{"topic":"acme/tasks","receiver":"board.example"},"paused":true,"name":"card"}',
+      '{"words":"Card {subject}.","tools":["mcp__b","mcp__a","mcp__a"],"cap":{"per_day":9},"level":"safe","folder":"~/work","target":{"start":"codex"},"when":{"state":["review","todo"]},"source":{"topic":"acme/tasks","receiver":"board.example"},"paused":true,"name":"card"}',
     ) as TriggerRule;
     expect(fingerprint(shuffled)).toBe(fingerprint(r));
     expect(fingerprint(card({ tools: [], when: {} }))).toBe(fingerprint(card()));
+    expect(fingerprint({ ...card(), subject: "", when: null } as unknown as TriggerRule)).toBe(fingerprint(card()));
     expect(fingerprint(card({ words: "Other." }))).not.toBe(fingerprint(card()));
     expect(fingerprint(card({ level: "edits" }))).not.toBe(fingerprint(card()));
     // A run that waits through a re-read of the same rule, spelled another way, is still its own.
     const { e, s, take } = rig();
     s.room = false;
     e.load(file(r));
-    take();
-    e.load(file(shuffled.paused ? { ...shuffled, paused: false } : shuffled));
+    take(notice({ state: "todo" }));
+    e.load(file({ ...shuffled, paused: false }));
     s.room = true;
     e.retry();
     expect(s.jobs).toHaveLength(1);
@@ -634,7 +795,7 @@ describe("what the second review found", () => {
     expect(next.s.jobs).toHaveLength(1);
     expect(next.s.acks).toEqual([{ id: notice().id, outcome: "ran", session: "codex:new" }]);
     // Or it expires at its deadline, refused held, its count back.
-    const late = rig({ saved: first.s.saved, session: { held: true } });
+    const late = rig({ saved: first.s.saved, session: { held: true, folder: "~/work" } });
     late.e.load(file(card({ target: { continue: SID } })));
     late.s.now = Date.parse(notice().expires_at);
     late.e.retry();
@@ -681,7 +842,7 @@ describe("nothing a dependency throws wedges the engine", () => {
       allowed: () => boom("allowed", true),
       harnesses: () => boom("harnesses", ["codex", "claude-code"]),
       offered: () => boom("offered", undefined),
-      session: () => boom("session", { held: s.held }),
+      session: () => boom("session", { held: s.held, folder: "~/work" }),
       startRoom: () => boom("startRoom", true),
       run: (_job, on) => {
         boom("run");
@@ -775,7 +936,7 @@ describe("nothing a dependency throws wedges the engine", () => {
       mode: () => "auto",
       allowed: () => true,
       harnesses: () => ["codex"],
-      session: () => ({ held: false }),
+      session: () => ({ held: false, folder: "~/work" }),
       startRoom: () => true,
       run: (_j, on) => {
         on.queued("start_limit");
@@ -813,7 +974,7 @@ describe("nothing a dependency throws wedges the engine", () => {
       mode: () => "auto",
       allowed: () => true,
       harnesses: () => ["codex"],
-      session: () => ({ held: false }),
+      session: () => ({ held: false, folder: "~/work" }),
       startRoom: () => s.room,
       run: (_j, on) => {
         ons.push(on);
@@ -864,5 +1025,206 @@ describe("nothing a dependency throws wedges the engine", () => {
       notice: notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G4Y", subject: "X-8" }),
     });
     expect(run.s.jobs).toBe(1);
+  });
+});
+
+describe("what the final review found", () => {
+  it("after suspend the engine does nothing, says nothing and saves nothing", () => {
+    let on: RunEvents | null = null;
+    const x = rig({
+      answer: (o) => {
+        on = o;
+        o.queued("start_limit");
+      },
+    });
+    x.e.load(file(card()));
+    x.take();
+    x.e.suspend();
+    const record = JSON.stringify(x.s.saved);
+    expect(x.s.saved?.waiting).toHaveLength(1);
+    // The cancelled start's own end, a retry, a tick, a reload, a resume and a fire: nothing.
+    const ev = on as unknown as RunEvents;
+    ev.refused("cancelled", "stopped");
+    ev.failed("stopped");
+    ev.queued("start_limit");
+    ev.began("codex:x");
+    ev.ended(1);
+    expect(ev.ready()).toBe(false);
+    x.e.retry();
+    x.e.expire();
+    x.e.check();
+    x.e.load(file());
+    expect(x.e.lift("card")).toBe(false);
+    x.e.fire("card", {
+      kind: "notice",
+      receiver: "board.example",
+      notice: notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F3G71" }),
+    });
+    expect(x.s.jobs).toHaveLength(1);
+    expect(JSON.stringify(x.s.saved)).toBe(record);
+    expect(x.s.acks).toEqual([{ id: notice().id, outcome: "taken" }]);
+  });
+
+  it("a tick whose record can't be saved does not run; the next look runs it once", () => {
+    let full = true;
+    const x = rig({
+      answer: (on) => {
+        on.began("codex:new");
+        on.ended(1);
+      },
+      save: () => {
+        if (full) throw new Error("ENOSPC");
+      },
+    });
+    const daily = card({ name: "card", source: { every: "day 09:00" }, words: "Go." });
+    x.e.load(file(daily));
+    x.e.check();
+    x.s.now = Date.parse("2026-11-25T09:00:30.000Z");
+    x.e.check();
+    expect(x.s.jobs).toHaveLength(0);
+    expect(x.s.logs).toContain(
+      "trigger card: its tick could not be recorded, so it does not run now; the next look tries again",
+    );
+    full = false;
+    x.e.check();
+    x.e.check();
+    expect(x.s.jobs).toHaveLength(1);
+    // The next day's tick, the disk full again: its last tick stays the one before, and it waits.
+    full = true;
+    x.s.now += 86400_000;
+    x.e.check();
+    expect(x.s.jobs).toHaveLength(1);
+    full = false;
+    x.e.check();
+    expect(x.s.jobs).toHaveLength(2);
+  });
+
+  it("a throw out of a retry's own catch leaves every waiting run waiting", () => {
+    let logThrows = true;
+    let n = 0;
+    const e = new TriggerEngine({
+      now: () => T0,
+      zone: "UTC",
+      mode: () => "auto",
+      allowed: () => true,
+      harnesses: () => ["codex"],
+      session: () => ({ held: false, folder: "~/work" }),
+      startRoom: () => {
+        n++;
+        // The first three runs wait; then a look throws.
+        if (n <= 3) return false;
+        throw new Error("no room to tell");
+      },
+      run: (_j, on) => {
+        on.began("codex:x");
+        return { cancel: () => {} };
+      },
+      load: () => undefined,
+      save: () => {},
+      log: (l) => {
+        if (logThrows && l.includes("a look at a run that waits failed")) {
+          logThrows = false;
+          throw new Error("the log is gone");
+        }
+      },
+    });
+    const r = card({ name: "c", cap: { per_day: 9 } });
+    e.load(file(r));
+    for (const id of ["01KB4M2Q8V3T6Y9C0D1E2F3G81", "01KB4M2Q8V3T6Y9C0D1E2F3G82", "01KB4M2Q8V3T6Y9C0D1E2F3G83"])
+      e.fire("c", { kind: "notice", receiver: "board.example", notice: notice({ id, subject: `X-${id.slice(-2)}` }) });
+    expect(e.waitingNow()).toEqual(["c", "c", "c"]);
+    expect(() => e.retry()).toThrow("the log is gone");
+    expect(e.waitingNow()).toEqual(["c", "c", "c"]);
+    // And the flag was let go of: the next look runs (each waiting run is looked at again).
+    const looked = n;
+    e.retry();
+    expect(n).toBe(looked + 3);
+    expect(e.waitingNow()).toEqual(["c", "c", "c"]);
+  });
+
+  it("rules moved in the file send no hello; a topic added does", () => {
+    const x = rig();
+    const a = card({ name: "a", source: { receiver: "board.example", topic: "zeta/tasks" } });
+    const b = card({ name: "b" });
+    x.e.load(file(a, b));
+    const was = x.s.changed;
+    x.e.load(file(b, a));
+    expect(x.s.changed).toBe(was);
+    x.e.load(file(b, a, card({ name: "c", source: { receiver: "board.example", topic: "ops/queue" } })));
+    expect(x.s.changed).toBe(was + 1);
+  });
+});
+
+describe("the last corners", () => {
+  it("a tick after the clock's last, or of a clock that never ticked, is no tick it had", () => {
+    const due = Date.parse("2026-11-24T09:00:00.000Z");
+    const r = card({ name: "c", source: { every: "15m" }, words: "Go." });
+    const w = (d: number) => ({
+      rule: "c",
+      cause: { kind: "tick", due: d },
+      until: d + 3600_000,
+      reason: "start_limit",
+      day: "2026-11-24",
+      key: null,
+    });
+    // No clock at all in the record, or one of another `every`: no tick of this rule's.
+    for (const rules of [{}, { c: { history: [], clock: { every: "30m", since: due - 3600_000, last: due } } }]) {
+      const x = rig({ saved: { v: 1, rules, waiting: [w(due)] } });
+      x.e.load(file(r));
+      expect(x.e.waitingNow()).toEqual([]);
+    }
+    for (const clock of [
+      { every: "15m", since: due - 3600_000, last: due - 15 * 60_000 },
+      { every: "15m", since: due - 3600_000 },
+    ]) {
+      const x = rig({ saved: { v: 1, rules: { c: { history: [], clock } }, waiting: [w(due)] } });
+      x.e.load(file(r));
+      expect(x.e.waitingNow()).toEqual([]);
+    }
+  });
+  it("a notice taken yesterday that still waits counts on its own day, not today's", () => {
+    const x = rig({
+      saved: {
+        v: 1,
+        rules: { card: { history: [], today: { day: "2026-11-24", runs: 1, keys: [] } } },
+        waiting: [
+          {
+            rule: "card",
+            cause: {
+              kind: "notice",
+              receiver: "board.example",
+              notice: notice({ at: "2026-11-23T23:50:00.000Z", expires_at: "2026-11-24T23:50:00.000Z" }),
+            },
+            until: Date.parse("2026-11-24T23:50:00.000Z"),
+            reason: "start_limit",
+            day: "2026-11-24",
+            key: null,
+          },
+        ],
+      },
+    });
+    x.s.room = false;
+    x.e.load(file(card({ cap: { per_day: 1 } })));
+    expect(x.e.waitingNow()).toEqual(["card"]);
+    // The stored count was the waiting run's: it counts on its notice's day, so today holds none.
+    expect(x.s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 0, keys: [] });
+  });
+  it("finals are remembered for the last ten thousand notices", () => {
+    const x = rig();
+    x.e.load(file(card({ cap: { per_day: 1 } })));
+    for (let i = 0; i < 10_002; i++)
+      x.e.fire("card", {
+        kind: "notice",
+        receiver: "board.example",
+        notice: notice({ id: `01KB4M2Q8V3T6Y9C0D1E${String(i).padStart(6, "0")}`, subject: `X-${i}` }),
+      });
+    expect(x.s.acks).toHaveLength(10_002);
+    // The first, forgotten, could be told again; the last, remembered, could not.
+    x.e.fire("card", {
+      kind: "notice",
+      receiver: "board.example",
+      notice: notice({ id: "01KB4M2Q8V3T6Y9C0D1E010001", subject: "X-10001" }),
+    });
+    expect(x.s.acks).toHaveLength(10_002);
   });
 });
