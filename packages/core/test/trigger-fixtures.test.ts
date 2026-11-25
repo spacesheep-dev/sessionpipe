@@ -71,6 +71,8 @@ interface Step {
   asleep?: string;
   release?: string;
   start_ended?: number;
+  run_ended?: number[];
+  resume?: string;
   permission?: unknown;
   expect: {
     acks?: Ack[];
@@ -99,7 +101,19 @@ interface Case {
   zone?: string;
   steps: Step[];
 }
-const STEP_KINDS = ["poll", "hello", "change", "machine", "tick", "wake", "release", "start_ended", "permission"];
+const STEP_KINDS = [
+  "poll",
+  "hello",
+  "change",
+  "machine",
+  "resume",
+  "tick",
+  "wake",
+  "release",
+  "start_ended",
+  "run_ended",
+  "permission",
+];
 const EXPECT_KEYS = new Set([
   "acks",
   "runs",
@@ -153,45 +167,61 @@ function runCase(c: Case) {
   let file = rulesOf(c.triggers, machine.places, c.triggers_ok ?? true);
   const sessions = structuredClone(c.sessions ?? {});
   const seen = new Map((c.seen ?? []).map((s) => [`${s.receiver}|${s.id}`, Date.parse(s.at)]));
+  /** Runs counted against a rule's cap and cooldown; `key` names the one that may be given back. */
   const counted: {
     rule: string;
     subject?: string | undefined;
     state?: string | undefined;
     day: string;
-    id?: string;
+    key?: string;
   }[] = (c.today ?? [])
     .filter((t) => t.result === "ran" || t.result === "failed")
     .map((t) => ({ rule: t.rule, subject: t.subject, state: t.state, day: day(Date.parse(t.at)) }));
-  const starts = { ...(c.starts ?? { running: 0, last_hour: 0 }) };
+  // The machine's caps on starts, as a local ask counts them: starts in progress, and starts in a
+  // sliding hour (the case's `last_hour` made at its first step's instant).
+  const firstAt = Date.parse(c.steps[0]?.at ?? AT);
+  let running = c.starts?.running ?? 0;
+  const startTimes: number[] = Array(c.starts?.last_hour ?? 0).fill(firstAt);
   const concurrent = c.limits?.start_concurrent ?? 2;
   const lastTick = new Map(Object.entries(c.last_tick ?? {}).map(([k, v]) => [k, Date.parse(v)]));
   const machinePaused = new Set<string>();
-  type Waiting = { id: string; rule: TriggerRule; notice: ControlNotice; why: "held" | "start_limit"; until: number };
+  type Waiting = {
+    key: string;
+    id?: string;
+    rule: TriggerRule;
+    notice?: ControlNotice;
+    why: "held" | "start_limit";
+    until: number;
+  };
   let waiting: Waiting[] = [];
-  let triggeredRuns = 0;
+  /** Triggered runs by index, in the case's order, and which are still running. */
+  const triggered: TriggerRule[] = [];
+  const stillRunning = new Set<number>();
 
   const harnessOf = (r: TriggerRule) => (isStart(r.target) ? r.target.start : r.target.continue.split(":")[0]!);
   const ref = (r: TriggerRule) => (isStart(r.target) ? null : r.target.continue);
   const allowed = (f: string) => machine.folders.some((a) => f === a || f.startsWith(`${a}/`));
-  const free = () => starts.running < concurrent && starts.last_hour < 10;
-  const giveBack = (id: string) => {
-    const i = counted.findIndex((x) => x.id === id);
+  const free = (now: number) => running < concurrent && startTimes.filter((t) => now - t < H).length < 10;
+  const giveBack = (key: string) => {
+    const i = counted.findIndex((x) => x.key === key);
     if (i >= 0) counted.splice(i, 1);
   };
   const active = (): TriggersFile | null =>
     file ? { ...file, rules: file.rules.filter((r) => !machinePaused.has(r.name)) } : null;
+  const hellos = () => JSON.stringify(machine.receivers.map((r) => helloTriggers(active(), r)));
+  const byId = (xs: Ack[]) => [...xs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   for (const [si, s] of c.steps.entries()) {
     const where = `${c.name}, step ${si + 1}`;
     expect(STEP_KINDS.filter((k) => k in s).length, `${where}: one kind a step`).toBeLessThanOrEqual(1);
     for (const k of Object.keys(s.expect)) expect(EXPECT_KEYS.has(k), `${where}: expect.${k}`).toBe(true);
     const now = Date.parse(s.at ?? AT);
+    const before = hellos();
     const acks: Ack[] = [];
     const runs: Run[] = [];
     const history: History[] = [];
     const paused: string[] = [];
     let cancelled: number[] | undefined;
-    let hello = false;
     const begin = (r: TriggerRule, n: ControlNotice | undefined, id?: string) => {
       const recorded = ref(r) ? sessions[ref(r)!]?.level : undefined;
       const offered = machine.levels?.[harnessOf(r)];
@@ -202,12 +232,17 @@ function runCase(c: Case) {
         env: { SESSIONPIPE_TRIGGERED_BY: r.name },
       });
       if (isStart(r.target)) {
-        starts.running++;
-        starts.last_hour++;
+        running++;
+        startTimes.push(now);
       }
-      triggeredRuns++;
+      stillRunning.add(triggered.push(r) - 1);
       if (id) acks.push({ id, outcome: "ran", session: ref(r) ?? `${harnessOf(r)}:*` });
+      else history.push({ rule: r.name, result: "ran" });
     };
+    const refuse = (w: { id?: string; rule: TriggerRule }, code: string) =>
+      w.id
+        ? acks.push({ id: w.id, outcome: "refused", code })
+        : history.push({ rule: w.rule.name, result: "refused", code });
     /** Steps 9 to 11 (CONTROL.md §14.7), at a run's first check and again when it is let go. */
     const recheck = (r: TriggerRule): string | null => {
       if (!allowed(r.folder)) return "folder";
@@ -219,35 +254,62 @@ function runCase(c: Case) {
       }
       return null;
     };
+    /** A run that passed its checks: counted now, then begun, or waiting (taken) for a window or the caps. */
+    const take = (w: Omit<Waiting, "why" | "until">, until: number) => {
+      const n = w.notice;
+      counted.push({ rule: w.rule.name, subject: n?.subject, state: n?.state, day: day(now), key: w.key });
+      const held = ref(w.rule) !== null && sessions[ref(w.rule)!]!.held;
+      if (held || (isStart(w.rule.target) && !free(now))) {
+        waiting.push({ ...w, why: held ? "held" : "start_limit", until });
+        if (w.id) acks.push({ id: w.id, outcome: "taken" });
+      } else begin(w.rule, n, w.id);
+    };
     const letGo = (w: Waiting) => {
       waiting = waiting.filter((x) => x !== w);
       const why = recheck(w.rule);
       if (why) {
-        giveBack(w.id);
-        acks.push({ id: w.id, outcome: "refused", code: why });
+        giveBack(w.key);
+        refuse(w, why);
       } else begin(w.rule, w.notice, w.id);
     };
-    // Time passes first: a waiting run past its deadline is refused why it waited, its count given back.
+    // Time passes first. A deadline is exclusive: at its own instant a waiting run has expired,
+    // before anything else at that instant; its count is given back.
     for (const w of [...waiting])
       if (now >= w.until) {
         waiting = waiting.filter((x) => x !== w);
-        giveBack(w.id);
-        acks.push({ id: w.id, outcome: "refused", code: w.why });
+        giveBack(w.key);
+        refuse(w, w.why);
       }
+    // The sliding hour may have room again.
+    for (const w of waiting.filter((x) => x.why === "start_limit")) if (free(now)) letGo(w);
 
     if (s.machine) Object.assign(machine, s.machine);
+    if (s.resume) machinePaused.delete(s.resume);
     if (s.change !== undefined) {
       const was = file?.on;
+      const old = file;
       file = rulesOf(s.change, machine.places);
-      hello = true;
+      // The machine's own pause ends with the rule, or when its target changes.
+      for (const name of [...machinePaused]) {
+        const a = old?.rules.find((r) => r.name === name);
+        const b = file?.rules.find((r) => r.name === name);
+        if (!b || JSON.stringify(a?.target) !== JSON.stringify(b.target)) machinePaused.delete(name);
+      }
       if (was && !file?.on) {
         for (const w of waiting) {
-          giveBack(w.id);
-          acks.push({ id: w.id, outcome: "refused", code: "triggers_off" });
+          giveBack(w.key);
+          refuse(w, "triggers_off");
         }
         waiting = [];
-        cancelled = Array.from({ length: triggeredRuns }, (_, i) => i);
+        // Only the triggered turns still running are cancelled.
+        cancelled = [...stillRunning].sort((a, b) => a - b);
+        stillRunning.clear();
       }
+    }
+    for (const i of s.run_ended ?? []) {
+      expect(stillRunning.has(i), `${where}: run ${i} is running`).toBe(true);
+      stillRunning.delete(i);
+      if (isStart(triggered[i]!.target)) running--;
     }
     if (s.hello) {
       const t = helloTriggers(active(), s.hello);
@@ -261,8 +323,8 @@ function runCase(c: Case) {
       for (const w of waiting.filter((x) => x.why === "held" && ref(x.rule) === s.release)) letGo(w);
     }
     if (s.start_ended) {
-      starts.running -= s.start_ended;
-      for (const w of waiting.filter((x) => x.why === "start_limit")) if (free()) letGo(w);
+      running -= s.start_ended;
+      for (const w of waiting.filter((x) => x.why === "start_limit")) if (free(now)) letGo(w);
     }
     if (s.permission !== undefined) expect(s.expect.answered_by_machine, where).toBe(false);
     if (s.poll) {
@@ -291,6 +353,7 @@ function runCase(c: Case) {
           acks.push({ id, outcome: "no_match" });
           continue;
         }
+        // One (rule, subject, state) a day: two notices with no state are the same state.
         const today = counted.filter((x) => x.rule === rule.name && x.day === day(now));
         if (today.some((x) => x.subject === n.subject && x.state === n.state)) {
           acks.push({ id, outcome: "refused", code: "cooldown" });
@@ -301,24 +364,17 @@ function runCase(c: Case) {
           continue;
         }
         const why = recheck(rule);
-        if (why) {
-          acks.push({ id, outcome: "refused", code: why });
-          continue;
-        }
-        // It counts now, when it is taken or begins (CONTROL.md §14.7, *When a run counts*).
-        counted.push({ rule: rule.name, subject: n.subject, state: n.state, day: day(now), id });
-        const held = ref(rule) !== null && sessions[ref(rule)!]!.held;
-        if (held || (isStart(rule.target) && !free())) {
-          waiting.push({ id, rule, notice: n, why: held ? "held" : "start_limit", until: Date.parse(n.expires_at) });
-          acks.push({ id, outcome: "taken" });
-        } else begin(rule, n, id);
+        if (why) acks.push({ id, outcome: "refused", code: why });
+        else take({ key, id, rule, notice: n }, Date.parse(n.expires_at));
       }
       const past = (s.poll.body.notices ?? []).slice(50).map((n) => (n as { id: string }).id);
       expect(s.expect.unacked ?? [], where).toEqual(past);
       expect(left, where).toBe(past.length);
       expect(s.expect.message_acks ?? [], where).toEqual((s.poll.body.messages ?? []).map((m) => m.id));
     }
-    // The clock, read in UTC: a tick now, or the latest one missed while the machine slept.
+    // The clock, read in UTC: a tick now, or the latest one missed while the machine slept. A tick
+    // takes steps 2 and 8 to 11 (CONTROL.md §14.7): paused first (nothing, on or off), then off,
+    // then late (missed, never counted), the cap, the re-check, and the start caps, where it waits.
     const ticks: [TriggerRule, number][] = [];
     if (s.tick) ticks.push([file?.rules.find((r) => r.name === s.tick) ?? ({ name: s.tick } as TriggerRule), now]);
     if (s.wake)
@@ -328,24 +384,25 @@ function runCase(c: Case) {
         if (t !== null) ticks.push([r, t]);
       }
     for (const [r, t] of ticks) {
+      if (r.paused || machinePaused.has(r.name)) continue;
       if (!file?.on) history.push({ rule: r.name, result: "refused", code: "triggers_off" });
-      else if (r.paused || machinePaused.has(r.name)) continue;
       else if (now - t >= 6 * H) history.push({ rule: r.name, result: "missed" });
       else if (counted.filter((x) => x.rule === r.name && x.day === day(now)).length >= r.cap.per_day)
         history.push({ rule: r.name, result: "refused", code: "cap" });
       else {
-        counted.push({ rule: r.name, day: day(now) });
-        begin(r, undefined);
-        history.push({ rule: r.name, result: "ran" });
+        const why = recheck(r);
+        if (why) history.push({ rule: r.name, result: "refused", code: why });
+        else take({ key: `tick|${r.name}|${t}`, rule: r }, t + 6 * H);
       }
     }
 
-    expect(s.expect.acks ?? [], `${where}: acks`).toEqual(acks);
+    expect(byId(s.expect.acks ?? []), `${where}: acks`).toEqual(byId(acks));
     expect(s.expect.runs ?? [], `${where}: runs`).toEqual(runs);
     expect(s.expect.history ?? [], `${where}: history`).toEqual(history);
     expect(s.expect.paused ?? [], `${where}: paused`).toEqual(paused);
     expect(s.expect.cancelled, `${where}: cancelled`).toEqual(cancelled);
-    expect(s.expect.hello ?? false, `${where}: hello at once`).toBe(hello);
+    // A hello goes at once when what some receiver's `triggers` says changes, and not otherwise.
+    expect(s.expect.hello ?? false, `${where}: hello at once`).toBe(hellos() !== before);
     for (const a of acks)
       expect(validate("control-notice-ack", { acks: [sent(a)] }), `${where}: ${JSON.stringify(a)}`).toEqual([]);
     for (const h of history.filter((x) => x.code)) {
@@ -406,9 +463,9 @@ describe("conformance/triggers/subject-patterns.json", () => {
 describe("conformance/triggers/rules-file.json", () => {
   const fx = read("rules-file.json") as {
     places: TriggerPlaces;
-    cases: { name: string; file: unknown; ok: boolean }[];
+    cases: { name: string; file: unknown; ok: boolean; places?: TriggerPlaces }[];
   };
   it(`${fx.cases.length} files, each read whole or refused whole`, () => {
-    for (const c of fx.cases) expect(checkTriggers(c.file, fx.places).ok, c.name).toBe(c.ok);
+    for (const c of fx.cases) expect(checkTriggers(c.file, c.places ?? fx.places).ok, c.name).toBe(c.ok);
   });
 });

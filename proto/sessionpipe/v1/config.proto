@@ -212,9 +212,11 @@ message TriggerRule {
       pattern: "^[^\\x00-\\x1f\\x7f-\\x9f]+$"
     }
   ];
-  // The widest level it runs at; a run gets the narrower of this, the machine's mode and,
-  // continuing, the session's own level. A notice rule is `edits` at most: the receiver
-  // holds other people's text. The reader checks that.
+  // The widest level it runs at. A run gets the narrowest of this, the source's ceiling (a
+  // notice rule `edits` at most: the receiver holds other people's text), the machine's mode and,
+  // continuing, the session's recorded level; then the widest level the harness takes here that
+  // is no wider. When nothing fits, no run exists (CONTROL.md §14.7). A notice rule above
+  // `edits` makes the file not fit; the reader checks that.
   StartPermission level = 8 [(google.api.field_behavior) = REQUIRED];
   // MCP servers or tools (`mcp__board`, `mcp__board__records_get`) its runs may use without
   // asking, as `control.session_tools` (HTTP.md §1) are: never a built-in tool, never a
@@ -316,7 +318,9 @@ message TriggerRun {
   TriggerTarget target = 1 [(google.api.field_behavior) = REQUIRED];
   // The folder.
   string folder = 2 [(google.api.field_behavior) = REQUIRED];
-  // The level, already the narrower of the rule's and the machine's mode.
+  // The level: already the narrowest of the rule's, its source's ceiling, the machine's mode and,
+  // continuing, the session's recorded level, then the widest the harness takes that is no wider.
+  // A run whose level none of those leaves is not a run, and is never described by this message.
   StartPermission level = 3 [(google.api.field_behavior) = REQUIRED];
   // The MCP tools it may use without asking.
   repeated string tools = 4 [(google.api.field_behavior) = REQUIRED];

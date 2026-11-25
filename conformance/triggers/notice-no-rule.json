@@ -20,7 +20,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -111,7 +116,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -202,7 +212,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -292,7 +307,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -383,7 +403,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -474,7 +499,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -565,7 +595,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -655,7 +690,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -746,7 +786,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -806,7 +851,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -883,7 +933,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {

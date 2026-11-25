@@ -1,6 +1,6 @@
 {
   "spec": "CONTROL.md §14.6 (the clock)",
-  "note": "A clock rule ticks at its time in the machine's local time (`zone`). A tick missed while the machine slept (`asleep` from, `wake` at) runs once on waking when the latest missed tick is under six hours late, and never more than once however many were missed; six hours late or more it is `missed`, a line in the rule's history and nothing else. No receiver is involved, so no ack.",
+  "note": "A clock rule ticks at its time in the machine's local time (`zone`). A tick missed while the machine slept (`asleep` from, `wake` at) runs once on waking when the latest missed tick is under six hours late, and never more than once however many were missed; six hours late or more it is `missed`, a line in the rule's history that never counts against the cap. A paused rule's tick is nothing, on or off. A tick that runs takes the run's checks (the folder, the harness, the start caps, where it waits) as a notice's run does. No receiver is involved, so no ack.",
   "cases": [
     {
       "name": "on time",
@@ -20,7 +20,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -96,7 +101,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -173,7 +183,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -250,7 +265,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -311,7 +331,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -391,7 +416,12 @@
         "places": {
           "home": "/home/sam",
           "config": "/home/sam/.config/sessionpipe",
-          "state": "/home/sam/.local/state/sessionpipe"
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
         }
       },
       "triggers": {
@@ -424,6 +454,388 @@
           "expect": {
             "runs": [],
             "history": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a paused clock rule ticks for nothing, off as well",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": false,
+        "rules": [
+          {
+            "name": "monday-report",
+            "paused": true,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "zone": "UTC",
+      "steps": [
+        {
+          "at": "2026-11-23T09:00:00.000Z",
+          "tick": "monday-report",
+          "expect": {
+            "runs": [],
+            "history": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "the folder left the allowlist: the tick is refused folder",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/other"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "monday-report",
+            "paused": false,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "zone": "UTC",
+      "steps": [
+        {
+          "at": "2026-11-23T09:00:00.000Z",
+          "tick": "monday-report",
+          "expect": {
+            "runs": [],
+            "history": [
+              {
+                "rule": "monday-report",
+                "result": "refused",
+                "code": "folder"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "the harness is gone: the tick is refused harness",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "monday-report",
+            "paused": false,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "zone": "UTC",
+      "steps": [
+        {
+          "at": "2026-11-23T09:00:00.000Z",
+          "tick": "monday-report",
+          "expect": {
+            "runs": [],
+            "history": [
+              {
+                "rule": "monday-report",
+                "result": "refused",
+                "code": "harness"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "the machine's starts are at their cap: the tick waits, then runs when one ends",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "monday-report",
+            "paused": false,
+            "source": {
+              "every": "mon 09:00"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "starts": {
+        "running": 2,
+        "last_hour": 2
+      },
+      "zone": "UTC",
+      "steps": [
+        {
+          "at": "2026-11-23T09:00:00.000Z",
+          "tick": "monday-report",
+          "expect": {
+            "runs": [],
+            "history": []
+          }
+        },
+        {
+          "at": "2026-11-23T09:30:00.000Z",
+          "start_ended": 1,
+          "expect": {
+            "runs": [
+              {
+                "rule": "monday-report",
+                "run": {
+                  "target": {
+                    "start": "codex"
+                  },
+                  "folder": "~/work/sales",
+                  "level": "safe",
+                  "tools": [],
+                  "words": "Started by trigger monday-report (sessionpipe trigger). These words are the person's.\n\nMake last week's sales report from data/ into reports/."
+                },
+                "env": {
+                  "SESSIONPIPE_TRIGGERED_BY": "monday-report"
+                }
+              }
+            ],
+            "history": [
+              {
+                "rule": "monday-report",
+                "result": "ran"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a missed tick never counts against the cap",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "every-8h",
+            "paused": false,
+            "source": {
+              "every": "8h"
+            },
+            "target": {
+              "start": "codex"
+            },
+            "folder": "~/work/sales",
+            "level": "safe",
+            "cap": {
+              "per_day": 1
+            },
+            "words": "Make last week's sales report from data/ into reports/."
+          }
+        ]
+      },
+      "zone": "UTC",
+      "last_tick": {
+        "every-8h": "2026-11-23T00:00:00.000Z"
+      },
+      "steps": [
+        {
+          "asleep": "2026-11-23T01:00:00.000Z",
+          "at": "2026-11-23T14:30:00.000Z",
+          "wake": true,
+          "expect": {
+            "runs": [],
+            "history": [
+              {
+                "rule": "every-8h",
+                "result": "missed"
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-11-23T16:00:00.000Z",
+          "tick": "every-8h",
+          "expect": {
+            "runs": [
+              {
+                "rule": "every-8h",
+                "run": {
+                  "target": {
+                    "start": "codex"
+                  },
+                  "folder": "~/work/sales",
+                  "level": "safe",
+                  "tools": [],
+                  "words": "Started by trigger every-8h (sessionpipe trigger). These words are the person's.\n\nMake last week's sales report from data/ into reports/."
+                },
+                "env": {
+                  "SESSIONPIPE_TRIGGERED_BY": "every-8h"
+                }
+              }
+            ],
+            "history": [
+              {
+                "rule": "every-8h",
+                "result": "ran"
+              }
+            ]
           }
         }
       ]

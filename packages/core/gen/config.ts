@@ -114,9 +114,11 @@ export interface TriggerRule {
    */
   folder: string;
   /**
-   * The widest level it runs at; a run gets the narrower of this, the machine's mode and,
-   * continuing, the session's own level. A notice rule is `edits` at most: the receiver
-   * holds other people's text. The reader checks that.
+   * The widest level it runs at. A run gets the narrowest of this, the source's ceiling (a
+   * notice rule `edits` at most: the receiver holds other people's text), the machine's mode and,
+   * continuing, the session's recorded level; then the widest level the harness takes here that
+   * is no wider. When nothing fits, no run exists (CONTROL.md §14.7). A notice rule above
+   * `edits` makes the file not fit; the reader checks that.
    */
   level: StartPermission;
   /**
@@ -198,7 +200,11 @@ export interface TriggerRun {
   target: TriggerTarget;
   /** The folder. */
   folder: string;
-  /** The level, already the narrower of the rule's and the machine's mode. */
+  /**
+   * The level: already the narrowest of the rule's, its source's ceiling, the machine's mode and,
+   * continuing, the session's recorded level, then the widest the harness takes that is no wider.
+   * A run whose level none of those leaves is not a run, and is never described by this message.
+   */
   level: StartPermission;
   /** The MCP tools it may use without asking. */
   tools: string[];

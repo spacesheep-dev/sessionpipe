@@ -1720,9 +1720,9 @@ environment (`env -u`). And anything that runs as the person can edit the person
 rules file included: a session at `auto`, or at `edits` in a folder that holds the config folder,
 could write itself a standing, self-renewing clock rule. That is the limit `control.json` (the
 folders, the mode) has today, and this document claims no more for `triggers.json`. What the
-definition does close: a rule's folder is never the home folder, nor a folder that holds
-sessionpipe's config or state folders or lies inside them (below), so no triggered run is handed
-the rules file's folder to write in.
+definition does close is narrower: a rule's folder must clear the floor below, so no triggered run
+is handed the rules file's folder, a harness's settings or the home folder's own settings to
+write in.
 
 The rules live in `<config>/triggers.json` (mode `0600`), written by the CLI only and read by the
 daemon, as the mode and the folders are. The CLI MUST write it whole and at once: to a file beside
@@ -1739,21 +1739,60 @@ them. A rule (`config.proto`'s `TriggerRule`):
 | `when` | A notice rule only. `state`, `for`, `by`: lists of allowed values (1 to 20 each, the notice's patterns; a list is never empty). An absent list allows any value; a notice without the field fits no list. `by` trusts the receiver's word for who made the change: it keeps a rule to the people the person trusts on an honest receiver, and protects nothing against a receiver that was broken into. |
 | `subject` | A notice rule only. The subjects it takes, in the pattern language of §14.8. |
 | `target` | Exactly one of `{"start": "<harness>"}` (a new session) or `{"continue": "<harness>:<id>"}` (an existing one, the id by its adapter's rule, §3.1). |
-| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as. Never the home folder itself, and never a folder that holds sessionpipe's config or state folders or lies inside them, compared on whole path segments after `~` is expanded and `.`/`..` resolved (the daemon compares real paths again at every run). Checked against the allowlist again at every run. |
+| `folder` | Absolute, or `~/…` under the home of the user the daemon runs as, and over the floor below. Checked against the allowlist again at every run. |
 | `level` | `read`, `safe`, `edits` or `auto`: the widest the rule runs at (§14.7). A notice rule's is `edits` at most: the receiver holds other people's text. `auto` is for clock rules only. |
 | `tools` | Up to 8 MCP servers or tools a run may use without asking, `^mcp__[A-Za-z0-9_-]{1,64}$` (`mcp__board`, `mcp__board__records_get`), as `control.session_tools` are (§6): never a built-in tool, never a shell pattern, since a command line holding the person's sign-in can do whatever that command can. The pattern is the daemon's for `session_tools`, so looser than the two shapes: any `mcp__` name of those characters. |
 | `cap` | `{"per_day": n}`, 1 to 50 runs a machine-local day. |
 | `words` | The person's words for the session, 1 to 4 000 characters. A notice rule's MAY name `{subject}`, `{state}`, `{for}` and `{by}` (§14.8); no other brace, and a clock rule's none. |
 
-**What the person confirms is what runs.** A rule's `words` hold no character that does not show
-but tab and line feed, and its `folder` none at all: no control character (C0, carriage return
-included, DEL, C1), no format character (bidi controls such as U+202E and U+2066, zero-width
-characters such as U+200B and U+FEFF, tag characters U+E0000 to U+E007F), no line or paragraph
-separator, nothing private-use, unassigned or a lone surrogate. The schema's patterns say the
-control characters; the reader says the rest by Unicode's general categories (`Cc`, `Cf`, `Zl`,
-`Zp`, `Co`, `Cn`, `Cs`), which no pattern every reader runs can name. And whatever a file holds, a
-machine that shows a rule, a refusal or the words of a test to a person MUST write every such
-character out as a visible escape (`\r`, `\u{202e}`).
+**The folder's floor.** A rule's folder is refused (the file does not fit) when it is, compared on
+whole path segments after `~` is expanded and `.` and `..` are resolved:
+
+- the home folder, or a folder that holds it (`/home`, `/`);
+- sessionpipe's config folder or state folder, a folder inside either, or one that holds either;
+- a harness's own folder (the folder each adapter's config files are in: `~/.claude` or
+  `CLAUDE_CONFIG_DIR`, `~/.codex` or `CODEX_HOME`, `~/.gemini`, …), a folder inside one, or one
+  that holds one: its allow rules and hooks reach every later session;
+- a dot-folder directly in the home folder (`~/.ssh`, `~/.dotfiles`), or a folder inside one;
+- on macOS, `~/Library` or a folder inside it (`~/Library/LaunchAgents`).
+
+On macOS and Windows, whose file systems usually ignore case, folders are compared without regard
+to case (`~/.Config/sessionpipe` is the config folder). A check on paths as written cannot see
+links, so both `trigger add` and the daemon, at every run, MUST compare **real** paths: the
+folder's and each place's, resolved with every link followed and in the case the file system keeps
+(Node's `fs.realpathSync.native`; plain `realpathSync` keeps the case it was typed in). This list is
+a floor, not a guarantee: the machine's folder allowlist stays the person's control, and a folder a
+rule may run in is one the person chose to let sessions write in.
+
+**What the person confirms is what runs.** A rule's `words` hold no character that does not show as
+itself but tab and line feed, and its `folder` none at all:
+
+- no control character: C0 (carriage return included), DEL, C1;
+- no format character (`Cf`): bidi controls such as U+202E and U+2066, zero-width characters such
+  as U+200B and U+FEFF, tag characters U+E0000 to U+E007F;
+- no line or paragraph separator (`Zl`, `Zp`), nothing private-use (`Co`), unassigned (`Cn`) or a
+  lone surrogate (`Cs`);
+- no Default_Ignorable_Code_Point: the combining grapheme joiner U+034F, the variation selectors
+  U+FE00 to U+FE0F and U+E0100 to U+E01EF (each of the latter can carry a hidden byte), the soft
+  hyphen, U+17B4, U+180B to U+180D, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0;
+- not U+2800 (the braille blank) nor U+FFFC;
+- no space but U+0020: every other space separator (`Zs`: U+00A0, U+2003, U+202F, U+3000, …);
+- no more than four combining marks (`M`) in a row on one character.
+
+The schema's patterns say the control characters; the reader says the rest with Unicode's tables,
+which no pattern every reader runs can name. A refusal names the character, `U+00A0`, as an escape,
+`\u{a0}`, and its place in the text, counted in characters, so the person can retype it (a space
+pasted from a web page is the likely one). Whatever a file holds, a machine that shows a rule, a
+refusal or the words of a test to a person MUST write every such character out as an escape
+(`\r`, `\u{202e}`), and a backslash that could be read as the start of one as two (`\\n` is a
+typed backslash and `n`, `\n` a line feed).
+
+**The rule in plain words.** What `trigger add` shows before it asks for `yes` is a sentence about
+the rule and, apart from it, the folder and the words, each on lines of their own that begin with
+a label and a mark (`  folder │ `, `  words  │ `, and `         │ ` for each further line of the
+words). The sentence holds only fields whose patterns keep them to plain tokens; the free text is
+never inside it, so no text in the words or the folder can read as part of the sentence (a level or
+a cap other than the rule's) or as a line of its own. A machine MUST show the description whole.
 
 A machine MUST read the file whole or not at all: a file that does not fit this, or is not there,
 is read as no rules with triggers **off**, and the machine says why in `trigger list` and in its
@@ -1827,8 +1866,10 @@ its own: `{"on": true, "topics": ["acme/tasks"]}`. `topics` are the topics of th
 paused in the file nor by the machine (§14.7 step 11), whose source is **that** receiver, each
 once, at most 50. Off, it is
 `{"on": false, "topics": []}`, so a receiver tells "off" from "a daemon that predates triggers",
-whose hello has no `triggers` at all. The daemon MUST send a hello at once when a rule is added,
-paused, resumed or removed, or the switch changes, as it does for its folders (§2).
+whose hello has no `triggers` at all. The daemon MUST send a hello at once whenever what the hello's
+`triggers` says to some receiver changes (its `on`, or its topics: a rule added, paused, resumed or
+removed, paused or resumed by the machine, the switch), as it does for its folders (§2), and need
+not for a change that leaves it the same (new words for a rule).
 
 A receiver learns topics, **never** a rule's name, filter, subject pattern, words, target, folder,
 level or tools. It MUST NOT send a notice on a topic the machine's last hello did not list for
@@ -1878,7 +1919,8 @@ notice never outlives it. A machine SHOULD ack every notice of a poll answer bef
 receiver again, and keeps every ack until the receiver accepted it (a `2xx`), as it does a
 command's (§10), so no ack is lost. A notice whose id the machine has seen from that receiver is
 acked `duplicate`, whatever its first ack was, and runs nothing; a receiver MUST NOT let a
-`duplicate` replace an ack it already has, and MUST tolerate the same ack twice.
+`duplicate` replace an ack it already has, and MUST tolerate the same ack twice. The order of the
+acks within one `POST` is not part of the protocol: a receiver matches them by `id`.
 
 **A filter is a limit, not a secret.** The acks never name a rule, but a receiver that sends
 notices learns from them all the same:
@@ -1937,27 +1979,35 @@ fails:
    notice: the first that fits takes it, and when a later step refuses it (`cooldown`, `cap`, …)
    the notice does NOT fall through to a later rule. None fits: `no_match`, and nothing runs.
 7. The rule has not counted a run today for this subject in this state; else `refused`
-   `cooldown`.
+   `cooldown`. Two notices with no `state` for one subject are the same subject in the same state.
 8. The rule's runs counted today are under its `cap`; else `refused` `cap`.
 9. The folder is on the machine's allowlist (§5 step 6); else `refused` `folder`.
 10. The harness runs headlessly here (§6 `start`); else `refused` `harness`.
 11. Continuing: the session exists, its transcript still there; else `refused` `no_session`, and
     the machine pauses the rule. That pause is kept in the daemon's own state and never written to
     `triggers.json` (the CLI alone writes the file): the rule's topic leaves the hello at once,
-    `trigger list` shows it paused by the machine and why, and `trigger resume` at the terminal
-    clears it.
+    `trigger list` shows it paused by the machine and why. The pause ends with `trigger resume` at
+    the terminal, with the rule's removal, or when the person changes the rule's target.
 
-A clock tick takes steps 2 and 8 to 11 (off is a history line `refused` `triggers_off`; a paused
-rule's tick is nothing), and §14.6 for lateness. Step 7 is for notice rules only.
+A clock tick takes, in order: a paused rule's tick (in the file or by the machine) is nothing, on
+or off; step 2 (off: a history line `refused` `triggers_off`); its lateness (§14.6: six hours or
+more is `missed`, decided before the cap and never counted); then steps 8 to 11 and the waits
+below, as a notice's run does. Step 7 is for notice rules only.
 
 **When a run counts.** A run counts against its rule's cap and cooldown the moment it is taken:
 when it begins, or, when it must wait, when it is acked `taken`. So two notices that arrive while
 the run of the first waits are counted one after the other, and the second is refused `cap` when
 the first used the last run of the day. Every run that counted stays counted whether it then works
-or fails. A count is given back only when the run then ends without running at all: refused `held`
-or `start_limit`, dropped by `triggers off`, or past its `expires_at`. When a waiting run is let go
-(the window lets go of the session, a start ends), steps 9 to 11 are checked **again**, and a run
-that now fails one is refused with that step's code (and its count given back).
+or fails. A count is given back when, and only when, a run that was taken ends without running at
+all: refused `held` or `start_limit` at its deadline, dropped by `triggers off`, or refused
+`folder`, `harness` or `no_session` when it is let go. When a waiting run is let go (the window
+lets go of the session, a start ends, the hour has room), steps 9 to 11 are checked **again**, and a
+run that now fails one is refused with that step's code. A count lent to a waiting run can refuse
+another notice `cap` (or `cooldown`) for good, even when the waiting run later gives it back: this
+is intended, since the machine cannot know at the time that the run will not happen, and a refused
+notice is final. A deadline is exclusive: at its own instant a waiting run has expired, and that
+is decided before anything else that happens at the same instant (a window letting go, a start
+ending).
 
 **A waiting run outlives a restart.** The daemon keeps every waiting run in its own state (the
 notice's id and receiver, the rule, the deadline: `expires_at`, or six hours after a tick) and
@@ -1972,17 +2022,26 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
 - **The level** is the narrowest of: the rule's `level`; its source's ceiling (`edits` for a notice
   rule, however the file came to say more); the machine's mode, where `safe` allows `safe`, `auto`
   allows `auto`, and `inherit` lets a named level be `safe` at most (§2); and, continuing, the
-  session's own recorded level. Then the widest level the harness takes here that is no wider (the
-  hello's `start.<harness>.permissions`): Codex has no `edits`, so a rule at `edits` runs Codex at
-  `safe`, its workspace sandbox, which writes files in the folder. When the harness takes no level
-  so narrow, the run is refused `harness`. A run is never wider than any of them.
+  session's own recorded level, where none recorded and `inherit` cap nothing more (§6). Then the
+  widest level the harness takes here that is no wider (the hello's `start.<harness>.permissions`):
+  Codex has no `edits`, so a rule at `edits` runs Codex at `safe`, its workspace sandbox, which
+  writes files in the folder. A run is never wider than any of them, and never gets a level it was
+  not given. When there is none, no run exists: a rule's level that is none of `read`, `safe`,
+  `edits` and `auto` is a file that does not fit (`triggers_off`); a recorded level the machine does
+  not know is a session it cannot continue as it was (`no_session`, and the rule paused); a harness
+  that takes no level so narrow is `harness`.
 - **Permissions.** A trigger answers no permission prompt. A triggered session raises one as any
   session does, and at `safe` or `edits` an unattended prompt is denied (§3.1). A triggered session
   is a root: it MAY `ask` (§13), and nothing it does is the person's approval.
-- **The machine's caps.** A start counts against the machine's caps on starts (`start_concurrent`,
-  2, and `start_per_hour`, 10, by default) exactly as a receiver's start and an ask's do. Beyond
-  them the run waits, acked `taken`, until the caps allow it, the notice expires (`refused`
-  `start_limit`) or, for a tick, six hours pass.
+- **The machine's caps.** A run counts against the machine's caps on starts exactly as a local ask
+  does (§13 `start_limit`): a rule that **starts** a session takes a start, counted against
+  `start_concurrent` (2 by default) while that start is in progress and against `start_per_hour`
+  (10 by default) for the sliding hour after it began, the same count a receiver's start and an
+  ask's start take; a rule that **continues** a session takes no start, and its turn waits for the
+  machine's headless slot (`headless`, 3 by default) as an ask's turn does. Where an ask beyond the
+  start caps is refused `start_limit`, a triggered start waits, acked `taken`, until the caps allow
+  it (a start ends, or the sliding hour has room), the notice expires (`refused` `start_limit`) or,
+  for a tick, six hours pass.
 - **A session a window holds.** A rule continues a session only through a path where the daemon
   runs the turn at the rule's level: `sdk`, `api` or `resume` (§6). Never `waiter`, `turn`, `inbox`,
   a channel or Codex's own queue, where the window's own mode would apply, and never a `fork`, which
@@ -1992,12 +2051,14 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   context, that a triggered run waits for it.
 - **Off.** Turning triggers off drops every waiting run (§14.10).
 - **What an `edits` run can leave for later runs.** A run at `edits` writes in its folder, and some
-  of what a folder holds widens what later sessions there may do: Claude Code's
-  `.claude/settings.json` (allow rules), `.git/hooks`. A triggered run can write those for the next
-  run of the same rule, or for the person's own sessions in that folder. Claude Code counts a
-  folder's allow rules only once a person has trusted that folder (RFC 0004 §5.1, step 0), so a
-  person SHOULD give a rule a folder of its own and SHOULD NOT trust a folder triggered runs write
-  in; hooks a run writes into `.git/hooks` run whenever git does there.
+  of what a folder holds can widen what later sessions there may do: Claude Code's
+  `.claude/settings.json`, `.git/hooks`. A triggered run can write those for the next run of the
+  same rule, or for the person's own sessions in that folder. What was measured (RFC 0004 §5.1,
+  step 0): Claude Code counts a folder's **allow rules** only once a person has trusted that
+  folder. What was not measured: whether hooks or MCP servers that an untrusted folder's settings
+  name run under `claude -p`. So a person SHOULD give a rule a folder of its own and SHOULD NOT
+  trust a folder triggered runs write in; and hooks a run writes into `.git/hooks` run whenever git
+  does there, whoever runs git.
 
 ### 14.8 The words, and the subject pattern
 
@@ -2054,7 +2115,8 @@ every tick is refused the same way. `sessionpipe triggers off`:
 
 - refuses every notice and tick from then on;
 - drops every run that waits, acking its notice `refused` `triggers_off`;
-- cancels every running triggered turn, as a `cancel` stops a turn the machine runs (§6 `cancel`);
+- cancels every triggered turn still running, as a `cancel` stops a turn the machine runs (§6
+  `cancel`); a triggered run that already ended is left as it is;
 - sends every receiver a hello with `{"on": false, "topics": []}` at once
   (`conformance/triggers/triggers-off.json`).
 

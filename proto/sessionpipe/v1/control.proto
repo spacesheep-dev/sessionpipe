@@ -222,6 +222,8 @@ enum TriggerRefusal {
   // The machine's caps on starts, which asks and receivers' starts share, stayed reached
   // until the notice expired.
   TRIGGER_REFUSAL_START_LIMIT = 9;
+  // Once `missed`, before a clock tick's lateness became a history result; never to be reused.
+  reserved 10;
 }
 
 // A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
