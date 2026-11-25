@@ -54,6 +54,7 @@ export {
 } from "./readers/transcripts.js";
 export { shortId } from "./short-id.js";
 export * from "./sinks/index.js";
+export { CONFIG_SCHEMAS, problems } from "./trigger-schemas.js";
 export * from "./triggers/index.js";
 export type * from "./types.js";
 export { isUlid, ulid } from "./ulid.js";
