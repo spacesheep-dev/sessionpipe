@@ -84,7 +84,7 @@ import { fetchFiles, picturesOf, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
-import { type Held, takeLock as takeLockFile } from "./lockfile.js";
+import { type Held, lockHolder, takeLock as takeLockFile } from "./lockfile.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import {
   type Following,
@@ -727,9 +727,18 @@ export interface Status {
   /** Whether a session here may ask another agent, and which agents (CONTROL.md §13). */
   ask: { on: boolean; harnesses: string[] };
   /** The person's trigger rules (CONTROL.md §14): on or off, how many, how many paused (by
-   *  the person or by this machine), and the runs that wait or run now. A daemon from
+   *  the person or by this machine), and the runs that wait or run now. `not_running` is set
+   *  when this daemon does not hold the rules' claim so no rule runs here. A daemon from
    *  before triggers has none. */
-  triggers?: { on: boolean; rules: number; paused: number; waiting: number; running: number; checks: number };
+  triggers?: {
+    on: boolean;
+    rules: number;
+    paused: number;
+    waiting: number;
+    running: number;
+    checks: number;
+    not_running?: string;
+  };
   /** Null when the daemon could restart now (nothing in hand); otherwise what it holds. */
   busy: string | null;
   update?: unknown;
@@ -904,6 +913,7 @@ export class ControlDaemon {
   private triggers: TriggerEngine | null = null;
   private triggerClaim: Held | null = null;
   private claimSaid = false;
+  private triggerClaimProblem: string | null = null;
   private rulesNow: TriggersFile | null = null;
   private triggerTimer: NodeJS.Timeout | null = null;
   /** Triggered runs waiting for the headless slot, by message id: told when they have it. */
@@ -932,26 +942,36 @@ export class ControlDaemon {
    *  never read, ran or wrote the record. Tried again at each look of the clock until held. */
   private claimTriggers(): void {
     if (this.triggers || !this.running) return;
+    const claimFile = path.join(this.dir, "triggers-state.lock");
     let claim: Held | null = null;
     try {
-      claim = takeLockFile(path.join(this.dir, "triggers-state.lock"), {
+      claim = takeLockFile(claimFile, {
+        claim: true,
         broke: (why) => this.deps.log(`the triggers' claim of a daemon that is gone (${why}) was let go of`),
       });
     } catch (e) {
+      this.triggerClaimProblem = `${claimFile} can't be taken (${String(e)})`;
       this.deps.log(`the triggers' claim can't be taken (${String(e)}); no rule runs here`);
       return;
     }
     if (!claim) {
+      const holder = lockHolder(claimFile);
+      /* v8 ignore next -- holder vanished or empty right after takeLock */
+      this.triggerClaimProblem = holder
+        ? `${claimFile} is held by pid ${holder.pid}`
+        : `${claimFile} is held by another daemon`;
       if (!this.claimSaid) this.deps.log("another daemon runs the trigger rules; this one runs none until it stops");
       this.claimSaid = true;
       return;
     }
     this.triggerClaim = claim;
+    this.triggerClaimProblem = null;
     const deps = this.deps;
     const record = path.join(this.dir, "triggers-state.json");
     this.triggers = new TriggerEngine({
       now: deps.now,
       ...(deps.triggerZone ? { zone: deps.triggerZone } : {}),
+      home: triggerPlaces(this.deps.env).home,
       mode: () => this.cfg.mode,
       // On the allowlist, and by its real path still not a place a rule may never run in
       // (§14.1: the home folder, sessionpipe's own config and state): a link is followed here,
@@ -1369,6 +1389,7 @@ export class ControlDaemon {
         waiting: this.triggers?.waitingNow().length ?? 0,
         running: this.triggers?.runningNow().length ?? 0,
         checks: this.triggers?.checks ?? 0,
+        ...(!this.triggers && this.triggerClaimProblem ? { not_running: this.triggerClaimProblem } : {}),
       },
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
@@ -4513,10 +4534,12 @@ export class ControlDaemon {
       if (this.deps.sdk) {
         const sdk = this.deps.sdk;
         const extra = this.childEnv(r, cmd);
-        const out = await this.slot(async () => {
+        let entered = false;
+        const ran = this.slot(async () => {
           // Stopped while it waited for the slot (a cancel, `triggers off`, its deadline): it never
           // starts. Until here it is a run in hand, as a claude -p run is until ownRun's slot.
           if (run.ctl.signal.aborted) return null;
+          entered = true;
           // A session the daemon will hold: from here a Stop is that session's interrupt.
           this.letGo(run);
           const s = sdk.start({
@@ -4532,6 +4555,7 @@ export class ControlDaemon {
           this.picturesSaid(id, got.pictures.length, sent.native ?? 0, "image blocks");
           return sent;
         }, id);
+        const out = await Promise.race([ran, run.stoppedSoon.then(() => (entered ? ran : null))]);
         if (out === null) return this.finish(r, id, UNSTARTED_ACK, sent);
         return this.finish(
           r,

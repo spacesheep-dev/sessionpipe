@@ -67,6 +67,7 @@ interface Step {
   run_ended?: number[];
   resume?: string;
   permission?: { run: number };
+  sessions?: Record<string, { level: StartPermission; held: boolean; folder?: string } | null>;
   expect: {
     acks?: Ack[];
     runs?: TriggerJob[];
@@ -186,11 +187,24 @@ function play(c: Case): void {
   let changed = 0;
   const noted: { rule: string; l: TriggerHistoryLine }[] = [];
   let saved: TriggerState = seeded(c, file);
+  const home = machine.places.home;
+  const folderKey = (f: string) => {
+    const abs = f === "~" ? home : f.startsWith("~/") ? `${home}${f.slice(1)}` : f;
+    return abs.length > 1 ? abs.replace(/\/+$/, "") : abs;
+  };
   const e = new TriggerEngine({
     now: () => now,
     zone: c.zone ?? "UTC",
+    home,
     mode: () => machine.mode,
-    allowed: (f) => machine.folders.some((m) => f === m || f.startsWith(`${m}/`)),
+    allowed: (f) => {
+      const fk = folderKey(f);
+      return machine.folders.some((m) => {
+        const mk = folderKey(m);
+        return fk === mk || fk.startsWith(`${mk}/`);
+      });
+    },
+    sameFolder: (a, b) => folderKey(a) === folderKey(b),
     harnesses: () => machine.harnesses,
     offered: (h) => machine.levels?.[h],
     session: (ref) => {
@@ -254,6 +268,9 @@ function play(c: Case): void {
       (sessions[s.release] as { held: boolean }).held = false;
       e.retry();
     }
+    for (const [k, v] of Object.entries(s.sessions ?? {}))
+      if (v === null) delete sessions[k];
+      else sessions[k] = v;
     if (s.start_ended !== undefined) {
       running -= s.start_ended;
       e.retry();

@@ -19,7 +19,9 @@ import {
   rmSync,
   writeSync,
 } from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { procStartOf, sameStart } from "./inbox.js";
 
 /** A folder where the lock file goes: nothing here removes it, so the person is told. */
 export class LockIsFolder extends Error {
@@ -34,6 +36,10 @@ export interface Held {
   release(): void;
 }
 
+/** Active long-lived claim tokens held by this process, so a leftover claim naming our own pid
+ *  from before a restart is broken while a second live daemon in the same process is kept. */
+const heldClaims = new Set<string>();
+
 const tokenOf = (file: string): string | null => {
   try {
     return readFileSync(file, "utf8").trim();
@@ -41,6 +47,14 @@ const tokenOf = (file: string): string | null => {
     return null;
   }
 };
+
+/** Who holds the lock file right now (its pid, if readable), for status and doctor. */
+export function lockHolder(file: string): { pid: number; token: string } | null {
+  const token = tokenOf(file);
+  if (!token) return null;
+  const pid = Number(token.split(" ")[0]);
+  return Number.isInteger(pid) && pid > 0 ? { pid, token } : null;
+}
 
 /** Whether the process `pid` is running (one this process can't signal is running). */
 function alive(pid: number): boolean {
@@ -54,7 +68,12 @@ function alive(pid: number): boolean {
 }
 
 /** Why the lock at `file` may be broken, with what it held; null while its owner holds it. */
-function staleness(file: string, staleMs: number): { why: string; token: string | null } | null {
+function staleness(
+  file: string,
+  staleMs: number,
+  claim: boolean,
+  procStart: (pid: number) => string | null,
+): { why: string; token: string | null } | null {
   let st: ReturnType<typeof lstatSync>;
   try {
     st = lstatSync(file);
@@ -64,35 +83,79 @@ function staleness(file: string, staleMs: number): { why: string; token: string 
   if (st.isDirectory()) throw new LockIsFolder(file);
   if (!st.isFile()) return { why: "not a file", token: null };
   const token = tokenOf(file);
-  const pid = Number(token?.split(" ")[0]);
-  if (!alive(pid)) return { why: "its command has ended", token };
+  /* v8 ignore next -- vanished between lstatSync and readFileSync */
+  if (token === null) return { why: "gone", token: null };
   const age = Date.now() - st.mtimeMs;
-  if (age < -1000) return { why: "its time is in the future", token };
+  // An empty file younger than two seconds may be mid-write by another writer.
+  if (token === "" && age < 2_000) return null;
+  const parts = token.split(" ");
+  const pid = Number(parts[0]);
+  if (!alive(pid)) return { why: "its command has ended", token };
+  if (claim) {
+    if (pid === process.pid && !heldClaims.has(token)) return { why: "this daemon's own pid from before", token };
+    const recorded = parts.slice(2).join(" ");
+    if (recorded) {
+      const live = procStart(pid);
+      if (live && !sameStart(recorded, live)) return { why: "another process has that pid now", token };
+    }
+    const bootAt = Date.now() - os.uptime() * 1000;
+    if (st.mtimeMs < bootAt - 5_000) return { why: "from before this computer started", token };
+  }
   if (age > staleMs) return { why: `${Math.round(age / 1000)} s old`, token };
   return null;
 }
 
+/** Write the token to a unique temp file and link it into place, so the lock never exists empty. */
+function atomicCreate(file: string, token: string): boolean {
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  const fd = openSync(tmp, "wx", 0o600);
+  try {
+    writeSync(fd, `${token}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    linkSync(tmp, file);
+    return true;
+  } catch (e) {
+    /* v8 ignore next -- linkSync error other than EEXIST (e.g. EXDEV/EPERM) */
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    return false;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
 /** Take the lock at `file`, or null while another holds it. `broke` is told why a stale one was
- *  broken. Throws LockIsFolder when a folder is there, and what the disk says otherwise. */
-export function takeLock(file: string, o: { staleMs?: number; broke?: (why: string) => void } = {}): Held | null {
+ *  broken. `claim`: long-lived daemon claim (records process start time; breaks leftover own-pid,
+ *  recycled-pid and pre-boot claims). Throws LockIsFolder when a folder is there. */
+export function takeLock(
+  file: string,
+  o: {
+    staleMs?: number;
+    broke?: (why: string) => void;
+    claim?: boolean;
+    procStart?: (pid: number) => string | null;
+  } = {},
+): Held | null {
   const staleMs = o.staleMs ?? Number.POSITIVE_INFINITY;
+  const claim = o.claim === true;
+  const procStart = o.procStart ?? procStartOf;
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const token = `${process.pid} ${randomUUID()}`;
+  const start = claim ? procStart(process.pid) : null;
+  const token = `${process.pid} ${randomUUID()}${start ? ` ${start}` : ""}`;
   for (let tries = 0; tries < 3; tries++) {
-    try {
-      const fd = openSync(file, "wx", 0o600);
-      writeSync(fd, `${token}\n`);
-      closeSync(fd);
+    if (atomicCreate(file, token)) {
+      if (claim) heldClaims.add(token);
       return {
         token,
         release: () => {
+          if (claim) heldClaims.delete(token);
           if (tokenOf(file) === token) rmSync(file, { force: true });
         },
       };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
-    const stale = staleness(file, staleMs);
+    const stale = staleness(file, staleMs, claim, procStart);
     if (!stale) return null;
     if (stale.why === "gone") continue;
     // Aside first: of two that found it stale, one renames it and the other finds it gone.

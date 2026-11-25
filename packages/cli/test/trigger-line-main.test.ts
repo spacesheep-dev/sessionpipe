@@ -12,12 +12,20 @@ import { writeControl } from "../src/control/store.js";
 import type { TriggerDeps } from "../src/triggers.js";
 
 let interactive = false;
+const cleanEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const out = { ...env };
+  delete out.CLAUDECODE;
+  delete out.CLAUDE_CODE_SESSION_ID;
+  delete out.CODEX_SESSION_ID;
+  delete out.SESSIONPIPE_CONTROL_JOB;
+  return out;
+};
 vi.mock("../src/triggers.js", async (original) => {
   const real = await original<typeof import("../src/triggers.js")>();
   return {
     ...real,
     defaultTriggerDeps: (_dist: string, env: NodeJS.ProcessEnv = process.env): TriggerDeps => ({
-      env,
+      env: cleanEnv(env),
       interactive: () => interactive,
       confirm: async () => "no",
       harnesses: () => ["claude-code", "codex"],
@@ -32,6 +40,31 @@ vi.mock("../src/triggers.js", async (original) => {
   };
 });
 const { main } = await import("../src/cli.js");
+
+/** Split one POSIX shell command line into words (single quotes, backslash, spaces). */
+function shSplit(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let word = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i] as string;
+    if (c === "'") {
+      const j = line.indexOf("'", i + 1);
+      if (j < 0) throw new Error("unterminated single quote");
+      cur += line.slice(i + 1, j);
+      i = j;
+    } else if (c === "\\") cur += line[++i];
+    else if (c === " " || c === "\t" || c === "\n") {
+      if (word) out.push(cur);
+      cur = "";
+      word = false;
+      continue;
+    } else cur += c;
+    word = true;
+  }
+  if (word) out.push(cur);
+  return out;
+}
 
 const clock = (name: string, words: string): TriggerRule => ({
   name,
@@ -101,17 +134,44 @@ describe("trigger line through main", () => {
       ["short", "-h"],
       ["color", "--no-color"],
     ] as const) {
+      writeRules({ v: 1, on: true, rules: [clock(name, words)] });
       const { out } = await at({ tty: true, columns: 80 }, "trigger", "line", name);
       expect(out[0]?.endsWith(` --words='${words}'`)).toBe(true);
-      // Pasted back, it is `add` with those words, not the CLI's help or its colour switch: `add`
-      // refuses here (no terminal, or a coding session's environment), and says so as `add`.
-      const argv = (out[0] as string)
-        .replace(/^sessionpipe /, "")
-        .split(" ")
-        .map((w) => w.replace(/^'(.*)'$/, "$1"));
-      const back = await at({}, ...argv.map((w) => w.replace(/^(--words=)'(.*)'$/, "$1$2")));
-      expect(back.out).toEqual([]);
-      expect(back.err.join("")).toContain("Adding a rule");
+      const argv = shSplit(out[0] as string).slice(1);
+      // Remove the rule first so `add` reads the line back and shows the rule to confirm.
+      writeRules({ v: 1, on: true, rules: [] });
+      interactive = true;
+      const back = await at({ tty: true, columns: 80 }, ...argv);
+      const plain = back.out.join("\n").replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
+      expect(back.err).toEqual([]);
+      expect(plain).toContain("Add this rule?");
+      expect(plain).toContain(`words  │ ${words}`);
+    }
+  });
+
+  it("commands that ask yes refuse --json even on a narrow terminal", async () => {
+    interactive = true;
+    for (const argv of [
+      [
+        "trigger",
+        "add",
+        "r",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/acme",
+        "--words",
+        "Go.",
+        "--json",
+      ],
+      ["trigger", "resume", "help", "--json"],
+      ["triggers", "on", "--no-service", "--json"],
+    ]) {
+      const res = await at({ tty: true, columns: 30 }, ...argv);
+      expect(res.out).toEqual([]);
+      expect(res.err.join("")).toContain("has no JSON output");
     }
   });
 });

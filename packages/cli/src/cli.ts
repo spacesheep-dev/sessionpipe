@@ -208,6 +208,9 @@ const FOR_PROGRAMS = ["tail", "wait", "channel", "worker", "hook", "version", "-
 /** Whether this run's lines are for a person to read (style.ts `paint`). */
 function forPeople(a: readonly string[], tty: boolean): boolean {
   if (a.includes("--help") || a.includes("-h")) return true;
+  // Commands that ask the person to type yes never print JSON and keep the terminal's width.
+  if ((a[0] === "trigger" && (a[1] === "add" || a[1] === "resume")) || (a[0] === "triggers" && a[1] === "on"))
+    return true;
   if (a.includes("--json") || FOR_PROGRAMS.includes(a[0] as string)) return false;
   // `trigger line` is a command a program reads back: its bytes as they are, at any width.
   if (a[0] === "trigger" && a[1] === "line") return false;

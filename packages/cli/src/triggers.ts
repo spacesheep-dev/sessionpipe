@@ -634,7 +634,7 @@ export async function triggerMain(argv: string[], o: TriggerOut, d: TriggerDeps)
     case "remove":
       return narrow(sub, p.words[1], o, d);
     case "resume":
-      return resume(p.words[1], o, d);
+      return resume(p, o, d);
     case "test":
       return test(p, o, d);
     case "line":
@@ -851,6 +851,7 @@ function buildRule(p: Parsed, d: TriggerDeps, h: Here, f: TriggersFile) {
 }
 
 async function add(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
+  if (p.flags.has("--json")) throw new Refusal("`trigger add` asks yes at your terminal and has no JSON output", "");
   personOnly(d, "Adding a rule");
   const h = await here(d);
   const { name, rule, next, notes, warn, when, words, pairedUrl, control } = buildRule(p, d, h, editable(h, d));
@@ -910,23 +911,33 @@ async function lineOf(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   const h = await here(d);
   const f = editable(h, d);
   const r = ruleOf(f, p.words[1], "line");
-  const { rule } = buildRule(parse(triggerLine(r).argv.slice(1)), d, h, {
-    ...f,
-    rules: f.rules.filter((x) => x !== r),
-  });
-  if (levelHere(rule, h.mode, h.offered).level === null)
-    throw new Refusal(
-      `${label(targetHarness(rule))} takes no level as narrow as ${rule.level} on this computer, so \`trigger add\` would refuse this rule here`,
-      "",
+  let rule = r;
+  try {
+    const built = buildRule(parse(triggerLine(r).argv.slice(1)), d, h, {
+      ...f,
+      rules: f.rules.filter((x) => x !== r),
+    });
+    rule = built.rule;
+    if (levelHere(rule, h.mode, h.offered).level === null)
+      o.note?.(
+        `This rule can't run on this computer right now (${label(targetHarness(rule))} takes no level as narrow as ${rule.level} here), but the line is still valid for another computer.`,
+      );
+    const was = { ...r, paused: false };
+    const changed = (Object.keys({ ...was, ...rule }) as (keyof TriggerRule)[]).filter(
+      (k) => JSON.stringify(was[k]) !== JSON.stringify(rule[k]),
     );
-  const was = { ...r, paused: false };
-  const changed = (Object.keys({ ...was, ...rule }) as (keyof TriggerRule)[]).filter(
-    (k) => JSON.stringify(was[k]) !== JSON.stringify(rule[k]),
-  );
-  if (changed.length)
+    if (changed.length)
+      o.note?.(
+        `The rules file writes ${changed.join(", ")} in a spelling \`trigger add\` doesn't; the line has it as \`trigger add\` writes it, which is the same rule.`,
+      );
+  } catch (e) {
+    if (!(e instanceof Refusal)) throw e;
+    // The rule already passed the definition reader (editable(h, d)); only local machine checks
+    // (harness, allowlist, pairing) can refuse it here. Print the line so it can be moved.
     o.note?.(
-      `The rules file writes ${changed.join(", ")} in a spelling \`trigger add\` doesn't; the line has it as \`trigger add\` writes it, which is the same rule.`,
+      `This rule can't run on this computer right now (${e.message}), but the line is still printed to move it.`,
     );
+  }
   const { line, argv } = triggerLine(rule);
   if (p.flags.has("--json")) return printJson(o, "trigger-line", { line, argv });
   o.print(line);
@@ -1037,7 +1048,10 @@ async function status(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
   if (p.flags.has("--json")) return printJson(o, "trigger-list", listOf(h));
   headline(o, h, d);
   const r = await d.local({ op: "status" }, 2000);
-  const t = r?.op === "status" ? (r.status as { triggers?: { waiting: number; running: number } }).triggers : undefined;
+  const t =
+    r?.op === "status"
+      ? (r.status as { triggers?: { waiting: number; running: number; not_running?: string } }).triggers
+      : undefined;
   o.say("");
   say(
     o,
@@ -1046,9 +1060,11 @@ async function status(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
       ? h.file?.on
         ? `not running, so no rule runs: \`sessionpipe triggers on\` installs it`
         : "not running"
-      : t
-        ? `running · ${t.running} run${t.running === 1 ? "" : "s"} now · ${t.waiting} waiting`
-        : "running a sessionpipe from before triggers: `sessionpipe update` brings it up to date",
+      : t?.not_running
+        ? `running, but no rule runs here (${t.not_running})`
+        : t
+          ? `running · ${t.running} run${t.running === 1 ? "" : "s"} now · ${t.waiting} waiting`
+          : "running a sessionpipe from before triggers: `sessionpipe update` brings it up to date",
   );
   say(
     o,
@@ -1059,6 +1075,7 @@ async function status(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
 }
 
 async function on(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
+  if (p.flags.has("--json")) throw new Refusal("`triggers on` asks yes at your terminal and has no JSON output", "");
   personOnly(d, "Turning triggers on");
   // At a terminal, always: on already, it still installs the background service.
   atTerminal(d, "Turning triggers on");
@@ -1136,7 +1153,9 @@ async function narrow(
   say(o, `  ${mark(o.ui, "ok")} `, `Paused ${r.name}: it runs nothing until \`sessionpipe trigger resume ${r.name}\`.`);
 }
 
-async function resume(name: string | undefined, o: TriggerOut, d: TriggerDeps): Promise<void> {
+async function resume(p: Parsed, o: TriggerOut, d: TriggerDeps): Promise<void> {
+  if (p.flags.has("--json")) throw new Refusal("`trigger resume` asks yes at your terminal and has no JSON output", "");
+  const name = p.words[1];
   personOnly(d, "Resuming a rule");
   const h = await here(d);
   const f = editable(h, d);
@@ -1173,6 +1192,11 @@ async function resume(name: string | undefined, o: TriggerOut, d: TriggerDeps): 
       const rec = readRecord(d.env);
       delete (rec.rules[r.name] as RuleState).paused;
       writePrivate(triggerStateFile(d.env), rec);
+    } else if (said.op !== "ok") {
+      throw new Refusal(
+        `the background service couldn't resume ${r.name} (another daemon may hold the rules claim, or the rule isn't paused there)`,
+        "sessionpipe triggers status",
+      );
     }
   }
   say(

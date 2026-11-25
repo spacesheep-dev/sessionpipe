@@ -45,7 +45,7 @@ function rig(
     answer?: (on: RunEvents) => void;
     session?: SessionLook;
     saved?: unknown;
-    save?: () => void;
+    save?: (x: TriggerState) => void;
     offered?: StartPermission[];
     now?: number;
   } = {},
@@ -716,12 +716,8 @@ describe("what the second review found", () => {
     };
     // Unchanged: it may begin.
     expect(go(() => {}).ok).toBe(true);
-    // The rule changed in what decides a run, paused, its folder no longer allowed, or the
-    // machine's mode narrowed: it may not, and it is dropped as no_match with its count back.
-    const changes: ((x: ReturnType<typeof rig>) => void)[] = [
-      (x) => {
-        x.s.allowed = false;
-      },
+    // The rule changed in what decides a run or paused: it is dropped as no_match with its count back.
+    const ruleChanges: ((x: ReturnType<typeof rig>) => void)[] = [
       (x) => {
         x.e.load(file(card({ paused: true })));
       },
@@ -729,12 +725,71 @@ describe("what the second review found", () => {
         x.e.load(file(card({ words: "Other." })));
       },
     ];
-    for (const change of changes) {
+    for (const change of ruleChanges) {
       const { x, ok } = go(change);
       expect(ok).toBe(false);
       expect(x.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "no_match" });
       expect(x.s.saved?.rules.card?.today?.runs ?? 0).toBe(0);
     }
+    // Machine-side change (folder off allowlist): refused with that step's code, count back.
+    const folderGone = go((x) => {
+      x.s.allowed = false;
+    });
+    expect(folderGone.ok).toBe(false);
+    expect(folderGone.x.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "refused", code: "folder" });
+    expect(folderGone.x.s.saved?.rules.card?.today?.runs ?? 0).toBe(0);
+    // Machine-side level refusal before turn begins (unknown recorded level pauses rule; no offered level refuses harness).
+    const unk = rig({ answer, session: { held: false, level: "edits", folder: "~/work" } });
+    unk.e.load(file(card({ level: "edits", target: { continue: SID } })));
+    unk.take();
+    unk.s.session = { held: false, level: "future" as never, folder: "~/work" };
+    expect((held as unknown as RunEvents).ready()).toBe(false);
+    expect(unk.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "refused", code: "no_session" });
+    expect(unk.e.pausedByMachine()).toEqual(["card"]);
+    const offered: StartPermission[] = ["read", "safe"];
+    const noOffer = rig({ answer, offered });
+    noOffer.e.load(file(card({ level: "read" })));
+    noOffer.take();
+    offered.splice(0, offered.length, "auto");
+    expect((held as unknown as RunEvents).ready()).toBe(false);
+    expect(noOffer.s.acks.at(-1)).toEqual({ id: notice().id, outcome: "refused", code: "harness" });
+    // Machine-made pause drops other waiting runs of the same rule (when fire() sees session gone while an earlier run waits).
+    const mp = rig({ session: { held: true, level: "safe", folder: "~/work" } });
+    mp.e.load(file(card({ target: { continue: SID } })));
+    mp.take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F1111", subject: "X-1" }));
+    mp.s.session = { gone: true };
+    mp.take(notice({ id: "01KB4M2Q8V3T6Y9C0D1E2F2222", subject: "X-2" }));
+    expect(mp.e.pausedByMachine()).toEqual(["card"]);
+    expect(mp.s.acks.filter((a) => a.id === "01KB4M2Q8V3T6Y9C0D1E2F1111").at(-1)).toEqual({
+      id: "01KB4M2Q8V3T6Y9C0D1E2F1111",
+      outcome: "no_match",
+    });
+    // Queued run is persisted into waiting on disk so a crash does not lose it.
+    const crashed = rig({ answer });
+    crashed.e.load(file(card()));
+    crashed.take();
+    (held as unknown as RunEvents).queued("start_limit");
+    expect(crashed.s.saved?.waiting.map((w) => w.rule)).toEqual(["card"]);
+    // If save fails during suspend on a handed-over unqueued run, suspend retries once.
+    let failSave = 0;
+    const retrySave = rig({
+      answer: () => {},
+      save: (x) => {
+        if (failSave > 0) {
+          failSave--;
+          throw new Error("enospc");
+        }
+        retrySave.s.saved = structuredClone(x);
+      },
+    });
+    retrySave.e.load(file(card()));
+    retrySave.take();
+    failSave = 1;
+    retrySave.e.suspend();
+    expect(failSave).toBe(0);
+    expect(retrySave.s.saved?.waiting.map((w) => w.rule)).toEqual(["card"]);
+    // Calling suspend a second time is a no-op (already stopped).
+    retrySave.e.suspend();
     // The level is what it would be now: a session found recorded at a narrower level is another run.
     const narrowed = rig({ answer, session: { held: false, level: "edits", folder: "~/work" } });
     narrowed.e.load(file(card({ level: "edits", target: { continue: SID } })));
@@ -1182,7 +1237,7 @@ describe("the last corners", () => {
       expect(x.e.waitingNow()).toEqual([]);
     }
   });
-  it("a notice taken yesterday that still waits counts on its own day, not today's", () => {
+  it("an overnight notice taken today keeps its count on today across reloads, and a future `at` is dropped", () => {
     const x = rig({
       saved: {
         v: 1,
@@ -1200,14 +1255,67 @@ describe("the last corners", () => {
             day: "2026-11-24",
             key: null,
           },
+          {
+            rule: "card",
+            cause: {
+              kind: "notice",
+              receiver: "board.example",
+              notice: notice({
+                id: "01KB4M2Q8V3T6Y9C0D1E2F9999",
+                at: "2026-11-28T09:00:00.000Z",
+                expires_at: "2026-11-28T10:00:00.000Z",
+              }),
+            },
+            until: Date.parse("2026-11-28T10:00:00.000Z"),
+            reason: "start_limit",
+            day: "2026-11-28",
+            key: null,
+          },
         ],
       },
     });
     x.s.room = false;
     x.e.load(file(card({ cap: { per_day: 1 } })));
     expect(x.e.waitingNow()).toEqual(["card"]);
-    // The stored count was the waiting run's: it counts on its notice's day, so today holds none.
-    expect(x.s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 0, keys: [] });
+    // The honest overnight wait stays on today's count, and the future `at` wait was dropped.
+    expect(x.s.saved?.rules.card?.today).toEqual({ day: "2026-11-24", runs: 1, keys: [] });
+    // A stored day earlier than the cause's day is clamped up to the cause's day; a notice taken
+    // yesterday stays on yesterday's day.
+    const early = rig({
+      saved: {
+        v: 1,
+        rules: { card: { history: [] } },
+        waiting: [
+          {
+            rule: "card",
+            cause: { kind: "notice", receiver: "board.example", notice: notice() },
+            until: Date.parse("2026-11-25T09:14:02.000Z"),
+            reason: "start_limit",
+            day: "2020-01-01",
+            key: null,
+          },
+          {
+            rule: "card",
+            cause: {
+              kind: "notice",
+              receiver: "board.example",
+              notice: notice({
+                id: "01KB4M2Q8V3T6Y9C0D1E2F8888",
+                at: "2026-11-23T23:50:00.000Z",
+                expires_at: "2026-11-24T23:50:00.000Z",
+              }),
+            },
+            until: Date.parse("2026-11-24T23:50:00.000Z"),
+            reason: "start_limit",
+            day: "2026-11-23",
+            key: null,
+          },
+        ],
+      },
+    });
+    early.s.room = false;
+    early.e.load(file(card({ cap: { per_day: 1 } })));
+    expect(early.s.saved?.waiting.map((w) => w.day)).toEqual(["2026-11-24", "2026-11-23"]);
   });
   it("finals are remembered for the last ten thousand notices", () => {
     const x = rig();

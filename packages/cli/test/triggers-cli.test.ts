@@ -1238,7 +1238,12 @@ describe("trigger line", () => {
     expect(rules.size).toBeGreaterThan(20);
     const ctl = readControl() as NonNullable<ReturnType<typeof readControl>>;
     writeControl({ ...ctl, mode: "auto" });
-    for (const r of rules.values()) await roundTrip(r, isStart(r.target) ? {} : sessionAt(r.folder));
+    for (const raw of rules.values()) {
+      const r = raw.folder.startsWith("/home/sam/")
+        ? { ...raw, folder: `~/${raw.folder.slice("/home/sam/".length)}` }
+        : raw;
+      await roundTrip(r, isStart(r.target) ? {} : sessionAt(r.folder));
+    }
   });
 
   it("--json is TriggerLine; a name it doesn't know, or a file it can't read, is refused", async () => {
@@ -1391,14 +1396,13 @@ describe("what the final review found", () => {
     lines = [];
     await run(["trigger", "remove", "monday-report"]);
     expect(text()).toContain("(not a file) was broken.");
-    // A lock from the future (a clock set back) is broken.
+    // A live owner's lock with a future time (a clock set back) is NOT broken.
     writeRules({ v: 1, on: true, rules: [clock] });
     writeFileSync(lock(), `${process.pid} other\n`);
     const ahead = new Date(Date.now() + 3600_000);
     utimesSync(lock(), ahead, ahead);
-    lines = [];
-    await run(["triggers", "off"]);
-    expect(text()).toContain("(its time is in the future) was broken.");
+    expect((await refusal(run(["triggers", "off"]))).message).toMatch(/Another sessionpipe command/);
+    rmSync(lock(), { force: true });
     // A folder it may not write in is said as the disk says it (a test run as root writes there).
     chmodSync(path.dirname(lock()), 0o500);
     let threw: unknown = null;
@@ -1411,6 +1415,7 @@ describe("what the final review found", () => {
     }
     if (threw) expect(threw).not.toBeInstanceOf(Refusal);
     // A folder there is said, with what to do, and nothing is written.
+    writeRules({ v: 1, on: false, rules: [clock] });
     mkdirSync(lock());
     const r = await refusal(run(["triggers", "on"]));
     expect(r.message).toMatch(/triggers\.json\.lock is a folder where the rules' lock goes/);
@@ -1418,26 +1423,71 @@ describe("what the final review found", () => {
     rmSync(lock(), { recursive: true });
   });
 
-  it("trigger line runs add's checks: a rule add would refuse here is refused, with why", async () => {
+  it("trigger line prints locally-unrunnable valid rules with a note on stderr so they can be moved", async () => {
     const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
     writeRules({ v: 1, on: true, rules: [card, clock] });
+    const lineWithNotes = async (name: string, extra: Partial<TriggerDeps> = {}) => {
+      const notes: string[] = [];
+      printed = [];
+      await triggerMain(
+        ["trigger", "line", name],
+        { ui: PLAIN, say: (l = "") => lines.push(l), print: (l) => printed.push(l), note: (l) => notes.push(l) },
+        deps(extra),
+      );
+      return { line: printed.join("\n"), notes: notes.join("\n") };
+    };
     // The receiver unpaired since.
     writeControl({ ...c, receivers: [] });
-    expect((await refusal(run(["trigger", "line", "card-todo"]))).message).toMatch(/isn't paired with board\.example/);
+    const unpaired = await lineWithNotes("card-todo");
+    expect(unpaired.line).toMatch(/^sessionpipe trigger add card-todo /);
+    expect(unpaired.notes).toMatch(/isn't paired with board\.example/);
     // The folder no longer allowed.
     writeControl({ ...c, folders: [] });
-    expect((await refusal(run(["trigger", "line", "monday-report"]))).message).toMatch(
-      /isn't a folder this computer lets sessions run in/,
-    );
+    const noFolder = await lineWithNotes("monday-report");
+    expect(noFolder.line).toMatch(/^sessionpipe trigger add monday-report /);
+    expect(noFolder.notes).toMatch(/isn't a folder this computer lets sessions run in/);
     // No harness here takes a level so narrow.
     writeControl(c);
-    expect(
-      (await refusal(run(["trigger", "line", "monday-report"], { harnesses: () => ["claude-code"] }))).message,
-    ).toMatch(/Codex can't run headlessly on this computer/);
+    const noHarness = await lineWithNotes("monday-report", { harnesses: () => ["claude-code"] });
+    expect(noHarness.line).toMatch(/^sessionpipe trigger add monday-report /);
+    expect(noHarness.notes).toMatch(/Codex can't run headlessly on this computer/);
     daemon = { start: { codex: { permissions: ["auto"] } } };
-    expect((await refusal(run(["trigger", "line", "monday-report"]))).message).toMatch(
-      /takes no level as narrow as safe on this computer, so `trigger add` would refuse this rule here/,
+    const noLevel = await lineWithNotes("monday-report");
+    expect(noLevel.line).toMatch(/^sessionpipe trigger add monday-report /);
+    expect(noLevel.notes).toMatch(/takes no level as narrow as safe here/);
+    // Non-refusal errors still propagate out of trigger line.
+    await expect(
+      lineWithNotes("monday-report", {
+        harnesses: () => {
+          throw new Error("boom");
+        },
+      }),
+    ).rejects.toThrow("boom");
+  });
+
+  it("triggers status says when rules aren't running, and resume refuses {op: none}", async () => {
+    writeRules({ v: 1, on: true, rules: [clock] });
+    daemon = { triggers: { waiting: 0, running: 0, not_running: "/state/triggers-state.lock is held by pid 42" } };
+    lines = [];
+    await run(["triggers", "status"]);
+    expect(text()).toContain("no rule runs here (/state/triggers-state.lock is held by pid 42)");
+    // Machine-paused rule where daemon returns {op: "none"} is refused, not reported resumed.
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: {
+        "monday-report": {
+          history: [],
+          paused: { at: "2026-11-24T09:00:00.000Z", code: "no_session", rule: "x", why: "gone" },
+        },
+      },
+      waiting: [],
+    });
+    const r = await refusal(
+      run(["trigger", "resume", "monday-report"], {
+        local: async () => ({ op: "none" }),
+      }),
     );
+    expect(r.message).toMatch(/couldn't resume monday-report/);
   });
 
   it("a rule written by hand in a spelling add would not write is printed as add writes it, and said", async () => {

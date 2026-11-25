@@ -27,7 +27,7 @@ vi.mock("node:fs", async (original) => {
     },
   };
 });
-const { LockIsFolder, takeLock } = await import("../src/control/lockfile.js");
+const { LockIsFolder, lockHolder, takeLock } = await import("../src/control/lockfile.js");
 
 let dir: string;
 let file: string;
@@ -86,5 +86,56 @@ describe("takeLock", () => {
     held?.release();
     rmSync(file, { force: true });
     expect(() => takeLock(path.join(dir))).toThrow(LockIsFolder);
+  });
+
+  it("claim mode breaks leftover own-pid, recycled-pid, and pre-boot claims, while keeping a live claim", () => {
+    // Leftover own-pid claim not in heldClaims: broken at once.
+    writeFileSync(file, `${process.pid} old-run\n`);
+    const broke: string[] = [];
+    const first = takeLock(file, {
+      claim: true,
+      broke: (w) => broke.push(w),
+      procStart: () => "Tue Nov 24 09:00:00 2026",
+    });
+    expect(first).not.toBeNull();
+    expect(broke).toEqual(["this daemon's own pid from before"]);
+    expect(lockHolder(file)?.pid).toBe(process.pid);
+    // While held in this process, a second claim does NOT break it.
+    expect(takeLock(file, { claim: true, procStart: () => "Tue Nov 24 09:00:00 2026" })).toBeNull();
+    first?.release();
+    // Recycled pid (different start time) is broken.
+    writeFileSync(file, `${process.ppid} prev Mon Nov 23 01:00:00 2026\n`);
+    const brokeRecycled: string[] = [];
+    const second = takeLock(file, {
+      claim: true,
+      broke: (w) => brokeRecycled.push(w),
+      procStart: () => "Tue Nov 24 09:00:00 2026",
+    });
+    expect(second).not.toBeNull();
+    expect(brokeRecycled).toEqual(["another process has that pid now"]);
+    second?.release();
+    // Pre-boot claim (mtime older than uptime) is broken even without start time.
+    writeFileSync(file, `${process.ppid} preboot\n`);
+    const preBoot = new Date(Date.now() - os.uptime() * 1000 - 60_000);
+    utimesSync(file, preBoot, preBoot);
+    const brokeBoot: string[] = [];
+    const third = takeLock(file, { claim: true, broke: (w) => brokeBoot.push(w), procStart: () => null });
+    expect(third).not.toBeNull();
+    expect(brokeBoot).toEqual(["from before this computer started"]);
+    third?.release();
+    // Fresh empty file (<2 s) is treated as mid-write (held), and lockHolder returns null.
+    writeFileSync(file, "");
+    expect(lockHolder(file)).toBeNull();
+    expect(takeLock(file)).toBeNull();
+    // Invalid pid token returns null from lockHolder, and live matching start time is kept.
+    writeFileSync(file, "notapid x\n");
+    expect(lockHolder(file)).toBeNull();
+    writeFileSync(file, `${process.ppid} live Tue Nov 24 09:00:00 2026\n`);
+    expect(takeLock(file, { claim: true, procStart: () => "Tue Nov 24 09:00:00 2026" })).toBeNull();
+    // Same start time unavailable (null): falls through without breaking.
+    expect(takeLock(file, { claim: true, procStart: () => null })).toBeNull();
+    // Missing file returns null from lockHolder.
+    rmSync(file, { force: true });
+    expect(lockHolder(file)).toBeNull();
   });
 });

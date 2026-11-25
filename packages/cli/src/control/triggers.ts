@@ -103,6 +103,8 @@ export interface TriggerDeps {
   now(): number;
   /** The machine's time zone; its own when unsaid. */
   zone?: string;
+  /** The user's home folder, for comparing `~/` and full folder paths in rule fingerprints. */
+  home?: string;
   mode(): MachineMode;
   /** The folder is on the machine's allowlist (§5 step 6) and over the floor, by its real path. */
   allowed(folder: string): boolean;
@@ -231,10 +233,17 @@ function canonical(v: unknown): unknown {
   return v === null || v === "" ? undefined : v;
 }
 
+/** A folder in one spelling (`~` expanded against `home`, trailing `/` dropped) so `~/work/acme`
+ *  and `/home/sam/work/acme` hash the same (§14.7, *Paused, removed or changed*). */
+function folderKey(f: string, home?: string): string {
+  const abs = home && f.startsWith("~/") ? `${home}${f.slice(1)}` : f;
+  return abs.replace(/\/+$/, "");
+}
+
 /** A rule's fingerprint: a hash of what decides what a run of it does (where it comes from and
  *  what it takes, what it runs, where, at which level, with which tools and words), in one
  *  spelling. Its name, its cap and its pause are left out: none of them changes a run. */
-export const fingerprint = (r: TriggerRule): string =>
+export const fingerprint = (r: TriggerRule, home?: string): string =>
   createHash("sha256")
     .update(
       JSON.stringify(
@@ -243,7 +252,7 @@ export const fingerprint = (r: TriggerRule): string =>
           when: r.when,
           subject: r.subject,
           target: r.target,
-          folder: r.folder,
+          folder: folderKey(r.folder, home),
           level: r.level,
           tools: r.tools,
           words: r.words,
@@ -300,6 +309,10 @@ export class TriggerEngine {
     return this.state.waiting;
   }
 
+  private fp(r: TriggerRule): string {
+    return fingerprint(r, this.deps.home);
+  }
+
   // --- the rules file -----------------------------------------------------------------
 
   /** The rules file as the daemon read it now (null: none, or one it refused whole). Turning
@@ -331,7 +344,7 @@ export class TriggerEngine {
     for (const run of [...this.running]) {
       // A queued run is the rule's as it was taken: changed under the same name, it is dropped.
       const live = this.live(run.rule);
-      if (file?.on && (run.began || (live && fingerprint(live) === run.w.shape))) continue;
+      if (file?.on && (run.began || (live && this.fp(live) === run.w.shape))) continue;
       // A run whose turn has not begun ends without running: its count given back.
       if (!run.began) {
         run.done = true;
@@ -346,7 +359,7 @@ export class TriggerEngine {
     }
     // A rule changed under the same name drops the runs that waited for it as it was.
     for (const w of this.waits.filter(
-      (x) => x.shape !== undefined && x.shape !== fingerprint(this.live(x.rule) as TriggerRule),
+      (x) => x.shape !== undefined && x.shape !== this.fp(this.live(x.rule) as TriggerRule),
     )) {
       this.waits.splice(this.waits.indexOf(w), 1);
       this.letGo(w);
@@ -410,7 +423,11 @@ export class TriggerEngine {
    *  it runs, or waits for a window to let go or for room under the machine's caps. */
   fire(name: string, cause: Cause): void {
     if (this.stopped) return;
-    if (cause.kind === "notice") this.heard.add(`${cause.receiver}\n${cause.notice.id}`);
+    if (cause.kind === "notice") {
+      const k = `${cause.receiver}\n${cause.notice.id}`;
+      this.heard.add(k);
+      if (this.heard.size > 10_000) this.heard.delete(this.heard.values().next().value as string);
+    }
     let taken: Waiting | null = null;
     try {
       this.fireNow(name, cause, (w) => {
@@ -463,7 +480,7 @@ export class TriggerEngine {
     today.runs++;
     if (key) today.keys.push(key);
     const until = n ? Date.parse(n.expires_at) : (cause as { due: number }).due + TICK_LATE_MS;
-    const w: Waiting = { rule: name, cause, until, reason: "start_limit", day, key, shape: fingerprint(rule) };
+    const w: Waiting = { rule: name, cause, until, reason: "start_limit", day, key, shape: this.fp(rule) };
     counted(w);
     this.attempt(w);
   }
@@ -526,7 +543,14 @@ export class TriggerEngine {
       const rule = file.rules.find((x) => x.name === w.rule);
       if (!rule) continue;
       const c = w.cause;
-      w.day = localDay(this.zone, c.kind === "tick" ? c.due : Date.parse(c.notice.at));
+      const causeAt = c.kind === "tick" ? c.due : Date.parse(c.notice.at);
+      const causeDay = localDay(this.zone, causeAt);
+      // Keep the day the run was taken when it lies within [causeDay, today], else clamp it into
+      // that range: honest overnight waits stay on today's count, and a hand-made day cannot escape.
+      if (w.day < causeDay) w.day = causeDay;
+      if (w.day > todayIs) w.day = todayIs;
+      // Never wait more than 24 h past now, whatever a hand-made record claims.
+      w.until = Math.min(w.until, now + 24 * 3600_000);
       const n = (per.get(`${w.rule}\n${w.day}`) ?? 0) + 1 + (w.day === todayIs ? (ranToday.get(w.rule) ?? 0) : 0);
       let why: [string, DropWhy] | null = null;
       if (isNoticeSource(rule.source) !== (c.kind === "notice")) why = ["its cause does not fit the rule", "no_match"];
@@ -534,8 +558,9 @@ export class TriggerEngine {
         if (!this.realTick(rule, c.due)) why = ["its tick is no tick of the rule's clock", "no_match"];
         else if (now - c.due >= TICK_LATE_MS) why = ["its tick is six hours old or more", "expired"];
       } else if (
+        causeAt > now + 5 * 60_000 ||
         now >= Date.parse(c.notice.expires_at) ||
-        Date.parse(c.notice.expires_at) - Date.parse(c.notice.at) > 24 * 3600_000
+        Date.parse(c.notice.expires_at) - causeAt > 24 * 3600_000
       )
         why = ["its notice has expired", "expired"];
       else if (!matchNotice(rule, c.receiver, c.notice).ok) why = ["its rule does not take its notice", "no_match"];
@@ -634,6 +659,11 @@ export class TriggerEngine {
       rule: shapeOf(rule),
       why,
     };
+    // The machine's own pause drops the rule's other waiting runs as a person's pause does (§14.7).
+    for (const w of this.waits.filter((x) => x.rule === rule.name)) {
+      this.waits.splice(this.waits.indexOf(w), 1);
+      this.letGo(w);
+    }
     this.deps.log(`trigger ${rule.name}: the session it continues is gone; this computer paused the rule`);
     if (JSON.stringify(this.hellos(this.file)) !== said) this.changed();
   }
@@ -683,12 +713,20 @@ export class TriggerEngine {
   }
 
   /** A run handed over is checked again the moment its turn would begin: its rule there, unpaused
-   *  and the same, and the folder, harness, session and level as they are now. */
-  private stillSo(w: Waiting, job: TriggerJob): boolean {
+   *  and the same (else "drop"), and the folder, harness, session and level as they are now (else
+   *  refused with that step's code, or "drop" if the job changed in level). */
+  private stillSo(w: Waiting, job: TriggerJob): "ok" | "drop" | TriggerRefusal {
     const rule = this.live(w.rule);
-    if (!rule || fingerprint(rule) !== w.shape || this.cannot(rule)) return false;
+    /* v8 ignore next -- load() already drops paused/changed queued runs; defensive guard */
+    if (!rule || this.fp(rule) !== w.shape) return "drop";
+    const why = this.cannot(rule);
+    if (why) return why;
     const now = this.jobFor(w, rule);
-    return !("refused" in now) && JSON.stringify(now) === JSON.stringify(job);
+    if ("refused" in now) {
+      if (now.refused === "no_session") this.pause(rule, "unknown_level");
+      return now.refused;
+    }
+    return JSON.stringify(now) === JSON.stringify(job) ? "ok" : "drop";
   }
 
   private begin(w: Waiting, job: TriggerJob): void {
@@ -720,16 +758,21 @@ export class TriggerEngine {
     handle = this.deps.run(job, {
       ready: () => {
         if (gone()) return false;
-        let ok = false;
+        let check: "ok" | "drop" | TriggerRefusal = "drop";
         try {
-          ok = this.stillSo(w, job);
+          check = this.stillSo(w, job);
         } catch (e) {
           this.deps.log(`trigger ${w.rule}: a look before its turn failed (${String(e)})`);
         }
-        if (ok) return true;
+        if (check === "ok") return true;
         over();
-        this.deps.log(`trigger ${w.rule}: its rule, its folder or its level is not what it was when the run was taken`);
-        this.letGo(w);
+        if (check === "drop") {
+          this.deps.log(`trigger ${w.rule}: its rule or its level is not what it was when the run was taken`);
+          this.letGo(w);
+        } else {
+          this.deps.log(`trigger ${w.rule}: refused before its turn began (${check})`);
+          this.end(w, check);
+        }
         this.saved();
         return false;
       },
@@ -855,16 +898,21 @@ export class TriggerEngine {
     return l;
   }
 
-  /** Save the record, bounded; a disk that won't take it is said in the log. */
+  /** Save the record, bounded; a disk that won't take it is said in the log. Runs handed over
+   *  that are still queued (not yet begun) are written into `waiting` so a crash does not lose them. */
   private saved(): boolean {
     if (this.stopped) return false;
     const old = new Date(this.deps.now() - HISTORY_MS).toISOString();
     for (const st of Object.values(this.state.rules)) st.history = st.history.filter((l) => l.at >= old);
+    const queued = [...this.running].filter((r) => r.queued && !r.began && !r.done).map((r) => r.w);
+    const disk: TriggerState = queued.length
+      ? { ...this.state, waiting: [...queued, ...this.state.waiting] }
+      : this.state;
     // Written only when something changed: the clock comes round every half minute.
-    const now = JSON.stringify(this.state);
+    const now = JSON.stringify(disk);
     if (now === this.lastSaved) return true;
     try {
-      this.deps.save(this.state);
+      this.deps.save(disk);
       this.lastSaved = now;
       return true;
     } catch (e) {
@@ -911,7 +959,7 @@ export class TriggerEngine {
     const rule = this.live(w.rule);
     // Another rule under the same name meanwhile: this run was not its own. Nothing of it is
     // written under the new rule; a notice is acked as no rule took it.
-    if (!rule || (w.shape !== undefined && w.shape !== fingerprint(rule))) this.letGo(w);
+    if (!rule || (w.shape !== undefined && w.shape !== this.fp(rule))) this.letGo(w);
     // Still waiting for what it waited for: kept as it is. Only a run that is let go is
     // checked again (steps 9 to 11).
     else if (this.blocked(w, rule)) this.waits.push(w);
@@ -1032,7 +1080,7 @@ export class TriggerEngine {
         this.call("cancel", () => run.cancel());
       }
     this.waits.unshift(...back);
-    this.saved();
+    if (!this.saved()) this.saved();
     // From here the engine is the next daemon's to take up: nothing more is done, said or saved.
     this.stopped = true;
   }
