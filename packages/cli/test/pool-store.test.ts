@@ -137,6 +137,87 @@ describe("state.json", () => {
     writeFileSync(poolStateFile(env), JSON.stringify({ pins: 1, accounts: 2, pending: 3 }));
     expect(readPoolState(env)).toEqual({ pins: {}, accounts: {} });
   });
+  it("a time as the wire spells it, the usage endpoint's names kept, and when each window was last heard never written", () => {
+    const st: Parameters<typeof keepStanding>[0] = { pins: {}, accounts: {} };
+    keepStanding(st, [
+      {
+        id: "a",
+        enabled: true,
+        shown: [{ id: "seven_day_opus_5_5", used_percent: 1 }],
+        usage_at: 7,
+        names: { seven_day_opus_5_5: "Opus 5.5" },
+        heard: { five_hour: 9 },
+      },
+    ]);
+    expect(st.accounts.a).toEqual({
+      shown: [{ id: "seven_day_opus_5_5", used_percent: 1 }],
+      usage_at: 7,
+      names: { seven_day_opus_5_5: "Opus 5.5" },
+    });
+    writePoolState(st, env);
+    writeFileSync(
+      poolStateFile(env),
+      JSON.stringify({
+        pins: {},
+        accounts: {
+          a: {
+            shown: [{ id: "five_hour", used_percent: 1, resets_at: "2026-12-01" }],
+            names: { five_hour: "Five", "Not An Id": "x", seven_day_x: 3, seven_day_y: "y".repeat(65) },
+          },
+          b: { shown: [{ id: "five_hour", used_percent: 1, resets_at: "9999-12-31T23:59:59-01:00" }], names: "x" },
+        },
+      }),
+    );
+    expect(readPoolState(env).accounts).toEqual({
+      a: {
+        shown: [{ id: "five_hour", used_percent: 1, resets_at: "2026-12-01T00:00:00.000Z" }],
+        names: { five_hour: "Five" },
+      },
+      b: { shown: [{ id: "five_hour", used_percent: 1 }] },
+    });
+  });
+  it("round-trips what an account shows and when the usage endpoint last listed it; keeps only windows of it", () => {
+    const shown = [
+      { id: "five_hour", used_percent: 8, resets_at: "2026-10-29T12:00:00.000Z", window_minutes: 300 },
+      { id: "seven_day_fable", used_percent: 33.5 },
+    ];
+    writePoolState({ pins: {}, accounts: { a: { shown, usage_at: 7 } } }, env);
+    expect(readPoolState(env).accounts).toEqual({ a: { shown, usage_at: 7 } });
+    const junk = [
+      null,
+      "x",
+      { id: "Five Hour", used_percent: 1 },
+      { id: "five_hour", used_percent: -1 },
+      { id: "five_hour", used_percent: "8" },
+      { id: "five_hour", used_percent: 9, resets_at: "soon", window_minutes: 1.5 },
+      { id: "five_hour", used_percent: 10 },
+      ...["a", "b", "c", "d", "e", "f", "g", "h"].map((id) => ({ id, used_percent: 1 })),
+    ];
+    writeFileSync(
+      poolStateFile(env),
+      JSON.stringify({
+        pins: {},
+        accounts: {
+          a: { shown: junk, usage_at: 7 },
+          b: { shown: [null], usage_at: 7 },
+          c: { shown: {}, usage_at: "x" },
+        },
+      }),
+    );
+    expect(readPoolState(env).accounts).toEqual({
+      a: {
+        shown: [
+          { id: "five_hour", used_percent: 9 },
+          ...["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ id, used_percent: 1 })),
+        ],
+        usage_at: 7,
+      },
+      b: {},
+      c: {},
+    });
+    writeFileSync(poolStateFile(env), JSON.stringify({ pins: {}, accounts: { a: { shown, usage_at: "x" } } }));
+    expect(readPoolState(env).accounts).toEqual({ a: { shown } });
+  });
   it("the policy's accounts come from the config's order plus the remembered standing", () => {
     const c = cfg({
       accounts: [...cfg().accounts, { id: "b", email: "", account_uuid: UUID, enabled: false, added_at: "x" }],

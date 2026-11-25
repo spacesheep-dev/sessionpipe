@@ -5,7 +5,7 @@
 // Code's own logins read through an injected `security` and a sandbox home. Nothing
 // here touches the network or the real keychain.
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,75 @@ describe("readLimits: the account's windows from a response's headers", () => {
       ["seven_day_opus", 96.1, undefined],
     ]);
   });
+  it("7d_oi is Fable's weekly limit: seven_day_fable, so the usage endpoint and every receiver name it the same", () => {
+    expect(readLimits(HEADERS.fable_window!, NOW)).toEqual({
+      windows: [
+        { id: "five_hour", used_percent: 12, resets_at: "2025-10-29T11:40:00.000Z", window_minutes: 300 },
+        { id: "seven_day", used_percent: 40, resets_at: "2025-11-03T11:00:00.000Z", window_minutes: 10080 },
+        { id: "seven_day_fable", used_percent: 33.5, resets_at: "2025-11-03T11:00:00.000Z" },
+      ],
+      status: "allowed",
+      observed_at: NOW,
+    });
+    // Any other model's part keeps the id it always had.
+    expect(
+      readLimits({ "anthropic-ratelimit-unified-7d_sonnet-utilization": "0.5" }, NOW)!.windows.map((w) => w.id),
+    ).toEqual(["seven_day_sonnet"]);
+  });
+  it("a refusal by the Fable limit names seven_day_fable, not Claude Code's own key for it", () => {
+    expect(readLimits(HEADERS.rejected_fable!, NOW)).toMatchObject({
+      status: "rejected",
+      claim: "seven_day_fable",
+      resets_at: "2025-11-03T11:00:00.000Z",
+      windows: [{ id: "five_hour" }, { id: "seven_day" }, { id: "seven_day_fable", used_percent: 100 }],
+    });
+  });
+  it("one header part per window: 7d_oi and a 7d_fable beside it are not mixed, the fuller is taken whole", () => {
+    const P = "anthropic-ratelimit-unified-";
+    expect(
+      readLimits(
+        {
+          [`${P}7d_oi-utilization`]: "0.2",
+          [`${P}7d_fable-utilization`]: "0.9",
+          [`${P}7d_oi-reset`]: "1764583200",
+          [`${P}7d_fable-reset`]: "1",
+        },
+        NOW,
+      )!.windows,
+    ).toEqual([{ id: "seven_day_fable", used_percent: 90, resets_at: "1970-01-01T00:00:01.000Z" }]);
+    // In either order; a part with no utilization is no window, and a tie keeps the first.
+    expect(
+      readLimits(
+        {
+          [`${P}7d_fable-utilization`]: "0.2",
+          [`${P}7d_oi-utilization`]: "1",
+          [`${P}7d_oi-reset`]: "1764583200",
+          [`${P}7d_x-reset`]: "1",
+          [`${P}7d-utilization`]: "0.5",
+          [`${P}7d-reset`]: "1",
+        },
+        NOW,
+      )!.windows.map((w) => [w.id, w.used_percent, w.resets_at]),
+    ).toEqual([
+      ["seven_day_fable", 100, "2025-12-01T10:00:00.000Z"],
+      ["seven_day", 50, "1970-01-01T00:00:01.000Z"],
+    ]);
+  });
+  it("a time past the year 9999 is no time: the wire spells four digits", () => {
+    expect(
+      readLimits(
+        {
+          "anthropic-ratelimit-unified-7d-utilization": "0.1",
+          "anthropic-ratelimit-unified-7d-reset": "9999-12-31T23:59:59-01:00",
+        },
+        NOW,
+      )!.windows,
+    ).toEqual([{ id: "seven_day", used_percent: 10, window_minutes: 10080 }]);
+  });
+  it("a claim that names something on the object prototype is that word, nothing inherited", () => {
+    for (const c of ["constructor", "__proto__", "tostring"])
+      expect(readLimits({ "anthropic-ratelimit-unified-representative-claim": c }, NOW)?.claim).toBe(c);
+  });
   it("on a refusal names the window that refused and when it resets", () => {
     expect(readLimits(HEADERS.rejected!, NOW)).toMatchObject({
       status: "rejected",
@@ -117,11 +186,153 @@ describe("usageLimits: the usage endpoint's JSON", () => {
       observed_at: NOW,
     });
   });
-  it("skips what is not a window, keeps at most eight, and is null with none", () => {
+  it("judges on the top-level windows as it always did; shows each model's week from the lists after the week's own", () => {
+    const sonnet = { id: "seven_day_sonnet", used_percent: 17, resets_at: "2025-11-03T11:00:00.000Z" };
+    const five = { id: "five_hour", used_percent: 8, resets_at: "2025-10-29T12:00:00.000Z", window_minutes: 300 };
+    const week = { id: "seven_day", used_percent: 41, resets_at: "2025-11-03T11:00:00.000Z", window_minutes: 10080 };
+    expect(usageLimits(USAGE.per_model, NOW)).toEqual({
+      windows: [five, week, sonnet, { id: "extra_usage", used_percent: 12.5 }],
+      shown: [
+        five,
+        week,
+        // The top-level key wins over the list's row for the same model (17, not 16).
+        sonnet,
+        { id: "seven_day_fable", used_percent: 33.5, resets_at: "2025-11-03T11:00:00.000Z" },
+        { id: "seven_day_opus_5_5", used_percent: 62, resets_at: "2025-11-03T11:00:00.000Z" },
+        { id: "extra_usage", used_percent: 12.5 },
+      ],
+      names: { seven_day_fable: "Fable", seven_day_opus_5_5: "Opus 5.5" },
+      observed_at: NOW,
+    });
+  });
+  it("reads model_scoped rows too, the list's row winning; any Fable is seven_day_fable, first; no reset is no reset", () => {
+    expect(usageLimits(USAGE.model_scoped_only, NOW)).toEqual({
+      windows: [{ id: "five_hour", used_percent: 1, window_minutes: 300 }],
+      shown: [
+        { id: "five_hour", used_percent: 1, window_minutes: 300 },
+        { id: "seven_day_fable", used_percent: 100 },
+        { id: "seven_day_opus_5_5", used_percent: 70, resets_at: "2025-11-03T11:00:00.000Z" },
+      ],
+      names: { seven_day_fable: "Fable 5.1", seven_day_opus_5_5: "Opus 5.5" },
+      observed_at: NOW,
+    });
+    // Only lists: nothing to judge, the rows to show; a name keeps its words, not its control characters.
+    expect(
+      usageLimits(
+        {
+          limits: [
+            { kind: "weekly_scoped", percent: 5, scope: { model: { display_name: " Haiku\u0007 \n 4 " } } },
+            { kind: "weekly_scoped", percent: 6, resets_at: null, scope: { model: { display_name: "fable" } } },
+            // Accents go before the id is made; the name keeps them.
+            { kind: "weekly_scoped", percent: 7, scope: { model: { display_name: "Ópus 5.5" } } },
+          ],
+        },
+        NOW,
+      ),
+    ).toEqual({
+      windows: [],
+      shown: [
+        { id: "seven_day_fable", used_percent: 6 },
+        { id: "seven_day_haiku_4", used_percent: 5 },
+        { id: "seven_day_opus_5_5", used_percent: 7 },
+      ],
+      names: { seven_day_fable: "fable", seven_day_haiku_4: "Haiku 4", seven_day_opus_5_5: "Ópus 5.5" },
+      observed_at: NOW,
+    });
+  });
+  it("judges on the first eight as always; shows all, Fable's week first among the lists' rows", () => {
+    const keys = Object.fromEntries("abcdefgh".split("").map((k, i) => [k, { utilization: i }]));
+    const r = usageLimits(
+      {
+        ...keys,
+        seven_day: { utilization: 50 },
+        limits: [{ kind: "weekly_scoped", percent: 20, scope: { model: { display_name: "Fable" } } }],
+      },
+      NOW,
+    )!;
+    // Judged: the first eight, as always.
+    expect(r.windows.map((w) => w.id)).toEqual(["a", "b", "c", "d", "e", "f", "g", "h"]);
+    // Shown: all, in order; which eight an account shows is the pool's cut (policy).
+    expect(r.shown?.map((w) => w.id)).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "seven_day", "seven_day_fable"]);
+    // Six top-level limits, Extra usage, and three models' rows: Fable's goes first among them.
+    const crowd = usageLimits(
+      {
+        five_hour: { utilization: 1 },
+        seven_day: { utilization: 1 },
+        seven_day_opus: { utilization: 1 },
+        seven_day_sonnet: { utilization: 1 },
+        seven_day_oauth_apps: { utilization: 1 },
+        seven_day_cowork: { utilization: 1 },
+        extra_usage: { utilization: 100, is_enabled: true },
+        limits: ["Opus 5.5", "Sonnet 4.6", "Fable"].map((name) => ({
+          kind: "weekly_scoped",
+          percent: 1,
+          scope: { model: { display_name: name } },
+        })),
+      },
+      NOW,
+    )!;
+    expect(crowd.windows.map((w) => w.id)).toContain("extra_usage");
+    expect(crowd.shown?.map((w) => w.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "seven_day_opus",
+      "seven_day_sonnet",
+      "seven_day_oauth_apps",
+      "seven_day_cowork",
+      "seven_day_fable",
+      "seven_day_opus_5_5",
+      "seven_day_sonnet_4_6",
+      "extra_usage",
+    ]);
+    expect(crowd.names).toEqual({
+      seven_day_fable: "Fable",
+      seven_day_opus_5_5: "Opus 5.5",
+      seven_day_sonnet_4_6: "Sonnet 4.6",
+    });
+  });
+  it("reads 64 rows of a list at most, each id once, quickly", () => {
+    const row = (name: string) => ({ kind: "weekly_scoped", percent: 1, scope: { model: { display_name: name } } });
+    const many = Array.from({ length: 20_000 }, (_, i) => row(`Model ${i % 70}`));
+    const t0 = performance.now();
+    const r = usageLimits({ five_hour: { utilization: 1 }, limits: many }, NOW)!;
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(r.shown).toHaveLength(65);
+    // Row 64 and after are not read: Fable there is not shown.
+    const late = usageLimits({ limits: [...Array.from({ length: 64 }, () => row("Same")), row("Fable")] }, NOW)!;
+    expect(late.shown?.map((w) => w.id)).toEqual(["seven_day_same"]);
+  });
+  it("a key from the wire finds nothing on the object prototype", () => {
+    const r = usageLimits(
+      JSON.parse('{"__proto__":{"utilization":5},"constructor":{"utilization":6},"toString":{"utilization":7}}'),
+      NOW,
+    )!;
+    expect(r.windows).toEqual([
+      { id: "__proto__", used_percent: 5 },
+      { id: "constructor", used_percent: 6 },
+    ]);
+  });
+  it("skips what is not a window, judges on eight at most, and is null with none", () => {
     const r = usageLimits(USAGE.odd, NOW)!;
-    expect(r.windows).toHaveLength(8);
+    // Judged as it always was: every top-level key shaped like a window, the first eight.
+    expect(r.windows.map((w) => w.id)).toEqual(["seven_day", "model_scoped", "a", "b", "c", "d", "e", "f"]);
     expect(r.windows[0]).toEqual({ id: "seven_day", used_percent: 150, window_minutes: 10080 });
-    expect(r.windows.map((w) => w.id)).not.toContain("five_hour");
+    // Shown: all of those (what is judged is always shown); no row of its limits list is a
+    // model's weekly limit, and model_scoped is no list of rows here.
+    expect(r.shown?.map((w) => w.id)).toEqual([
+      "seven_day",
+      "model_scoped",
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+      "i",
+    ]);
+    expect(r.names).toBeUndefined();
     expect(
       usageLimits(
         { five_hour: { utilization: 1, resets_at: 1762167600000 }, x: { utilization: 2, resets_at: 0 } },
@@ -138,6 +349,38 @@ describe("usageLimits: the usage endpoint's JSON", () => {
     expect(usageLimits(null, NOW)).toBeNull();
     expect(usageLimits([USAGE.typical], NOW)).toBeNull();
     expect(usageLimits("five_hour", NOW)).toBeNull();
+  });
+});
+
+describe("the pool's answers in conformance/remote/claude-code (pool-*.json, made up in the shapes Claude Code reads)", () => {
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../conformance/remote/claude-code");
+  const files = readdirSync(dir).filter((f) => f.startsWith("pool-") && f.endsWith(".json"));
+  it("has the usage answer and the header set for Fable", () => {
+    expect(files.sort()).toEqual(["pool-headers-fable.json", "pool-usage-fable.json"]);
+  });
+  it.each(files)("%s", (f) => {
+    const fx = JSON.parse(readFileSync(path.join(dir, f), "utf8")) as {
+      made_up: string;
+      request: { method: string; path: string };
+      response: { status: number; body?: unknown; headers?: Record<string, string> };
+      expect: { windows: unknown[]; shown?: unknown[]; names?: Record<string, string>; status?: string };
+    };
+    expect(fx.made_up).toMatch(/^NOT a recording/);
+    if (fx.response.headers) {
+      expect(readLimits(fx.response.headers, NOW)).toEqual({
+        windows: fx.expect.windows,
+        status: fx.expect.status,
+        observed_at: NOW,
+      });
+      return;
+    }
+    expect(fx.request).toEqual({ method: "GET", path: new URL(POOL_ENDPOINTS.usage).pathname });
+    expect(usageLimits(fx.response.body, NOW)).toEqual({
+      windows: fx.expect.windows,
+      shown: fx.expect.shown,
+      names: fx.expect.names,
+      observed_at: NOW,
+    });
   });
 });
 

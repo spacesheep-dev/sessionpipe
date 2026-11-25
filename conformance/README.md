@@ -31,7 +31,14 @@
   from a harness's own service (scrubbed), for the facts an adapter may ask it for once the person
   turned `remote_titles` on: claude.ai's name for a Claude Code session (spec/ADAPTERS.md, the Facts
   row). `expect.title` is the name a reader must take, or `null` for none. Read by
-  `packages/core/test/claude-code.test.ts`.
+  `packages/core/test/claude-code.test.ts`. The exception is `pool-*.json`, which are **not
+  recordings**: made-up values in the shapes Claude Code 2.1.327's own reader takes, for the
+  account pool (spec/ADAPTERS.md, the Pool row), each saying so in `made_up`, as no
+  account's real usage answer or headers are kept here. `pool-usage-fable.json` is
+  `GET /api/oauth/usage` with a `limits[]` row for Fable (`expect.windows`: what an
+  account's room is judged on; `expect.shown`: every window shown; `expect.names`);
+  `pool-headers-fable.json` is a response whose `response.headers` carry `7d_oi`. Read by
+  `packages/core/test/claude-code-pool.test.ts`.
 - `transcripts/<harness>/*.jsonl` — transcript files as the harness writes them, scrubbed, for what
   a reader must keep and skip (spec/ADAPTERS.md, the Transcript row). Read by
   `packages/core/test/transcripts.test.ts`; `codex/picture-attached.jsonl` (a rollout recorded on

@@ -1,0 +1,41 @@
+{
+  "made_up": "NOT a recording. Every value is made up. The shape is what Claude Code 2.1.327's own reader takes from GET /api/oauth/usage: top-level windows {utilization (a percent), resets_at}, and a model's weekly limit as a row of `limits` (kind weekly_scoped, scope.model.display_name, percent, resets_at). `expect.windows` is what the pool judges an account's room on (the top-level windows, as before); `expect.shown` is every window it shows; `expect.names` the names the rows gave.",
+  "request": {
+    "method": "GET",
+    "path": "/api/oauth/usage"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "five_hour": { "utilization": 8.0, "resets_at": "2026-11-25T14:00:00.123456+00:00" },
+      "seven_day": { "utilization": 41.0, "resets_at": "2026-12-01T10:00:00.565451+00:00" },
+      "seven_day_oauth_apps": null,
+      "seven_day_opus": null,
+      "seven_day_sonnet": { "utilization": 17.0, "resets_at": "2026-12-01T10:00:00.565451+00:00" },
+      "extra_usage": { "is_enabled": true, "monthly_limit": 5000, "used_credits": 625, "utilization": 12.5, "currency": "USD" },
+      "limits": [
+        { "kind": "session", "group": "session", "percent": 8, "resets_at": "2026-11-25T14:00:00.123456+00:00", "scope": null, "severity": "normal", "is_active": true },
+        { "kind": "weekly_all", "group": "weekly", "percent": 41, "resets_at": "2026-12-01T10:00:00.565451+00:00", "scope": null, "severity": "normal", "is_active": false },
+        { "kind": "weekly_scoped", "group": "weekly", "percent": 33.5, "resets_at": "2026-12-01T10:00:00.565451+00:00", "scope": { "model": { "display_name": "Fable" } }, "severity": "normal", "is_active": false },
+        { "kind": "weekly_scoped", "group": "weekly", "percent": 62, "resets_at": "2026-12-01T10:00:00.565451+00:00", "scope": { "model": { "display_name": "Opus 5.5" } }, "severity": "warning", "is_active": false }
+      ]
+    }
+  },
+  "expect": {
+    "windows": [
+      { "id": "five_hour", "used_percent": 8, "resets_at": "2026-11-25T14:00:00.123Z", "window_minutes": 300 },
+      { "id": "seven_day", "used_percent": 41, "resets_at": "2026-12-01T10:00:00.565Z", "window_minutes": 10080 },
+      { "id": "seven_day_sonnet", "used_percent": 17, "resets_at": "2026-12-01T10:00:00.565Z" },
+      { "id": "extra_usage", "used_percent": 12.5 }
+    ],
+    "shown": [
+      { "id": "five_hour", "used_percent": 8, "resets_at": "2026-11-25T14:00:00.123Z", "window_minutes": 300 },
+      { "id": "seven_day", "used_percent": 41, "resets_at": "2026-12-01T10:00:00.565Z", "window_minutes": 10080 },
+      { "id": "seven_day_sonnet", "used_percent": 17, "resets_at": "2026-12-01T10:00:00.565Z" },
+      { "id": "seven_day_fable", "used_percent": 33.5, "resets_at": "2026-12-01T10:00:00.565Z" },
+      { "id": "seven_day_opus_5_5", "used_percent": 62, "resets_at": "2026-12-01T10:00:00.565Z" },
+      { "id": "extra_usage", "used_percent": 12.5 }
+    ],
+    "names": { "seven_day_fable": "Fable", "seven_day_opus_5_5": "Opus 5.5" }
+  }
+}

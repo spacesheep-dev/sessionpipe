@@ -176,13 +176,15 @@ machine's order: each one's `id` (the same string `session.account_id` and
 map), `email` or `label` where known (they travel only here, as `accounts` above),
 `enabled`, a `status` — `ready` (has room), `limited` (used up until `until`, where the
 machine knows when), `error` (needs the person: sign in again), `disabled` (turned off)
-— `current: true` on the one serving new sessions now, and MAY carry `windows`, the
-account's freshest numbers in the shape of `limits.observed.windows` (1–8; from the
-idle usage poll when no session asked recently, since an idle account's numbers ride
-on no session and would reach no receiver otherwise), and, when the status is
-`limited` or `error`, `limited_by`: the id of the window that took the account out
-(`seven_day`), or `rejected` (the vendor's status) or `error` (sign in again) for the
-causes that are no window. A receiver reads `windows` as it reads `limits.observed` (a
+— `current: true` on the one serving new sessions now, and MAY carry `windows`, every
+window the account shows, in the shape of `limits.observed.windows` (1–8: the vendor's
+usage answer, read for each account whether a session uses it or not, with each
+response's numbers put over it, as `limits.observed` for the account carries them; an
+idle account's numbers ride on no session and would reach no receiver otherwise), and,
+when the status is `limited` or `error`, `limited_by`: the id of the full window that
+took the account out (`seven_day`; always one of the `windows` it carries), or the window
+the vendor's refusal named, or `rejected` (the vendor's status) or `error` (sign in
+again) for the causes that are no window. A receiver reads `windows` as it reads `limits.observed` (a
 window whose `resets_at` has passed has reset) and MUST NOT send it on as an event: it
 is a hello's reading, for the receiver's own page. A daemon MUST send a hello **at once** when the pool changes (on or off,
 an account added, removed, reordered, enabled or disabled, a status change), as it does

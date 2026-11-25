@@ -1,0 +1,30 @@
+{
+  "made_up": "NOT a recording. Every value is made up. The shape is what Claude Code 2.1.327's own reader takes from a response's anthropic-ratelimit-unified-* headers: per window <part>-utilization (a fraction) and <part>-reset (epoch seconds), its table of windows naming 7d_oi the window it calls the \"Fable limit\". `expect.windows` is what the pool judges the account's room on and shows; `7d_oi` is seven_day_fable.",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "anthropic-ratelimit-unified-status": "allowed",
+      "anthropic-ratelimit-unified-5h-utilization": "0.12",
+      "anthropic-ratelimit-unified-5h-reset": "1795615200",
+      "anthropic-ratelimit-unified-5h-status": "allowed",
+      "anthropic-ratelimit-unified-7d-utilization": "0.41",
+      "anthropic-ratelimit-unified-7d-reset": "1796119200",
+      "anthropic-ratelimit-unified-7d-status": "allowed",
+      "anthropic-ratelimit-unified-7d_oi-utilization": "0.335",
+      "anthropic-ratelimit-unified-7d_oi-reset": "1796119200",
+      "anthropic-ratelimit-unified-7d_oi-status": "allowed"
+    }
+  },
+  "expect": {
+    "status": "allowed",
+    "windows": [
+      { "id": "five_hour", "used_percent": 12, "resets_at": "2026-11-25T14:00:00.000Z", "window_minutes": 300 },
+      { "id": "seven_day", "used_percent": 41, "resets_at": "2026-12-01T10:00:00.000Z", "window_minutes": 10080 },
+      { "id": "seven_day_fable", "used_percent": 33.5, "resets_at": "2026-12-01T10:00:00.000Z" }
+    ]
+  }
+}

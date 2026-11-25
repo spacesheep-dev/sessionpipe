@@ -5,18 +5,27 @@
 import { describe, expect, it } from "vitest";
 import {
   type AccountState,
+  type Apart,
   choose,
   expirePins,
+  FRESH_MS,
+  fromResponse,
+  fromUsage,
   HOLD_MS,
   hasRoom,
+  KEEP_MS,
   MAX_HOLD_MS,
   observe,
   PIN_IDLE_MS,
   PINS_MAX,
   type PolicyState,
   pin,
+  pollDue,
   REJECTED_MS,
   roomAt,
+  SWITCH_PERCENT,
+  see,
+  shownOf,
   summary,
   withRoom,
 } from "../../cli/src/pool/policy.js";
@@ -302,6 +311,272 @@ describe("observe", () => {
     expect(s.accounts[0]?.error).toBe("sign in again");
     observe(s, "a", { error: null }, T0);
     expect(s.accounts[0]?.error).toBeUndefined();
+  });
+});
+
+describe("see: what an account shows", () => {
+  const W = (id: string, used_percent: number, at?: number) => ({
+    id,
+    used_percent,
+    ...(at !== undefined ? { resets_at: iso(at) } : {}),
+  });
+  const WEEK = T0 + 7 * 86_400_000;
+  const list = [
+    W("five_hour", 8, T0 + 3_600_000),
+    W("seven_day", 41, WEEK),
+    W("seven_day_sonnet", 17, WEEK),
+    W("seven_day_fable", 33.5, WEEK),
+    W("extra_usage", 12.5),
+  ];
+  it("an unknown account, or no window, shows nothing new", () => {
+    const s = st([acct("a")]);
+    expect(see(s, "zz", { windows: list }, "usage", T0)).toBe(false);
+    expect(see(s, "a", { windows: [], status: "allowed" }, "response", T0)).toBe(false);
+    expect(s.accounts[0]).toEqual({ id: "a", enabled: true });
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([]);
+  });
+  it("the usage endpoint's answer is the list; a response puts its numbers over it and keeps the rest", () => {
+    const s = st([acct("a")]);
+    expect(see(s, "a", { windows: list }, "usage", T0)).toBe(true);
+    expect(s.accounts[0]).toMatchObject({ shown: list, usage_at: T0 });
+    // The same list again changes nothing (no limits.observed for it).
+    expect(see(s, "a", { windows: list }, "usage", T0 + 1)).toBe(false);
+    expect(s.accounts[0]?.usage_at).toBe(T0 + 1);
+    // A response names three windows, one of them new to the list: it goes after the
+    // last limit, before the Extra usage; the Sonnet week and Extra usage stay.
+    const headers = [W("five_hour", 9, T0 + 3_600_000), W("seven_day", 41, WEEK), W("seven_day_opus", 3, WEEK)];
+    expect(see(s, "a", { windows: headers, status: "allowed" }, "response", T0 + 60_000)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([
+      W("five_hour", 9, T0 + 3_600_000),
+      W("seven_day", 41, WEEK),
+      W("seven_day_sonnet", 17, WEEK),
+      W("seven_day_fable", 33.5, WEEK),
+      W("seven_day_opus", 3, WEEK),
+      W("extra_usage", 12.5),
+    ]);
+    // The next response with the same numbers changes nothing: the windows it keeps
+    // are the same windows, so a busy account does not get one event per response.
+    expect(see(s, "a", { windows: headers }, "response", T0 + 61_000)).toBe(false);
+    // The endpoint stops listing the Sonnet week: the next poll's list is the list.
+    expect(see(s, "a", { windows: list.filter((w) => w.id !== "seven_day_sonnet") }, "usage", T0 + 300_000)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState).map((w) => w.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "seven_day_fable",
+      "extra_usage",
+    ]);
+  });
+  it("a kept window goes once it has reset, and all of them once the endpoint has not answered for KEEP_MS", () => {
+    const s = st([acct("a")]);
+    see(s, "a", { windows: [W("five_hour", 8, T0 + 60_000), W("seven_day_fable", 100, T0 + 120_000)] }, "usage", T0);
+    // Fable's week reset at T0 + 2 min; the response at T0 + 3 min does not name it.
+    expect(see(s, "a", { windows: [W("five_hour", 1, T0 + 3_600_000)] }, "response", T0 + 180_000)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([W("five_hour", 1, T0 + 3_600_000)]);
+    // A list whose last answer is too old: polls failing (the endpoint signed out, or
+    // down) while responses keep coming show what the responses carry, as before.
+    see(s, "a", { windows: [W("five_hour", 8), W("seven_day_sonnet", 50, WEEK)] }, "usage", T0);
+    expect(see(s, "a", { windows: [W("five_hour", 2)] }, "response", T0 + KEEP_MS)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState).map((w) => w.id)).toEqual(["five_hour", "seven_day_sonnet"]);
+    expect(see(s, "a", { windows: [W("five_hour", 2)] }, "response", T0 + KEEP_MS + 1)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([W("five_hour", 2)]);
+  });
+  it("an account from a state file before `shown` shows its numbers, then each response's, until a poll", () => {
+    const s = st([acct("a", { limits: { windows: [W("five_hour", 5), W("seven_day", 6)] }, limits_at: T0 })]);
+    expect(summary(s, T0)[0]?.windows).toEqual([W("five_hour", 5), W("seven_day", 6)]);
+    expect(see(s, "a", { windows: [W("five_hour", 5), W("seven_day", 6)] }, "response", T0)).toBe(false);
+    expect(see(s, "a", { windows: [W("seven_day", 7)] }, "response", T0)).toBe(true);
+    expect(s.accounts[0]?.shown).toEqual([W("seven_day", 7)]);
+  });
+  it("never more than eight: past eight, what is no known limit goes first", () => {
+    const s = st([acct("a")]);
+    const junk = "abcdefg".split("").map((k) => W(k, 1));
+    see(s, "a", { windows: [W("five_hour", 1), ...junk] }, "usage", T0);
+    expect(shownOf(s.accounts[0] as AccountState)).toHaveLength(8);
+    see(s, "a", { windows: [W("seven_day", 2), W("seven_day_fable", 3)] }, "response", T0 + 1);
+    expect(shownOf(s.accounts[0] as AccountState).map((w) => w.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "seven_day_fable",
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+  });
+  it("a reading the same again keeps its object; a poll near a fresher response's number leaves it", () => {
+    const s = st([acct("a")]);
+    const R = T0 + 3_600_000;
+    see(s, "a", { windows: [W("five_hour", 10.2, R), W("seven_day", 40, WEEK)] }, "response", T0);
+    const kept = shownOf(s.accounts[0] as AccountState)[0];
+    // The usage endpoint's reset, to the microsecond: the same reset. Its whole percent
+    // (10) beside a response's 10.2 a minute old: the response's stays.
+    const poll = {
+      windows: [{ id: "five_hour", used_percent: 10, resets_at: iso(R + 565) }, W("seven_day", 40, WEEK + 565)],
+    };
+    expect(see(s, "a", poll, "usage", T0 + 60_000)).toBe(false);
+    expect(shownOf(s.accounts[0] as AccountState)[0]).toBe(kept);
+    // A point or more apart, or the response FRESH_MS old: the poll's number is taken.
+    expect(see(s, "a", { windows: [W("five_hour", 11.2, R), W("seven_day", 40, WEEK)] }, "usage", T0 + 120_000)).toBe(
+      true,
+    );
+    see(s, "a", { windows: [W("five_hour", 10.2, R)] }, "response", T0 + 180_000);
+    expect(see(s, "a", { windows: [W("five_hour", 10, R)] }, "usage", T0 + 180_000 + FRESH_MS)).toBe(true);
+    // A response that reads the same keeps the object too, its reset in whole seconds.
+    const was = shownOf(s.accounts[0] as AccountState)[0];
+    expect(see(s, "a", { windows: [W("five_hour", 10, R)] }, "response", T0 + 200_000 + FRESH_MS)).toBe(false);
+    expect(shownOf(s.accounts[0] as AccountState)[0]).toBe(was);
+    // A reset and none are not the same reading; a length is part of it.
+    expect(see(s, "a", { windows: [W("five_hour", 10)] }, "response", T0 + 210_000 + FRESH_MS)).toBe(true);
+    expect(
+      see(s, "a", { windows: [{ ...W("five_hour", 10), window_minutes: 300 }] }, "response", T0 + 220_000 + FRESH_MS),
+    ).toBe(true);
+    // The heard times are the process's own: never written down (store.ts keepStanding).
+    expect(s.accounts[0]?.heard?.five_hour).toBe(T0 + 220_000 + FRESH_MS);
+  });
+  it("a poll's number is taken over a close response's when its reset differs, or when it reaches the judged level", () => {
+    const s = st([acct("a")]);
+    const R1 = T0 + 60_000;
+    const R2 = T0 + 5 * 3_600_000;
+    see(s, "a", { windows: [W("five_hour", 0.5, R1)] }, "response", T0);
+    // R1 has passed; a minute later the poll says 0 with the new reset: taken, under a point or not.
+    expect(see(s, "a", { windows: [W("five_hour", 0, R2)] }, "usage", T0 + 120_000)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([W("five_hour", 0, R2)]);
+    // A response at 99.5, then a poll at 100 for the same reset: the poll's, the account is full.
+    see(s, "a", { windows: [W("seven_day", 99.5, WEEK)] }, "response", T0 + 130_000);
+    expect(see(s, "a", { windows: [W("seven_day", SWITCH_PERCENT + 2, WEEK)] }, "usage", T0 + 140_000)).toBe(true);
+    expect(shownOf(s.accounts[0] as AccountState)).toEqual([W("seven_day", SWITCH_PERCENT + 2, WEEK)]);
+  });
+  it("a window no response names, read by two polls with resets a few hundred ms apart, is unchanged: no event", () => {
+    const s = st([acct("a")]);
+    const first = { id: "seven_day_fable", used_percent: 30, resets_at: iso(WEEK + 120) };
+    see(s, "a", { windows: [], shown: [first] }, "usage", T0);
+    const again = { windows: [], shown: [{ ...first, resets_at: iso(WEEK + 565) }] };
+    expect(see(s, "a", again, "usage", T0 + 300_000)).toBe(false);
+    expect(fromUsage(s, "a", again, T0 + 600_000, T0 + 600_000, false)).toBeNull();
+    expect(shownOf(s.accounts[0] as AccountState)[0]).toBe(first);
+  });
+  it("past eight a full window is kept first: the window an account is limited by is one it shows", () => {
+    const s = st([acct("a")]);
+    const list = [
+      "five_hour",
+      "seven_day",
+      "seven_day_opus",
+      "seven_day_sonnet",
+      "seven_day_x",
+      "seven_day_y",
+      "seven_day_z",
+      "seven_day_w",
+    ];
+    see(s, "a", { windows: [], shown: [...list.map((id) => W(id, 1)), W("extra_usage", 100)] }, "usage", T0);
+    expect(shownOf(s.accounts[0] as AccountState).map((w) => w.id)).toEqual([...list.slice(0, 7), "extra_usage"]);
+  });
+  it("the usage answer and a response a point or more apart for the same reset, since the last poll, are noted", () => {
+    const s = st([acct("a")]);
+    const apart: Apart[] = [];
+    see(s, "a", { windows: [W("seven_day_fable", 33, WEEK)] }, "usage", T0, apart);
+    see(s, "a", { windows: [W("seven_day_fable", 30, WEEK), W("five_hour", 5, T0 + 60_000)] }, "response", T0 + 1);
+    see(
+      s,
+      "a",
+      { windows: [W("seven_day_fable", 33, WEEK), W("five_hour", 0, T0 + 5 * 3_600_000)] },
+      "usage",
+      T0 + 300_000,
+      apart,
+    );
+    // Fable apart; the 5-hour window reset in between, so its numbers are not compared.
+    expect(apart).toEqual([{ id: "seven_day_fable", response: 30, usage: 33 }]);
+    // The next poll, no response since: the poll's own number, nothing to note.
+    see(s, "a", { windows: [W("seven_day_fable", 34, WEEK)] }, "usage", T0 + 600_000, apart);
+    expect(apart).toHaveLength(1);
+  });
+  it("past eight a response's own windows are kept before those it does not name; the names come with the list", () => {
+    const s = st([acct("a")]);
+    const list = [
+      "five_hour",
+      "seven_day",
+      "seven_day_opus",
+      "seven_day_sonnet",
+      "seven_day_x",
+      "seven_day_y",
+      "seven_day_z",
+      "seven_day_w",
+    ];
+    see(s, "a", { windows: [], shown: list.map((id) => W(id, 1)), names: { seven_day_x: "X 1" } }, "usage", T0);
+    expect(s.accounts[0]?.names).toEqual({ seven_day_x: "X 1" });
+    see(s, "a", { windows: [W("five_hour", 2), W("seven_day_fable", 3)] }, "response", T0 + 1);
+    expect(shownOf(s.accounts[0] as AccountState).map((w) => w.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "seven_day_opus",
+      "seven_day_sonnet",
+      "seven_day_x",
+      "seven_day_y",
+      "seven_day_z",
+      "seven_day_fable",
+    ]);
+    // A list without names takes the old ones away.
+    see(s, "a", { windows: [W("five_hour", 1)] }, "usage", T0 + 2);
+    expect(s.accounts[0]?.names).toBeUndefined();
+  });
+  it("fromResponse and fromUsage: shown always, judged as before; the windows of an event, or null", () => {
+    const s = st([acct("a"), acct("b")]);
+    const answer = { windows: [W("five_hour", 10)], shown: [W("five_hour", 10), W("seven_day_fable", 100, WEEK)] };
+    // A poll not judged: shown, and room as it was.
+    expect(fromUsage(s, "a", answer, T0, T0, false)).toEqual(answer.shown);
+    expect(s.accounts[0]?.limits).toBeUndefined();
+    // Judged: on the top-level windows only; the full Fable row takes nobody out.
+    // (the numbers are new to room, so an event's windows come back; the same answer again, none).
+    expect(fromUsage(s, "a", { ...answer, shown: [...answer.shown] }, T0 + 1, T0 + 1, true)).toEqual(answer.shown);
+    expect(fromUsage(s, "a", { ...answer, shown: [...answer.shown] }, T0 + 1, T0 + 1, true)).toBeNull();
+    expect(s.accounts[0]).toMatchObject({ limits: { windows: [W("five_hour", 10)] }, limits_at: T0 + 1 });
+    expect(hasRoom(s.accounts[0] as AccountState, T0 + 2)).toBe(true);
+    // An answer whose top level had no window is no numbers to judge, as before.
+    expect(fromUsage(s, "b", { windows: [], shown: [W("seven_day_fable", 5)] }, T0, T0, true)).toEqual([
+      W("seven_day_fable", 5),
+    ]);
+    expect(s.accounts[1]?.limits_at).toBeUndefined();
+    expect(fromUsage(s, "zz", answer, T0, T0, true)).toBeNull();
+    // A response: an event when its numbers or what is shown changed.
+    expect(fromResponse(s, "a", { windows: [W("five_hour", 12)], status: "allowed" }, T0 + 3)).toEqual([
+      W("five_hour", 12),
+      W("seven_day_fable", 100, WEEK),
+    ]);
+    expect(fromResponse(s, "a", { windows: [W("five_hour", 12)], status: "allowed" }, T0 + 4)).toBeNull();
+    expect(fromResponse(s, "zz", { windows: [W("five_hour", 12)] }, T0)).toBeNull();
+  });
+  it("pollDue: every enabled account without a sign-in to fix, on its own clock; judged only as before", () => {
+    const E = 300_000;
+    expect(pollDue(acct("a", { enabled: false }), T0, E)).toBeNull();
+    expect(pollDue(acct("a", { error: "sign in again" }), T0, E)).toBeNull();
+    expect(pollDue(acct("a"), T0, E)).toEqual({ judge: true });
+    // Busy (fresh numbers), last listed a poll ago (a little early still counts): asked, not judged.
+    expect(pollDue(acct("a", { limits_at: T0 - 1, usage_at: T0 - E + 1000 }), T0, E)).toEqual({ judge: false });
+    expect(pollDue(acct("a", { limits_at: T0 - 1, usage_at: T0 - 1000 }), T0, E)).toBeNull();
+    expect(pollDue(acct("a", { limits_at: T0 - 1 }), T0, E)).toEqual({ judge: false });
+    // Idle: judged, as it always was.
+    expect(pollDue(acct("a", { limits_at: T0 - E, usage_at: T0 }), T0, E)).toEqual({ judge: true });
+  });
+  it("room is judged as before: a window only the list shows moves nobody; a seven_day_fable from the headers takes the account out as seven_day_oi did", () => {
+    // In use: its responses say it has room; the list's full Sonnet week is shown, not judged.
+    const busy = acct("a");
+    const s = st([busy, acct("b")]);
+    see(s, "a", { windows: [W("five_hour", 10), W("seven_day_sonnet", 100, WEEK)] }, "usage", T0);
+    observe(s, "a", { windows: [W("five_hour", 10)], status: "allowed" }, T0);
+    see(s, "a", { windows: [W("five_hour", 11)], status: "allowed" }, "response", T0 + 1);
+    observe(s, "a", { windows: [W("five_hour", 11)], status: "allowed" }, T0 + 1);
+    expect(choose(s, { now: T0 + 2 }).account?.id).toBe("a");
+    expect(summary(s, T0 + 2)[0]).toMatchObject({
+      status: "ready",
+      used_percent: 100,
+      windows: [W("five_hour", 11), W("seven_day_sonnet", 100, WEEK)],
+    });
+    // A response's 7d_oi at 100 (seven_day_fable): judged, as any full window from the
+    // headers always was (the id is new, the rule is not).
+    const two = st([acct("a"), acct("b")]);
+    fromResponse(two, "a", { windows: [W("five_hour", 10), W("seven_day_fable", 100, WEEK)] }, T0);
+    expect(summary(two, T0)[0]).toMatchObject({ status: "limited", limited_by: "seven_day_fable", until: iso(WEEK) });
+    expect(choose(two, { now: T0 }).account?.id).toBe("b");
   });
 });
 

@@ -978,7 +978,8 @@ describe("claude-code: claude.ai's name, when the person turned it on", () => {
   it("reads each answer recorded from claude.ai as a reader must (conformance/remote/claude-code)", async () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const fixtures = path.resolve(here, "../../../conformance/remote/claude-code");
-    const files = readdirSync(fixtures).filter((f) => f.endsWith(".json"));
+    // pool-*.json are the pool's, read by claude-code-pool.test.ts.
+    const files = readdirSync(fixtures).filter((f) => f.endsWith(".json") && !f.startsWith("pool-"));
     expect(files.length).toBeGreaterThanOrEqual(2);
     for (const f of files) {
       const fx = JSON.parse(readFileSync(path.join(fixtures, f), "utf8")) as {
@@ -1066,6 +1067,18 @@ describe("StatusLine: the account's limits, as the status line is handed them", 
     });
     expect(r?.events[0]?.data).toEqual({
       windows: [{ id: "seven_day_fable", used_percent: 12, resets_at: "2025-02-06T16:00:00.000Z" }],
+    });
+  });
+  it("a window named like something on the object prototype gets no length from it", () => {
+    const r = hook("StatusLine", {
+      transcript_path: "/x.jsonl",
+      rate_limits: JSON.parse('{"__proto__":{"used_percentage":1},"constructor":{"used_percentage":2}}'),
+    });
+    expect(r?.events[0]?.data).toEqual({
+      windows: [
+        { id: "__proto__", used_percent: 1 },
+        { id: "constructor", used_percent: 2 },
+      ],
     });
   });
   it("reports nothing before the first response, or for an account without limits", () => {

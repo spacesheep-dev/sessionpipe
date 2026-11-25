@@ -339,6 +339,73 @@ describe("sessionpipe pool, with no daemon running", () => {
     expect(lines[2]).toMatch(/^ {2}\S+ {2}Fiction <a@fiction\.tribe> {12}enabled {3}5h {2}50% .* serving now$/);
   });
 
+  it("status: a model's own week is a column after 7d once any account shows one, named as the usage endpoint names it", async () => {
+    const pool = open();
+    await three(pool);
+    const week = new Date(T0 + 4 * 86_400_000).toISOString();
+    const long = `seven_day_${"a".repeat(54)}`;
+    // As the usage reader hands them over: the lists' weeks are shown, not judged.
+    adapter.usage = async (access) => {
+      const u = usage(access.includes("misha") ? 99 : 12);
+      const add = access.includes("fiction")
+        ? [
+            { id: "seven_day_fable", used_percent: 33.5, resets_at: week },
+            { id: "seven_day_opus_5_5", used_percent: 62, resets_at: week },
+          ]
+        : access.includes("sheep")
+          ? [
+              { id: "seven_day_fable", used_percent: 100, resets_at: week },
+              { id: long, used_percent: 10, resets_at: week },
+            ]
+          : [];
+      return add.length
+        ? {
+            ...u,
+            shown: [...u.windows, ...add],
+            names: access.includes("fiction") ? { seven_day_opus_5_5: "Opus 5.5" } : {},
+          }
+        : u;
+    };
+    await pool.refresh();
+    const ids = pool.accounts().map((a) => a.id);
+    const r5 = `(resets ${clock(T0 + 3_600_000)})`;
+    const r7 = `(resets ${day(T0 + 4 * 86_400_000)})`;
+    await run(["status"], { open: () => pool });
+    const col = (...c: [string, number][]) => c.map(([t, w]) => t.padEnd(w)).join(" ");
+    // Each model's column is as wide as its widest cell and a space, 30 at least; percents are whole.
+    const wf = Math.max(30, `7d Fable 100% ${r7}`.length + 1);
+    const wo = Math.max(30, `7d Opus 5.5  62% ${r7}`.length + 1);
+    const wl = `7d A${"a".repeat(53)}  10% ${r7}`.length + 1;
+    expect(lines.slice(2, 5)).toEqual([
+      `  ${col([ids[0]!, 9], ["Fiction <a@fiction.tribe>", 36], ["enabled", 9], [`5h  12% ${r5}`, 24], [`7d  40% ${r7}`, 30], [`7d Fable  33% ${r7}`, wf], [`7d Opus 5.5  62% ${r7}`, wo], [`7d A${"a".repeat(53)} —`, wl])} serving now`,
+      `  ${col([ids[1]!, 9], ["Misha <m@x.y>", 36], ["enabled", 9], [`5h  99% ${r5}`, 24], [`7d  40% ${r7}`, 30], ["7d Fable —", wf], ["7d Opus 5.5 —", wo], [`7d A${"a".repeat(53)} —`, wl])} none left until ${clock(T0 + 3_600_000)}`,
+      // A full Fable week from the lists is shown; the account still has room.
+      `  ${col([ids[2]!, 9], ["Sheep <s@spacesheep.dev>", 36], ["enabled", 9], [`5h  12% ${r5}`, 24], [`7d  40% ${r7}`, 30], [`7d Fable 100% ${r7}`, wf], ["7d Opus 5.5 —", wo], [`7d A${"a".repeat(53)}  10% ${r7}`, wl])} has room`,
+    ]);
+    lines = [];
+    const terminal = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+    await poolMain(["pool", "status"], out, "/dist", deps({ open: () => pool }), terminal);
+    const aa = `7d A${"a".repeat(53)}`;
+    expect(lines.slice(2)).toEqual([
+      `  ${ids[0]}  Fiction <a@fiction.tribe> · enabled · serving now`,
+      `            5h  12% ${r5} · 7d  40% ${r7}`,
+      `            7d Fable  33% ${r7}`,
+      `            7d Opus 5.5  62% ${r7}`,
+      `            ${aa} —`,
+      `  ${ids[1]}  Misha <m@x.y> · enabled · none left until ${clock(T0 + 3_600_000)}`,
+      `            5h  99% ${r5} · 7d  40% ${r7}`,
+      "            7d Fable — · 7d Opus 5.5 —",
+      `            ${aa} —`,
+      `  ${ids[2]}  Sheep <s@spacesheep.dev> · enabled · has room`,
+      `            5h  12% ${r5} · 7d  40% ${r7}`,
+      `            7d Fable 100% ${r7} · 7d Opus 5.5 —`,
+      // A cell too long for a line of its own is broken at its spaces.
+      `            ${aa}  10%`,
+      `            ${r7}`,
+    ]);
+    for (const l of lines) expect(l.length).toBeLessThan(80);
+  });
+
   it("status words: an account in error, one with no numbers yet, and a pending sign-in", async () => {
     const pool = open();
     adapter.logins.set("one", {
@@ -714,6 +781,34 @@ describe("sessionpipe pool, with the daemon running", () => {
     expect(lines).toContain("  Background service: running · listening on 127.0.0.1:51234");
   });
 
+  it("at a terminal, a model's week too long for a line is broken at its spaces, first in its line or not", async () => {
+    const long = `seven_day_${"b".repeat(54)}`;
+    answer = {
+      op: "pool",
+      outcome: "delivered",
+      status: status({
+        accounts: [
+          {
+            id: "acc1",
+            email: "a@x.y",
+            account_uuid: "u",
+            enabled: true,
+            added_at: "x",
+            status: "ready",
+            current: true,
+            windows: [{ id: long, used_percent: 5, resets_at: new Date(T0 + 3_600_000).toISOString() }],
+          },
+        ] as PoolStatus["accounts"],
+      }),
+    } as LocalReply;
+    const terminal = makeUi({ isTTY: true, columns: 80, env: {}, platform: "linux" });
+    await poolMain(["pool", "status"], out, "/dist", deps(), terminal);
+    expect(lines.slice(3, 6)).toEqual([
+      "            5h — · 7d —",
+      `            7d B${"b".repeat(53)}   5%`,
+      `            (resets ${clock(T0 + 3_600_000)})`,
+    ]);
+  });
   it("what the daemon reports about each settings file, and each window and standing, is worded", async () => {
     const acc = (over: Record<string, unknown>) => ({
       id: "acc1",

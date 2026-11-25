@@ -868,9 +868,10 @@ message PoolAccount {
   bool current = 6;
   // limited: when it has room again, where the machine knows.
   string until = 7 [(sessionpipe.v1.format) = FORMAT_DATE_TIME];
-  // The account's freshest numbers, as limits.observed would carry them: from the
-  // idle usage poll when no session asked recently, since an idle account's numbers
-  // ride on no session and would reach no receiver otherwise.
+  // Every window the account shows, as limits.observed carries them: the vendor's usage
+  // answer, read for each account whether a session uses it or not, with each response's
+  // numbers put over it; an idle account's numbers ride on no session and would reach no
+  // receiver otherwise.
   repeated LimitWindow windows = 8 [(buf.validate.field).repeated = {
     min_items: 1
     max_items: 8

@@ -14,10 +14,13 @@
 //   platform.claude.com (the token URL and the manual callback); the older
 //   console.anthropic.com names bb still uses are the same service.
 // - Limits come back on every response as `anthropic-ratelimit-unified-*` headers:
-//   `5h`/`7d` (and `7d_<model>`) × `utilization` (a fraction 0–1), `reset` (epoch
-//   seconds), `status`; a whole-account `status` (allowed · allowed_warning · rejected);
-//   on a refusal `representative-claim` names the window and `reset` says when. The
-//   usage endpoint says the same per window as `{utilization (a percent), resets_at}`.
+//   `5h`/`7d` (and `7d_<model>`, and `7d_oi`: Fable's, 2.1.327) × `utilization` (a
+//   fraction 0–1), `reset` (epoch seconds), `status`; a whole-account `status` (allowed ·
+//   allowed_warning · rejected); on a refusal `representative-claim` names the window
+//   and `reset` says when. The usage endpoint says the same per window as
+//   `{utilization (a percent), resets_at}`, and a model's own weekly limit as a row of
+//   its `limits` list (2.1.327: `kind: "weekly_scoped"`, `scope.model.display_name`,
+//   `percent`, `resets_at`).
 // - Claude Code's own login is a generic password in the macOS keychain, service
 //   `Claude Code-credentials` (plus `-<8 hex of sha256(config dir)>` when
 //   CLAUDE_CONFIG_DIR is set), account = the login user; elsewhere
@@ -70,7 +73,16 @@ export interface PoolCredential {
 }
 export type PoolStatus = "allowed" | "allowed_warning" | "rejected";
 export interface PoolLimits {
+  /** What the account's room is judged on: a response's windows, or the usage endpoint's
+   *  top-level ones (the first eight, as this reader has always taken them). */
   windows: LimitWindow[];
+  /** The usage endpoint only, where it differs from `windows`: every window its answer
+   *  shows, the per-model weeks of its lists included (at most eight). Shown, never
+   *  judged: a list's row moves no request to another account. */
+  shown?: LimitWindow[];
+  /** The usage endpoint only: the name its list gave each per-model week, by window id
+   *  ("Opus 5.5" for `seven_day_opus_5_5`), for a person's screen. */
+  names?: Record<string, string>;
   /** The account as a whole. */
   status?: PoolStatus;
   /** On a refusal: the window that refused (`five_hour`, `seven_day`, …) and when it resets. */
@@ -102,8 +114,33 @@ export class PoolUpstreamError extends Error {}
 // --- limits ---------------------------------------------------------------------------
 
 const PREFIX = "anthropic-ratelimit-unified-";
-const WINDOW_IDS: Record<string, string> = { "5h": "five_hour", "7d": "seven_day" };
-const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, seven_day: 10_080 };
+/** The Fable model's weekly limit, under the one id every source of it is given here.
+ *  Claude Code 2.1.327 reads it from the headers as `7d_oi` (its table of unified
+ *  windows: `["seven_day_overage_included","7d_oi"]`) and calls it the "Fable limit" (its
+ *  table of limit names: `seven_day_overage_included: "Fable limit"`); the usage endpoint
+ *  lists it in `limits[]` under the model's display name, "Fable" or "Fable 5.1" (the
+ *  names its usage screen accepts for that row, and it reads any `/^fable\b/i` row as
+ *  this limit). Named by its model, not by `7d_oi` (which would be `seven_day_oi`,
+ *  "This week, Oi only"), so the headers, the usage endpoint and every receiver that
+ *  names a `seven_day_<model>` window "This week, <Model> only" agree on one window,
+ *  and no receiver needs a release to show it. */
+const FABLE = "seven_day_fable";
+// Maps, not object literals: a key from the wire (`constructor`, `__proto__`) must find
+// nothing, not what every object inherits.
+const WINDOW_IDS = new Map([
+  ["5h", "five_hour"],
+  ["7d", "seven_day"],
+  ["7d_oi", FABLE],
+]);
+/** A refusal's `representative-claim` names the window by Claude Code's own key. */
+const CLAIM_IDS = new Map([["seven_day_overage_included", FABLE]]);
+const WINDOW_MINUTES = new Map([
+  ["five_hour", 300],
+  ["seven_day", 10_080],
+]);
+/** Rows read from each of the usage endpoint's lists, at most: Claude Code 2.1.327's own
+ *  cap on them (its SDK's `rate_limits.limits`, `.max(64)`). */
+const ROWS_MAX = 64;
 const STATUSES = new Set<string>(["allowed", "allowed_warning", "rejected"]);
 const ID_RE = /^[a-z0-9_]{1,64}$/;
 
@@ -132,17 +169,23 @@ function isoTime(v: unknown): string | undefined {
   if (/^\d+(\.\d+)?$/.test(s)) return isoTime(Number(s));
   if (!/^\d{4}-\d{2}-\d{2}T/.test(s)) return undefined;
   const t = Date.parse(s);
-  return Number.isFinite(t) ? new Date(t).toISOString() : undefined;
+  return Number.isFinite(t) ? wireTime(t) : undefined;
+}
+/** A time as the wire spells one (four-digit years only: past 9999 `toISOString` writes
+ *  `+010000-…`, which no reader takes); else none. */
+function wireTime(t: number): string | undefined {
+  const iso = new Date(t).toISOString();
+  return /^\d{4}-/.test(iso) ? iso : undefined;
 }
 const percentOf = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-/** The window id a `5h`/`7d`/`7d_opus` header part names; the same ids Claude Code's status line uses. */
-const windowId = (part: string): string => WINDOW_IDS[part] ?? `seven_day_${part.slice(3)}`;
+/** The window id a `5h`/`7d`/`7d_opus`/`7d_oi` header part names; the same ids Claude Code's status line uses. */
+const windowId = (part: string): string => WINDOW_IDS.get(part) ?? `seven_day_${part.slice(3)}`;
 
 /** The account's limits from a response's headers; null when the limiter did not run
  *  (no `anthropic-ratelimit-unified-*` header at all). A window needs a readable
  *  utilization; a status or a reset alone is kept on the account. */
 export function readLimits(headers: HeaderBag, now: number): PoolLimits | null {
-  const seen = new Map<string, { used?: number; resets_at?: string }>();
+  const seen = new Map<string, { id: string; used?: number; resets_at?: string }>();
   const out: PoolLimits = { windows: [], observed_at: now };
   let any = false;
   for (const [name, value] of entries(headers)) {
@@ -154,7 +197,7 @@ export function readLimits(headers: HeaderBag, now: number): PoolLimits | null {
       continue;
     }
     if (rest === "representative-claim") {
-      if (ID_RE.test(value)) out.claim = value;
+      if (ID_RE.test(value)) out.claim = CLAIM_IDS.get(value) ?? value;
       continue;
     }
     if (rest === "reset") {
@@ -164,10 +207,11 @@ export function readLimits(headers: HeaderBag, now: number): PoolLimits | null {
     }
     const m = /^(5h|7d|7d_[a-z0-9_]+)-(utilization|reset)$/.exec(rest);
     if (!m) continue;
-    const id = windowId(m[1] as string);
+    const part = m[1] as string;
+    const id = windowId(part);
     if (!ID_RE.test(id)) continue;
-    const w = seen.get(id) ?? {};
-    seen.set(id, w);
+    const w = seen.get(part) ?? { id };
+    seen.set(part, w);
     if (m[2] === "utilization") {
       const n = Number(value);
       if (value.trim() && Number.isFinite(n)) w.used = percentOf(n * 100);
@@ -177,9 +221,17 @@ export function readLimits(headers: HeaderBag, now: number): PoolLimits | null {
     }
   }
   if (!any) return null;
-  for (const [id, w] of seen) {
+  // Two parts naming one window (`7d_oi` and a `7d_fable`): the fuller one, whole, with
+  // its own reset, never one's utilization with the other's reset. Room was judged on
+  // both before they shared a name, and the fuller one is what took an account out.
+  const byId = new Map<string, { used: number; resets_at?: string }>();
+  for (const w of seen.values()) {
     if (w.used === undefined) continue;
-    const minutes = WINDOW_MINUTES[id];
+    const had = byId.get(w.id);
+    if (!had || w.used > had.used) byId.set(w.id, { used: w.used, ...(w.resets_at ? { resets_at: w.resets_at } : {}) });
+  }
+  for (const [id, w] of byId) {
+    const minutes = WINDOW_MINUTES.get(id);
     out.windows.push({
       id,
       used_percent: w.used,
@@ -190,27 +242,122 @@ export function readLimits(headers: HeaderBag, now: number): PoolLimits | null {
   return out;
 }
 
+/** A model's name as the usage endpoint's list gave it, for a person's screen: control
+ *  characters and runs of space as one space, 64 characters at most. */
+const nameOf = (name: string): string =>
+  name
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it drops
+    .replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, " ")
+    .trim()
+    .slice(0, 64);
+
+/** The id of a model's weekly window, from the name the usage endpoint shows for the
+ *  model: `seven_day_` and the name with its accents dropped (NFKD), lowercased, every
+ *  run of other characters one `_` ("Ópus 5.5" → `seven_day_opus_5_5`); any Fable is
+ *  FABLE. Null when that is no id (nothing left, or longer than the wire's 64). */
+function modelWindowId(name: string): string | null {
+  if (/^fable\b/i.test(name.trim())) return FABLE;
+  const slug = name
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  const id = `seven_day_${slug}`;
+  return slug && ID_RE.test(id) ? id : null;
+}
+
+interface ListedRow {
+  kind?: unknown;
+  percent?: unknown;
+  utilization?: unknown;
+  resets_at?: unknown;
+  display_name?: unknown;
+  scope?: { model?: { display_name?: unknown } | null } | null;
+}
+/** A list's first ROWS_MAX rows; anything but a list is none. */
+const rows = (v: unknown): (ListedRow | null)[] =>
+  Array.isArray(v) ? (v.slice(0, ROWS_MAX) as (ListedRow | null)[]) : [];
+
+/** The per-model weekly windows the usage endpoint lists rather than keys, each id once
+ *  (the first row wins), with the names the rows gave them: each `limits[]` row of kind
+ *  `weekly_scoped` scoped to a model (`percent`, `resets_at`), which is what Claude Code
+ *  2.1.327's usage screen reads them from, then each `model_scoped[]` row
+ *  (`display_name`, `utilization`, `resets_at`), the form that Claude Code hands the
+ *  same rows to its SDK in. Any other row is no window. */
+function modelWindows(j: Record<string, unknown>): { windows: LimitWindow[]; names: Map<string, string> } {
+  const windows: LimitWindow[] = [];
+  const names = new Map<string, string>();
+  const add = (name: unknown, used: unknown, resets: unknown) => {
+    if (typeof name !== "string" || typeof used !== "number" || !Number.isFinite(used)) return;
+    const id = modelWindowId(name);
+    if (!id || names.has(id)) return;
+    const resets_at = isoTime(resets);
+    windows.push({ id, used_percent: percentOf(used), ...(resets_at ? { resets_at } : {}) });
+    names.set(id, nameOf(name));
+  };
+  for (const r of rows(j.limits))
+    if (r?.kind === "weekly_scoped") add(r.scope?.model?.display_name, r.percent, r.resets_at);
+  for (const r of rows(j.model_scoped)) add(r?.display_name, r?.utilization, r?.resets_at);
+  return { windows, names };
+}
+
 /** The usage endpoint's JSON: `{five_hour: {utilization, resets_at}, seven_day: {…},
- *  seven_day_<model>: {…}, …}`, utilization a percent already. Any other key shaped
- *  like a window passes through under its own id; null when none is. */
+ *  seven_day_<model>: {…}, …, limits: [rows]}`, utilization a percent already.
+ *
+ *  `windows`, what room is judged on, is what this reader always took: each top-level
+ *  key shaped like a window, under its own id, in the answer's order, the first eight.
+ *
+ *  `shown` is every window the answer shows, in the order to show them: the top-level
+ *  ones (the first ROWS_MAX), and the per-model weeks of its lists (modelWindows)
+ *  straight after the last of `five_hour`, `seven_day` and `seven_day_*`, Fable's first.
+ *  A window already there under the same id is not added again: a top-level key wins
+ *  (it is what this reader always took, and what Claude Code's own screen reads
+ *  `seven_day_sonnet` from), and `limits[]` wins over `model_scoped[]` (Claude Code's
+ *  copy of it). Not cut to the wire's eight here: which eight an account shows is the
+ *  pool's to choose, by what its room is judged on (policy `capped`). Null when there is
+ *  no window at all. */
 export function usageLimits(json: unknown, now: number): PoolLimits | null {
   if (!json || typeof json !== "object" || Array.isArray(json)) return null;
-  const windows: LimitWindow[] = [];
-  for (const [id, v] of Object.entries(json as Record<string, unknown>)) {
+  const j = json as Record<string, unknown>;
+  const top: LimitWindow[] = [];
+  for (const [id, v] of Object.entries(j)) {
     if (!ID_RE.test(id) || !v || typeof v !== "object" || Array.isArray(v)) continue;
     const w = v as { utilization?: unknown; resets_at?: unknown };
     if (typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) continue;
     const resets_at = isoTime(w.resets_at);
-    const minutes = WINDOW_MINUTES[id];
-    windows.push({
+    const minutes = WINDOW_MINUTES.get(id);
+    top.push({
       id,
       used_percent: percentOf(w.utilization),
       ...(resets_at ? { resets_at } : {}),
       ...(minutes ? { window_minutes: minutes } : {}),
     });
   }
-  return windows.length ? { windows: windows.slice(0, 8), observed_at: now } : null;
+  const windows = top.slice(0, 8);
+  const shown = top.slice(0, ROWS_MAX);
+  const ids = new Set(shown.map((w) => w.id));
+  const listed = modelWindows(j);
+  const add = listed.windows.filter((w) => !ids.has(w.id)).sort((a, b) => order(a.id) - order(b.id));
+  let at = 0;
+  shown.forEach((w, i) => {
+    if (order(w.id) < 3) at = i + 1;
+  });
+  shown.splice(at, 0, ...add);
+  if (!shown.length) return null;
+  const names = Object.fromEntries(add.map((w) => [w.id, listed.names.get(w.id) as string]));
+  return {
+    windows,
+    ...(JSON.stringify(shown) !== JSON.stringify(windows) ? { shown } : {}),
+    ...(add.length ? { names } : {}),
+    observed_at: now,
+  };
 }
+
+/** Where a window goes among the limits: the session and the week, Fable's week, any
+ *  other model's week, then whatever else (Extra usage, a key this reader does not know). */
+const order = (id: string): number =>
+  id === "five_hour" || id === "seven_day" ? 0 : id === FABLE ? 1 : id.startsWith("seven_day_") ? 2 : 3;
 
 // --- metadata.user_id -----------------------------------------------------------------
 

@@ -50,7 +50,7 @@ export type Fetched =
 
 export class Credentials {
   private readonly cache = new Map<string, PoolCredential>();
-  private readonly inflight = new Map<string, Promise<Fetched>>();
+  private readonly inflight = new Map<string, { p: Promise<Fetched>; background: boolean }>();
   private readonly refusedAt = new Map<string, number>();
   private readonly refreshedAt = new Map<string, number>();
   private readonly failed = new Map<string, { at: number; n: number; detail: string }>();
@@ -133,9 +133,13 @@ export class Credentials {
    *  usage poll), so a token that has run out is left so while the store is shut. */
   get(id: string, force = false, background = false): Promise<Fetched> {
     const running = this.inflight.get(id);
-    if (running) return running;
+    // A request never takes a background call's answer: that one may have left a token
+    // that ran out as it was, for nobody waiting, which a request waiting on it would not.
+    // It waits for it instead, then asks for itself (a refresh made meanwhile is in memory).
+    if (running && (background || !running.background)) return running.p;
+    if (running) return running.p.then(() => this.get(id, force, background));
     const p = this.fetch(id, force, background).finally(() => this.inflight.delete(id));
-    this.inflight.set(id, p);
+    this.inflight.set(id, { p, background });
     return p;
   }
 

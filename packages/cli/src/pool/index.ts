@@ -7,7 +7,7 @@
 //   openPool(deps) → Pool                 reads pool.json and state.json; nothing listens yet
 //
 //   pool.start() → {port, moved, other?}  the listener on 127.0.0.1 (pool.json's port, else a
-//                                         free one, persisted); starts the idle usage poll
+//                                         free one, persisted); starts the usage poll
 //                                         (every 5 min). `moved` and `on`: settings were
 //                                         rewritten for the new port. `other`: a pool already
 //                                         answers on pool.json's port, so this process did not
@@ -32,7 +32,7 @@
 //
 //   deps.onLimits(accountUuid, session | null, limits)   an account's windows changed on a request:
 //                                         the daemon appends `limits.observed` with `account_id`
-//                                         on that session (null session: from an idle poll; keep
+//                                         on that session (null session: from the usage poll; keep
 //                                         it for the hello, don't invent a session).
 //   deps.onChange()                       anything the hello carries changed: send one now.
 //
@@ -60,7 +60,16 @@ import { Credentials } from "./credentials.js";
 import { type Imported, importLogins, type ResolvedLogin } from "./import.js";
 import { installedPoolEnv, installPoolEnv, type PoolEnvState, uninstallPoolEnv } from "./install.js";
 import { beginLogin, completeLogin, pendingLogin } from "./login.js";
-import { type AccountSummary, expirePins, observe, type PolicyState, summary } from "./policy.js";
+import {
+  type AccountSummary,
+  type Apart,
+  expirePins,
+  fromUsage,
+  observe,
+  type PolicyState,
+  pollDue,
+  summary,
+} from "./policy.js";
 import { type PoolServer, startPoolServer } from "./server.js";
 import {
   credentialName,
@@ -99,7 +108,8 @@ export { type PoolServer, type PoolStats, startPoolServer } from "./server.js";
 export { type PoolAccount, type PoolConfig, poolFile, poolStateFile, readPool } from "./store.js";
 export type * from "./types.js";
 
-/** Idle accounts are asked for their usage this often (and at once on add/enable/refresh). */
+/** Every enabled account is asked for its usage this often, busy or idle (and at once on
+ *  add/enable/refresh). */
 export const POLL_MS = 5 * 60_000;
 /** The hello lists at most this many (core's hello schema). */
 export const ACCOUNTS_MAX = 20;
@@ -110,6 +120,9 @@ export const PERSIST_MS = 1_000;
 /** After a rotation the bearer before it is still accepted this long: a Claude Code
  *  session keeps the token it read at its start (bb gives the same grace). */
 export const ROTATION_GRACE_MS = 10 * 60_000;
+/** A disagreement between the usage answer and the responses is written down this often
+ *  at most, per account and window. */
+export const APART_LOG_MS = 3_600_000;
 
 export interface PoolDeps {
   /** core's `claudePool` unless a test says otherwise (types.ts says what of it is used). */
@@ -174,7 +187,9 @@ export interface PoolStatus {
   /** Requests it is answering right now (0 when it isn't up). */
   in_flight: number;
   settings: { file: string; state: PoolEnvState; note?: string }[];
-  accounts: (PoolAccount & AccountSummary & { limits?: PoolLimits })[];
+  /** `limits`: what room is judged on; `names`: the usage endpoint's names for the
+   *  per-model weeks it lists, by window id. */
+  accounts: (PoolAccount & AccountSummary & { limits?: PoolLimits; names?: Record<string, string> })[];
   pending?: { id: string; url: string; expires_at: string };
   /** Refreshed sign-ins held in memory only, the secrets store having refused them:
    *  a restart before it takes them signs those accounts out. Absent when none. */
@@ -406,6 +421,22 @@ export function openPool(deps: PoolDeps): Pool {
 
   let server: PoolServer | null = null;
   let poll: NodeJS.Timeout | null = null;
+  /** When each (account, window) disagreement was last written to the log. */
+  const apartAt = new Map<string, number>();
+  /** The usage answer and the account's own responses a point or more apart on one
+   *  window (policy `Apart`): one line, at most once an hour per account and window,
+   *  naming the window, the two numbers and the pool's short id, nothing more. Whether
+   *  the two sources agree can only be learnt on a machine that is really using them. */
+  const noteApart = (id: string, apart: Apart[]) => {
+    const t = now();
+    for (const x of apart) {
+      const key = `${id} ${x.id}`;
+      const last = apartAt.get(key);
+      if (last !== undefined && t - last < APART_LOG_MS) continue;
+      apartAt.set(key, t);
+      log(`${id}: ${x.id} is ${x.response}% in its responses and ${x.usage}% in its usage answer`);
+    }
+  };
   let other = false;
 
   /** Is a pool already answering on this port? Asked before listening, so a second
@@ -432,8 +463,12 @@ export function openPool(deps: PoolDeps): Pool {
       req.on("error", () => resolve(false));
     });
 
-  /** Ask the usage endpoint for one account; the numbers go to the policy (no session). */
-  const pollOne = async (id: string): Promise<void> => {
+  /** Ask the usage endpoint for one account (no session): its answer is what the account
+   *  shows (policy `fromUsage`), dated `at`, the poll's own clock. Room is judged on its
+   *  top-level windows only, and only when `judge`: asked for (an add, an enable, a
+   *  refresh) or the account's numbers POLL_MS old (pollDue), as before; an account in
+   *  use keeps being judged on its responses, as it always was. */
+  const pollOne = async (id: string, at = now(), judge = true): Promise<void> => {
     // Nobody waits on these numbers: a sign-in the store could not keep is not refreshed for them.
     const cred = await credentials.get(id, false, true);
     if (!cred.ok) {
@@ -444,9 +479,13 @@ export function openPool(deps: PoolDeps): Pool {
       const limits = await adapter.fetchUsage(cred.access, fetchFn, now);
       if (!limits) return;
       const before = summary(policy, now()).find((s) => s.id === id)?.status;
-      if (observe(policy, id, limits, now())) {
-        saveState();
-        deps.onLimits?.(uuidOf(id), null, limits);
+      const apart: Apart[] = [];
+      const shown = fromUsage(policy, id, limits, at, now(), judge, apart);
+      noteApart(id, apart);
+      // usage_at moved: written down even when no number did.
+      saveState();
+      if (shown) {
+        deps.onLimits?.(uuidOf(id), null, { ...limits, windows: shown });
         if (summary(policy, now()).find((s) => s.id === id)?.status !== before) changed();
       }
     } catch (e) {
@@ -467,8 +506,12 @@ export function openPool(deps: PoolDeps): Pool {
     if (!cfg.on) return;
     const t = now();
     const every = deps.pollMs ?? POLL_MS;
-    for (const a of policy.accounts)
-      if (a.enabled && !a.error && (a.limits_at === undefined || t - a.limits_at >= every)) await pollOne(a.id);
+    for (const a of policy.accounts) {
+      // Every account on its own clock, so one in steady use still gets its whole list
+      // (its responses carry only some windows); judged only as before (pollDue).
+      const due = pollDue(a, t, every);
+      if (due) await pollOne(a.id, t, due.judge);
+    }
     if (expirePins(policy, now())) saveState();
   };
 
@@ -765,7 +808,8 @@ export function openPool(deps: PoolDeps): Pool {
         settings: cfg.port ? installedPoolEnv(dirs(), ours(bearer(), read().previous ?? undefined)) : [],
         accounts: cfg.accounts.map((a, i) => {
           const limits = policy.accounts[i]?.limits;
-          return { ...a, ...(sums[i] as AccountSummary), ...(limits ? { limits } : {}) };
+          const names = policy.accounts[i]?.names;
+          return { ...a, ...(sums[i] as AccountSummary), ...(limits ? { limits } : {}), ...(names ? { names } : {}) };
         }),
         ...(disk.pending && disk.pending.expires_at > t
           ? {
