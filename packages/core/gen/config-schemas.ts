@@ -644,6 +644,26 @@ export const CONFIG_SCHEMAS = {
       "matches"
     ]
   },
+  "trigger-line": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "line": {
+        "type": "string"
+      },
+      "argv": {
+        "minItems": 4,
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "line",
+      "argv"
+    ]
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 /** A machine-local file's schema name. */

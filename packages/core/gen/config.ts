@@ -221,6 +221,20 @@ export interface TriggerRun {
 }
 
 /**
+ * `sessionpipe trigger line <name> --json`: the one `sessionpipe trigger add` command that makes
+ * the rule again, as a line and as its words.
+ */
+export interface TriggerLine {
+  /**
+   * The command on one line, flags in their fixed order, values quoted as POSIX single quotes
+   * where they hold anything outside `A-Za-z0-9_./:@=+-` (CONTROL.md §14.1).
+   */
+  line: string;
+  /** The words the line splits into, from `trigger` on (no `sessionpipe`). */
+  argv: string[];
+}
+
+/**
  * `sessionpipe trigger test <name> --json`: what a sample notice, or a tick, would run. It runs
  * nothing and records nothing.
  */

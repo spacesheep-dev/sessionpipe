@@ -69,6 +69,7 @@ export const CONFIG_SCHEMAS: Readonly<Record<string, string>> = {
   triggers: "TriggersFile",
   "trigger-list": "TriggerList",
   "trigger-test": "TriggerTestAnswer",
+  "trigger-line": "TriggerLine",
 };
 
 type Schema = Record<string, unknown>;

@@ -1682,6 +1682,7 @@ sessionpipe trigger add <name> (--on <receiver> --topic <t> [--event <e>] | --ev
   (--start <harness> | --continue <harness>:<id>) --folder <dir> [--level <l>]
   [--tools mcp__<server>[__<tool>],…] [--cap <n>/day] --words "<text>"
 sessionpipe trigger list | pause <name> | resume <name> | remove <name> | test <name> [--subject X-001 --state todo]
+sessionpipe trigger line <name> [--json]
 ```
 
 A rule enters the machine **only from its own terminal**:
@@ -1696,7 +1697,16 @@ A rule enters the machine **only from its own terminal**:
   `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID` or `SESSIONPIPE_CONTROL_JOB` is set and not empty,
   it says that this is the person's command to run at the machine and changes nothing. The last
   three are the ones `ask on` checks; `CLAUDECODE` is set in the shell of every Claude Code
-  session as well. `trigger list` and `trigger test` change nothing and run anywhere.
+  session as well. `trigger list`, `trigger test` and `trigger line` change nothing and run anywhere.
+- `trigger line <name>` prints, on its own and on one line, the `sessionpipe trigger add` command
+  that makes the rule again (on another machine, say), and `--json` prints it as `TriggerLine`
+  (config.proto): the line and its words. The line is a contract a program may read: the flags in
+  one fixed order (`--on`, `--topic`, `--event`, `--every`, `--when state=`, `--when for=`,
+  `--when by=`, `--subject`, `--start`, `--continue`, `--folder`, `--level`, `--tools`, `--cap`,
+  `--words`), each value bare when it holds only `A-Z a-z 0-9 _ . / : @ = + -` and otherwise in
+  POSIX single quotes (a `'` in it written `'\''`), a word apart from the next by one space. Read
+  back by `add`, it is the same rule, unpaused. A newline in the words is written as itself inside
+  their quotes, the only way a POSIX shell reads one back.
 - `add` writes every field of the rule: without `--level` it writes `safe`, and without `--cap`
   `{"per_day": 5}`, and the sentence it shows says so.
 - `add` checks what a run would check (§14.7: the folder is allowed, the harness runs headlessly
