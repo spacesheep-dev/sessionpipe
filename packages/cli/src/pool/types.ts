@@ -14,8 +14,14 @@ export type LimitWindow = DataOf<"limits.observed">["windows"][number];
 /** An account's limits as last seen: from response headers (with the unified status)
  *  or from the usage endpoint (windows only). */
 export interface PoolLimits {
-  /** Empty when only a status or a reset was readable: then the windows known so far stay. */
+  /** What room is judged on. Empty when only a status or a reset was readable: then the
+   *  windows known so far stay. */
   windows: LimitWindow[];
+  /** The usage endpoint's, where it differs: every window it shows (its lists' per-model
+   *  weeks too). Shown, never judged. */
+  shown?: LimitWindow[];
+  /** The usage endpoint's names for the per-model weeks of its lists, by window id. */
+  names?: Record<string, string>;
   /** `allowed`, `allowed_warning` or `rejected`, when the source said. */
   status?: string;
   /** On a refusal: the window that refused, and when it resets. */

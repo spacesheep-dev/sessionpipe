@@ -1,5 +1,5 @@
 {
-  "_comment": "GET /api/oauth/usage as the pooler reads it (shape from bb's parser and Claude Code's window names; values made up). utilization is a percent here; resets_at RFC 3339 or epoch seconds.",
+  "_comment": "GET /api/oauth/usage as the pooler reads it (shape from bb's parser and Claude Code's window names; the limits rows as Claude Code 2.1.327 reads them; values made up). utilization is a percent here; resets_at RFC 3339 or epoch seconds.",
   "typical": {
     "five_hour": { "utilization": 23.7, "resets_at": "2025-10-29T12:00:00.000000+00:00" },
     "seven_day": { "utilization": 61.49, "resets_at": "2025-11-03T11:00:00Z" },
@@ -7,11 +7,110 @@
     "seven_day_oauth_apps": null,
     "extra_usage": { "is_enabled": false, "utilization": null, "monthly_limit": null, "used_credits": null }
   },
+  "per_model": {
+    "five_hour": { "utilization": 8.0, "resets_at": "2025-10-29T12:00:00.000000+00:00" },
+    "seven_day": { "utilization": 41.0, "resets_at": "2025-11-03T11:00:00.000000+00:00" },
+    "seven_day_oauth_apps": null,
+    "seven_day_opus": null,
+    "seven_day_sonnet": { "utilization": 17.0, "resets_at": "2025-11-03T11:00:00.000000+00:00" },
+    "extra_usage": {
+      "is_enabled": true,
+      "monthly_limit": 5000,
+      "used_credits": 625,
+      "utilization": 12.5,
+      "currency": "USD"
+    },
+    "limits": [
+      {
+        "kind": "session",
+        "group": "session",
+        "percent": 8,
+        "resets_at": "2025-10-29T12:00:00.000000+00:00",
+        "scope": null,
+        "severity": "normal",
+        "is_active": true
+      },
+      {
+        "kind": "weekly_all",
+        "group": "weekly",
+        "percent": 41,
+        "resets_at": "2025-11-03T11:00:00.000000+00:00",
+        "scope": null,
+        "severity": "normal",
+        "is_active": false
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 33.5,
+        "resets_at": "2025-11-03T11:00:00.000000+00:00",
+        "scope": { "model": { "display_name": "Fable" } },
+        "severity": "normal",
+        "is_active": false
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 16,
+        "resets_at": "2025-11-03T11:00:00.000000+00:00",
+        "scope": { "model": { "display_name": "Sonnet" } },
+        "severity": "normal",
+        "is_active": false
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 62,
+        "resets_at": 1762167600,
+        "scope": { "model": { "display_name": "Opus 5.5" } },
+        "severity": "warning",
+        "is_active": false
+      }
+    ]
+  },
+  "model_scoped_only": {
+    "five_hour": { "utilization": 1, "resets_at": null },
+    "model_scoped": [
+      { "display_name": "Fable 5.1", "utilization": 99.96, "resets_at": null },
+      { "display_name": "Opus 5.5", "utilization": 5, "resets_at": "2025-11-03T11:00:00Z" }
+    ],
+    "limits": [
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 70,
+        "resets_at": "2025-11-03T11:00:00Z",
+        "scope": { "model": { "display_name": "Opus 5.5" }, "surface": null }
+      }
+    ]
+  },
   "odd": {
     "five_hour": { "utilization": "23", "resets_at": "2025-10-29T12:00:00Z" },
     "seven_day": { "utilization": 150.04, "resets_at": "whenever" },
     "Seven-Day": { "utilization": 1, "resets_at": 1762167600 },
-    "limits": [{ "kind": "weekly_scoped", "percent": 3 }],
+    "limits": [
+      { "kind": "weekly_scoped", "percent": 3 },
+      {
+        "kind": "weekly_scoped",
+        "percent": 4,
+        "scope": { "model": null, "surface": { "display_name": "Claude Code" } }
+      },
+      { "kind": "session", "percent": 5, "scope": { "model": { "display_name": "Fable" } } },
+      { "kind": "weekly_scoped", "percent": "6", "scope": { "model": { "display_name": "Haiku" } } },
+      { "kind": "weekly_scoped", "percent": 7, "scope": { "model": { "display_name": "!!!" } } },
+      {
+        "kind": "weekly_scoped",
+        "percent": 8,
+        "scope": { "model": { "display_name": "Mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm" } }
+      },
+      { "kind": "weekly_scoped", "percent": 9, "scope": { "model": "Haiku" } },
+      { "kind": "weekly_scoped", "percent": 10, "scope": "Haiku" },
+      { "kind": "monthly_scoped", "percent": 11, "scope": { "model": { "display_name": "Haiku" } } },
+      null,
+      12,
+      "weekly_scoped"
+    ],
+    "model_scoped": { "display_name": "Haiku", "utilization": 13 },
     "a": { "utilization": 1 },
     "b": { "utilization": 2 },
     "c": { "utilization": 3 },

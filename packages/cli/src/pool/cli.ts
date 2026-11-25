@@ -286,6 +286,45 @@ function when(iso: string | undefined, now: number): string {
     : `${d.toLocaleString("en-US", { month: "short" })} ${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+const WEEK_OF = "seven_day_";
+/** A model's week as `pool status` labels it: the name the usage endpoint gave it
+ *  ("7d Opus 5.5"), else its id's words as the GUI makes them ("7d Fable"). */
+const modelWeek = (id: string, name: string | undefined): string =>
+  `7d ${
+    name ??
+    id
+      .slice(WEEK_OF.length)
+      .split("_")
+      .filter(Boolean)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join(" ")
+  }`;
+
+/** Parts joined with " · ", as many to a line as fit before `width` after `indent`; a
+ *  part too long for a line of its own is broken at its spaces. */
+function wrapped(parts: string[], indent: string, width: number): string[] {
+  const room = width - 1 - indent.length;
+  const lines: string[] = [];
+  let line = "";
+  for (const p of parts) {
+    const next = line ? `${line} · ${p}` : p;
+    if (next.length <= room) {
+      line = next;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = "";
+    for (const w of p.split(" ")) {
+      if (line && line.length + 1 + w.length > room) {
+        lines.push(line);
+        line = w;
+      } else line = line ? `${line} ${w}` : w;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.map((l) => `${indent}${l}`);
+}
+
 /** The status word of an account, in the words the GUI uses too. */
 function word(a: PoolStatus["accounts"][number], now: number): string {
   switch (a.status) {
@@ -314,24 +353,50 @@ function printStatus(r: Done, out: (s?: string) => void, now: number, ui: Ui): v
   if (r.daemon) out(`  daemon:   running${listenerWord(s)}`);
   else if (s.on) out(DAEMON_DOWN);
   else out("  daemon:   not running (nothing needs it while the pool is off)");
+  /** One window of an account as a cell: `5h  12% (resets 11:00)`, `7d —`. */
+  const cell = (a: PoolStatus["accounts"][number], id: string, label: string, width: number) => {
+    const x = a.windows?.find((w) => w.id === id);
+    if (!x) return `${label} —`.padEnd(width);
+    const reset = when(x.resets_at, now);
+    // Whole percents, as Claude Code's own usage screen shows them, so a column keeps its width.
+    return `${label} ${String(Math.floor(x.used_percent)).padStart(3)}%${reset ? ` (resets ${reset})` : ""}`.padEnd(
+      width,
+    );
+  };
+  // A model's own week (`seven_day_fable`: "7d Fable") is a column after 7d for every
+  // account once any account shows it, "—" where one does not, as for 5h and 7d; in a
+  // pipe each is as wide as its widest cell, so the status words still line up.
+  const models = [
+    ...new Set(s.accounts.flatMap((a) => (a.windows ?? []).map((w) => w.id).filter((id) => id.startsWith(WEEK_OF)))),
+  ].map((id) => {
+    const label = modelWeek(id, s.accounts.find((a) => a.names?.[id])?.names?.[id]);
+    return { id, label, width: Math.max(30, ...s.accounts.map((a) => cell(a, id, label, 0).length + 1)) };
+  });
   for (const a of s.accounts) {
-    const w = (id: string) => a.windows?.find((x) => x.id === id);
-    const win = (id: string, label: string, width: number) => {
-      const x = w(id);
-      if (!x) return `${label} —`.padEnd(width);
-      const reset = when(x.resets_at, now);
-      return `${label} ${String(x.used_percent).padStart(3)}%${reset ? ` (resets ${reset})` : ""}`.padEnd(width);
-    };
+    const win = (id: string, label: string, width: number) => cell(a, id, label, width);
     // One line per account is over a hundred columns: a terminal gets two, the windows
-    // under the name. A pipe keeps the one line it always had.
+    // under the name, and the models' weeks under those, as many to a line as fit. A
+    // pipe keeps the one line it always had.
     const name = a.label ? `${a.label} <${a.email}>` : a.email;
     if (ui.width === Number.POSITIVE_INFINITY)
       out(
-        `  ${a.id.padEnd(9)} ${name.padEnd(36)} ${(a.enabled ? "enabled" : "disabled").padEnd(9)} ${win("five_hour", "5h", 24)} ${win("seven_day", "7d", 30)} ${word(a, now)}`,
+        `  ${a.id.padEnd(9)} ${name.padEnd(36)} ${(a.enabled ? "enabled" : "disabled").padEnd(9)} ${[
+          win("five_hour", "5h", 24),
+          win("seven_day", "7d", 30),
+          ...models.map((m) => win(m.id, m.label, m.width)),
+          word(a, now),
+        ].join(" ")}`,
       );
     else {
+      const under = `  ${" ".repeat(9)} `;
       out(`  ${a.id.padEnd(9)} ${name} · ${a.enabled ? "enabled" : "disabled"} · ${word(a, now)}`);
-      out(`  ${" ".repeat(9)} ${win("five_hour", "5h", 0)} · ${win("seven_day", "7d", 0)}`);
+      out(`${under}${win("five_hour", "5h", 0)} · ${win("seven_day", "7d", 0)}`);
+      for (const l of wrapped(
+        models.map((m) => win(m.id, m.label, 0)),
+        under,
+        ui.width,
+      ))
+        out(l);
     }
   }
   if (!s.accounts.length) out("  no accounts: `sessionpipe pool add --import` or `sessionpipe pool login`");

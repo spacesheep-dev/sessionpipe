@@ -201,6 +201,22 @@ describe("Credentials", () => {
       expect(await c.get("a", false, true)).toEqual({ ok: true, access: "a-a+", fresh: true });
     });
 
+    it("a request arriving while the usage poll asks for the same account gets its own answer, not the poll's", async () => {
+      const { c, store, state, tick } = shuttable();
+      store.set("a", cred("a", 1_000_000 + 60_000));
+      tick(120_000);
+      // The poll (nobody waiting) leaves the run-out token as it is; the request at the
+      // same moment must still be served, as it would be on its own.
+      const [poll, request] = await Promise.all([c.get("a", false, true), c.get("a")]);
+      expect(poll).toMatchObject({ ok: false, why: "unreadable" });
+      expect(request).toEqual({ ok: true, access: "a-a+", fresh: true });
+      expect(state.refreshes).toBe(1);
+      // A poll arriving while a request refreshes shares that one refresh.
+      store.set("b", cred("b", 1_000_000 + 60_000));
+      const [r2, p2] = await Promise.all([c.get("b"), c.get("b", false, true)]);
+      expect(p2).toEqual(r2);
+      expect(state.refreshes).toBe(2);
+    });
     it("a request waiting on a token that has run out is served; the new sign-in is offered to the store until it is in", async () => {
       const { c, store, state, tick, log } = shuttable();
       store.set("a", cred("a", 1_000_000 + 60_000));

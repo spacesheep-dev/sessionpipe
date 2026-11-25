@@ -21,6 +21,17 @@ export const MAX_HOLD_MS = 60 * 60_000;
 /** Pins kept at most; the oldest go first. A caller inventing session ids fills nothing
  *  but this. */
 export const PINS_MAX = 4096;
+/** A window a response does not name stays shown this long after the usage endpoint
+ *  last listed it: three polls missed in a row (signed out there, or failing) and the
+ *  endpoint's own windows go, rather than look current under each response's time. */
+export const KEEP_MS = 15 * 60_000;
+/** A response's number this recent outranks a usage poll's for the same window when the
+ *  two are less than a point apart (see). */
+export const FRESH_MS = 5 * 60_000;
+/** Two resets this close are the same reset. */
+const SAME_RESET_MS = 1_000;
+/** The wire's cap on an account's windows (`limits.observed`, the hello). */
+const WINDOWS_MAX = 8;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface AccountState {
@@ -36,9 +47,21 @@ export interface AccountState {
   /** Why: `limit` (a 429 or a `rejected`: the pool knows the answer and says it itself)
    *  or `upstream` (a 5xx rest: the upstream's own answer still passes through). */
   hold_why?: "limit" | "upstream";
-  /** The freshest numbers, whatever their source, and when they were taken (ms). */
+  /** The freshest numbers, whatever their source, and when they were taken (ms): what
+   *  room is judged on (newest wins, as it always was). */
   limits?: PoolLimits;
   limits_at?: number;
+  /** Every window the account's numbers name now, for the hello, `limits.observed` and
+   *  `pool status` (see): the usage endpoint's whole list, each response's windows put
+   *  over it. Absent in a state file from before it: then `limits` is what is shown. */
+  shown?: LimitWindow[];
+  /** When the usage endpoint last listed the account's windows (ms): the next poll is
+   *  due POLL_MS after it, whether the account is busy or idle (pollDue). */
+  usage_at?: number;
+  /** The usage endpoint's names for its per-model weeks ("Opus 5.5"), for `pool status`. */
+  names?: Record<string, string>;
+  /** When a response last named each window (ms): kept in memory only (see). */
+  heard?: Record<string, number>;
 }
 
 export interface Pin {
@@ -152,6 +175,163 @@ export function expirePins(state: PolicyState, now: number): number {
   return dropped;
 }
 
+/** Where a window goes among the limits: the session and the week, then Fable's week,
+ *  then any other model's week, then whatever else (Extra usage, an unknown key). */
+const rankOf = (id: string): number =>
+  id === "five_hour" || id === "seven_day" ? 0 : id === "seven_day_fable" ? 1 : id.startsWith("seven_day_") ? 2 : 3;
+/** At most eight, in their order. Past eight, what stays first: a window at the level
+ *  room is judged at (SWITCH_PERCENT; so the window an account is limited by is always
+ *  one it shows), then the ids in `first` (a response's own), then by rankOf; the last of
+ *  a rank goes first. */
+function capped(windows: LimitWindow[], first: ReadonlySet<string> = new Set()): LimitWindow[] {
+  const rank = (w: LimitWindow) => (w.used_percent >= SWITCH_PERCENT ? -2 : first.has(w.id) ? -1 : rankOf(w.id));
+  const keep = new Set(
+    windows
+      .map((w, i) => ({ w, i }))
+      .sort((a, b) => rank(a.w) - rank(b.w) || a.i - b.i)
+      .slice(0, WINDOWS_MAX)
+      .map((x) => x.w),
+  );
+  return windows.filter((w) => keep.has(w));
+}
+const hasReset = (w: LimitWindow, now: number): boolean => {
+  const at = ms(w.resets_at);
+  return at !== null && at <= now;
+};
+/** The same reading of a window: the same percent and length, the reset within a second
+ *  (the headers say it in whole seconds, the usage endpoint to the microsecond). */
+function same(a: LimitWindow, b: LimitWindow): boolean {
+  return a.used_percent === b.used_percent && a.window_minutes === b.window_minutes && sameReset(a, b);
+}
+function sameReset(a: LimitWindow, b: LimitWindow): boolean {
+  const x = ms(a.resets_at);
+  const y = ms(b.resets_at);
+  return x === null || y === null ? x === y : Math.abs(x - y) < SAME_RESET_MS;
+}
+
+/** One window the usage answer and a response from the last FRESH_MS put a point or more
+ *  apart for the same reset: what the daemon's log notes (pool/index.ts), since whether
+ *  the two sources agree is known only on a person's own machine. */
+export interface Apart {
+  id: string;
+  response: number;
+  usage: number;
+}
+
+/** What the account shows: its windows as `see` keeps them, else (a state file from
+ *  before) the numbers room is judged on. */
+export const shownOf = (a: AccountState): LimitWindow[] => a.shown ?? a.limits?.windows ?? [];
+
+/** Take in what the account's numbers now show (AccountState.shown), and say whether
+ *  that changed. The usage endpoint lists every window the account has (`shown` of its
+ *  answer), so its answer is the list. A response names only the windows its headers
+ *  carry: those are put over the list in place, one new to it goes after the last known
+ *  limit, and every other window stays, unless its reset has passed (it reset; a
+ *  receiver would only show it as such) or the usage endpoint has not listed the
+ *  account's windows for KEEP_MS. A window read the same again keeps the object it had
+ *  (same), and a poll leaves a window alone that a response named within FRESH_MS when
+ *  the two are less than a point apart: the response's number is the more exact one,
+ *  and a list that flipped between the two would make an event of each flip. Room is
+ *  not judged on any of this (observe is). A status or a reset alone shows nothing new. */
+export function see(
+  state: PolicyState,
+  accountId: string,
+  what: PoolLimits,
+  from: "usage" | "response",
+  now: number,
+  apart: Apart[] = [],
+) {
+  const a = state.accounts.find((x) => x.id === accountId);
+  const fresh = from === "usage" ? (what.shown ?? what.windows) : what.windows;
+  if (!a || !fresh.length) return false;
+  const before = shownOf(a);
+  const had = new Map(before.map((w) => [w.id, w]));
+  const heard = a.heard ?? {};
+  if (from === "usage") {
+    const last = a.usage_at;
+    a.shown = capped(
+      fresh.map((w) => {
+        const o = had.get(w.id);
+        if (!o) return w;
+        if (same(o, w)) return o;
+        const h = heard[w.id];
+        // A response's number for the same reset, named since the last poll and recently.
+        const heardHere = h !== undefined && now - h < FRESH_MS && (last === undefined || h >= last) && sameReset(o, w);
+        const gap = Math.abs(o.used_percent - w.used_percent);
+        if (heardHere && gap >= 1) apart.push({ id: w.id, response: o.used_percent, usage: w.used_percent });
+        // Within a point of it: the response's, the more exact one, stays; but never a
+        // number under the judged level when the poll says the window is full.
+        return heardHere && gap < 1 && w.used_percent < SWITCH_PERCENT ? o : w;
+      }),
+    );
+    a.usage_at = now;
+    const names = Object.entries(what.names ?? {}).filter(([id]) => a.shown?.some((w) => w.id === id));
+    if (names.length) a.names = Object.fromEntries(names);
+    else delete a.names;
+  } else {
+    const byId = new Map(fresh.map((w) => [w.id, w]));
+    for (const w of fresh) heard[w.id] = now;
+    a.heard = heard;
+    const keep = a.usage_at !== undefined && now - a.usage_at <= KEEP_MS;
+    const out: LimitWindow[] = [];
+    for (const w of before) {
+      const f = byId.get(w.id);
+      if (f) {
+        out.push(same(w, f) ? w : f);
+        byId.delete(w.id);
+      } else if (keep && !hasReset(w, now)) out.push(w);
+    }
+    let at = 0;
+    out.forEach((w, i) => {
+      if (rankOf(w.id) < 3) at = i + 1;
+    });
+    out.splice(at, 0, ...byId.values());
+    a.shown = capped(out, new Set(fresh.map((w) => w.id)));
+  }
+  return JSON.stringify(before) !== JSON.stringify(a.shown);
+}
+
+/** A response's numbers into the account: its room judged on them (observe, as it always
+ *  was) and what it shows (see). The windows a `limits.observed` for it carries, when one
+ *  is due (either changed); else null. */
+export function fromResponse(state: PolicyState, accountId: string, limits: PoolLimits, now: number) {
+  const shown = see(state, accountId, limits, "response", now);
+  const judged = observe(state, accountId, limits, now);
+  const a = state.accounts.find((x) => x.id === accountId);
+  return a && (shown || judged) ? shownOf(a) : null;
+}
+
+/** A usage poll's answer into the account, `at` the poll's own time: what it shows, and,
+ *  when `judge` (pollDue), its room, on the answer's top-level windows only, as before;
+ *  an answer with none of those was no numbers to judge, as before. The account's
+ *  windows when either changed; else null. */
+export function fromUsage(
+  state: PolicyState,
+  accountId: string,
+  limits: PoolLimits,
+  at: number,
+  now: number,
+  judge: boolean,
+  apart: Apart[] = [],
+) {
+  const shown = see(state, accountId, limits, "usage", at, apart);
+  const judged = judge && limits.windows.length > 0 && observe(state, accountId, limits, now);
+  const a = state.accounts.find((x) => x.id === accountId);
+  return a && (shown || judged) ? shownOf(a) : null;
+}
+
+/** Whether an account's usage is to be asked for at tick `t`, polls `every` ms apart, and
+ *  whether that answer is judged: only when it would have been before every account was
+ *  polled (the account's numbers `every` old, or none), so which account serves a
+ *  request is decided as it was. Every enabled account without a sign-in to fix is asked
+ *  on its own clock (`usage_at`), busy or idle; a tick a little early still counts, or
+ *  the timer's jitter would make it every other tick. Null: not now. */
+export function pollDue(a: AccountState, t: number, every: number): { judge: boolean } | null {
+  if (!a.enabled || a.error) return null;
+  const judge = a.limits_at === undefined || t - a.limits_at >= every;
+  return judge || a.usage_at === undefined || t - a.usage_at >= every - every / 10 ? { judge } : null;
+}
+
 const sameLimits = (a: PoolLimits | undefined, b: PoolLimits): boolean =>
   !!a && a.status === b.status && JSON.stringify(a.windows) === JSON.stringify(b.windows);
 
@@ -217,9 +397,10 @@ export interface AccountSummary {
   current: boolean;
   /** Limited: when it has room again, RFC 3339, if known. */
   until?: string;
-  /** The fullest window, for a status line. */
+  /** The fullest window shown, for a status line. */
   used_percent?: number;
-  /** The freshest numbers, from headers or the idle poll (1–8 windows). */
+  /** Every window the account shows (AccountState.shown, 1–8): the usage poll's list
+   *  with each response's numbers put over it. */
   windows?: LimitWindow[];
   /** What took it out: the window that is full (the one that resets last when
    *  several are), else the window a `rejected` status named (`claim`), else
@@ -245,14 +426,15 @@ export function summary(state: PolicyState, now: number): AccountSummary[] {
   return state.accounts.map((a) => {
     const at = roomAt(a, now);
     const status: AccountStatus = !a.enabled ? "disabled" : a.error ? "error" : at === null ? "ready" : "limited";
-    const used = a.limits?.windows.length ? Math.max(...a.limits.windows.map((w) => w.used_percent)) : undefined;
+    const shown = shownOf(a);
+    const used = shown.length ? Math.max(...shown.map((w) => w.used_percent)) : undefined;
     return {
       id: a.id,
       status,
       current: a.id === current,
       ...(at !== null ? { until: new Date(at).toISOString() } : {}),
       ...(used !== undefined ? { used_percent: used } : {}),
-      ...(a.limits?.windows.length ? { windows: a.limits.windows.slice(0, 8) } : {}),
+      ...(shown.length ? { windows: shown.slice(0, WINDOWS_MAX) } : {}),
       ...(status === "error" ? { limited_by: "error" } : status === "limited" ? { limited_by: limitedBy(a, now) } : {}),
     };
   });

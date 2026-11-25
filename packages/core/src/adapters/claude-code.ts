@@ -439,7 +439,11 @@ function statusLine(file: string, want: boolean, cmd?: HookCommand): InstallRepo
 const epochIso = (t: unknown): string | undefined =>
   typeof t === "number" && t > 0 && t < 1e11 ? new Date(t * 1000).toISOString() : undefined;
 
-const WINDOW_MINUTES: Record<string, number> = { five_hour: 300, seven_day: 10_080 };
+// A Map: a key from the status line (`constructor`, `__proto__`) must find nothing.
+const WINDOW_MINUTES = new Map([
+  ["five_hour", 300],
+  ["seven_day", 10_080],
+]);
 
 /** The status line's `rate_limits`: `five_hour`, `seven_day` and, behind a gateway,
  *  `spend_limit`, each with `used_percentage` and `resets_at` in epoch seconds. Only
@@ -454,7 +458,7 @@ export function claudeLimits(rl: unknown): DataOf<"limits.observed"> | null {
       prune({
         id,
         used_percent: w.used_percentage,
-        window_minutes: WINDOW_MINUTES[id],
+        window_minutes: WINDOW_MINUTES.get(id),
         resets_at: epochIso(w.resets_at),
       }),
     );

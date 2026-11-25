@@ -1075,9 +1075,10 @@ export interface PoolAccount {
   /** limited: when it has room again, where the machine knows. */
   until?: string | undefined;
   /**
-   * The account's freshest numbers, as limits.observed would carry them: from the
-   * idle usage poll when no session asked recently, since an idle account's numbers
-   * ride on no session and would reach no receiver otherwise.
+   * Every window the account shows, as limits.observed carries them: the vendor's usage
+   * answer, read for each account whether a session uses it or not, with each response's
+   * numbers put over it; an idle account's numbers ride on no session and would reach no
+   * receiver otherwise.
    */
   windows?: LimitWindow[] | undefined;
   /**

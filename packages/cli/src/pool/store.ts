@@ -24,7 +24,7 @@ import {
   secretSet,
 } from "../secrets.js";
 import type { AccountState, Pin } from "./policy.js";
-import type { PendingLogin, PoolCredential, PoolLimits } from "./types.js";
+import type { LimitWindow, PendingLogin, PoolCredential, PoolLimits } from "./types.js";
 
 export interface PoolAccount {
   /** The pool's short id for the account (eight hex digits of its uuid, short-id.ts). */
@@ -62,6 +62,37 @@ export interface PoolStateAccount {
   error?: string;
   limits?: PoolLimits;
   limits_at?: number;
+  shown?: LimitWindow[];
+  usage_at?: number;
+  names?: Record<string, string>;
+}
+
+const WINDOW_ID = /^[a-z0-9_]{1,64}$/;
+/** A stored time as the wire spells one: a date alone ("2026-12-01") parses and is
+ *  written back in full; one past the year 9999 (`+010000-…`) is no time. */
+function wireTime(v: unknown): string | undefined {
+  const t = typeof v === "string" ? Date.parse(v) : Number.NaN;
+  if (!Number.isFinite(t)) return undefined;
+  const iso = new Date(t).toISOString();
+  return /^\d{4}-/.test(iso) ? iso : undefined;
+}
+/** The windows of a state file that are windows (the wire's shape), eight at most: they
+ *  go out in events and hellos as they are read. */
+function windowsIn(v: unknown[]): LimitWindow[] {
+  const out: LimitWindow[] = [];
+  for (const w of v as Partial<Record<keyof LimitWindow, unknown>>[]) {
+    if (!w || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || out.some((x) => x.id === w.id)) continue;
+    if (typeof w.used_percent !== "number" || !Number.isFinite(w.used_percent) || w.used_percent < 0) continue;
+    out.push({
+      id: w.id,
+      used_percent: w.used_percent,
+      ...(wireTime(w.resets_at) ? { resets_at: wireTime(w.resets_at) as string } : {}),
+      ...(Number.isInteger(w.window_minutes) && (w.window_minutes as number) > 0
+        ? { window_minutes: w.window_minutes as number }
+        : {}),
+    });
+  }
+  return out.slice(0, 8);
 }
 
 export interface PoolState {
@@ -151,6 +182,17 @@ export function readPoolState(env: NodeJS.ProcessEnv = process.env): PoolState {
         o.limits = { windows: a.limits.windows, ...(a.limits.status !== undefined ? { status: a.limits.status } : {}) };
         if (typeof a.limits_at === "number") o.limits_at = a.limits_at;
       }
+      // A file written before these two has neither: its account shows `limits` until
+      // its first poll, which, with no `usage_at`, comes at once.
+      const shown = Array.isArray(a.shown) ? windowsIn(a.shown) : [];
+      if (shown.length) {
+        o.shown = shown;
+        if (typeof a.usage_at === "number") o.usage_at = a.usage_at;
+        const names = Object.entries(a.names && typeof a.names === "object" ? a.names : {}).filter(
+          ([k, v]) => WINDOW_ID.test(k) && typeof v === "string" && v.length <= 64,
+        );
+        if (names.length) o.names = Object.fromEntries(names);
+      }
       st.accounts[id] = o;
     }
   const p = j.pending as PoolState["pending"] | undefined;
@@ -177,7 +219,8 @@ export function policyAccounts(cfg: PoolConfig, st: PoolState): AccountState[] {
 /** Write the policy's accounts back into the state (the config keeps `enabled`). */
 export function keepStanding(st: PoolState, accounts: AccountState[]): void {
   st.accounts = {};
-  for (const { id, enabled: _e, ...rest } of accounts) st.accounts[id] = rest;
+  // `heard` is the running process's own (policy `see`): never written down.
+  for (const { id, enabled: _e, heard: _h, ...rest } of accounts) st.accounts[id] = rest;
 }
 
 export const TOKEN_NAME = "pool:token";

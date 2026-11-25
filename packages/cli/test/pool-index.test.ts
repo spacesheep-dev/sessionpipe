@@ -127,7 +127,9 @@ describe("adding accounts", () => {
     expect(adapter.calls.usage).toBe(1);
     expect(limits).toEqual([{ uuid: uuidOf("one"), session: null, limits: usage(12) }]);
     expect(readPoolState(env).pending).toBeUndefined();
-    expect(readPoolState(env).accounts).toEqual({ [a.id]: { limits: usage(12), limits_at: T0 } });
+    expect(readPoolState(env).accounts).toEqual({
+      [a.id]: { limits: usage(12), limits_at: T0, shown: usage(12).windows, usage_at: T0 },
+    });
     expect(changes).toBe(1);
     expect(pool.status().accounts[0]).toMatchObject({
       ...a,
@@ -768,6 +770,106 @@ describe("the listener", () => {
     } finally {
       await up.close();
     }
+  });
+  it("an account in steady use is asked for its usage on its own clock, and each event carries every window it shows", {
+    timeout: 15_000,
+  }, async () => {
+    const up = await upstream((_req, res) => {
+      res.writeHead(200, {
+        "anthropic-ratelimit-unified-5h-utilization": "0.25",
+        "anthropic-ratelimit-unified-7d-utilization": "0.4",
+        "anthropic-ratelimit-unified-status": "allowed",
+      });
+      res.end("{}");
+    });
+    const WEEK = new Date(T0 + 7 * 86_400_000).toISOString();
+    const list = (fable: number): PoolLimits => ({
+      windows: [
+        { id: "five_hour", used_percent: 20 },
+        { id: "seven_day", used_percent: 40 },
+        { id: "seven_day_fable", used_percent: fable, resets_at: WEEK },
+      ],
+    });
+    try {
+      adapter.usage = async () => list(33.5);
+      const pool = open({ upstream: up.url, pollMs: 25 });
+      const one = await signIn(pool, "one");
+      await pool.setOn(true);
+      const { port } = await pool.start();
+      const token = JSON.parse(readFileSync(poolSecretsFile(env), "utf8"))["pool:token"];
+      const ask = (n: number) =>
+        fetch(`http://127.0.0.1:${port}/v1/messages`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: body(`aaaaaaaa-0000-4000-8000-00000000000${n}`),
+        });
+      expect((await ask(1)).status).toBe(200);
+      // The response carries two windows; the event carries the three the account shows.
+      expect(limits.at(-1)?.limits.windows).toEqual([
+        { id: "five_hour", used_percent: 25 },
+        { id: "seven_day", used_percent: 40 },
+        { id: "seven_day_fable", used_percent: 33.5, resets_at: WEEK },
+      ]);
+      const events = limits.length;
+      await ask(2);
+      expect(limits.length).toBe(events);
+      // Busy: its numbers are 5 ms old when the poll's clock comes round. It is asked
+      // anyway; room stays judged on its responses.
+      const calls = adapter.calls.usage;
+      now = T0 + 20;
+      await ask(3);
+      adapter.usage = async () => list(50);
+      now = T0 + 25;
+      await vi.waitFor(() => expect(adapter.calls.usage).toBe(calls + 1), 5000);
+      await new Promise((r) => setTimeout(r, 40));
+      expect(adapter.calls.usage).toBe(calls + 1);
+      expect(pool.status().accounts[0]?.limits?.windows).toEqual([
+        { id: "five_hour", used_percent: 25 },
+        { id: "seven_day", used_percent: 40 },
+      ]);
+      expect(readPoolState(env).accounts[one.id]).toMatchObject({ usage_at: T0 + 25, limits_at: T0 + 20 });
+      expect(pool.helloPool().accounts[0]?.windows?.map((w) => w.used_percent)).toEqual([20, 40, 50]);
+      await ask(4);
+      expect(limits.at(-1)?.limits.windows.map((w) => w.used_percent)).toEqual([25, 40, 50]);
+      // The poll said 20 where the responses say 25: one line in the log, the pool's short
+      // id and the numbers, and no more than once an hour for that window.
+      const line = `${one.id}: five_hour is 25% in its responses and 20% in its usage answer`;
+      expect(logs.filter((l) => l === line)).toHaveLength(1);
+      now = T0 + 50;
+      await vi.waitFor(() => expect(adapter.calls.usage).toBe(calls + 2), 5000);
+      expect(logs.filter((l) => l === line)).toHaveLength(1);
+      expect(logs.join("\n")).not.toMatch(/one@x\.y/);
+      // A poll that fails is asked again on the next tick, and what was shown stays.
+      adapter.usage = async () => {
+        throw new Error("usage 500");
+      };
+      now = T0 + 75;
+      await vi.waitFor(() => expect(adapter.calls.usage).toBeGreaterThan(calls + 3), 5000);
+      expect(readPoolState(env).accounts[one.id]).toMatchObject({ usage_at: T0 + 50 });
+      expect(pool.helloPool().accounts[0]?.windows?.map((w) => w.id)).toContain("seven_day_fable");
+      await pool.stop();
+    } finally {
+      await up.close();
+    }
+  });
+  it("a state file from before the poll's own clock: its account is polled at once and shown, not judged", async () => {
+    const pool = open();
+    const one = await signIn(pool, "one");
+    await pool.setOn(true);
+    await pool.stop();
+    writeFileSync(
+      poolStateFile(env),
+      JSON.stringify({ pins: {}, accounts: { [one.id]: { limits: usage(7), limits_at: T0 } } }),
+    );
+    expect(open().helloPool().accounts[0]?.windows).toEqual(usage(7).windows);
+    adapter.usage = async () => ({ windows: [...usage(9).windows, { id: "seven_day_fable", used_percent: 3 }] });
+    const n = adapter.calls.usage;
+    const p2 = open({ pollMs: 25 });
+    await p2.start();
+    await vi.waitFor(() => expect(adapter.calls.usage).toBe(n + 1), 5000);
+    expect(p2.status().accounts[0]?.limits).toEqual(usage(7));
+    expect(p2.helloPool().accounts[0]?.windows?.map((w) => w.id)).toEqual(["five_hour", "seven_day_fable"]);
+    await p2.stop();
   });
   it("F1: a second daemon on the same pool.json stands down when a pool already answers on the port", async () => {
     const pool = open();

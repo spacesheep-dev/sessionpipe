@@ -23,7 +23,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import { retryAfterMs } from "../http-sink.js";
 import type { Credentials } from "./credentials.js";
-import { type AccountState, choose, observe, type PolicyState, pin, roomAt, withRoom } from "./policy.js";
+import { type AccountState, choose, fromResponse, observe, type PolicyState, pin, roomAt, withRoom } from "./policy.js";
 import type { PoolAdapter, PoolLimits } from "./types.js";
 
 export const BODY_CAP = 32 * 1024 * 1024;
@@ -81,7 +81,8 @@ export interface PoolServerDeps {
   credentials: Credentials;
   /** The state changed (a pin, a hold, fresh numbers): write it down. */
   persist: () => void;
-  /** An account's windows changed on a request: the daemon's `limits.observed`.
+  /** An account's windows changed on a request: the daemon's `limits.observed`, with
+   *  every window the account shows (policy `see`), not only the response's.
    *  `accountId` is the pool's id; the façade maps it to the account uuid. */
   onLimits: (accountId: string, session: string | null, limits: PoolLimits) => void;
   /** An account's standing changed (held, in error): the daemon sends a hello. */
@@ -428,8 +429,11 @@ export function startPoolServer(deps: PoolServerDeps): Promise<PoolServer> {
       const now = deps.now();
       const limits = deps.adapter.readLimits(up.headers, now);
       // Only windows make a `limits.observed` (the schema wants one); a status alone
-      // still changes the account's standing.
-      if (limits && observe(deps.state, a.id, limits, now)) deps.onLimits(a.id, session ?? null, limits);
+      // still changes the account's standing. The event carries every window the account
+      // shows, not just this response's: each one is the whole set, and a receiver
+      // replaces what it had with it (PROTOCOL.md).
+      const shown = limits && fromResponse(deps.state, a.id, limits, now);
+      if (limits && shown) deps.onLimits(a.id, session ?? null, { ...limits, windows: shown });
       const status = up.status;
       const rejected = status === 429 || limits?.status === "rejected";
       let moveOn = false;
