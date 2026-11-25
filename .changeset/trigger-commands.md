@@ -11,7 +11,8 @@
 - Every command that changes a rule refuses inside a coding session. Characters that don't show are written out wherever a rule is shown.
 - A rule that continues a session takes that session's folder: `add` shows it on the folder line and refuses another `--folder`.
 - When the rules change in another terminal while you read a rule before typing `yes`, nothing is written: "The rules changed while you were reading. Nothing was written. Run the command again."
-- `sessionpipe trigger line <name>` prints the one `sessionpipe trigger add …` command that makes the rule again, on a line of its own (`| pbcopy` takes it whole), to make the same rule on another computer: the flags in one fixed order, a value quoted only when it must be. `--json` prints it with its words.
-- Two commands never write the rules over each other: a command that changes them takes a lock, and another command meanwhile says "Another sessionpipe command is changing the rules. Run it again."
+- `sessionpipe trigger line <name>` prints the one `sessionpipe trigger add …` command that makes the rule again, exactly as it is at a terminal of any width or in a pipe (`| pbcopy` takes it whole), to make the same rule on another computer: the flags in one fixed order, a value quoted for sh, bash and zsh only when it must be, and a value that starts with `-` written `--flag=<value>`, which `trigger add` now takes for every option. It runs `add`'s checks, so a rule `add` would refuse here is refused with why. `--json` prints it with its words.
+- Two commands never write the rules over each other: a command that changes them takes a lock, and another command meanwhile says "Another sessionpipe command is changing the rules. Run it again." A lock left by a command that ended is let go of at once.
+- `trigger list` says a run dropped because its rule was paused or changed; `--json` says why a rules file can't be read. A terminal too narrow to show a rule whole asks nothing and says to widen it.
 - `sessionpipe ask off` and `sessionpipe control off` keep the background service while triggers are on.
 - `sessionpipe-core` exports the machine's own files' schemas (`CONFIG_SCHEMAS`).

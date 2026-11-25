@@ -7,6 +7,7 @@
 // and the sessions on this computer are stand-ins (TriggerDeps); the rules file and the daemon's
 // record are real files under the test's own home.
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -18,7 +19,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isStart, type TriggerRule } from "@sessionpipe/core";
+import { isStart, shellWord, type TriggerRule, triggerLine } from "@sessionpipe/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { readRules, triggerStateFile, triggersFile, writeRules } from "../src/control/rules-file.js";
 import { controlState, readControl, writeControl, writePrivate } from "../src/control/store.js";
@@ -30,12 +31,10 @@ import {
   hostOf,
   levelHere,
   levelMeans,
-  lineArgv,
   printJson,
   readRecord,
   sessionFolder,
   sessionThere,
-  shellWord,
   type TriggerDeps,
   triggerMain,
 } from "../src/triggers.js";
@@ -1141,10 +1140,10 @@ describe("trigger line", () => {
     if (word) out.push(cur);
     return out;
   }
-  const lineFor = async (name: string): Promise<string> => {
+  const lineFor = async (name: string, over: Partial<TriggerDeps> = {}): Promise<string> => {
     printed = [];
     lines = [];
-    await run(["trigger", "line", name]);
+    await run(["trigger", "line", name], over);
     expect(lines).toEqual([]);
     expect(printed).toHaveLength(1);
     return printed[0] as string;
@@ -1153,7 +1152,7 @@ describe("trigger line", () => {
    *  `add` writes is the rule, unpaused. */
   const roundTrip = async (rule: TriggerRule, over: Partial<TriggerDeps> = {}) => {
     writeRules({ v: 1, on: true, rules: [rule] });
-    const line = await lineFor(rule.name);
+    const line = await lineFor(rule.name, over);
     expect(line.includes("\u001b") || line.endsWith(" "), rule.name).toBe(false);
     if (!rule.words.includes("\n")) expect(line).not.toContain("\n");
     const argv = shSplit(line);
@@ -1271,7 +1270,7 @@ describe("trigger line", () => {
     expect(shellWord("a b")).toBe("'a b'");
     expect(shellWord("it's")).toBe("'it'\\''s'");
     expect(shellWord("~/w")).toBe("'~/w'");
-    expect(lineArgv({ ...clock, when: { state: [] }, tools: [] })).not.toContain("--when");
+    expect(triggerLine({ ...clock, when: { state: [] }, tools: [] })).not.toContain("--when");
   });
 });
 
@@ -1363,7 +1362,7 @@ describe("the rules' lock", () => {
     const old = new Date(Date.now() - 60_000);
     utimesSync(lock(), old, old);
     await run(["trigger", "pause", "monday-report"]);
-    expect(text()).toMatch(/A lock on the rules 6\d s old, left by a command that ended, was broken\./);
+    expect(text()).toMatch(/A lock on the rules left by a command that ended \(6\d s old\) was broken\./);
     expect(readRules()).toMatchObject({ file: { rules: [{ paused: true }] } });
     expect(existsSync(lock())).toBe(false);
     // Let go of when nothing is written, too.
@@ -1375,5 +1374,152 @@ describe("the rules' lock", () => {
     });
     expect(text()).toContain("The rules changed while you were reading.");
     expect(existsSync(lock())).toBe(false);
+  });
+});
+
+describe("what the final review found", () => {
+  const lock = () => `${triggersFile()}.lock`;
+  it("the lock: one whose command has ended is broken at once; a link, a future time too; a folder is said", async () => {
+    writeRules({ v: 1, on: true, rules: [clock] });
+    // A fresh lock whose process has ended: no 30 s wait.
+    writeFileSync(lock(), "999999 gone\n");
+    await run(["trigger", "pause", "monday-report"]);
+    expect(text()).toContain("A lock on the rules left by a command that ended (its command has ended) was broken.");
+    expect(existsSync(lock())).toBe(false);
+    // A link that leads nowhere is no lock.
+    symlinkSync(path.join(path.dirname(lock()), "nowhere"), lock());
+    lines = [];
+    await run(["trigger", "remove", "monday-report"]);
+    expect(text()).toContain("(not a file) was broken.");
+    // A lock from the future (a clock set back) is broken.
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writeFileSync(lock(), `${process.pid} other\n`);
+    const ahead = new Date(Date.now() + 3600_000);
+    utimesSync(lock(), ahead, ahead);
+    lines = [];
+    await run(["triggers", "off"]);
+    expect(text()).toContain("(its time is in the future) was broken.");
+    // A folder it may not write in is said as the disk says it (a test run as root writes there).
+    chmodSync(path.dirname(lock()), 0o500);
+    let threw: unknown = null;
+    try {
+      await run(["trigger", "pause", "monday-report"]);
+    } catch (e) {
+      threw = e;
+    } finally {
+      chmodSync(path.dirname(lock()), 0o700);
+    }
+    if (threw) expect(threw).not.toBeInstanceOf(Refusal);
+    // A folder there is said, with what to do, and nothing is written.
+    mkdirSync(lock());
+    const r = await refusal(run(["triggers", "on"]));
+    expect(r.message).toMatch(/triggers\.json\.lock is a folder where the rules' lock goes/);
+    expect(r.next).toMatch(/^rmdir /);
+    rmSync(lock(), { recursive: true });
+  });
+
+  it("trigger line runs add's checks: a rule add would refuse here is refused, with why", async () => {
+    const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
+    writeRules({ v: 1, on: true, rules: [card, clock] });
+    // The receiver unpaired since.
+    writeControl({ ...c, receivers: [] });
+    expect((await refusal(run(["trigger", "line", "card-todo"]))).message).toMatch(/isn't paired with board\.example/);
+    // The folder no longer allowed.
+    writeControl({ ...c, folders: [] });
+    expect((await refusal(run(["trigger", "line", "monday-report"]))).message).toMatch(
+      /isn't a folder this computer lets sessions run in/,
+    );
+    // No harness here takes a level so narrow.
+    writeControl(c);
+    expect(
+      (await refusal(run(["trigger", "line", "monday-report"], { harnesses: () => ["claude-code"] }))).message,
+    ).toMatch(/Codex can't run headlessly on this computer/);
+    daemon = { start: { codex: { permissions: ["auto"] } } };
+    expect((await refusal(run(["trigger", "line", "monday-report"]))).message).toMatch(
+      /takes no level as narrow as safe on this computer, so `trigger add` would refuse this rule here/,
+    );
+  });
+
+  it("a rule written by hand in a spelling add would not write is printed as add writes it, and said", async () => {
+    const notes: string[] = [];
+    writeRules({
+      v: 1,
+      on: true,
+      rules: [
+        { ...card, source: { ...card.source, receiver: "board.example:443" }, folder: path.join(home, "work", "acme") },
+      ],
+    });
+    printed = [];
+    await triggerMain(
+      ["trigger", "line", "card-todo"],
+      { ui: PLAIN, say: (l = "") => lines.push(l), print: (l) => printed.push(l), note: (l) => notes.push(l) },
+      deps(),
+    );
+    expect(printed[0]).toContain("--on board.example --topic");
+    expect(printed[0]).toContain("--folder '~/work/acme'");
+    expect(notes).toEqual([
+      "The rules file writes source, folder in a spelling `trigger add` doesn't; the line has it as `trigger add` writes it, which is the same rule.",
+    ]);
+    // Written as add writes it: nothing is said.
+    writeRules({ v: 1, on: true, rules: [card] });
+    notes.length = 0;
+    await triggerMain(
+      ["trigger", "line", "card-todo"],
+      { ui: PLAIN, say: () => {}, print: () => {}, note: (l) => notes.push(l) },
+      deps(),
+    );
+    expect(notes).toEqual([]);
+  });
+
+  it("every case of trigger-line.json is the line here, and add reads it back as the rule", async () => {
+    const fx = JSON.parse(
+      readFileSync(path.resolve(import.meta.dirname, "../../../conformance/triggers/trigger-line.json"), "utf8"),
+    ) as { cases: { name: string; rule: TriggerRule; line: string; argv: string[] }[] };
+    const c = readControl() as NonNullable<ReturnType<typeof readControl>>;
+    writeControl({ ...c, mode: "auto" });
+    mkdirSync(path.join(home, "work", "sales"), { recursive: true });
+    let n = 0;
+    for (const x of fx.cases.filter((y) => y.rule.folder.startsWith("~/work/"))) {
+      const over: Partial<TriggerDeps> = isStart(x.rule.target)
+        ? {}
+        : { sessionThere: () => true, sessionFolder: () => path.join(home, x.rule.folder.slice(2)) };
+      writeRules({ v: 1, on: true, rules: [x.rule] });
+      printed = [];
+      await run(["trigger", "line", x.rule.name], over);
+      expect(printed, x.name).toEqual([x.line]);
+      writeRules({ v: 1, on: true, rules: [] });
+      typed = "yes";
+      await run(x.argv, over);
+      const back = readRules();
+      expect(back.state === "ok" && back.file.rules[0], x.name).toEqual({ ...x.rule, paused: false });
+      n++;
+    }
+    expect(n).toBeGreaterThan(8);
+  });
+
+  it("list --json says why a rules file can't be read; a dropped run is said as dropped", async () => {
+    writeFileSync(triggersFile(), "{");
+    printed = [];
+    await run(["trigger", "list", "--json"]);
+    expect(JSON.parse(printed.join("\n"))).toEqual({ problem: "$: not JSON", on: false, rules: [] });
+    writeRules({ v: 1, on: true, rules: [clock] });
+    writePrivate(triggerStateFile(), {
+      v: 1,
+      rules: { "monday-report": { history: [{ at: "2026-11-24T09:00:00.000Z", result: "dropped" }] } },
+      waiting: [],
+    });
+    lines = [];
+    await run(["trigger", "list"]);
+    expect(text()).toContain("09:00  dropped: the rule was paused or changed before its run began");
+  });
+
+  it("a terminal under 43 columns shows no rule to confirm: it says to widen it", async () => {
+    const r = await refusal(run(ADD, {}, makeUi({ isTTY: true, columns: 42, env: {} })));
+    expect(r.message).toBe(
+      "this terminal is too narrow to show a rule as you confirm it: widen it to at least 43 columns and run the command again",
+    );
+    expect(readRules()).toEqual({ state: "none" });
+    await run(ADD, {}, makeUi({ isTTY: true, columns: 43, env: {} }));
+    expect(readRules()).toMatchObject({ state: "ok" });
   });
 });

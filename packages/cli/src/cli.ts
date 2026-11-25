@@ -167,6 +167,8 @@ let typed: string[] = [];
 let out: (s?: string) => void = print;
 /** Lines already set for this run's terminal (report.ts, usage.ts): written as they are. */
 let say: (s?: string) => void = print;
+/** A line for the person on stderr, beside what a command writes for a program on stdout. */
+let note: (s: string) => void = print;
 let state = "";
 /** How this run's output looks: a terminal's colour and width, or a pipe's whole lines. */
 let ui: Ui = PLAIN;
@@ -207,6 +209,8 @@ const FOR_PROGRAMS = ["tail", "wait", "channel", "worker", "hook", "version", "-
 function forPeople(a: readonly string[], tty: boolean): boolean {
   if (a.includes("--help") || a.includes("-h")) return true;
   if (a.includes("--json") || FOR_PROGRAMS.includes(a[0] as string)) return false;
+  // `trigger line` is a command a program reads back: its bytes as they are, at any width.
+  if (a[0] === "trigger" && a[1] === "line") return false;
   // The daemon's log, and its status where a script reads it (a pipe gets JSON).
   if (a[0] === "control") return a[1] !== "run" && (a[1] !== "status" || tty);
   // `ask <agent> "<task>"` prints the agent's answer.
@@ -227,6 +231,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<void> 
   const write = (s = ""): void => io.out(clean(s, { breaks: true, colour: true }));
   out = people ? (s = "") => write(paint(ui, s)) : io.out;
   say = write;
+  note = (s) => io.err(`${clean(s)}\n`);
   state = stateDir();
   try {
     await command(args[0] ?? "help");
@@ -357,7 +362,7 @@ async function command(cmd: string): Promise<void> {
     }
     case "triggers":
     case "trigger":
-      return triggerMain(args, { ui, say, print: out }, defaultTriggerDeps(distDir));
+      return triggerMain(args, { ui, say, print: out, note }, defaultTriggerDeps(distDir));
     case "channel":
       return channelMain(args, channelIo);
     case "hook":
