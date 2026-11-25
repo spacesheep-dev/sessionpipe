@@ -81,6 +81,8 @@ interface Step {
   headless_ended?: number;
   resume?: string;
   permission?: unknown;
+  /** The sessions as they are now: each named one replaced, `null` for one that is gone. */
+  sessions?: Record<string, { level: StartPermission; held: boolean; folder?: string } | null>;
   expect: {
     acks?: Ack[];
     runs?: Run[];
@@ -121,6 +123,7 @@ const STEP_KINDS = [
   "headless_ended",
   "run_ended",
   "permission",
+  "sessions",
 ];
 const EXPECT_KEYS = new Set([
   "acks",
@@ -152,12 +155,27 @@ const sent = (a: Ack) => ({
   ...(a.session ? { session: a.session.replace(/:\*$/, ":8c132906-8c3f-4814-870a-afc3d05e1d2e") } : {}),
 });
 
-/** What decides what a run of a rule does (§14.7, *Paused, removed or changed*), in one spelling. */
-const runShape = (r: TriggerRule): string =>
-  JSON.stringify(
-    [r.source, r.when ?? {}, r.subject ?? null, r.target, r.folder, r.level, r.tools ?? [], r.words],
+/** A folder as §14.7 compares it: `~` expanded against the home, no trailing `/`. */
+const folderKey = (f: string, home: string): string => {
+  const abs = f === "~" ? home : f.startsWith("~/") ? `${home}${f.slice(1)}` : f;
+  return abs.length > 1 ? abs.replace(/\/+$/, "") : abs;
+};
+
+/** What decides what a run of a rule does (§14.7, *Paused, removed or changed*), the same values
+ *  written another way read the same: `when`'s lists and the tools as sets, the folder after `~`. */
+const runShape = (r: TriggerRule, home: string): string => {
+  const set = (xs: string[] | undefined) => [...new Set(xs ?? [])].sort();
+  const when = Object.fromEntries(
+    Object.entries(r.when ?? {})
+      .filter(([, v]) => (v as string[]).length)
+      .map(([k, v]) => [k, set(v as string[])])
+      .sort(),
+  );
+  return JSON.stringify(
+    [r.source, when, r.subject ?? null, r.target, folderKey(r.folder, home), r.level, set(r.tools), r.words],
     (_k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v),
   );
+};
 
 /** The latest tick of a clock rule after `from` and at most `to` (UTC), or null. */
 function latestTick(every: string, from: number, to: number, last?: number): number | null {
@@ -202,9 +220,10 @@ function runCase(c: Case) {
   let headless = c.starts?.headless ?? 0;
   const slots = c.limits?.headless ?? 3;
   const lastTick = new Map(Object.entries(c.last_tick ?? {}).map(([k, v]) => [k, Date.parse(v)]));
-  // A clock rule with no last tick was first seen at the case's first step: an interval counts
-  // from there (§14.6).
-  const firstSeen = Date.parse(c.steps[0]?.at ?? AT);
+  // When the machine first saw each clock rule (or its resume, or a new `every`): an interval with
+  // no last tick counts from there (§14.6). The rules the case starts with, at its first step.
+  const seenAt = new Map((file?.rules ?? []).map((r) => [r.name, Date.parse(c.steps[0]?.at ?? AT)]));
+  const home = machine.places.home;
   const machinePaused = new Set<string>();
   type Waiting = {
     key: string;
@@ -221,7 +240,13 @@ function runCase(c: Case) {
 
   const harnessOf = (r: TriggerRule) => (isStart(r.target) ? r.target.start : r.target.continue.split(":")[0]!);
   const ref = (r: TriggerRule) => (isStart(r.target) ? null : r.target.continue);
-  const allowed = (f: string) => machine.folders.some((a) => f === a || f.startsWith(`${a}/`));
+  const allowed = (f: string) => {
+    const fk = folderKey(f, home);
+    return machine.folders.some((a) => {
+      const ak = folderKey(a, home);
+      return fk === ak || fk.startsWith(`${ak}/`);
+    });
+  };
   const free = (now: number) => running < concurrent && startTimes.filter((t) => now - t < H).length < 10;
   /** What a run waits for, or null when it may begin: its own rule's earlier run (one at a time,
    *  in the order they were taken), a window, the start caps or (continuing) a headless slot. */
@@ -229,7 +254,7 @@ function runCase(c: Case) {
     const ahead = waiting.findIndex((x) => x.rule.name === w.rule.name);
     if ([...stillRunning].some((i) => triggered[i]!.name === w.rule.name)) return "busy";
     if (ahead >= 0 && waiting[ahead]!.key !== w.key) return "busy";
-    if (ref(w.rule) !== null && sessions[ref(w.rule)!]!.held) return "held";
+    if (ref(w.rule) !== null && sessions[ref(w.rule)!]?.held) return "held";
     if (isStart(w.rule.target) ? !free(now) : headless >= slots) return "start_limit";
     return null;
   };
@@ -285,13 +310,23 @@ function runCase(c: Case) {
       if (ref(r) && !sessions[ref(r)!]) {
         machinePaused.add(r.name);
         paused.push(r.name);
+        // The machine's own pause is a pause: the rule's other waiting runs go as a person's pause
+        // takes them (§14.7).
+        for (const w of [...waiting])
+          if (w.rule.name === r.name) {
+            waiting = waiting.filter((x) => x !== w);
+            giveBack(w.key);
+            if (w.id) acks.push({ id: w.id, outcome: "no_match" });
+            history.push({ rule: r.name, result: "dropped", ...of(w.notice) });
+          }
         return "no_session";
       }
-      // Step 11b: a continued session runs in its own folder (§14.1): it is known, the rule's and
-      // allowed, or no run.
+      // Step 12: a continued session runs in its own folder (§14.1): it is known, the rule's (as
+      // real paths: `~` expanded, no trailing `/`) and allowed, or no run.
       if (ref(r)) {
         const there = sessions[ref(r)!]!.folder;
-        if (there === undefined || there !== r.folder || !allowed(there)) return "folder";
+        if (there === undefined || folderKey(there, home) !== folderKey(r.folder, home) || !allowed(r.folder))
+          return "folder";
       }
       return null;
     };
@@ -334,11 +369,24 @@ function runCase(c: Case) {
     drain();
 
     if (s.machine) Object.assign(machine, s.machine);
-    if (s.resume) machinePaused.delete(s.resume);
+    if (s.resume) {
+      machinePaused.delete(s.resume);
+      seenAt.set(s.resume, now);
+      lastTick.delete(s.resume);
+    }
     if (s.change !== undefined) {
       const was = file?.on;
       const old = file;
       file = rulesOf(s.change, machine.places);
+      // A rule new to the machine, resumed, or given a new `every` is seen now (§14.6).
+      for (const r of file?.rules ?? []) {
+        const o = old?.rules.find((x) => x.name === r.name);
+        const every = (x: TriggerRule | undefined) => (x && !isNoticeSource(x.source) ? x.source.every : null);
+        if (!o || (o.paused && !r.paused) || every(o) !== every(r)) {
+          seenAt.set(r.name, now);
+          lastTick.delete(r.name);
+        }
+      }
       // The machine's own pause ends with the rule, or when its target changes.
       for (const name of [...machinePaused]) {
         const a = old?.rules.find((r) => r.name === name);
@@ -360,7 +408,10 @@ function runCase(c: Case) {
         // still is (§14.7).
         for (const w of [...waiting]) {
           const now2 = file.rules.find((r) => r.name === w.rule.name);
-          if (now2 && !now2.paused && runShape(now2) === runShape(w.rule)) continue;
+          if (now2 && !now2.paused && runShape(now2, home) === runShape(w.rule, home)) {
+            w.rule = now2;
+            continue;
+          }
           waiting = waiting.filter((x) => x !== w);
           giveBack(w.key);
           if (w.id) acks.push({ id: w.id, outcome: "no_match" });
@@ -383,6 +434,9 @@ function runCase(c: Case) {
       expect(Object.keys(t).sort()).toEqual(["on", "topics"]);
     }
     if (s.release) sessions[s.release]!.held = false;
+    for (const [k, v] of Object.entries(s.sessions ?? {}))
+      if (v === null) delete sessions[k];
+      else sessions[k] = v;
     if (s.start_ended) running -= s.start_ended;
     drain();
     if (s.permission !== undefined) expect(s.expect.answered_by_machine, where).toBe(false);
@@ -439,7 +493,12 @@ function runCase(c: Case) {
     if (s.wake)
       for (const r of file?.rules ?? []) {
         if (isNoticeSource(r.source)) continue;
-        const t = latestTick(r.source.every, Date.parse(s.asleep!), now, lastTick.get(r.name) ?? firstSeen);
+        const t = latestTick(
+          r.source.every,
+          Date.parse(s.asleep!),
+          now,
+          lastTick.get(r.name) ?? seenAt.get(r.name) ?? now,
+        );
         if (t !== null) ticks.push([r, t]);
       }
     for (const [r, t] of ticks) {

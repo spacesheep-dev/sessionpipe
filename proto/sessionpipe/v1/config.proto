@@ -342,18 +342,31 @@ message TriggerList {
 
 // What one run of a rule is, as the daemon would start it.
 message TriggerRun {
+  option (sessionpipe.v1.strict) = true;
   // A new session of a harness, or an existing one continued.
   TriggerTarget target = 1 [(google.api.field_behavior) = REQUIRED];
   // The folder.
-  string folder = 2 [(google.api.field_behavior) = REQUIRED];
+  string folder = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 1024
+  ];
   // The level: already the narrowest of the rule's, its source's ceiling, the machine's mode and,
   // continuing, the session's recorded level, then the widest the harness takes that is no wider.
   // A run whose level none of those leaves is not a run, and is never described by this message.
   StartPermission level = 3 [(google.api.field_behavior) = REQUIRED];
   // The MCP tools it may use without asking.
-  repeated string tools = 4 [(google.api.field_behavior) = REQUIRED];
+  repeated string tools = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 8,
+    (buf.validate.field).repeated.items.string.pattern = "^mcp__[A-Za-z0-9_-]{1,64}$"
+  ];
   // The words the session is given, framed and with the notice's tokens in backticks.
-  string words = 5 [(google.api.field_behavior) = REQUIRED];
+  string words = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 4600
+  ];
 }
 
 // `sessionpipe trigger line <name> --json`: the one `sessionpipe trigger add` command that makes
@@ -362,10 +375,11 @@ message TriggerLine {
   option (sessionpipe.v1.strict) = true;
   // The command, flags in their fixed order, each value one POSIX shell word (CONTROL.md §14.1,
   // conformance/triggers/trigger-line.json). One line, unless the words hold a line feed, which
-  // stays inside their quotes.
+  // stays inside their quotes. 24 000 covers worst-case POSIX quoting of a maximal rule (4x on
+  // 4 000 apostrophes in words and 1 024 in folder, plus all optional flags).
   string line = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string.max_len = 20000,
+    (buf.validate.field).string.max_len = 24000,
     (buf.validate.field).string.pattern = "^sessionpipe trigger add "
   ];
   // The words the line splits into, from `trigger` on (no `sessionpipe`): at least a clock rule's
@@ -381,6 +395,7 @@ message TriggerLine {
 // `sessionpipe trigger test <name> --json`: what a sample notice, or a tick, would run. It runs
 // nothing and records nothing.
 message TriggerTestAnswer {
+  option (sessionpipe.v1.strict) = true;
   // The rule's name.
   string rule = 1 [
     (google.api.field_behavior) = REQUIRED,

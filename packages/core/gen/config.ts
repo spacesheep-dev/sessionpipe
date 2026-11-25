@@ -236,7 +236,8 @@ export interface TriggerLine {
   /**
    * The command, flags in their fixed order, each value one POSIX shell word (CONTROL.md §14.1,
    * conformance/triggers/trigger-line.json). One line, unless the words hold a line feed, which
-   * stays inside their quotes.
+   * stays inside their quotes. 24 000 covers worst-case POSIX quoting of a maximal rule (4x on
+   * 4 000 apostrophes in words and 1 024 in folder, plus all optional flags).
    */
   line: string;
   /**

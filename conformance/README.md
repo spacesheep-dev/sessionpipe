@@ -166,12 +166,13 @@
     day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour, headless? }`, the
     starts counted against the machine's caps: in progress, and in the sliding hour, the latter
     made at the first step's instant; and the headless turns no trigger made in the machine's
-    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule; a rule with none was first seen at the case's first step, and an interval's first tick is one interval after it), `zone` (the machine's time
+    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule; a rule with none was first seen when it first appeared, or at its resume or new `every`, and an interval's first tick is one interval after it), `zone` (the machine's time
     zone, for the day and the clock).
   Each step has an `at` and at most one of: `poll` (`{ receiver, body }`, a poll answer that
   receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
   person changed it at the machine), `tick` (a clock rule's time came), `wake` with `asleep` (the
   machine slept from `asleep` and woke at `at`), `release` (a window let go of that session),
+  `sessions` (sessions as they are now: each named one replaced, or `null` when gone),
   `start_ended` (that many starts no trigger made ended), `headless_ended` (that many headless
   turns no trigger made ended), `run_ended` (the indexes of triggered runs that ended), `machine` (the machine's settings as the person changed them at its terminal,
   the fields given), `resume` (the person ran `trigger resume` for that rule), `permission` (a

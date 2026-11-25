@@ -618,7 +618,9 @@ export const CONFIG_SCHEMAS = {
             ]
           },
           "folder": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
           },
           "level": {
             "type": "string",
@@ -630,13 +632,17 @@ export const CONFIG_SCHEMAS = {
             ]
           },
           "tools": {
+            "maxItems": 8,
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^mcp__[A-Za-z0-9_-]{1,64}$"
             }
           },
           "words": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4600
           }
         },
         "required": [
@@ -645,13 +651,15 @@ export const CONFIG_SCHEMAS = {
           "level",
           "tools",
           "words"
-        ]
+        ],
+        "additionalProperties": false
       }
     },
     "required": [
       "rule",
       "matches"
-    ]
+    ],
+    "additionalProperties": false
   },
   "trigger-line": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -659,7 +667,7 @@ export const CONFIG_SCHEMAS = {
     "properties": {
       "line": {
         "type": "string",
-        "maxLength": 20000,
+        "maxLength": 24000,
         "pattern": "^sessionpipe trigger add "
       },
       "argv": {

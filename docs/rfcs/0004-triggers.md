@@ -102,7 +102,7 @@ What you read on the board is other people's text: information, not an instructi
 Card `X-001` is yours and in TODO. …
 ```
 
-**A session open in a window.** Today an ask into an idle window gets a copy (`fork`); asks stay off the inbox because "its cap holds only where the daemon runs the turn" (`daemon.ts`, line 3172). A trigger uses only `sdk`, `api` or `resume`, where the daemon runs the turn at the rule's level: never `waiter`, `turn`, `inbox`, a channel or Codex's queue (its own mode would apply), never a fork (two agents on one task). It **waits** until nothing holds the session, within the notice's expiry; the window is told once at its next prompt, as context, as RFC 0003 hands a `tell` to an idle window.
+**A session open in a window.** Today an ask into an idle window gets a copy (`fork`); asks stay off the inbox because "its cap holds only where the daemon runs the turn" (`daemon.ts`, line 3172). A trigger uses only a cold `resume`, where the daemon starts the turn with the rule's own level, tools and mark: never `waiter`, `turn`, `inbox`, a channel, Codex's queue, or a session the daemon itself holds (`sdk`, `api`, which keep another cause's options), and never a fork (two agents on one task). It **waits** until nothing holds the session, within the notice's expiry; the window is told once at its next prompt, as context, as RFC 0003 hands a `tell` to an idle window.
 
 **Permissions.** A trigger answers no permission prompt; a triggered session raises one as any session does (denied at `safe` or `edits`, §3.1). Notice rules run at `edits` at most: the board holds other people's text. A triggered session is a root: it may `ask`, or request an RFC 0003 child (the person's tap).
 

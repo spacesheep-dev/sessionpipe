@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CONFIG_SCHEMAS } from "../gen/config-schemas.js";
+import { problems } from "../src/schema/validate.js";
 import { shellWord, triggerLine } from "../src/triggers/line.js";
+import { columnsOf } from "../src/triggers/text.js";
 import type { TriggerRule } from "../src/types.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -62,5 +65,31 @@ describe("trigger-line.json", () => {
     expect(shSplit("a\\ b")).toEqual(["a b"]);
     expect(() => shSplit("'open")).toThrow("an open quote");
     expect(() => shSplit("=bare")).toThrow("a bare =");
+  });
+  it("maximal rule's line fits TriggerLine schema, and Yijing hexagrams count 2 columns", () => {
+    const maxRule: TriggerRule = {
+      name: "a".repeat(40),
+      paused: false,
+      source: {
+        receiver: `${"a".repeat(240)}.example:443`,
+        topic: `${"a".repeat(36)}/${"b".repeat(43)}`,
+        event: "record.updated",
+      },
+      when: {
+        state: Array.from({ length: 20 }, (_, i) => `s${i}`),
+        for: Array.from({ length: 20 }, (_, i) => `f${i}`),
+        by: Array.from({ length: 20 }, (_, i) => `b${i}`),
+      },
+      subject: "^X-[0-9]{1,6}$",
+      target: { start: "claude-code" },
+      folder: `/${"'".repeat(1023)}`,
+      level: "edits",
+      tools: Array.from({ length: 8 }, (_, i) => `mcp__${"t".repeat(58)}${i}`),
+      cap: { per_day: 50 },
+      words: "'".repeat(4000),
+    };
+    const out = triggerLine(maxRule);
+    expect(problems(CONFIG_SCHEMAS["trigger-line"], out)).toEqual([]);
+    expect(columnsOf("\u4dc0")).toBe(2);
   });
 });
