@@ -1,5 +1,55 @@
 # sessionpipe
 
+## 0.18.5
+
+### Patch Changes
+
+- 4e19f83: A Codex session can ask another agent
+  
+  - Codex runs a session's commands in a sandbox that closes the way to this computer's background service. `sessionpipe ask` from a Codex session then said that no service was running and told the model to have the person run `sessionpipe ask on`, which changed nothing. It now says the command was stopped on its way to the service, and what lets it through.
+  - `sessionpipe ask setup` writes the Codex rule that lets `sessionpipe ask <agent> "<task>"` out of the sandbox, and nothing else: `ask on`, `ask off` and `ask setup` stay the person's, a flag where the agent goes is refused, and a program that is only named `sessionpipe` is not taken for it. The rule is tried on the machine's own Codex first and written only where that Codex reads it as meant; `ask setup --remove` takes it out.
+  - `on`, `off`, `status` and `setup` are commands only as the first word after `ask`: `sessionpipe ask --yes on` and `sessionpipe ask --no-color on` are now usage errors.
+  - The answer as it grows is shown on stderr only to a person at a terminal, never to a session that asks. A harness hands its model the command's two streams as one text, and the model read the answer twice, run together.
+- 8f9d2a3: A Codex session says which account it ran under
+  
+  - A Codex session's events now carry `account_id` where Codex records one: the ChatGPT account the thread was created under and the person in it, as Codex writes them into the session's file. A session on an API key or another provider still has none.
+  - The usage limits a Codex turn leaves are stamped with the account that Codex was signed in to when it started, so a thread picked up again after signing in to another account does not file its numbers under the account that made it.
+  - The background service's hello names the machine's Codex account beside the Claude Code ones, with its email as the label, for a receiver the person paired with. It comes from Codex's own sign-in file: the account, the person's id and the email are used, never the tokens.
+- 56cf3be: A Codex turn that fails is reported as failed
+  
+  - Codex fires neither its Stop hook nor its notify when a turn fails at its model's service (a usage limit, a sign-in that ran out, a server error). Such a turn was reported as started and never as ended, and its prompt was joined to the next turn's in the transcript. Its end is now read from Codex's own session file and reported as `turn.ended` with `reason: error` and Codex's class for the error (`usage_limit_exceeded`, `unauthorized`, ...), never the error's message. In `codex exec` that happens as the session ends; in an open window, at the person's next prompt or when the session is next started.
+  - A turn that failed, and one the person stopped, is a turn of its own in the transcript: the prompt after it is no longer joined to it.
+- fa6f537: A message for a Codex session that is open in a window reaches it
+  
+  - Codex 0.171 locks a session that a window has open, or that its background server still holds for about a minute after the window's last turn, and refuses a second run of it. A message sent to such a session from a paired device failed with Codex's own error, "already has an active writer". It now goes into Codex's own queue for that window (`codex queue`): the window takes it as a turn of its own, at once when it is idle and when its turn ends otherwise, and the answer comes back as for any message delivered in place.
+  - The message counts as delivered only once Codex's session file shows that a turn began for it. If Codex takes it into its queue and no turn begins (the window was closed in that moment, or the process that has the session does not serve the queue), the outcome is `failed` with code `held`: it says the message is in Codex's queue and may run when the session is next used. Nothing more is queued for that session until it has.
+  - That turn runs in the window, under the window's own approval and sandbox settings, as if it were typed there; where only Codex's background server still has the session, it runs there with no window open. A message from `sessionpipe ask` carries limits of its own, which hold only in a turn sessionpipe runs itself, so an ask for a session that is open and idle in Codex is refused with that reason and is not queued.
+  - Where another program's headless `codex exec` is in the middle of a turn in the session, nothing is queued, and the message's outcome says to send it again when that turn is done.
+  - A Stop cannot take a message back out of Codex's queue: from the moment it is handed to Codex, the turn is the window's to stop.
+  - Where Codex has a session's lock file and the `codex` on the daemon's path is 0.171.0 or later, the session is no longer refused for 90 seconds after it was last written to: Codex itself says whether something has it.
+  - In the transcript, a message that was delivered to a Codex session is the person's words, without sessionpipe's frame around them.
+- 18f2f2e: Allow or Deny for a Codex permission prompt says plainly that it is answered in Codex
+  
+  - sessionpipe reports a Codex permission prompt but does not answer it: Codex asks its hooks before it shows its own prompt and waits for them, so a hook that waited for an answer from another device would keep the prompt from the person at the keyboard. An Allow sent for a Codex session used to come back as "no permission prompt open for that id" and a Deny as expired; both now say that a Codex prompt is answered in Codex itself.
+- a7f1be4: A Codex command that fails is reported as failed
+  
+  - Codex tells its hooks what a command printed and never how it exited, so every Codex tool call was reported as `ok`. Codex's own session file says how a finished command exited, a moment after the hook. The worker now looks there before it reports the call's end: a command that exited with anything but 0 is `ok: false` with `error: "exit N"`.
+  - Not covered, and reported as before: a command Codex leaves running in the background, an edit, a tool that is not a command, calls a subagent makes, calls run side by side whose results Codex writes late, and a Codex old enough to name its calls otherwise.
+- 005a41d: A Codex turn is reported as ended once
+  
+  - With sessionpipe's hooks and its notify fallback both installed, as `sessionpipe install` leaves them, Codex says each turn's end twice: by its Stop hook, then by its notify. Both were sent, so a receiver saw every Codex turn end two times, and the second also read the transcript and the limits again. The second of the two is now dropped: nothing is sent for it and nothing is read again. A machine where Codex has not approved the hooks still reports each turn's end, from the notify alone.
+  - A notify of any other kind than a finished turn is not taken for a turn's end.
+- f96e1a2: A message sent to a Codex session that is busy reaches it
+  
+  - A message for a Codex session in the middle of a turn was taken and then failed: the session's Stop never asked for it. Codex's Stop hook now asks the background service as Claude Code's does, and Codex goes on with the message in the same turn. The reply is read from Codex's own session file and sent back.
+  - In the transcript such a message is the person's own turn, in their words, where it used to appear wrapped in Codex's markup. A reason another tool's Stop hook gave Codex is no longer shown as something the person typed.
+  - The answer to a message handed over this way is sent as one turn when it is over, where a slow read could send its first words alone.
+  - When the person stops a Codex turn, a message that was waiting for the turn's end no longer waits for an end that is not coming.
+- c1e2fdd: A copy answers knowing what the session has done since, and the session hears what the copy did
+  
+  - A message the daemon can't hand to a session in place runs in a copy of the session, and every later message went to that same copy for good. A session that kept working after the copy was made (open in the desktop app, say) had its messages answered for days by a copy that knew none of that work. Now, once the session has been written to since a message last ran in its copy, the next message gets a fresh copy of the session as it is. A follow-up while the session hasn't moved still goes to the same copy.
+  - Nothing a copy does shows in the session's own conversation, so the session went on working beside edits it never saw. What each copy was asked and answered is now kept, and the session gets it as context with its next prompt (Claude Code's `UserPromptSubmit` hook), once.
+
 ## 0.18.4
 
 ### Patch Changes
