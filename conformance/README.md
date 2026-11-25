@@ -149,9 +149,11 @@
 - `triggers/*.json` — the person's trigger rules, the notices a receiver sends, their acks, the
   hello's topics and the clock (spec/CONTROL.md §14). A scenario file is `{ spec, note, cases }`;
   a case is `{ name, machine, triggers, steps }` and what the machine knew before it:
-  - `machine`: `{ mode, folders, harnesses, receivers }`, the machine's mode (`safe`, `auto`,
-    `inherit`), its allowed folders, the harnesses it runs headlessly and the receivers it is
-    paired with (by host);
+  - `machine`: `{ mode, folders, harnesses, receivers, places, levels? }`, the machine's mode
+    (`safe`, `auto`, `inherit`), its allowed folders, the harnesses it runs headlessly, the
+    receivers it is paired with (by host), `places` (`{ home, config, state }`, the folders a
+    rule's folder may not be, hold or lie in) and, where a case needs it, `levels` (per harness,
+    the levels it takes here, as a hello's `start.<harness>.permissions`);
   - `triggers`: `<config>/triggers.json` exactly (`null`: no file). `triggers_ok: false` marks a
     file the machine must refuse whole, and so read as triggers off;
   - optional: `sessions` (`{ "<harness>:<id>": { level, held } }`, the sessions a rule continues,
@@ -164,17 +166,26 @@
   receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
   person changed it at the machine), `tick` (a clock rule's time came), `wake` with `asleep` (the
   machine slept from `asleep` and woke at `at`), `release` (a window let go of that session),
-  `start_ended` (that many of the machine's starts ended), `permission` (a triggered run raised a
-  prompt); a step with none is time passing to `at`. Its `expect` holds what must follow: `acks`
+  `start_ended` (that many of the machine's starts ended), `machine` (the machine's settings as
+  the person changed them at its terminal, the fields given), `permission` (a triggered run
+  raised a prompt); a step with none is time passing to `at`. Within a step, waiting runs whose
+  deadline passed are acked first, then what the step does. Its `expect` holds what must follow: `acks`
   (`{ id, outcome, code?, session? }`, the machine's clock aside; `"<harness>:*"` is a session the
   run made), `runs` (`{ rule, run, env }`, `run` being `config.proto`'s `TriggerRun` and `env` what
   the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
-  `history` (lines a rule's history gains), and `unacked`, `cancelled`, `paused`, `message_acks`,
-  `answered_by_machine` where a case says them. `rules-file.json` (`{ name, file, ok }`) and
-  `subject-patterns.json` (`{ pattern, ok, matches?, misses? }`) are the reader's alone. Run by
-  `packages/core/test/trigger-fixtures.test.ts` for every part the pure functions decide (which
-  file is read, a broken, expired or unmatched notice, triggers off, the run a match makes, the
-  hello's topics, every ack's shape); the daemon's tests run the same files for the rest.
+  `history` (`{ rule, result, code? }`, lines a rule's history gains; `result` is `ran`,
+  `refused`, `failed` or `missed`), and `unacked` (ids past the fiftieth), `cancelled` (the
+  indexes, in the case's order, of the triggered runs a `triggers off` cancels), `paused` (rules
+  the machine paused), `message_acks` (the poll's messages, which the command path acks) and
+  `answered_by_machine` where a case says them. An absent list means none. `rules-file.json`
+  (`{ places, cases: [{ name, file, ok }] }`) and `subject-patterns.json` (`{ pattern, ok,
+  matches?, misses? }`) are the reader's alone. Run by `packages/core/test/trigger-fixtures.test.ts`
+  against the definition's functions and a small model of CONTROL.md §14.7, which checks every
+  expectation of every step; the daemon's tests run the same files against the daemon. Only a
+  daemon can show: a clock in a time zone other than UTC (every case here is `UTC`), a waiting
+  run that outlives a restart, real paths against the allowlist, the levels a harness's binary
+  takes, a hello and an ack actually sent and retried, and that a permission prompt is left to
+  the harness (`answered_by_machine: false`).
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet

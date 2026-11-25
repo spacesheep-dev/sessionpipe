@@ -1,6 +1,6 @@
 {
   "spec": "CONTROL.md §14.4 (acks), §14.7 step 5",
-  "note": "A machine remembers a notice's id, with the receiver it came from, for 25 hours, and records it before anything runs. The same id again from that receiver is acked `duplicate` and runs nothing again (the receiver may have missed the first ack); the same id from another receiver is another notice.",
+  "note": "A machine remembers a notice's id, with the receiver it came from, for 25 hours, and records it before anything runs. The same id again from that receiver is acked `duplicate`, whatever its first ack was, and runs nothing again; the same id from another receiver is another notice.",
   "cases": [
     {
       "name": "the same notice twice",

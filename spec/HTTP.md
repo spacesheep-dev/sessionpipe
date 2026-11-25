@@ -132,7 +132,9 @@ long-poll per receiver, whatever the number of sessions.
   command. A receiver MUST keep re-delivering a notice until a final ack, a `taken` (which
   pauses it until `expires_at`), or its `expires_at`, and keeps at most the latest per (topic,
   subject), 200 a machine (CONTROL.md §14.4, §14.5). A daemon that predates notices reads
-  `messages` only.
+  `messages` only. A machine reads the notices one by one and never checks a whole poll answer
+  against `control-poll.json`: one bad notice, or a fifty-first, never costs it a message or
+  another notice.
 - A poll is also the machine's heartbeat: a receiver MAY show a machine that polled
   within `2 × wait_max_s` as online, and SHOULD hand a session the waiter (CONTROL.md
   §8) only while its machine is online.
