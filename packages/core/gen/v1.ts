@@ -589,6 +589,12 @@ export interface ControlInfo {
    * A daemon pairs in, or switches to, `inherit` only with receivers that say so.
    */
   inherit?: boolean | undefined;
+  /**
+   * Informational: the receiver sends notices (CONTROL.md §14) on the topics a machine
+   * lists, and takes `POST {control}/notices/ack`. Without it, a machine tells the person
+   * making a rule for this receiver that the receiver sends none.
+   */
+  notices?: boolean | undefined;
 }
 
 /** `GET /.well-known/sessionpipe`: what the receiver takes. */
@@ -656,6 +662,18 @@ export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "u
 
 /** Where a pooled account stands. */
 export type PoolAccountStatus = "ready" | "limited" | "error" | "disabled";
+
+/**
+ * What became of a notice (CONTROL.md §14). `taken` is not final; every other outcome is.
+ * An ack never says which rule took a notice, nor its words, level, folder or filter.
+ */
+export type NoticeOutcome = "taken" | "ran" | "no_match" | "duplicate" | "expired" | "refused" | "failed";
+
+/**
+ * Why a machine refused a notice, or a clock tick of one of its rules (CONTROL.md §14).
+ * Closed: a machine sends no other word, so a receiver can say each one to the person.
+ */
+export type TriggerRefusal = "triggers_off" | "bad_notice" | "cooldown" | "cap" | "folder" | "harness" | "no_session" | "held" | "start_limit" | "missed";
 
 /**
  * A file attached to a `start` (CONTROL.md §3.1). The bytes wait on the receiver
@@ -879,10 +897,54 @@ export interface ControlMessage {
   expires_at: string;
 }
 
-/** `GET {control}`: the messages waiting for the machine. */
+/**
+ * A notice (CONTROL.md §14): a receiver's word that something changed on a topic the
+ * machine listed in its hello. Unsigned, and never a command: it carries no session, no
+ * words, no folder, no level and no tool, only these short typed fields, and a notice that no
+ * rule of the machine takes runs nothing. Strict: a machine refuses a member it doesn't
+ * name (`bad_notice`). Beyond this shape the machine checks what a schema cannot: `at` is
+ * before `expires_at`, at most 24 hours before it and at most 5 minutes ahead of the
+ * machine's clock, and the notice is at most 1 KiB as JSON.
+ */
+export interface ControlNotice {
+  /**
+   * The receiver's id for this notice, a ULID: the ack key, and the key the machine
+   * deduplicates on (with the receiver) for 25 hours.
+   */
+  id: string;
+  /** What it is about, as the machine listed it in its hello (`acme/tasks`). */
+  topic: string;
+  /** What happened, in the receiver's word (`record.updated`). */
+  event: string;
+  /** The thing it happened to, in the receiver's id (`X-001`): a token, never text. */
+  subject: string;
+  /** The subject's state now, in the receiver's word (`todo`). */
+  state?: string | undefined;
+  /** Who the subject is for (an assignee), as the receiver names them: a token. */
+  for?: string | undefined;
+  /** Who made the change, as the receiver names them: a token. */
+  by?: string | undefined;
+  /** The receiver's clock when it made the notice. */
+  at: string;
+  /**
+   * After this the machine MUST NOT run anything for it and acks `expired`; at most 24 h
+   * after `at`.
+   */
+  expires_at: string;
+}
+
+/** `GET {control}`: the messages and notices waiting for the machine. */
 export interface ControlPoll {
   /** The messages, oldest first. */
   messages: ControlMessage[];
+  /**
+   * The notices for the topics the machine listed (CONTROL.md §14), oldest first, at most
+   * 50. Only to a machine whose last hello listed topics for this receiver: a daemon that
+   * predates notices ignores this member. A machine reads each notice on its own, so a
+   * broken one never stops a message or another notice, and leaves any past the 50th for
+   * the next poll.
+   */
+  notices?: ControlNotice[] | undefined;
 }
 
 /**
@@ -929,6 +991,33 @@ export interface Ack {
   seq?: number | undefined;
   /** What a start ran with. */
   applied?: Applied | undefined;
+}
+
+/**
+ * What became of one notice (CONTROL.md §14). Never the rule that took it, nor its words,
+ * level, folder or filter. `session` comes only with `ran`, `code` only with `refused`:
+ * rules the schema cannot say, which a receiver checks.
+ */
+export interface NoticeAck {
+  /** The notice's id. */
+  id: string;
+  /** The outcome. */
+  outcome: NoticeOutcome;
+  /** The machine's clock. */
+  at: string;
+  /**
+   * ran: the session the run began in, `<harness>:<id>`, so the receiver can link the
+   * subject to it.
+   */
+  session?: string | undefined;
+  /** refused: why. */
+  code?: TriggerRefusal | undefined;
+}
+
+/** `POST {control}/notices/ack`: what became of the notices (CONTROL.md §14). */
+export interface ControlNoticeAck {
+  /** One per notice, at most 50. */
+  acks: NoticeAck[];
 }
 
 /** `POST {control}/ack`: what became of the messages. */
@@ -1111,6 +1200,22 @@ export interface ControlHelloPool {
   accounts: PoolAccount[];
 }
 
+/**
+ * The machine's triggers as one receiver needs them (CONTROL.md §14): present in EVERY
+ * hello of a daemon that knows triggers (`on: false`, `topics: []` when they are off), so a
+ * receiver tells "off" from "an old daemon". A receiver learns topics, never a rule's
+ * filter, words, target or level.
+ */
+export interface ControlHelloTriggers {
+  /** Whether triggers are on at this machine. */
+  on: boolean;
+  /**
+   * The topics of this machine's rules (not paused) whose source is THIS receiver: the only
+   * topics it may send notices on. Empty when triggers are off.
+   */
+  topics: string[];
+}
+
 /** Per harness: the options a start may carry (CONTROL.md §2). */
 export interface StartOptions {
   /** The levels it starts at here, already capped by `mode`. */
@@ -1169,4 +1274,10 @@ export interface ControlHello {
   ask?: boolean | undefined;
   /** As in control-pair.json. */
   handoff?: boolean | undefined;
+  /**
+   * The machine's triggers for this receiver: whether they are on, and the topics it may
+   * send notices on (CONTROL.md §14). Sent again the moment a rule or the switch changes.
+   * A hello without it is a daemon that predates triggers: send it no notices.
+   */
+  triggers?: ControlHelloTriggers | undefined;
 }

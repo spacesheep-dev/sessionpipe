@@ -58,6 +58,8 @@ export const SCHEMA_FILES: Readonly<Record<string, string>> = {
   "control-pair-started": "ControlPairStarted",
   "control-paired": "ControlPaired",
   "control-hello": "ControlHello",
+  "control-notice": "ControlNotice",
+  "control-notice-ack": "ControlNoticeAck",
 };
 
 type Schema = Record<string, unknown>;

@@ -1,0 +1,31 @@
+{
+  "name": "kind-trigger",
+  "description": "A trigger.add, signed correctly by a trusted passkey's day key: no command makes a rule, so the kind is unknown.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"trigger.add\",\"session\":\"sessionpipe:triggers\",\"text\":\"Card {subject} is yours and in TODO.\",\"nonce\":\"DLvrnbrfXfVtyBF18u4EEA\",\"iat\":1790800000000}",
+      "csig": "EHtgkfkENDDRUOkuWWPjcRicxl3NytA_rFtUStsD3JfD7J679AXPT4XlWgbb5qRm66NGRKYWfwvXoHLbadABsw",
+      "grant": {
+        "cred": "AFn-sf-e4slqib1a76sSbbC2lOdPQkN5",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiemlETnV4TnlZdDZEbUVQYWNZYk01WUdRWUhqeTh6MDM0YkZrbE5HZWdOOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEQCIBudq1nMmblrZ-XLSeXXQJ9KqKlo6lxazJPHaWpeVd_pAiA1fw3_BrOSS9luEu2kuDaC_cqycmr5riQW8FRaYvjFlQ",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZgSxO88V3nS-YxAuPg6OjzyotKq7JYW8WqCBHb7DXaebXP2kX-lhhtA2LkZ3WASipcRnb6JZd2Cer5oZTo30jg\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "AFn-sf-e4slqib1a76sSbbC2lOdPQkN5",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEQWJglHXQiKSV933uGl7nTTJxGV8lyfRP_BLcR6KrnFs-m14hrIfED76ZNpdaYkrvK5nZKMgp17CVVlQqqpdfmQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "unknown_kind"
+  }
+}

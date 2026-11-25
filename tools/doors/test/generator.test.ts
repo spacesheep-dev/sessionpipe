@@ -143,7 +143,7 @@ describe("the schemas command", () => {
     const error: string[] = [];
     const io = { log: (s: string) => log.push(s), error: (s: string) => error.push(s) };
     expect(run({ root: fake, check: true, ...io })).toBe(1);
-    expect(error.filter((l) => l.endsWith(": missing"))).toHaveLength(19);
+    expect(error.filter((l) => l.endsWith(": missing"))).toHaveLength(21);
     expect(run({ root: fake, check: false, ...io })).toBe(0);
     expect(existsSync(path.join(fake, "packages/core/gen/v1.ts"))).toBe(true);
     expect(readFileSync(path.join(fake, "schemas/v1/event.json"), "utf8")).toBe(
@@ -164,7 +164,7 @@ describe("the schemas command", () => {
     expect(run({ root: fake, check: false, ...io })).toBe(0);
     expect(existsSync(path.join(fake, "schemas/v1/extra.json"))).toBe(false);
     expect(run({ root: fake, check: true, ...io })).toBe(0);
-    expect(log.at(-1)).toMatch(/in sync with proto\/ \(19 files\)/);
+    expect(log.at(-1)).toMatch(/in sync with proto\/ \(21 files\)/);
     // Six runs of the generator over a copied tree: about five seconds on a Windows
     // runner, where the default 5 s limit failed it twice in one day (2026-11-11).
   }, 30_000);
@@ -217,6 +217,6 @@ describe("the schemas command", () => {
   });
   it("schemaFiles names every file under schemas/v1", () => {
     const d = new Descriptors(build({ root }));
-    expect(Object.keys(schemaFiles(d))).toHaveLength(16);
+    expect(Object.keys(schemaFiles(d))).toHaveLength(18);
   });
 });
