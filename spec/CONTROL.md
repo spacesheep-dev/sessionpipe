@@ -2054,8 +2054,9 @@ tools (Claude Code's `--allowedTools`, the Agent SDK's `allowedTools`, as `sessi
   of what a folder holds can widen what later sessions there may do: Claude Code's
   `.claude/settings.json`, `.git/hooks`. A triggered run can write those for the next run of the
   same rule, or for the person's own sessions in that folder. What was measured (RFC 0004 §5.1,
-  step 0): Claude Code counts a folder's **allow rules** only once a person has trusted that
-  folder. What was not measured: whether hooks or MCP servers that an untrusted folder's settings
+  step 0, recorded in `conformance/control-claude-folder-rules.json` on Claude Code 2.1.327 and the
+  Agent SDK 0.3.332): Claude Code counts a folder's **allow rules** only once a person has trusted
+  that folder. What was not measured: whether hooks or MCP servers that an untrusted folder's settings
   name run under `claude -p`. So a person SHOULD give a rule a folder of its own and SHOULD NOT
   trust a folder triggered runs write in; and hooks a run writes into `.git/hooks` run whenever git
   does there, whoever runs git.
