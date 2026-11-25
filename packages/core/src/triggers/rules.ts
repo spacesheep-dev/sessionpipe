@@ -103,6 +103,14 @@ export function expandFolder(folder: string, home: string, platform: NodeJS.Plat
   return folder === "~" ? home : /^~[\\/]/.test(folder) ? P.join(home, folder.slice(2)) : folder;
 }
 
+/** A path segment without the trailing dots and spaces Windows ignores. A loop, not a pattern:
+ *  `/[. ]+$/` tries again from every dot and space of a long run that does not reach the end. */
+function untailed(seg: string): string {
+  let end = seg.length;
+  while (end > 0 && (seg[end - 1] === "." || seg[end - 1] === " ")) end--;
+  return seg.slice(0, end);
+}
+
 /** Why a rule's folder is under the floor (CONTROL.md §14.1, *The folder's floor*), or null. The
  *  floor: not the home folder, nor a folder that holds it; not sessionpipe's config or state
  *  folders, nor inside them, nor holding them; not a harness's own folder, nor inside or holding
@@ -119,11 +127,7 @@ export function folderProblem(folder: string, places: TriggerPlaces): string | n
   // dots and spaces Windows ignores in every segment, and in one case where the disk ignores case.
   const norm = (p: string) => {
     let n = P.resolve(p).normalize("NFC");
-    if (win)
-      n = n
-        .split(P.sep)
-        .map((seg) => seg.replace(/[. ]+$/, ""))
-        .join(P.sep);
+    if (win) n = n.split(P.sep).map(untailed).join(P.sep);
     return fold ? n.toLowerCase() : n;
   };
   const within = (a: string, b: string) => {
