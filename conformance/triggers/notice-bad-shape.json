@@ -1,0 +1,1087 @@
+{
+  "spec": "CONTROL.md §14.2 (the notice)",
+  "note": "Notices that are not the closed shape, one way each: too big, a life over a day or none, from the future beyond the 5 minutes of slack, a null or mistyped member, a member named `__proto__`, a token with a line break at its end, a time without milliseconds. Each is acked `refused` `bad_notice` and runs nothing, where the notice otherwise fits card-todo. At exactly 5 minutes ahead a notice is read (notice-no-rule.json's last case is read at 3 seconds).",
+  "cases": [
+    {
+      "name": "more than 1 KiB",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004C",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004C",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a life over 24 hours",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004D",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.001Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004D",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "expires_at the same as at",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004E",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-24T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004E",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "expires_at before at",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004F",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-24T09:14:01.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004F",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "at more than 5 minutes ahead of the machine's clock",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004G",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:19:05.001Z",
+                  "expires_at": "2026-11-25T09:19:05.001Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004G",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a null member",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004H",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": null,
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004H",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a member of the wrong type",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004J",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": 1,
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004J",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a member named __proto__",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004K",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z",
+                  "__proto__": {
+                    "session": "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e"
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004K",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a token ending in a line feed (ECMA-262: $ is the very end)",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004M",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001\n",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004M",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a token ending in a carriage return",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004N",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude\r",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02.000Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004N",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "a time without milliseconds",
+      "machine": {
+        "mode": "auto",
+        "folders": [
+          "~/work"
+        ],
+        "harnesses": [
+          "claude-code",
+          "codex"
+        ],
+        "receivers": [
+          "board.example",
+          "tasks.example"
+        ],
+        "places": {
+          "home": "/home/sam",
+          "config": "/home/sam/.config/sessionpipe",
+          "state": "/home/sam/.local/state/sessionpipe",
+          "harnesses": [
+            "/home/sam/.claude",
+            "/home/sam/.codex"
+          ],
+          "system": [],
+          "platform": "linux"
+        }
+      },
+      "triggers": {
+        "v": 1,
+        "on": true,
+        "rules": [
+          {
+            "name": "card-todo",
+            "paused": false,
+            "source": {
+              "receiver": "board.example",
+              "topic": "acme/tasks",
+              "event": "record.updated"
+            },
+            "when": {
+              "state": [
+                "todo"
+              ],
+              "for": [
+                "studio-claude"
+              ]
+            },
+            "subject": "^X-[0-9]{1,6}$",
+            "target": {
+              "start": "claude-code"
+            },
+            "folder": "~/work/acme",
+            "level": "edits",
+            "tools": [
+              "mcp__board"
+            ],
+            "cap": {
+              "per_day": 5
+            },
+            "words": "Card {subject} is yours and in TODO. Read it with the board tools, do it, move it to REVIEW."
+          }
+        ]
+      },
+      "steps": [
+        {
+          "at": "2026-11-24T09:14:05.000Z",
+          "poll": {
+            "receiver": "board.example",
+            "body": {
+              "messages": [],
+              "notices": [
+                {
+                  "id": "01KB4M2Q8V3T6Y9C0D1E2F004P",
+                  "topic": "acme/tasks",
+                  "event": "record.updated",
+                  "subject": "X-001",
+                  "state": "todo",
+                  "for": "studio-claude",
+                  "by": "u-41c9",
+                  "at": "2026-11-24T09:14:02Z",
+                  "expires_at": "2026-11-25T09:14:02.000Z"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "acks": [
+              {
+                "id": "01KB4M2Q8V3T6Y9C0D1E2F004P",
+                "outcome": "refused",
+                "code": "bad_notice"
+              }
+            ],
+            "runs": []
+          }
+        }
+      ]
+    }
+  ]
+}

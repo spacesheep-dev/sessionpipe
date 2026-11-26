@@ -1508,6 +1508,49 @@ describe.skipIf(process.platform === "win32")("status", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("trigger and triggers reach their commands", async () => {
+    expect((await run("trigger", "list")).text).toContain("Triggers are off · 0 rules");
+    expect((await run("triggers", "status")).text).toContain("this computer's mode: safe");
+  });
+
+  it("trigger rules: no line until there is a rules file; then on or off, how many, how many paused", async () => {
+    // Before: nothing set up, no rules file, and This computer says what it always said.
+    const before = await run("status");
+    expect(said(before, "This computer")).toMatch(/^✓ \S+ \(sessionpipe .*\)$/);
+    const rule = {
+      name: "monday-report",
+      paused: false,
+      source: { every: "mon 09:00" },
+      target: { start: "codex" },
+      folder: "/srv/work/sales",
+      level: "safe",
+      cap: { per_day: 1 },
+      words: "Make the report.",
+    };
+    put(path.join(tmp, "config", "triggers.json"), {
+      v: 1,
+      on: false,
+      rules: [rule, { ...rule, name: "b", paused: true }],
+    });
+    const off = await run("doctor");
+    expect(group(off, "This computer")).toContain(
+      "  · triggers            off · 2 rules, 1 paused · `sessionpipe triggers on` turns them on",
+    );
+    put(path.join(tmp, "config", "triggers.json"), { v: 1, on: true, rules: [rule] });
+    // After: on, and the background service is now wanted, so its absence is said.
+    const on = await run("status");
+    expect(said(on, "This computer")).toMatch(/, background service: not running, triggers on \(1 rule\)$/);
+    const j = JSON.parse((await run("doctor", "--json")).lines.join("\n"));
+    expect(j.triggers).toEqual({ on: true, readable: true, rules: 1, paused: 0 });
+    put(path.join(tmp, "config", "triggers.json"), "{");
+    const broken = await run("doctor");
+    expect(group(broken, "This computer")).toContain(
+      "  ! triggers            off: the rules file can't be read ($: not JSON)",
+    );
+    expect(broken.text).toContain("`sessionpipe trigger list` says what is wrong");
+    process.exitCode = undefined;
+  });
+
   it("control health: not running, a receiver without the age field, one polling, one never polled", async () => {
     put(path.join(tmp, "config", "control.json"), {
       name: "box",

@@ -9,6 +9,7 @@ import {
   LINEAGE_ENV,
   launchedBy,
   readHook,
+  TRIGGERED_BY_ENV,
   withoutLineage,
 } from "../src/launched-by.js";
 import { problems, SCHEMAS } from "../src/schema/index.js";
@@ -22,14 +23,20 @@ const adapter = (session: Record<string, unknown> | null): Adapter =>
   }) as unknown as Adapter;
 
 describe("the lineage is reset by whatever starts a further session (PROTOCOL.md §3, CONTROL.md §13)", () => {
-  it("withoutLineage drops the three variables and nothing else; jobEnv is that plus the control mark", () => {
+  it("withoutLineage drops the four variables and nothing else; jobEnv is that plus the control mark", () => {
     const env = {
       PATH: "/bin",
       [LAUNCHED_BY_ENV]: "codex:a",
       [DELEGATED_BY_ENV]: "codex:b",
       [ASK_CHAIN_ENV]: "codex:a,codex:b",
+      [TRIGGERED_BY_ENV]: "card-todo",
     };
-    expect(LINEAGE_ENV).toEqual(["SESSIONPIPE_LAUNCHED_BY", "SESSIONPIPE_ASKED_BY", "SESSIONPIPE_ASK_CHAIN"]);
+    expect(LINEAGE_ENV).toEqual([
+      "SESSIONPIPE_LAUNCHED_BY",
+      "SESSIONPIPE_ASKED_BY",
+      "SESSIONPIPE_ASK_CHAIN",
+      "SESSIONPIPE_TRIGGERED_BY",
+    ]);
     expect(withoutLineage(env)).toEqual({ PATH: "/bin" });
     expect(env[DELEGATED_BY_ENV]).toBe("codex:b");
     expect(jobEnv(env)).toEqual({ PATH: "/bin", SESSIONPIPE_CONTROL_JOB: "1" });

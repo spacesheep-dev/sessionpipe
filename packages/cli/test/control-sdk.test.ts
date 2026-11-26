@@ -142,6 +142,7 @@ describe("loadSdk", () => {
       HOME: tmp,
       SESSIONPIPE_ASKED_BY: "codex:stale",
       SESSIONPIPE_ASK_CHAIN: "codex:stale",
+      SESSIONPIPE_TRIGGERED_BY: "stale-rule",
     };
     const host = await loadSdk({ claudeBin: "/opt/claude", env, log: (s) => log.push(s) });
     expect(log[0]).toContain(sdkFile);

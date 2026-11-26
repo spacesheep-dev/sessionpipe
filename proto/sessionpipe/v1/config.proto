@@ -1,0 +1,414 @@
+// The machine's own files, which no receiver ever sees (RFC 0001 §8): today the person's trigger
+// rules, `<config>/triggers.json` (spec/CONTROL.md §14), and what `sessionpipe trigger … --json`
+// prints about them. Nothing here is on the wire. The CLI writes the file, the daemon reads it,
+// and both read these shapes; packages/core/gen/config.ts and config-schemas.ts are generated
+// from this file, and nothing is published under schemas/v1.
+syntax = "proto3";
+
+package sessionpipe.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/field_behavior.proto";
+import "sessionpipe/v1/control.proto";
+import "sessionpipe/v1/options.proto";
+
+// What became of a run of a rule: a notice or a clock tick the rule took (CONTROL.md §14).
+enum TriggerResult {
+  // None.
+  TRIGGER_RESULT_UNSPECIFIED = 0;
+  // The run began.
+  TRIGGER_RESULT_RAN = 1;
+  // The machine said no; the line's `code` says why.
+  TRIGGER_RESULT_REFUSED = 2;
+  // The run could not begin: the harness failed to start.
+  TRIGGER_RESULT_FAILED = 3;
+  // A clock tick six hours late or more, so nothing ran (CONTROL.md §14.6). Only a clock rule's
+  // history has it, and no ack ever does.
+  TRIGGER_RESULT_MISSED = 4;
+  // A run that was taken and waited, dropped before it began because the person paused its rule
+  // or changed it under the same name (CONTROL.md §14.7); its count was given back, and a notice's
+  // ack says `no_match`.
+  TRIGGER_RESULT_DROPPED = 5;
+}
+
+// Why the machine itself paused a rule (CONTROL.md §14.7 step 11), kept in the daemon's state and
+// never in the rules file.
+enum TriggerPause {
+  // None.
+  TRIGGER_PAUSE_UNSPECIFIED = 0;
+  // The session the rule continues is gone. `trigger resume` clears it, once that session is back.
+  TRIGGER_PAUSE_GONE = 1;
+  // The session's recorded level is one this machine does not know. Changing the rule's target
+  // (`trigger remove` and `trigger add` again) clears it; resuming would only pause it again.
+  TRIGGER_PAUSE_UNKNOWN_LEVEL = 2;
+}
+
+// Which part of a rule a notice did not fit (`sessionpipe trigger test`). The machine's own
+// word, for the person at its terminal: never in an ack, which says `no_match` alone.
+enum TriggerMiss {
+  // None.
+  TRIGGER_MISS_UNSPECIFIED = 0;
+  // The notice came from another receiver, or the rule runs on a clock.
+  TRIGGER_MISS_RECEIVER = 1;
+  // Another topic.
+  TRIGGER_MISS_TOPIC = 2;
+  // Another event than the one the rule names.
+  TRIGGER_MISS_EVENT = 3;
+  // A state the rule doesn't list, or none where it lists some.
+  TRIGGER_MISS_STATE = 4;
+  // Someone the rule doesn't list in `for`, or no one where it lists some.
+  TRIGGER_MISS_FOR = 5;
+  // Someone the rule doesn't list in `by`, or no one where it lists some.
+  TRIGGER_MISS_BY = 6;
+  // A subject the rule's pattern doesn't match.
+  TRIGGER_MISS_SUBJECT = 7;
+  // The rule's words name a field (`{state}`, `{for}`, `{by}`) the notice doesn't carry.
+  TRIGGER_MISS_PLACEHOLDER = 8;
+}
+
+// A rule's notices: one receiver the machine is paired with, and one topic.
+message NoticeSource {
+  option (sessionpipe.v1.strict) = true;
+  // The receiver, as the machine names it: the host (and port, when there is one) of the
+  // address it was paired with, lowercase (`board.example`).
+  string receiver = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      max_len: 259
+      pattern: "^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$"
+    }
+  ];
+  // The topic, listed in the hello to that receiver and to no other.
+  string topic = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9._/-]{0,79}$"
+  ];
+  // Only notices of this event; any event when absent.
+  string event = 3 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_.]{0,39}$"];
+}
+
+// A rule's clock: it runs with no receiver at all, in the machine's local time.
+message ClockSource {
+  option (sessionpipe.v1.strict) = true;
+  // `mon 09:00` to `sun 09:00` once a week, `day 08:30` every day, or an interval: `30m`, `2h`.
+  // Beyond the pattern the reader checks an interval is 15 minutes to 7 days.
+  string every = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^(?:(?:mon|tue|wed|thu|fri|sat|sun|day) (?:[01][0-9]|2[0-3]):[0-5][0-9]|[1-9][0-9]{0,4}[mh])$"
+  ];
+}
+
+// When a rule runs, exactly one of: a receiver's notice on a topic, or a clock.
+message TriggerSource {
+  option (sessionpipe.v1.either) = true;
+  // On a notice.
+  NoticeSource notice = 1;
+  // On a clock.
+  ClockSource clock = 2;
+}
+
+// A new session of a harness this machine runs headlessly.
+message StartTarget {
+  option (sessionpipe.v1.strict) = true;
+  // The harness (`claude-code`, `codex`).
+  string start = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}$"
+  ];
+}
+
+// An existing session, continued with the rule's words.
+message ContinueTarget {
+  option (sessionpipe.v1.strict) = true;
+  // The session, `<harness>:<id>`; the id follows its adapter's rule (Claude Code: a UUID).
+  string continue = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"
+  ];
+}
+
+// What a rule runs, exactly one of: a new session, or an existing one continued.
+message TriggerTarget {
+  option (sessionpipe.v1.either) = true;
+  // A new session.
+  StartTarget start = 1;
+  // An existing session.
+  ContinueTarget continue = 2;
+}
+
+// Which notices a rule takes beyond its source. Each list, when present, allows only its
+// values, and a notice without that field fits it not at all; an absent list allows any
+// value. A list is never empty. A filter is a limit, not a secret: a receiver that sends
+// notices can learn it from the acks (CONTROL.md §14.4).
+message TriggerWhen {
+  option (sessionpipe.v1.strict) = true;
+  // The states it takes (`todo`).
+  repeated string state = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 20
+    unique: true
+    items: {
+      string: {pattern: "^[a-z0-9_-]{1,32}$"}
+    }
+  }];
+  // Whom the subject must be for (`studio-claude`).
+  repeated string for = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 20
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"}
+    }
+  }];
+  // Who must have made the change (`u-41c9`), in the receiver's word: it keeps a rule to the
+  // people the person trusts on an honest receiver, and protects nothing against a receiver
+  // that was broken into, which can name anyone.
+  repeated string by = 3 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 20
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"}
+    }
+  }];
+}
+
+// How often a rule may run.
+message TriggerCap {
+  option (sessionpipe.v1.strict) = true;
+  // Runs a day at most, by the machine's local calendar. Every run counts, whether it then
+  // works or fails.
+  int32 per_day = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32 = {
+      gte: 1
+      lte: 50
+    }
+  ];
+}
+
+// One of the person's rules (CONTROL.md §14), made only at the machine's own terminal, shown in
+// plain words and confirmed there. No command and no notice makes, changes, pauses, resumes or
+// removes one.
+message TriggerRule {
+  option (sessionpipe.v1.strict) = true;
+  // The rule's name: what `triggered_by` carries and the CLI names it by.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,39}$"
+  ];
+  // A paused rule runs nothing, and its topic leaves the hello.
+  bool paused = 2 [(google.api.field_behavior) = REQUIRED];
+  // When it runs.
+  TriggerSource source = 3 [(google.api.field_behavior) = REQUIRED];
+  // A notice rule only: which notices it takes, beyond its source.
+  TriggerWhen when = 4;
+  // A notice rule only: the subjects it takes, in the safe pattern language of CONTROL.md
+  // §14 (`^X-[0-9]{1,6}$`): anchored, no groups, no alternation, matched without
+  // backtracking. The reader compiles it; one that doesn't compile is refused.
+  string subject = 5 [(buf.validate.field).string = {
+    min_len: 2
+    max_len: 100
+    pattern: "^\\^.*\\$$"
+  }];
+  // What it runs.
+  TriggerTarget target = 6 [(google.api.field_behavior) = REQUIRED];
+  // The folder it runs in: absolute, or `~/…` under the daemon's user's home; never the home
+  // folder itself, nor a folder that holds sessionpipe's config or state folders or lies inside
+  // them (a session there could write itself a rule). Checked against the machine's allowlist
+  // again at every run. Text a person reads before saying `yes`, so no character that does not
+  // show: the pattern refuses every control character (C0, DEL, C1); the reader refuses the
+  // rest by Unicode's categories (format, line and paragraph separators, private use,
+  // unassigned, surrogates), which no pattern every reader runs can name.
+  string folder = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+      pattern: "^[^\\x00-\\x1f\\x7f-\\x9f]+$"
+    }
+  ];
+  // The widest level it runs at. A run gets the narrowest of this, the source's ceiling (a
+  // notice rule `edits` at most: the receiver holds other people's text), the machine's mode and,
+  // continuing, the session's recorded level; then the widest level the harness takes here that
+  // is no wider. When nothing fits, no run exists (CONTROL.md §14.7). A notice rule above
+  // `edits` makes the file not fit; the reader checks that.
+  StartPermission level = 8 [(google.api.field_behavior) = REQUIRED];
+  // MCP servers or tools (`mcp__board`, `mcp__board__records_get`) its runs may use without
+  // asking, as `control.session_tools` (HTTP.md §1) are: never a built-in tool, never a
+  // shell pattern. The pattern is the daemon's for `session_tools`, and so looser than the two
+  // shapes: any `mcp__` name of letters, digits, `_` and `-`.
+  repeated string tools = 9 [(buf.validate.field).repeated = {
+    max_items: 8
+    unique: true
+    items: {
+      string: {pattern: "^mcp__[A-Za-z0-9_-]{1,64}$"}
+    }
+  }];
+  // How often it may run.
+  TriggerCap cap = 10 [(google.api.field_behavior) = REQUIRED];
+  // The person's words for the session. A notice rule's may name `{subject}`, `{state}`,
+  // `{for}` and `{by}`, each filled with the notice's token in backticks; no other brace,
+  // and a clock rule's none. What the person confirms is what the session gets, so no
+  // character that does not show but tab and line feed: the pattern refuses every other
+  // control character (C0 with carriage return, DEL, C1); the reader refuses the rest by
+  // Unicode's categories, as for `folder`.
+  string words = 11 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 4000
+      pattern: "^[^\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]+$"
+    }
+  ];
+}
+
+// `<config>/triggers.json` (mode 0600), written by the CLI only and read by the daemon, as the
+// mode and the folders are. A file that doesn't fit is read as no rules and triggers off,
+// never guessed at.
+message TriggersFile {
+  option (sessionpipe.v1.strict) = true;
+  // Always 1.
+  int32 v = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.const = 1
+  ];
+  // Whether triggers are on: the person's switch at the machine (`sessionpipe triggers on`).
+  // Off until they turn it on.
+  bool on = 2 [(google.api.field_behavior) = REQUIRED];
+  // The rules, in the order a notice is tried against them: the first that takes it runs.
+  repeated TriggerRule rules = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 50
+  ];
+}
+
+// One line of a rule's history (`trigger list`): a run, a refusal, a failure, a missed tick or a
+// waiting run dropped. `code` comes with `refused` only.
+message TriggerHistoryLine {
+  option (sessionpipe.v1.strict) = true;
+  // When.
+  string at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (sessionpipe.v1.format) = FORMAT_DATE_TIME
+  ];
+  // What became of it.
+  TriggerResult result = 2 [(google.api.field_behavior) = REQUIRED];
+  // refused: why.
+  TriggerRefusal code = 3;
+  // The notice's subject; absent for a clock tick.
+  string subject = 4 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$"];
+  // The notice's state, when it had one.
+  string state = 5 [(buf.validate.field).string.pattern = "^[a-z0-9_-]{1,32}$"];
+  // ran: the session, `<harness>:<id>`.
+  string session = 6 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$"];
+  // ran: how long the run took, in milliseconds, once it ended.
+  int64 ms = 7 [(buf.validate.field).int64.gte = 0];
+}
+
+// One rule as `sessionpipe trigger list --json` prints it.
+message TriggerListEntry {
+  option (sessionpipe.v1.strict) = true;
+  // The rule, as the file has it.
+  TriggerRule rule = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its runs today, against `cap.per_day`.
+  int32 today = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).int32.gte = 0
+  ];
+  // Its latest lines, newest first.
+  repeated TriggerHistoryLine recent = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 20
+  ];
+  // When the machine paused it itself: why. Absent when it didn't.
+  TriggerPause machine_paused = 4;
+}
+
+// `sessionpipe trigger list --json`.
+message TriggerList {
+  option (sessionpipe.v1.strict) = true;
+  // Whether triggers are on. A rules file that can't be read is off.
+  bool on = 1 [(google.api.field_behavior) = REQUIRED];
+  // Every rule, in the file's order.
+  repeated TriggerListEntry rules = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 50
+  ];
+  // When the rules file can't be read: what is wrong with it, in the machine's words. Absent when
+  // it reads, or is not there.
+  string problem = 3 [(buf.validate.field).string.max_len = 2000];
+}
+
+// What one run of a rule is, as the daemon would start it.
+message TriggerRun {
+  option (sessionpipe.v1.strict) = true;
+  // A new session of a harness, or an existing one continued.
+  TriggerTarget target = 1 [(google.api.field_behavior) = REQUIRED];
+  // The folder.
+  string folder = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 1024
+  ];
+  // The level: already the narrowest of the rule's, its source's ceiling, the machine's mode and,
+  // continuing, the session's recorded level, then the widest the harness takes that is no wider.
+  // A run whose level none of those leaves is not a run, and is never described by this message.
+  StartPermission level = 3 [(google.api.field_behavior) = REQUIRED];
+  // The MCP tools it may use without asking.
+  repeated string tools = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.max_items = 8,
+    (buf.validate.field).repeated.items.string.pattern = "^mcp__[A-Za-z0-9_-]{1,64}$"
+  ];
+  // The words the session is given, framed and with the notice's tokens in backticks.
+  string words = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 4600
+  ];
+}
+
+// `sessionpipe trigger line <name> --json`: the one `sessionpipe trigger add` command that makes
+// the rule again, as a line and as its words.
+message TriggerLine {
+  option (sessionpipe.v1.strict) = true;
+  // The command, flags in their fixed order, each value one POSIX shell word (CONTROL.md §14.1,
+  // conformance/triggers/trigger-line.json). One line, unless the words hold a line feed, which
+  // stays inside their quotes. 24 000 covers worst-case POSIX quoting of a maximal rule (4x on
+  // 4 000 apostrophes in words and 1 024 in folder, plus all optional flags).
+  string line = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.max_len = 24000,
+    (buf.validate.field).string.pattern = "^sessionpipe trigger add "
+  ];
+  // The words the line splits into, from `trigger` on (no `sessionpipe`): at least a clock rule's
+  // fourteen (its words written `--words=<value>`), at most a rule with every flag's twenty-nine.
+  repeated string argv = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).repeated.min_items = 14,
+    (buf.validate.field).repeated.max_items = 29,
+    (buf.validate.field).repeated.items.string.max_len = 4100
+  ];
+}
+
+// `sessionpipe trigger test <name> --json`: what a sample notice, or a tick, would run. It runs
+// nothing and records nothing.
+message TriggerTestAnswer {
+  option (sessionpipe.v1.strict) = true;
+  // The rule's name.
+  string rule = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_-]{0,39}$"
+  ];
+  // The sample notice; absent for a clock rule.
+  ControlNotice notice = 2;
+  // Whether the rule takes it.
+  bool matches = 3 [(google.api.field_behavior) = REQUIRED];
+  // When it doesn't: which part of the rule it does not fit.
+  TriggerMiss miss = 4;
+  // A check that would refuse it now (triggers off, the cap, the folder), when one would.
+  TriggerRefusal refusal = 5;
+  // When it matches: what would run.
+  TriggerRun run = 6;
+}

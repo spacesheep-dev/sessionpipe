@@ -59,7 +59,7 @@ const log = (o) => fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(o)
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 log({ bin: path.basename(process.argv[1]), argv: a, cwd: process.cwd(), job: process.env.SESSIONPIPE_CONTROL_JOB || null,
   asked_by: process.env.SESSIONPIPE_ASKED_BY || null, chain: process.env.SESSIONPIPE_ASK_CHAIN || null,
-  launched_by: process.env.SESSIONPIPE_LAUNCHED_BY || null });
+  launched_by: process.env.SESSIONPIPE_LAUNCHED_BY || null, triggered_by: process.env.SESSIONPIPE_TRIGGERED_BY || null });
 `;
   writeFileSync(
     fakeCodex,
@@ -892,15 +892,22 @@ describe.runIf(unix)("sessionpipe ask (CONTROL.md §13): the other modes and edg
       SESSIONPIPE_ASKED_BY: "codex:stale",
       SESSIONPIPE_ASK_CHAIN: "codex:stale",
       SESSIONPIPE_LAUNCHED_BY: "codex:stale",
+      SESSIONPIPE_TRIGGERED_BY: "stale-rule",
     };
     await startDaemon({ receivers: true, extra: { env: { ...env, ...stale } } });
     const q = await rx.send({ kind: "start", session: `codex:${RECV}`, cwd: project, text: "go" });
     expect(await rx.waitAck(q.id)).toMatchObject({ outcome: "delivered" });
-    expect(runs()[0]).toMatchObject({ job: "1", asked_by: null, chain: null, launched_by: null });
+    expect(runs()[0]).toMatchObject({ job: "1", asked_by: null, chain: null, launched_by: null, triggered_by: null });
     const anon = req();
     delete anon.from;
     expect((await askIt(anon)).end?.op).toBe("answer");
-    expect(runs()[1]).toMatchObject({ job: "1", asked_by: null, chain: "unknown", launched_by: null });
+    expect(runs()[1]).toMatchObject({
+      job: "1",
+      asked_by: null,
+      chain: "unknown",
+      launched_by: null,
+      triggered_by: null,
+    });
     // And a child the daemon runs for an asker carries that asker, nothing older.
     const into = await askIt(req({ session: `codex:${RECV}`, from: ASKER }));
     expect(into.end, JSON.stringify(into.end)).toMatchObject({ op: "answer" });

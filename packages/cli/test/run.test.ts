@@ -75,6 +75,13 @@ describe("runJob", () => {
     const own = await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
     expect(own.events[0]?.session.delegated_by).toBeUndefined();
   });
+  it("a job whose environment names a rule writes triggered_by; the worker's own environment never does", async () => {
+    const ran = { ...job("SessionStart", { source: "startup" }), env: { SESSIONPIPE_TRIGGERED_BY: "card-todo" } };
+    expect((await runJob(ran, { state: tmp })).events[0]?.session.triggered_by).toBe("card-todo");
+    vi.stubEnv("SESSIONPIPE_TRIGGERED_BY", "card-todo");
+    const own = await runJob(job("SessionStart", { source: "startup" }), { state: tmp });
+    expect(own.events[0]?.session.triggered_by).toBeUndefined();
+  });
   it("the effort a Claude Code hook reports goes out with the session (#210)", async () => {
     const id = "4e960f0a-fc94-4b51-a223-9c810563a481";
     const stop = {

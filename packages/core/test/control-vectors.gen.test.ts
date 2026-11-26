@@ -1172,6 +1172,31 @@ describe.runIf(WRITE)("write control vectors", () => {
       );
     }
 
+    // --- no command makes a rule (CONTROL.md §14): 171, after the handoff ---
+    // A rule is made only at the machine's own terminal. A correctly signed command that
+    // asks for one names a kind the verifier does not know, so no signature, however good,
+    // makes, changes, pauses or removes a rule.
+    const triggers: Vector[] = [
+      {
+        name: "kind-trigger",
+        description:
+          "A trigger.add, signed correctly by a trusted passkey's day key: no command makes a rule, so the kind is unknown.",
+        input: {
+          signed: await signed(
+            pk,
+            day,
+            commandStr({
+              kind: "trigger.add",
+              session: "sessionpipe:triggers",
+              text: "Card {subject} is yours and in TODO.",
+            }),
+          ),
+          ...base(),
+        },
+        expect: { ok: false, code: "unknown_kind" },
+      },
+    ];
+
     mkdirSync(dir, { recursive: true });
     const names = new Set<string>();
     let n = 0;
@@ -1184,6 +1209,7 @@ describe.runIf(WRITE)("write control vectors", () => {
       ...device,
       ...pool,
       ...handoff,
+      ...triggers,
     ];
     for (const v of all) {
       do n++;

@@ -24,6 +24,7 @@ import { isBroad } from "./connect.js";
 import type { Status } from "./control/daemon.js";
 import { type AskRequest, ask, askMany, type LocalReply, reach, socketPath } from "./control/local.js";
 import { installService, uninstallService } from "./control/pair.js";
+import { readRules, rulesOf } from "./control/rules-file.js";
 import { askOn, type ControlConfig, readControl, writeControl } from "./control/store.js";
 import { waitSession } from "./control/wait.js";
 import { rerunGlobally, stableNode, viaNpx } from "./runtime.js";
@@ -342,6 +343,9 @@ function off(io: AskIo, env: NodeJS.ProcessEnv): number {
   io.out("  ✓ Sessions on this machine can no longer ask another agent (`sessionpipe ask on` turns it back on).");
   if (c.receivers.length)
     io.out("  The background service uses the new setting within seconds; your receivers' messages still arrive.");
+  // The person's trigger rules run in the same service, on a clock with no receiver at all.
+  else if (rulesOf(readRules(env))?.on)
+    io.out("  The background service stays: your trigger rules run in it (`sessionpipe triggers off` stops them).");
   else {
     uninstallService(env);
     io.out("  Background service: removed; with no receiver paired, nothing was left for it to do.");

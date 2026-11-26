@@ -43,14 +43,16 @@ import {
   type RunOptions,
   type RunResult,
   readConfig,
+  realFolderProblem,
   redactDeep,
   redactSecrets,
   type Session,
   safeId,
+  type TriggersFile,
   takeLock,
   tilde,
+  triggerPlaces,
   ulid,
-  untilde,
 } from "@sessionpipe/core";
 import {
   type ControlCommand,
@@ -82,6 +84,7 @@ import { fetchFiles, picturesOf, withFiles, writeFiles } from "./files.js";
 import * as inbox from "./inbox.js";
 import { Lines, type Turn } from "./line.js";
 import { type AskRequest, ask, type Health, type LocalReply, type LocalRequest } from "./local.js";
+import { type Held, lockHolder, takeLock as takeLockFile } from "./lockfile.js";
 import { poolRequestOf, runPoolRequest } from "./pool.js";
 import {
   type Following,
@@ -127,6 +130,7 @@ import {
 import {
   type Ack,
   AckOutbox,
+  allowedIn,
   askOn,
   COPY_NOTES_KEPT,
   type ControlConfig,
@@ -141,9 +145,12 @@ import {
   startOptionsOf,
   takeTurnsSeed,
   writeControl,
+  writePrivate,
   writeState,
 } from "./store.js";
 import { AnswerStream } from "./stream.js";
+import { readStateFile } from "./trigger-state.js";
+import { type RunEvents, type SessionLook, TriggerEngine, type TriggerJob } from "./triggers.js";
 
 const {
   claudeArgs,
@@ -432,6 +439,13 @@ export interface AckSink {
   /** False when the message reaching the session is the whole job and its reply isn't
    *  waited for (a relay). */
   wantsReply: boolean;
+  /** MCP servers or tools the run may use without asking: a trigger rule's own (§14.7). An
+   *  ask or a relay brings none. */
+  tools?: string[];
+  /** Only a turn the daemon runs itself: `sdk` or `resume`. Never a waiter, a Stop, a
+   *  session's inbox, a channel, a fork or a harness's own queue, where the session's own
+   *  mode would apply instead of the run's level (a trigger, §14.7). Refused `held` there. */
+  ownTurns?: boolean;
 }
 type Caller = PairedReceiver | AckSink;
 const isSink = (r: Caller): r is AckSink => "ack" in r;
@@ -579,6 +593,14 @@ export interface DaemonDeps {
   copy?: () => NonNullable<Health["copy"]>;
   /** Another daemon took the socket path: this one has stopped and should exit. */
   onLostSocket?: () => void;
+  /** The person's trigger rules as `<config>/triggers.json` has them now (rules-file.ts):
+   *  null for none, or a file refused whole. Read at start and on `reloadRules()`. Absent:
+   *  this daemon runs no rules. */
+  rules?: () => TriggersFile | null;
+  /** The time zone a rule's clock and day are read in; the machine's own when unsaid. */
+  triggerZone?: string;
+  /** How often the rules' clock is looked at (30 s; tests shorten it). */
+  triggerCheckMs?: number;
   /** The machine's account pool (pool/index.ts): its listener runs in this process,
    *  every hello carries its state, and `pool` commands and socket ops go to it.
    *  Absent: this daemon can't pool (a `pool` command is `unsupported`). */
@@ -704,6 +726,19 @@ export interface Status {
   start: Record<string, StartEntry>;
   /** Whether a session here may ask another agent, and which agents (CONTROL.md §13). */
   ask: { on: boolean; harnesses: string[] };
+  /** The person's trigger rules (CONTROL.md §14): on or off, how many, how many paused (by
+   *  the person or by this machine), and the runs that wait or run now. `not_running` is set
+   *  when this daemon does not hold the rules' claim so no rule runs here. A daemon from
+   *  before triggers has none. */
+  triggers?: {
+    on: boolean;
+    rules: number;
+    paused: number;
+    waiting: number;
+    running: number;
+    checks: number;
+    not_running?: string;
+  };
   /** Null when the daemon could restart now (nothing in hand); otherwise what it holds. */
   busy: string | null;
   update?: unknown;
@@ -872,6 +907,20 @@ export class ControlDaemon {
    *  clear: B, asked by A, can't ask A back from a clean environment, and C, asked by B
    *  under A, can't ask on by forgetting its chain. */
   private readonly asks = new Map<string, { from: string | null; to: string }>();
+  /** The person's trigger rules at work (control/triggers.ts): fed the rules file, its clock
+   *  looked at every half minute, its runs begun through `runTrigger`. */
+  /** The engine of the person's rules, once this daemon holds their claim (claimTriggers). */
+  private triggers: TriggerEngine | null = null;
+  private triggerClaim: Held | null = null;
+  private claimSaid = false;
+  private triggerClaimProblem: string | null = null;
+  private rulesNow: TriggersFile | null = null;
+  private triggerTimer: NodeJS.Timeout | null = null;
+  /** Triggered runs waiting for the headless slot, by message id: told when they have it. */
+  private readonly slotted = new Map<string, () => void>();
+  /** Sessions a rule's run started and holds through the Agent SDK until its turn ends: no other
+   *  turn goes into them (they carry the rule's tools and mark). */
+  private readonly triggerOpened = new Set<string>();
 
   constructor(
     private cfg: ControlConfig,
@@ -885,6 +934,69 @@ export class ControlDaemon {
     // read here. It is taken up once the socket is this daemon's (`takeUp`).
     this.state = readState(path.join(dir, "state.json"), deps.now());
     this.aliases = readAliases(aliasFile(dir));
+  }
+
+  /** The person's rules run in one daemon only: the one that holds the record's claim
+   *  (`triggers-state.lock`, lockfile.ts), taken once this daemon has started and before it reads
+   *  the record. Two daemons started at once never both run a tick, and the one that steps aside
+   *  never read, ran or wrote the record. Tried again at each look of the clock until held. */
+  private claimTriggers(): void {
+    if (this.triggers || !this.running) return;
+    const claimFile = path.join(this.dir, "triggers-state.lock");
+    let claim: Held | null = null;
+    try {
+      claim = takeLockFile(claimFile, {
+        claim: true,
+        broke: (why) => this.deps.log(`the triggers' claim of a daemon that is gone (${why}) was let go of`),
+      });
+    } catch (e) {
+      this.triggerClaimProblem = `${claimFile} can't be taken (${String(e)})`;
+      this.deps.log(`the triggers' claim can't be taken (${String(e)}); no rule runs here`);
+      return;
+    }
+    if (!claim) {
+      const holder = lockHolder(claimFile);
+      /* v8 ignore next -- holder vanished or empty right after takeLock */
+      this.triggerClaimProblem = holder
+        ? `${claimFile} is held by pid ${holder.pid}`
+        : `${claimFile} is held by another daemon`;
+      if (!this.claimSaid) this.deps.log("another daemon runs the trigger rules; this one runs none until it stops");
+      this.claimSaid = true;
+      return;
+    }
+    this.triggerClaim = claim;
+    this.triggerClaimProblem = null;
+    const deps = this.deps;
+    const record = path.join(this.dir, "triggers-state.json");
+    this.triggers = new TriggerEngine({
+      now: deps.now,
+      ...(deps.triggerZone ? { zone: deps.triggerZone } : {}),
+      home: triggerPlaces(this.deps.env).home,
+      mode: () => this.cfg.mode,
+      // On the allowlist, and by its real path still not a place a rule may never run in
+      // (§14.1: the home folder, sessionpipe's own config and state): a link is followed here,
+      // which the definition's check of the written path cannot do.
+      allowed: (folder) =>
+        this.allowed(folder) !== null && realFolderProblem(folder, triggerPlaces(this.deps.env)) === null,
+      sameFolder: (a, b) => this.allowed(a) !== null && this.allowed(a) === this.allowed(b),
+      harnesses: () => this.triggerHarnesses(),
+      session: (ref) => this.triggerSession(ref),
+      startRoom: () => this.startRoom(),
+      // The levels a start may name here, as the hello says them: a run gets the widest that
+      // is no wider than its own (Codex has no edits).
+      offered: (h) => this.startEntry(h)?.permissions,
+      run: (job, on) => this.runTrigger(job, on),
+      // `ack`, the notice's outcome for its receiver, is the notices step's to wire.
+      // Over the size an honest record can reach, it is no record (trigger-state.ts).
+      load: () => readStateFile(record, deps.log),
+      save: (s) => writePrivate(record, s),
+      log: (l) => deps.log(l),
+      changed: () => this.triggersChanged(),
+    });
+    this.safely(() => {
+      this.triggers?.load(this.rulesNow);
+      this.triggers?.check();
+    });
   }
 
   // --- lifecycle ------------------------------------------------------------------
@@ -903,6 +1015,18 @@ export class ControlDaemon {
     this.helloTimer.unref();
     void this.helloAll();
     void this.flushAcks();
+    // The person's rules, and their clock: looked at now (a tick missed while the daemon was
+    // stopped is run or refused `missed` at once) and every half minute after.
+    this.reloadRules();
+    this.triggerTimer = setInterval(
+      () =>
+        this.safely(() => {
+          this.claimTriggers();
+          this.triggers?.check();
+        }),
+      this.deps.triggerCheckMs ?? 30_000,
+    );
+    this.triggerTimer.unref();
     const idle = setInterval(() => this.closeIdleSdk(), Math.min(60_000, this.deps.sdkIdleMs ?? 60_000));
     idle.unref();
     if (this.sockId) {
@@ -929,6 +1053,13 @@ export class ControlDaemon {
     if (this.helloTimer) clearInterval(this.helloTimer);
     if (this.helloSoon) clearTimeout(this.helloSoon);
     if (this.ownTimer) clearInterval(this.ownTimer);
+    if (this.triggerTimer) clearInterval(this.triggerTimer);
+    // A triggered run that waits in a session's line, or for the headless slot, waits again in the
+    // record: the next daemon takes it up (§14.7).
+    // Only the daemon that holds the claim ever wrote the record, and it lets go of the claim.
+    this.safely(() => this.triggers?.suspend());
+    this.triggerClaim?.release();
+    this.triggerClaim = null;
     for (const s of this.sdkSessions.values()) s.close();
     for (const l of this.live.values()) {
       l.waiter?.destroy();
@@ -1249,6 +1380,17 @@ export class ControlDaemon {
       delivered: { ...this.delivered },
       start: this.startOptions(),
       ask: { on: askOn(this.cfg), harnesses: this.askable() },
+      triggers: {
+        on: !!this.rulesNow?.on,
+        rules: this.rulesNow?.rules.length ?? 0,
+        paused:
+          this.rulesNow?.rules.filter((x) => x.paused || (this.triggers?.pausedByMachine() ?? []).includes(x.name))
+            .length ?? 0,
+        waiting: this.triggers?.waitingNow().length ?? 0,
+        running: this.triggers?.runningNow().length ?? 0,
+        checks: this.triggers?.checks ?? 0,
+        ...(!this.triggers && this.triggerClaimProblem ? { not_running: this.triggerClaimProblem } : {}),
+      },
       busy: this.busy(),
       ...(this.deps.updateStatus ? { update: this.deps.updateStatus() } : {}),
       ...(this.deps.pool ? { pool: this.poolSummary() } : {}),
@@ -1428,6 +1570,11 @@ export class ControlDaemon {
       case "ask":
         void this.onAsk(req, s);
         return;
+      case "trigger":
+        // `sessionpipe trigger resume` at the terminal, for a rule this machine paused: the one
+        // thing the CLI can't do in the rules file, since the pause is the daemon's own.
+        this.reply(s, req.action === "resume" && this.liftPause(String(req.name)) ? { op: "ok" } : { op: "none" });
+        return;
       case "permission": {
         const l = this.liveOf(req.session);
         const prev = l.attentions.get(req.attention);
@@ -1530,6 +1677,8 @@ export class ControlDaemon {
       // the lane is not kept shut for a window that has closed.
       this.unpark(named);
       l.ended = this.deps.now();
+      // A window let go of a session: a rule's run may be waiting for it.
+      this.safely(() => this.triggers?.retry());
     }
     // `Interrupt` is Codex's: the person stopped the turn, and no Stop follows.
     if (e.event === "Stop" || e.event === "StopFailure" || e.event === "SessionEnd" || e.event === "Interrupt") {
@@ -1785,9 +1934,10 @@ export class ControlDaemon {
     }
   }
 
-  /** A receiver's own MCP servers; an ask or a relay brings none. */
+  /** A receiver's own MCP servers; a trigger's rule names its own; an ask or a relay brings
+   *  none. Read as a receiver's are, so nothing but an MCP name ever gets through. */
   private allowedFor(r: Caller): string[] {
-    return isSink(r) ? [] : (this.sessionTools.get(r.control + r.machine) ?? []);
+    return isSink(r) ? sessionToolsFrom(r.tools) : (this.sessionTools.get(r.control + r.machine) ?? []);
   }
 
   private async helloAll(): Promise<void> {
@@ -2542,23 +2692,7 @@ export class ControlDaemon {
   /** The real folder a command or a session names, when it is one this machine allows:
    *  absolute, or under this user's home as `~/…` (a start's `cwd` may say either). */
   private allowed(folder: string): string | null {
-    const dir = untilde(folder);
-    if (!path.isAbsolute(dir)) return null;
-    let r: string;
-    try {
-      r = realpathSync.native(dir);
-      if (!statSync(r).isDirectory()) return null;
-    } catch {
-      return null;
-    }
-    for (const f of this.cfg.folders) {
-      let rf = f;
-      try {
-        rf = realpathSync.native(f);
-      } catch {}
-      if (r === rf || r.startsWith(rf.endsWith(path.sep) ? rf : rf + path.sep)) return r;
-    }
-    return null;
+    return allowedIn(folder, this.cfg.folders);
   }
 
   private permission(r: PairedReceiver, id: string, cmd: ControlCommand, sent: number) {
@@ -2738,7 +2872,7 @@ export class ControlDaemon {
       if (run.ctl.signal.aborted) return { stopped: true };
       run.began = true;
       return this.deps.run(bin, args, { ...o, signal: run.ctl.signal });
-    });
+    }, run.id);
     // Stopped while it waits: it is over now, not when a slot comes free, which could be
     // half an hour away. The slot, when its turn comes, is given straight back.
     const res = await Promise.race([
@@ -3241,6 +3375,21 @@ export class ControlDaemon {
     if ("unsupported" in route) return this.finish(r, id, { outcome: "unsupported", detail: route.unsupported });
     /* v8 ignore next -- place() already refused a session with no transcript (`known` is never false here) */
     if ("refused" in route) return this.finish(r, id, { outcome: "refused", code: route.refused });
+    // A trigger's run is only ever a turn the daemon runs itself, at the run's level (§14.7):
+    // anything else is a session something holds, and the run waits for it.
+    if (isSink(r) && r.ownTurns && !this.ownTurnFits(route.mode))
+      return this.finish(r, id, {
+        outcome: "refused",
+        code: "held",
+        detail: `${cmd.session.slice(0, 24)} is held (${route.mode}); a triggered run waits for a turn this machine runs itself`,
+      });
+    // And the other way: a session a rule's run opened through the Agent SDK has that rule's
+    // tools and mark, so no other turn goes into it (it is closed when the rule's turn ends).
+    if (route.mode === "sdk" && this.triggerOpened.has(cmd.session))
+      return this.finish(r, id, {
+        outcome: "unsupported",
+        detail: `a triggered run has ${cmd.session.slice(0, 24)} for its own turn; send it again when that turn ends`,
+      });
     switch (route.mode) {
       case "waiter": {
         const l = this.live.get(cmd.session)!;
@@ -3573,6 +3722,9 @@ export class ControlDaemon {
   ): Promise<void> {
     const live = drv.live as NonNullable<Driver["live"]>;
     const open = `${drv.label} has that session open in another process`;
+    /* v8 ignore next 2 -- triggerSession() waits for a thread Codex has locked; this is the backstop */
+    if (isSink(r) && r.ownTurns)
+      return this.finish(r, id, { outcome: "refused", code: "held", detail: `${open}: a triggered run waits for it` });
     if (cmd.permission !== undefined)
       return this.finish(r, id, {
         outcome: "unsupported",
@@ -4272,9 +4424,11 @@ export class ControlDaemon {
   }
 
   /** One headless Claude Code process at a time per slot; the rest wait in order. */
-  private async slot<T>(fn: () => Promise<T>): Promise<T> {
+  private async slot<T>(fn: () => Promise<T>, id?: string): Promise<T> {
     while (this.procs >= this.limits().headless) await new Promise<void>((r) => this.procWaiters.push(r));
     this.procs++;
+    // The message whose turn this is has its slot: a triggered run counts as begun from here.
+    if (id) this.slotted.get(id)?.();
     try {
       return await fn();
     } finally {
@@ -4283,11 +4437,19 @@ export class ControlDaemon {
     }
   }
 
-  private async startSession(r: Caller, id: string, cmd: ControlCommand, sent: number): Promise<void> {
+  /** The machine's caps on starts (CONTROL.md §6 `start`) allow one more now: a receiver's,
+   *  an ask's and a trigger's alike. */
+  private startRoom(): boolean {
     const lim = this.limits();
     const now = this.deps.now();
     this.startTimes = this.startTimes.filter((t) => now - t < 3_600_000);
-    if (this.startsRunning >= lim.startConcurrent || this.startTimes.length >= lim.startPerHour) {
+    return this.startsRunning < lim.startConcurrent && this.startTimes.length < lim.startPerHour;
+  }
+
+  private async startSession(r: Caller, id: string, cmd: ControlCommand, sent: number): Promise<void> {
+    const lim = this.limits();
+    const now = this.deps.now();
+    if (!this.startRoom()) {
       // A limit of none is not a crowd: "already starting 0 new session(s); it starts at
       // most 0 at once" sent the person off to wait for sessions that were not starting.
       const detail =
@@ -4317,6 +4479,8 @@ export class ControlDaemon {
       await this.serial(cmd.session, () => this.owning(cmd.session, () => this.startOne(r, id, cmd, sent)));
     } finally {
       this.startsRunning--;
+      // A run of a rule may have been waiting for exactly this.
+      this.safely(() => this.triggers?.retry());
     }
   }
 
@@ -4368,11 +4532,16 @@ export class ControlDaemon {
       if (got === null) return;
       const text = got.text;
       if (this.deps.sdk) {
-        // A session the daemon will hold: from here a Stop is that session's interrupt.
-        this.letGo(run);
         const sdk = this.deps.sdk;
         const extra = this.childEnv(r, cmd);
-        const out = await this.slot(async () => {
+        let entered = false;
+        const ran = this.slot(async () => {
+          // Stopped while it waited for the slot (a cancel, `triggers off`, its deadline): it never
+          // starts. Until here it is a run in hand, as a claude -p run is until ownRun's slot.
+          if (run.ctl.signal.aborted) return null;
+          entered = true;
+          // A session the daemon will hold: from here a Stop is that session's interrupt.
+          this.letGo(run);
           const s = sdk.start({
             session: ref.id,
             cwd,
@@ -4385,7 +4554,9 @@ export class ControlDaemon {
           const sent = await s.send(this.framed(r, text, true), got.pictures);
           this.picturesSaid(id, got.pictures.length, sent.native ?? 0, "image blocks");
           return sent;
-        });
+        }, id);
+        const out = await Promise.race([ran, run.stoppedSoon.then(() => (entered ? ran : null))]);
+        if (out === null) return this.finish(r, id, UNSTARTED_ACK, sent);
         return this.finish(
           r,
           id,
@@ -4930,6 +5101,203 @@ export class ControlDaemon {
           });
       },
     };
+  }
+
+  // --- the person's trigger rules (CONTROL.md §14) ----------------------------------
+
+  /** The rules file, read again (`<config>/triggers.json` changed): the engine drops what may
+   *  no longer run and looks at the clock at once. */
+  reloadRules(): void {
+    this.rulesNow = this.deps.rules?.() ?? null;
+    this.safely(() => {
+      this.claimTriggers();
+      this.triggers?.load(this.rulesNow);
+      this.triggers?.check();
+    });
+  }
+
+  /** The engine's entry points, from the daemon: nothing in the person's rules (a hand-edited
+   *  record, a rule no version foresaw) may throw into the daemon's start, its poll loop or an
+   *  unhandled rejection. Said in the log, and the daemon goes on. */
+  private safely(fn: () => void): void {
+    try {
+      fn();
+    } catch (e) {
+      this.deps.log(`trigger rules: ${String(e)}; the rest of this computer goes on`);
+    }
+  }
+
+  /** The person's `trigger resume` for a pause the machine made itself, through the engine,
+   *  guarded as every entry point is. */
+  private liftPause(name: string): boolean {
+    let lifted = false;
+    this.safely(() => {
+      lifted = this.triggers?.lift(name) ?? false;
+    });
+    return lifted;
+  }
+
+  /** What a hello says of triggers changed (a rule, a pause, the switch). The hello's
+   *  `triggers` is the notices step's (§14.3); this is where it sends one at once. */
+  private triggersChanged(): void {
+    this.deps.log("trigger rules changed");
+  }
+
+  /** The harnesses a rule may run: those an ask may start, but an ACP agent, which takes no
+   *  level here and would run at the machine's mode rather than the rule's (§6). */
+  private triggerHarnesses(): string[] {
+    return this.askable().filter((h) => !acpControl.acpAgent(h));
+  }
+
+  /** How the session a rule continues stands now: gone, or there, held or not (by the same
+   *  ladder a message takes: only a turn the daemon runs itself counts as free), and the
+   *  level its start recorded. */
+  private triggerSession(session: string): SessionLook {
+    const place = this.place(session);
+    // Anything else place() refuses (the session's folder, an ambiguous home) leaves no folder
+    // the run could really use: refused folder (§14.1).
+    if ("refused" in place) return place.refused === "no_session" ? { gone: true } : { held: false, folder: null };
+    const route = routePrompt(this.view(session, place));
+    const ref = parseSessionRef(session)!;
+    // A thread Codex has locked is a live process's, by Codex's own word (§6, What counts as
+    // held): a run would be refused there, and a trigger's is never put into its queue.
+    const locked = ref.harness === "codex" && codexControl.threadLocked(place.target as string, this.codexHome());
+    const recorded =
+      ref.harness === "claude-code" ? this.state.started[ref.id] : startOptionsOf(this.aliasOf(ref.harness, ref.id));
+    return {
+      // Only a cold `resume` is a turn a rule may take: a session the daemon holds was opened
+      // with another cause's tools, level and mark (ownTurnFits).
+      held: locked || !("mode" in route) || route.mode !== "resume",
+      ...(recorded ? { level: recorded.permission } : {}),
+      // The folder the run really uses: the session's own, as its transcript says.
+      folder: place.folder,
+    };
+  }
+
+  /** Whether a turn the ladder chose is one a trigger's run may take (§14.7): only a cold
+   *  `resume`, which the daemon starts with exactly the run's level, tools and mark. A session
+   *  the daemon holds (`sdk`) keeps what it was opened with, another cause's tools and
+   *  environment, so a rule never sends into one: it waits, as for a window, until the held
+   *  session closes (ten idle minutes) and then resumes it cold. */
+  private ownTurnFits(mode: DeliveryMode): boolean {
+    return mode === "resume";
+  }
+
+  /** One run of one of the person's rules, begun through the same paths a local ask takes
+   *  (onAsk): a start is `startSession`, a session continued is the session's line and
+   *  `prompt`, each with a sink of the daemon's own. What differs from an ask, and nothing
+   *  else: the level is the run's (the rule's, narrowed by triggerRun to the machine's mode
+   *  and the session's own) where an ask is `safe` at most, since a rule is the person's
+   *  standing choice made at this terminal and an ask is a model's doing; the rule's MCP tools
+   *  are allowed (`tools`); the words come framed by the rule (§14.8) with no frame of an
+   *  ask's; the environment carries `SESSIONPIPE_TRIGGERED_BY` and no ask's lineage; and only
+   *  a turn the daemon runs itself is taken (`ownTurns`). The level still passes every check a
+   *  start's does (startChoice: never above the machine's mode), so this widens nothing an ask
+   *  or a receiver could reach: neither can name this sink. Nothing here answers a permission
+   *  prompt: a triggered session raises one as any session does. */
+  private runTrigger(job: TriggerJob, on: RunEvents): { cancel(): void } {
+    const id = ulid(this.deps.now());
+    const sent = this.deps.now();
+    const target = job.run.target;
+    const start = "start" in target;
+    const session = start ? `${target.start}:${randomUUID()}` : target.continue;
+    let began = false;
+    let over = false;
+    /** `triggers off`, or the run's deadline, came before its turn: it never begins. */
+    let stopped = false;
+    const begin = () => {
+      /* v8 ignore next -- a run has one slot (slot() calls this once); the guard keeps it so */
+      if (began) return;
+      // Checked again the moment it would begin: its rule, folder and level as they are now
+      // (§14.7). No: it is stopped here, before anything starts, as a cancel stops it.
+      if (!on.ready()) {
+        stopped = true;
+        this.stopTriggered(id, session);
+        return;
+      }
+      began = true;
+      on.began(session);
+    };
+    const sink: AckSink = {
+      label: `trigger ${job.rule}`,
+      // The rule's words, framed already (§14.8).
+      frame: (text) => text,
+      env: job.env,
+      tools: job.run.tools,
+      ownTurns: true,
+      wantsReply: true,
+      /* v8 ignore next -- a triggered run's answer as it grows goes nowhere: no socket waits on it */
+      progress: () => {},
+      ack: (a) => {
+        /* v8 ignore next -- a run has one final ack (finish()) */
+        if (over) return;
+        // Taken: handed over, and until it has the headless slot (`slotted`) it waits there.
+        if (a.outcome === "taken") return on.queued("start_limit");
+        over = true;
+        this.slotted.delete(id);
+        // A session this run opened through the Agent SDK is closed with its turn: held, it
+        // would hand the rule's tools and mark to whatever turn came next.
+        const held = this.sdkSessions.get(session);
+        if (held && this.triggerOpened.delete(session)) {
+          held.close();
+          this.sdkSessions.delete(session);
+        }
+        if (!began)
+          return a.outcome === "refused" ? on.refused(a.code as string, String(a.detail)) : on.failed(String(a.detail));
+        on.ended(this.deps.now() - sent);
+      },
+    };
+    this.slotted.set(id, begin);
+    this.inflight.add(id);
+    if (start && this.deps.sdk) this.triggerOpened.add(session);
+    this.deps.log(`trigger ${job.rule}: runs ${session.slice(0, 24)} at ${job.run.level}`);
+    const cmd = {
+      kind: start ? "start" : "prompt",
+      session,
+      text: job.run.words,
+      permission: job.run.level,
+      ...(start ? { cwd: job.run.folder } : { iat: sent }),
+    } as ControlCommand;
+    let go: Promise<void>;
+    if (start) go = this.startSession(sink, id, cmd, sent);
+    else {
+      // A run that waits in its session's line (behind another turn there) is a waiting run:
+      // taken, under its deadline, and dropped by `triggers off` before its turn comes.
+      on.queued("held");
+      go = this.inLine(session, sent, async () => {
+        if (stopped) return this.finish(sink, id, UNSTARTED_ACK);
+        const place = this.place(session);
+        if ("refused" in place) return this.finish(sink, id, refusal(place));
+        return this.inHand(id, this.namesOf(parseSessionRef(session)!), () => this.prompt(sink, id, cmd, place, sent));
+      });
+    }
+    /* v8 ignore next 6 -- the runs settle with an ack; a rejection is the backstop, as onAsk's */
+    void go.catch((e) =>
+      this.finish(sink, id, {
+        outcome: "failed",
+        detail: String(/* v8 ignore next -- the runs reject with Errors */ (e as Error)?.message || e),
+      }),
+    );
+    return {
+      cancel: () => {
+        stopped = true;
+        this.stopTriggered(id, session);
+      },
+    };
+  }
+
+  /** `triggers off` stops a triggered run as a `cancel` stops a turn the machine runs (§6
+   *  `cancel`): a turn in hand is aborted (its child process ended), a session the daemon
+   *  holds is interrupted. */
+  private stopTriggered(id: string, session: string): void {
+    const run = this.runs.find((x) => x.id === id);
+    if (run) {
+      run.ctl.abort();
+      return;
+    }
+    const held = this.sdkSessions.get(session);
+    /* v8 ignore next -- a run neither in hand nor in a busy held session is over already */
+    if (held?.busy) void held.interrupt();
   }
 
   // --- handoffs (CONTROL.md §6 `reply_to`) ------------------------------------------

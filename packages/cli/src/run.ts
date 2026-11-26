@@ -518,14 +518,15 @@ export const atRest = (e: Event): Event => ({ ...e, session: redactDeep(e.sessio
 export const sinkAt = (sinks: readonly SinkConfig[], tier: number): boolean =>
   sinks.some((s) => !s.paused && Math.min(s.tier, s.max_tier ?? 3) >= tier);
 
-/** What session.attended is read from, the desktop app's link included, and session.launched_by
- *  and delegated_by (hook.ts picks all five): the job's own, never the worker's. */
+/** What session.attended is read from, the desktop app's link included, and session.launched_by,
+ *  delegated_by and triggered_by (hook.ts picks all six): the job's own, never the worker's. */
 const JOB_OWN_ENV = [
   "CLAUDE_CODE_SESSION_ATTENDED",
   "CLAUDE_CODE_HOST_SESSION_ID",
   "SESSIONPIPE_ASKED_BY",
   "SESSIONPIPE_CONTROL_JOB",
   "SESSIONPIPE_LAUNCHED_BY",
+  "SESSIONPIPE_TRIGGERED_BY",
 ];
 
 /** Run one hook job end to end: events → outbox → sinks. Returns what happened.
@@ -725,6 +726,7 @@ export async function runJob(
       ...(r.session.effort ? { effort: r.session.effort } : {}),
       ...(r.session.launched_by ? { launched_by: r.session.launched_by } : {}),
       ...(r.session.delegated_by ? { delegated_by: r.session.delegated_by } : {}),
+      ...(r.session.triggered_by ? { triggered_by: r.session.triggered_by } : {}),
     };
     const version = (facts.get(job.harness, id).harness_version as string | undefined) ?? undefined;
     const at = opts.now ?? job.at;

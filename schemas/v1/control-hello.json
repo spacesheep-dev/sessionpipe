@@ -282,6 +282,27 @@
     },
     "handoff": {
       "type": "boolean"
+    },
+    "triggers": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "topics": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._/-]{0,79}$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "on",
+        "topics"
+      ]
     }
   },
   "required": [

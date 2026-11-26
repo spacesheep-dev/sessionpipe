@@ -21,12 +21,14 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { configFile, stateDir } from "@sessionpipe/core";
+import { configFile, stateDir, untilde } from "@sessionpipe/core";
 import {
   COPY_WHYS,
   type CopyWhy,
@@ -89,6 +91,28 @@ export interface ControlConfig {
 /** `ask` as the config means it: on when unsaid. */
 export const askOn = (c: Pick<ControlConfig, "ask">): boolean => c.ask !== false;
 
+/** The real folder `folder` names (absolute, or `~` / `~/…` under this user's home), when it is
+ *  one of `folders` or inside one, compared on whole path segments of real paths; else null. */
+export function allowedIn(folder: string, folders: readonly string[]): string | null {
+  const dir = untilde(folder);
+  if (!path.isAbsolute(dir)) return null;
+  let r: string;
+  try {
+    r = realpathSync.native(dir);
+    if (!statSync(r).isDirectory()) return null;
+  } catch {
+    return null;
+  }
+  for (const f of folders) {
+    let rf = f;
+    try {
+      rf = realpathSync.native(f);
+    } catch {}
+    if (r === rf || r.startsWith(rf.endsWith(path.sep) ? rf : rf + path.sep)) return r;
+  }
+  return null;
+}
+
 export const controlFile = (env: NodeJS.ProcessEnv = process.env) =>
   path.join(path.dirname(configFile(env)), "control.json");
 export const controlState = (env: NodeJS.ProcessEnv = process.env) => path.join(stateDir(env), "control");
@@ -97,6 +121,8 @@ export function writePrivate(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  // 0600 before it takes the file's name: a temporary file left by a crash keeps its mode.
+  chmodSync(tmp, 0o600);
   renameSync(tmp, file);
   try {
     chmodSync(file, 0o600);

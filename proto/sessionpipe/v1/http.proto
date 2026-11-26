@@ -212,6 +212,10 @@ message ControlInfo {
   // The receiver shows a machine in `inherit` mode as that, never as safe or auto.
   // A daemon pairs in, or switches to, `inherit` only with receivers that say so.
   bool inherit = 6;
+  // Informational: the receiver sends notices (CONTROL.md §14) on the topics a machine
+  // lists, and takes `POST {control}/notices/ack`. Without it, a machine tells the person
+  // making a rule for this receiver that the receiver sends none.
+  bool notices = 7;
 }
 
 // `GET /.well-known/sessionpipe`: what the receiver takes.

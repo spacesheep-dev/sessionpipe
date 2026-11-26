@@ -21,7 +21,10 @@ export {
   LAUNCHED_BY_ENV,
   LINEAGE_ENV,
   launchedBy,
+  RULE_NAME_RE,
   readHook,
+  TRIGGERED_BY_ENV,
+  triggeredBy,
   withoutLineage,
 } from "./launched-by.js";
 export {
@@ -51,5 +54,7 @@ export {
 } from "./readers/transcripts.js";
 export { shortId } from "./short-id.js";
 export * from "./sinks/index.js";
+export { CONFIG_SCHEMAS, problems } from "./trigger-schemas.js";
+export * from "./triggers/index.js";
 export type * from "./types.js";
 export { isUlid, ulid } from "./ulid.js";

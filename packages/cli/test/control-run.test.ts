@@ -443,7 +443,8 @@ describe("control run", () => {
   it("control.json edited by hand reaches the running daemon; a broken one is ignored", async () => {
     paired();
     await run();
-    expect(seen.watchers).toHaveLength(1);
+    // control.json's, then the trigger rules file's (control-ask-run.test.ts has that one).
+    expect(seen.watchers).toHaveLength(2);
     writeControl({ name: "renamed", folders: [], mode: "auto", receivers: [] });
     seen.watchers[0]!();
     expect(daemon().reloaded).toEqual([expect.objectContaining({ name: "renamed", mode: "auto" })]);

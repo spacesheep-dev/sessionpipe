@@ -1,0 +1,42 @@
+{
+  "harness": "claude-code",
+  "event": "SessionStart",
+  "recorded": {
+    "at": "2026-10-21T17:06:35.578Z",
+    "harness_version": "2.1.300",
+    "how": "The hook payload recorded for session-start-launched-by.json (claude -p --settings <hooks>, this branch's hook as the SessionStart entry, from a scratch folder with SESSIONPIPE_STATE at a scratch state and SESSIONPIPE_NO_WORKER=1; the prompt asked for one word; paths scrubbed), byte for byte, with SESSIONPIPE_TRIGGERED_BY in place of SESSIONPIPE_LAUNCHED_BY, as the control daemon sets it on a run it starts for a rule (CONTROL.md §14). The variable is sessionpipe's own and Claude Code passes it to its hooks unread, so the payload is the harness's as recorded."
+  },
+  "input": {
+    "argv": [
+      "claude-code",
+      "SessionStart"
+    ],
+    "stdin": "{\"session_id\":\"c397e1dd-7a72-432b-b075-2e8dbe531037\",\"transcript_path\":\"/Users/user/.claude/projects/-Users-user-sessionpipe-record-ws/c397e1dd-7a72-432b-b075-2e8dbe531037.jsonl\",\"cwd\":\"/Users/user/sessionpipe/record/ws\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}\n",
+    "env": {
+      "CLAUDE_PROJECT_DIR": "/Users/user/sessionpipe/record/ws",
+      "SESSIONPIPE_TRIGGERED_BY": "card-todo"
+    },
+    "cwd": "/Users/user/sessionpipe/record/ws"
+  },
+  "expect": [
+    {
+      "id": "*",
+      "time": "*",
+      "tier": "*",
+      "type": "session.started",
+      "harness": {
+        "name": "claude-code",
+        "event": "SessionStart"
+      },
+      "session": {
+        "id": "c397e1dd-7a72-432b-b075-2e8dbe531037",
+        "cwd": "/Users/user/sessionpipe/record/ws",
+        "seq": "*",
+        "triggered_by": "card-todo"
+      },
+      "data": {
+        "source": "startup"
+      }
+    }
+  ]
+}

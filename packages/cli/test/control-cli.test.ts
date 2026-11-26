@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptSinkToken, CONTROL_HELP, controlMain, enabledHarnesses, waitMain } from "../src/control/cli.js";
 import type { Status } from "../src/control/daemon.js";
 import { installService, off, pair, uninstallService, withoutInherit } from "../src/control/pair.js";
+import { writeRules } from "../src/control/rules-file.js";
 import { readControl, writeControl } from "../src/control/store.js";
 import { readPool } from "../src/pool/index.js";
 import { rerunGlobally } from "../src/runtime.js";
@@ -418,6 +419,16 @@ describe("control mode, keys, off, status, help", () => {
     await run("off");
     expect(uninstallService).toHaveBeenCalledTimes(1);
     expect(said()).toContain("The daemon stays: sessions here may still ask another agent");
+    // Triggers on: clock rules run in the daemon with no receiver, so it stays too.
+    writeRules({ v: 1, on: true, rules: [] });
+    vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [] });
+    await run("off");
+    expect(uninstallService).toHaveBeenCalledTimes(1);
+    expect(said()).toContain("The daemon stays: your trigger rules run in it (`sessionpipe triggers off` stops them).");
+    writeRules({ v: 1, on: false, rules: [] });
+    vi.mocked(off).mockResolvedValueOnce({ name: "lab", folders: [], mode: "safe", receivers: [] });
+    await run("off");
+    expect(uninstallService).toHaveBeenCalledTimes(2);
   });
 
   it.runIf(process.platform !== "win32")("status: the daemon's answer as JSON, or that it isn't running", async () => {

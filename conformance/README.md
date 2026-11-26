@@ -146,6 +146,61 @@
   poll's messages arriving together, the running one finishing, one being refused. Run by
   `packages/cli/test/control-line.test.ts`; a second implementation of the machine runs the
   same file.
+- `triggers/*.json` — the person's trigger rules, the notices a receiver sends, their acks, the
+  hello's topics and the clock (spec/CONTROL.md §14). A scenario file is `{ spec, note, cases }`;
+  a case is `{ name, machine, triggers, steps }` and what the machine knew before it:
+  - `machine`: `{ mode, folders, harnesses, receivers, places, levels? }`, the machine's mode
+    (`safe`, `auto`, `inherit`), its allowed folders, the harnesses it runs headlessly, the
+    receivers it is paired with (by host), `places` (`{ home, config, state, harnesses, system, platform }`,
+    what a rule's folder is checked against: CONTROL.md §14.1, *The folder's floor*) and, where a
+    case needs it, `levels` (per harness, the levels it takes here, as a hello's
+    `start.<harness>.permissions`; absent, the harness takes every level. A case with Codex gives
+    `levels.codex`, `[read, safe, auto]`: Codex has no `edits`);
+  - `triggers`: `<config>/triggers.json` exactly (`null`: no file). `triggers_ok: false` marks a
+    file the machine must refuse whole, and so read as triggers off;
+  - optional: `sessions` (`{ "<harness>:<id>": { level, held, folder } }`, the sessions a rule
+    continues, their recorded level, whether a window holds one, and the folder the session runs
+    in, which a run of a rule continuing it uses (one with no `folder` is a session whose folder
+    the machine can't tell: refused `folder`); a session not listed is gone), `seen`
+    (notice ids already seen, `{ receiver, id, at }`), `today` (the rules' runs earlier that local
+    day, `{ rule, subject, state, at, result }`), `starts` (`{ running, last_hour, headless? }`, the
+    starts counted against the machine's caps: in progress, and in the sliding hour, the latter
+    made at the first step's instant; and the headless turns no trigger made in the machine's
+    slots), `limits` (`{ start_concurrent?, headless? }`, 2 and 3 when absent), `last_tick` (per clock rule; a rule with none was first seen when it first appeared, or at its resume or new `every`, and an interval's first tick is one interval after it), `zone` (the machine's time
+    zone, for the day and the clock).
+  Each step has an `at` and at most one of: `poll` (`{ receiver, body }`, a poll answer that
+  receiver gave), `hello` (the receiver a hello goes to now), `change` (the rules file as the
+  person changed it at the machine), `tick` (a clock rule's time came), `wake` with `asleep` (the
+  machine slept from `asleep` and woke at `at`), `release` (a window let go of that session),
+  `sessions` (sessions as they are now: each named one replaced, or `null` when gone),
+  `start_ended` (that many starts no trigger made ended), `headless_ended` (that many headless
+  turns no trigger made ended), `run_ended` (the indexes of triggered runs that ended), `machine` (the machine's settings as the person changed them at its terminal,
+  the fields given), `resume` (the person ran `trigger resume` for that rule), `permission` (a
+  triggered run raised a prompt); a step with none is time passing to `at`. Within a step, waiting
+  runs whose deadline passed (a deadline is exclusive) are settled first, refused for what they
+  waited for (`busy`, `held`, `start_limit`), then every waiting run that may begin does, in the
+  order taken, then what the step does, then again every waiting run that may begin. A `hello`
+  goes only to a receiver in `machine.receivers`. Its `expect` holds what must follow: `acks`
+  (`{ id, outcome, code?, session? }`, the machine's clock aside; `"<harness>:*"` is a session the
+  run made), `runs` (`{ rule, run, env }`, `run` being `config.proto`'s `TriggerRun` and `env` what
+  the run's environment gains), `triggers` (a hello's), `hello: true` (a hello goes out at once),
+  `history` (`{ rule, result, code?, subject?, state? }`, lines a rule's history gains, every
+  run and refusal of a rule that took the cause, a notice's with its subject and state; `result`
+  is `ran`, `refused`, `failed`, `missed` or `dropped`, in the order written within one rule), and `unacked` (ids past the fiftieth), `cancelled` (the
+  indexes, in the case's order, of the triggered runs a `triggers off` cancels), `paused` (rules
+  the machine paused), `message_acks` (the poll's messages, which the command path acks) and
+  `answered_by_machine` where a case says them. An absent list means none, and `hello` absent
+  means no hello goes out at once. Acks are compared by `id`: their order within a step is not
+  part of the protocol. `rules-file.json` (`{ places, cases: [{ name, file, ok, places? }] }`, a
+  case's own `places` where it has one) and `subject-patterns.json` (`{ pattern, ok,
+  matches?, misses? }`) are the reader's alone, and `trigger-line.json` (`{ cases: [{ name,
+  rule, line, argv }] }`) is `trigger line`'s, run by `packages/core/test/trigger-line.test.ts`. Run by `packages/core/test/trigger-fixtures.test.ts`
+  against the definition's functions and a small model of CONTROL.md §14.7, which checks every
+  expectation of every step; the daemon's tests run the same files against the daemon. Only a
+  daemon can show: a clock in a time zone other than UTC (every case here is `UTC`), a waiting
+  run that outlives a restart, real paths against the allowlist, the levels a harness's binary
+  takes, a hello and an ack actually sent and retried, and that a permission prompt is left to
+  the harness (`answered_by_machine: false`).
 - `control-vectors/*.json` — signed control commands, valid and broken, and enrollment
   proofs, each with the verdict every verifier must reach (spec/CONTROL.md §5). Run by
   `packages/core/test/control-vectors.test.ts`; `npm run vectors` writes the ones not yet

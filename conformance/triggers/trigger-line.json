@@ -1,0 +1,485 @@
+{
+  "spec": "CONTROL.md §14.1 (trigger line)",
+  "note": "The one `sessionpipe trigger add` command that makes a rule again, as `trigger line` prints it and a program reads it back: the flags in one fixed order (--on --topic --event | --every; --when state= for= by=; --subject; --start | --continue; --folder; --level; --tools; --cap; --words); --level and --cap always, the others only when the rule has them; a `when` key's values and the tools joined by a comma, in the rule's order; a value bare when it is not empty, holds only A-Z a-z 0-9 _ . / : @ = + - and does not start with = or -, else in POSIX single quotes with a ' written '\\'' and a line feed kept inside them; a value that starts with - written as one word --flag=<value>. `line` is what a person pastes into sh, bash or zsh; `argv` is what it splits into, from `trigger` on. Read back by `add`, it is the same rule, unpaused.",
+  "cases": [
+    {
+      "name": "a clock rule: --every, the defaults written (--level, --cap), a quote in the words",
+      "rule": {
+        "name": "monday-report",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "Make last week's sales report from data/ into reports/."
+      },
+      "line": "sessionpipe trigger add monday-report --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words 'Make last week'\\''s sales report from data/ into reports/.'",
+      "argv": [
+        "trigger",
+        "add",
+        "monday-report",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "Make last week's sales report from data/ into reports/."
+      ]
+    },
+    {
+      "name": "every flag of a notice rule, in order; lists joined by a comma, in the rule's order",
+      "rule": {
+        "name": "card-todo",
+        "paused": false,
+        "source": {
+          "receiver": "board.example",
+          "topic": "acme/tasks",
+          "event": "record.updated"
+        },
+        "when": {
+          "state": [
+            "todo",
+            "doing"
+          ],
+          "for": [
+            "studio-claude"
+          ],
+          "by": [
+            "u-41c9",
+            "u-7"
+          ]
+        },
+        "subject": "^X-[0-9]{1,6}$",
+        "target": {
+          "start": "claude-code"
+        },
+        "folder": "~/work/acme",
+        "level": "edits",
+        "tools": [
+          "mcp__board",
+          "mcp__board__read"
+        ],
+        "cap": {
+          "per_day": 5
+        },
+        "words": "Card {subject} is yours and in {state}."
+      },
+      "line": "sessionpipe trigger add card-todo --on board.example --topic acme/tasks --event record.updated --when 'state=todo,doing' --when for=studio-claude --when 'by=u-41c9,u-7' --subject '^X-[0-9]{1,6}$' --start claude-code --folder '~/work/acme' --level edits --tools 'mcp__board,mcp__board__read' --cap 5/day --words 'Card {subject} is yours and in {state}.'",
+      "argv": [
+        "trigger",
+        "add",
+        "card-todo",
+        "--on",
+        "board.example",
+        "--topic",
+        "acme/tasks",
+        "--event",
+        "record.updated",
+        "--when",
+        "state=todo,doing",
+        "--when",
+        "for=studio-claude",
+        "--when",
+        "by=u-41c9,u-7",
+        "--subject",
+        "^X-[0-9]{1,6}$",
+        "--start",
+        "claude-code",
+        "--folder",
+        "~/work/acme",
+        "--level",
+        "edits",
+        "--tools",
+        "mcp__board,mcp__board__read",
+        "--cap",
+        "5/day",
+        "--words",
+        "Card {subject} is yours and in {state}."
+      ]
+    },
+    {
+      "name": "a notice rule with only what it needs: no --event, --when, --subject or --tools",
+      "rule": {
+        "name": "card-min",
+        "paused": false,
+        "source": {
+          "receiver": "board.example",
+          "topic": "acme/tasks"
+        },
+        "target": {
+          "start": "claude-code"
+        },
+        "folder": "~/work/acme",
+        "level": "safe",
+        "cap": {
+          "per_day": 5
+        },
+        "words": "Card {subject} is yours and in {state}."
+      },
+      "line": "sessionpipe trigger add card-min --on board.example --topic acme/tasks --start claude-code --folder '~/work/acme' --level safe --cap 5/day --words 'Card {subject} is yours and in {state}.'",
+      "argv": [
+        "trigger",
+        "add",
+        "card-min",
+        "--on",
+        "board.example",
+        "--topic",
+        "acme/tasks",
+        "--start",
+        "claude-code",
+        "--folder",
+        "~/work/acme",
+        "--level",
+        "safe",
+        "--cap",
+        "5/day",
+        "--words",
+        "Card {subject} is yours and in {state}."
+      ]
+    },
+    {
+      "name": "a rule that continues a session",
+      "rule": {
+        "name": "nightly",
+        "paused": false,
+        "source": {
+          "every": "day 02:30"
+        },
+        "target": {
+          "continue": "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
+        },
+        "folder": "~/work/acme",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "Make last week's sales report from data/ into reports/."
+      },
+      "line": "sessionpipe trigger add nightly --every 'day 02:30' --continue codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b --folder '~/work/acme' --level safe --cap 1/day --words 'Make last week'\\''s sales report from data/ into reports/.'",
+      "argv": [
+        "trigger",
+        "add",
+        "nightly",
+        "--every",
+        "day 02:30",
+        "--continue",
+        "codex:019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b",
+        "--folder",
+        "~/work/acme",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "Make last week's sales report from data/ into reports/."
+      ]
+    },
+    {
+      "name": "an interval, a folder with a space and an absolute folder",
+      "rule": {
+        "name": "every-2h",
+        "paused": false,
+        "source": {
+          "every": "2h"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "/srv/work/my acme",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "Make last week's sales report from data/ into reports/."
+      },
+      "line": "sessionpipe trigger add every-2h --every 2h --start codex --folder '/srv/work/my acme' --level safe --cap 1/day --words 'Make last week'\\''s sales report from data/ into reports/.'",
+      "argv": [
+        "trigger",
+        "add",
+        "every-2h",
+        "--every",
+        "2h",
+        "--start",
+        "codex",
+        "--folder",
+        "/srv/work/my acme",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "Make last week's sales report from data/ into reports/."
+      ]
+    },
+    {
+      "name": "words with a line feed (kept inside the quotes), a tab and a backslash",
+      "rule": {
+        "name": "nl",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "First line.\nSecond\tline, a \\ backslash."
+      },
+      "line": "sessionpipe trigger add nl --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words 'First line.\nSecond\tline, a \\ backslash.'",
+      "argv": [
+        "trigger",
+        "add",
+        "nl",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "First line.\nSecond\tline, a \\ backslash."
+      ]
+    },
+    {
+      "name": "words a shell would act on, all inside single quotes",
+      "rule": {
+        "name": "shell",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "$(rm -rf ~) `id` $HOME; echo && x | y > z < w * ? [a] # !! ~"
+      },
+      "line": "sessionpipe trigger add shell --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words '$(rm -rf ~) `id` $HOME; echo && x | y > z < w * ? [a] # !! ~'",
+      "argv": [
+        "trigger",
+        "add",
+        "shell",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "$(rm -rf ~) `id` $HOME; echo && x | y > z < w * ? [a] # !! ~"
+      ]
+    },
+    {
+      "name": "words that start with - are one word: --words=",
+      "rule": {
+        "name": "dash",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "-h"
+      },
+      "line": "sessionpipe trigger add dash --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words='-h'",
+      "argv": [
+        "trigger",
+        "add",
+        "dash",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words=-h"
+      ]
+    },
+    {
+      "name": "words that look like a flag of the CLI's own",
+      "rule": {
+        "name": "help",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "--help --no-color"
+      },
+      "line": "sessionpipe trigger add help --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words='--help --no-color'",
+      "argv": [
+        "trigger",
+        "add",
+        "help",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words=--help --no-color"
+      ]
+    },
+    {
+      "name": "words that start with = are quoted (zsh expands a bare one)",
+      "rule": {
+        "name": "equals",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "=TODO"
+      },
+      "line": "sessionpipe trigger add equals --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words '=TODO'",
+      "argv": [
+        "trigger",
+        "add",
+        "equals",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "=TODO"
+      ]
+    },
+    {
+      "name": "words that are all bare characters stay bare",
+      "rule": {
+        "name": "bare",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "safe",
+        "cap": {
+          "per_day": 1
+        },
+        "words": "a.b/c:d@e=f+g-h_1"
+      },
+      "line": "sessionpipe trigger add bare --every 'mon 09:00' --start codex --folder '~/work/sales' --level safe --cap 1/day --words a.b/c:d@e=f+g-h_1",
+      "argv": [
+        "trigger",
+        "add",
+        "bare",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "safe",
+        "--cap",
+        "1/day",
+        "--words",
+        "a.b/c:d@e=f+g-h_1"
+      ]
+    },
+    {
+      "name": "a forty-character name and the largest cap",
+      "rule": {
+        "name": "a234567890123456789012345678901234567890",
+        "paused": false,
+        "source": {
+          "every": "mon 09:00"
+        },
+        "target": {
+          "start": "codex"
+        },
+        "folder": "~/work/sales",
+        "level": "read",
+        "cap": {
+          "per_day": 50
+        },
+        "words": "Make last week's sales report from data/ into reports/."
+      },
+      "line": "sessionpipe trigger add a234567890123456789012345678901234567890 --every 'mon 09:00' --start codex --folder '~/work/sales' --level read --cap 50/day --words 'Make last week'\\''s sales report from data/ into reports/.'",
+      "argv": [
+        "trigger",
+        "add",
+        "a234567890123456789012345678901234567890",
+        "--every",
+        "mon 09:00",
+        "--start",
+        "codex",
+        "--folder",
+        "~/work/sales",
+        "--level",
+        "read",
+        "--cap",
+        "50/day",
+        "--words",
+        "Make last week's sales report from data/ into reports/."
+      ]
+    }
+  ]
+}

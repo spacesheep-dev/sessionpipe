@@ -85,6 +85,23 @@ for (const f of delivery) {
   }
 }
 
+// Trigger scenarios (spec/CONTROL.md §14): every file parses and names its spec and its cases.
+// What each case holds is checked by packages/core/test/trigger-fixtures.test.ts, and by an engine.
+for (const f of walk(path.join(root, "conformance/triggers")).filter((f) => f.endsWith(".json"))) {
+  const rel = path.relative(root, f);
+  try {
+    const j = JSON.parse(readFileSync(f, "utf8"));
+    if (typeof j.spec !== "string" || !Array.isArray(j.cases) || !j.cases.length)
+      throw new Error("needs spec and cases[]");
+    if (j.cases.some((c) => !c || (typeof c.name !== "string" && typeof c.pattern !== "string")))
+      throw new Error("every case needs a name");
+    rows.push([rel, "ok", ""]);
+  } catch (e) {
+    failed++;
+    rows.push([rel, "FAIL", String(e.message)]);
+  }
+}
+
 // Control vectors: every signed message fits control.json (the receiver's envelope
 // fields aside), and every command a vector expects to verify fits control-command.json,
 // as every key a vector expects to enroll fits control-key.json.

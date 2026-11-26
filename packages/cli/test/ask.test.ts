@@ -42,6 +42,7 @@ import {
 } from "../src/ask.js";
 import { type LocalReply, type LocalRequest, reach } from "../src/control/local.js";
 import { installService, uninstallService } from "../src/control/pair.js";
+import { writeRules } from "../src/control/rules-file.js";
 import { readControl, writeControl } from "../src/control/store.js";
 import { rerunGlobally, viaNpx } from "../src/runtime.js";
 import { PLAIN } from "../src/style.js";
@@ -463,6 +464,13 @@ describe("ask on / off / status", () => {
     expect(uninstallService).toHaveBeenCalledTimes(1);
     expect(kept.out).toContain("within seconds");
     expect(readControl(env)?.ask).toBe(false);
+  });
+  it("off keeps the service while the person's trigger rules are on, with no receiver at all", async () => {
+    writeControl({ name: "box", folders: [], mode: "safe", receivers: [] }, env);
+    writeRules({ v: 1, on: true, rules: [] }, env);
+    const r = await run(["off"]);
+    expect(uninstallService).not.toHaveBeenCalled();
+    expect(r.out).toContain("The background service stays: your trigger rules run in it");
   });
   it("status: the switch, the daemon, the agents and the folders", async () => {
     expect((await run(["status"])).out).toBe(

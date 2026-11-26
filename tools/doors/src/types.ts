@@ -13,7 +13,9 @@
 //   repeated / map          T[] / Record<string, T>
 //   google.protobuf.Value   unknown;  Struct → Record<string, unknown>
 //   nullable                | null
-import { type DescField, type DescFile, ScalarType } from "@bufbuild/protobuf";
+//   a type of another file  `import type { Name } from "<from>"`, when the file's types are a module
+//                           of their own (config.ts names control.proto's types from v1.ts)
+import { type DescEnum, type DescField, type DescFile, type DescMessage, ScalarType } from "@bufbuild/protobuf";
 import {
   type Descriptors,
   enumWords,
@@ -89,15 +91,46 @@ function fieldType(d: Descriptors, f: DescField): string {
 
 /** The proto files whose messages and enums the types file holds, in order. */
 export const WIRE_FILES: readonly string[] = ["options", "events", "http", "control"];
+/** The machine's own files (config.proto): never on the wire, so a module of their own. */
+export const CONFIG_FILES: readonly string[] = ["config"];
+
+export interface TypesOptions {
+  /** The file's third header line: what its shapes are. */
+  about?: string;
+  /** The module a type of another proto file is imported from (`./v1.js`). Without it, a
+   *  field whose type another file defines is an error: the module would not compile. */
+  from?: string;
+}
+
+/** The names the given files' fields use that another proto file defines, sorted. */
+function foreignNames(d: Descriptors, files: readonly string[]): string[] {
+  const own = new Set(files.map((f) => `sessionpipe/v1/${f}`));
+  const names = new Set<string>();
+  for (const name of files)
+    for (const m of d.registry.getFile(`sessionpipe/v1/${name}.proto`)!.messages)
+      for (const f of m.fields) {
+        const kind = kindOf(f);
+        const desc: DescMessage | DescEnum | undefined =
+          "message" in kind ? kind.message : "enum" in kind ? kind.enum : undefined;
+        if (!desc || desc.typeName.startsWith("google.protobuf.") || own.has(desc.file.name)) continue;
+        names.add(desc.name);
+      }
+  return [...names].sort();
+}
 
 /** The whole file's text: every message and enum of the given `sessionpipe/v1/<name>.proto` files, in order. */
-export function typesFile(d: Descriptors, files: readonly string[] = WIRE_FILES): string {
+export function typesFile(d: Descriptors, files: readonly string[] = WIRE_FILES, o: TypesOptions = {}): string {
   const parts = [
     "// SPDX-License-Identifier: Apache-2.0",
     "// GENERATED from proto/sessionpipe/v1/*.proto by tools/doors; do not edit. `npm run schemas` rewrites it.",
-    "// The wire's shapes as TypeScript: snake_case keys, numbers for every integer, enums as their words.",
+    `// ${o.about ?? "The wire's shapes as TypeScript: snake_case keys, numbers for every integer, enums as their words."}`,
     "",
   ];
+  const foreign = foreignNames(d, files);
+  if (foreign.length) {
+    if (!o.from) throw new Error(`${files.join(", ")}: names ${foreign.join(", ")} from another file; say where from`);
+    parts.push(`import type { ${foreign.join(", ")} } from ${JSON.stringify(o.from)};\n`);
+  }
   for (const name of files) {
     const file = d.registry.getFile(`sessionpipe/v1/${name}.proto`)!;
     const notes = comments(file);
