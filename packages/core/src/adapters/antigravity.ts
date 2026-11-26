@@ -352,11 +352,11 @@ function extractBrainPaths(file: string): { dataDir: string | null; messagesDir:
   const idx = file.lastIndexOf(marker);
   if (idx > 0) {
     const dataDir = file.slice(0, idx);
-    const rest = file.slice(idx + marker.length);
-    const nextSep = rest.indexOf(path.sep);
-    const convDir = nextSep >= 0 ? rest.slice(0, nextSep) : rest;
-    const messagesDir = convDir ? path.join(dataDir, "brain", convDir, ".system_generated", "messages") : null;
-    return { dataDir, messagesDir };
+    const convDir = file.slice(idx + marker.length).split(path.sep)[0];
+    return {
+      dataDir,
+      messagesDir: convDir ? path.join(dataDir, "brain", convDir, ".system_generated", "messages") : null,
+    };
   }
   const logsDir = path.dirname(file);
   const sysGenDir = path.dirname(logsDir);
@@ -497,9 +497,8 @@ export function antigravityFacts(
   }
   if (parentId) out.parent_id = parentId;
   if (!out.title) {
-    const summaryLine = dbTitle ? (dbTitle.split(/\r?\n/).find((l) => l.trim()) ?? "").trim() : "";
-    if (summaryLine) {
-      out.title = capTitle(summaryLine);
+    if (dbTitle) {
+      out.title = capTitle(dbTitle.split(/\r?\n/)[0]!.trim());
       out.title_source = "harness";
     } else if (out.parent_id) {
       let promptTitle =

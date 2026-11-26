@@ -728,6 +728,96 @@ describe("antigravity subagent parent linking and fallback titles", () => {
     expect(facts.parent_id).toBeUndefined();
     expect(facts.title).toBe("Add a README to this project");
   });
+
+  it("handles edge cases cleanly: non-brain transcript, malformed message JSON, blank/tag-only titles, and invalid ids", () => {
+    // Standalone .system_generated/logs/transcript.jsonl outside brain/ still resolves sibling messages/.
+    const standaloneRoot = path.join(home, "custom-dir", ".system_generated");
+    mkdirSync(path.join(standaloneRoot, "logs"), { recursive: true });
+    mkdirSync(path.join(standaloneRoot, "messages"), { recursive: true });
+    const standaloneLog = path.join(standaloneRoot, "logs", "transcript.jsonl");
+    writeFileSync(
+      standaloneLog,
+      [
+        JSON.stringify({ type: "SYSTEM_MESSAGE", created_at: "2026-11-26T12:30:00Z", content: "No sender here" }),
+        JSON.stringify({ type: "PLANNER_RESPONSE", created_at: "2026-11-26T12:30:01Z", content: "ok" }),
+      ].join("\n"),
+    );
+    const sameMtime = new Date(Date.now() - 30_000);
+    const files: [string, string][] = [
+      ["a-corrupt.json", "{not json"],
+      ["b-array.json", "[]"],
+      ["c-notext.json", JSON.stringify({ sender: PARENT, content: 123 })],
+      [
+        "d-parent.json",
+        JSON.stringify({
+          sender: PARENT,
+          renderDetails: { messageTitle: "Message from Parent Agent" },
+          content: "\n\n<tag></tag>\n   \nActual delegated task",
+        }),
+      ],
+    ];
+    for (const [name, body] of files) {
+      const p = path.join(standaloneRoot, "messages", name);
+      writeFileSync(p, body);
+      utimesSync(p, sameMtime, sameMtime);
+    }
+    const standaloneFacts = antigravityFacts(standaloneLog, { conversation: CHILD, workspaces: [], env });
+    expect(standaloneFacts.parent_id).toBe(PARENT);
+    expect(standaloneFacts.title).toBe("Actual delegated task");
+
+    // SYSTEM_MESSAGE with sender= but no content= falls back to sibling messages/ for title, and
+    // tag-only delegated text yields no title rather than garbage.
+    const noContentFile = dataDir(
+      "antigravity-cli",
+      [
+        JSON.stringify({
+          type: "SYSTEM_MESSAGE",
+          created_at: "2026-11-26T12:30:00Z",
+          content: `[Message] timestamp=2026-11-26T12:30:00Z sender=${PARENT}`,
+        }),
+      ],
+      CHILD,
+    );
+    const noContentMsgDir = path.join(gemini, "antigravity-cli", "brain", CHILD, ".system_generated", "messages");
+    mkdirSync(noContentMsgDir, { recursive: true });
+    writeFileSync(
+      path.join(noContentMsgDir, "m.json"),
+      JSON.stringify({
+        sender: PARENT,
+        renderDetails: { messageTitle: "Message from Parent Agent" },
+        content: "From msg",
+      }),
+    );
+    expect(antigravityFacts(noContentFile, { conversation: CHILD, workspaces: [], env })).toMatchObject({
+      parent_id: PARENT,
+      title: "From msg",
+    });
+
+    // Subagent with tag-only prompt and no messages / no DB agent_name stays untitled cleanly.
+    const tagOnlyId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const tagOnlyFile = dataDir(
+      "antigravity-cli",
+      [
+        JSON.stringify({
+          type: "SYSTEM_MESSAGE",
+          created_at: "2026-11-26T12:30:00Z",
+          content: `[Message] sender=${PARENT} content=<tag></tag>\n   `,
+        }),
+      ],
+      tagOnlyId,
+    );
+    const tagOnlyFacts = antigravityFacts(tagOnlyFile, { conversation: tagOnlyId, workspaces: [], env });
+    expect(tagOnlyFacts.parent_id).toBe(PARENT);
+    expect(tagOnlyFacts.title).toBeUndefined();
+
+    // Invalid conversation id skips DB query cleanly; empty conv segment after /brain/ returns null messagesDir.
+    const invalidFile = dataDir("antigravity-cli", [JSON.stringify({ type: "PLANNER_RESPONSE", content: "ok" })], CONV);
+    expect(antigravityFacts(invalidFile, { conversation: "bad id!", workspaces: [], env }).parent_id).toBeUndefined();
+    const emptyBrainFile = path.join(gemini, "antigravity-cli", "brain", "");
+    expect(
+      antigravityFacts(`${emptyBrainFile}${path.sep}`, { conversation: CONV, workspaces: [], env }).parent_id,
+    ).toBeUndefined();
+  });
 });
 
 describe("antigravity detect, install and uninstall", () => {
