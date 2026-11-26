@@ -2,7 +2,7 @@
 // Which one process holds a Claude Code session, and which account it belongs to when
 // more than one has its transcript (spec/CONTROL.md §6, Homes; §6.3 `inbox`). Registry
 // rows are files in a temp dir; the live pid is this test process's own.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -150,5 +150,48 @@ describe("resolveHome", () => {
       live: ["both-a", "both-b"],
     });
     expect([a, b].every((d) => path.isAbsolute(d))).toBe(true);
+  });
+
+  /** A second login that links its `projects/` (and `sessions/`) to `owner`'s. */
+  const linkedTo = (name: string, owner: string, folders = ["projects", "sessions"]) => {
+    const dir = path.join(tmp, name);
+    mkdirSync(dir, { recursive: true });
+    for (const f of folders) symlinkSync(path.join(owner, f), path.join(dir, f));
+    return dir;
+  };
+
+  it("accounts sharing their folders by symlink, one process live: that session, in the account owning the folders", () => {
+    const owner = home("link-own", { session: SESSION, rows: [{ pid: process.pid, sessionId: SESSION }] });
+    const a = linkedTo("link-a", owner);
+    const b = linkedTo("link-b", owner);
+    expect(findTranscripts(SESSION, [a, owner, b])).toHaveLength(3);
+    expect(resolveHome(SESSION, [a, owner, b])).toEqual({
+      transcript: {
+        file: path.join(owner, "projects", PROJECT, `${SESSION}.jsonl`),
+        configDir: owner,
+        project: PROJECT,
+      },
+    });
+  });
+
+  it("shared folders and nothing live: still ambiguous, since a copy would need an account", () => {
+    const owner = home("cold-own", { session: SESSION });
+    mkdirSync(path.join(owner, "sessions"), { recursive: true });
+    const a = linkedTo("cold-a", owner);
+    expect(resolveHome(SESSION, [owner, a])).toEqual({ ambiguous: ["cold-a", "cold-own"], live: [] });
+  });
+
+  it("one transcript by symlink but two processes, each in its own registry: still ambiguous", () => {
+    const owner = home("pair-own", { session: SESSION, rows: [{ pid: process.pid, sessionId: SESSION }] });
+    const other = linkedTo("pair-b", owner, ["projects"]);
+    mkdirSync(path.join(other, "sessions"), { recursive: true });
+    writeFileSync(
+      path.join(other, "sessions", `${process.ppid}.json`),
+      JSON.stringify({ pid: process.ppid, sessionId: SESSION }),
+    );
+    expect(resolveHome(SESSION, [owner, other])).toEqual({
+      ambiguous: ["pair-b", "pair-own"],
+      live: ["pair-b", "pair-own"],
+    });
   });
 });

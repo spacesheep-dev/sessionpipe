@@ -7,7 +7,7 @@
 // spacesheep CLI's machine listener (lib/machine.js, 1.22), which ran it in
 // production first.
 import { execFile, execFileSync } from "node:child_process";
-import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PICTURE_TYPES, type Picture, type PictureLimits, picturesFor } from "../control/pictures.js";
@@ -639,10 +639,43 @@ export function resolveHome(session: string, dirs: readonly string[]): HomeChoic
   if (all.length === 1) return { transcript: all[0] as Transcript };
   const live = all.filter((t) => liveRecords(session, t.configDir).length > 0);
   if (live.length === 1) return { transcript: live[0] as Transcript };
+  const linked = oneThroughLinks(session, live);
+  if (linked) return { transcript: linked };
   return {
     ambiguous: [...new Set(all.map(homeName))].sort(),
     live: [...new Set(live.map(homeName))].sort(),
   };
+}
+
+const realOf = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+const linkedFolder = (dir: string, name: string): boolean => {
+  try {
+    return lstatSync(path.join(dir, name)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+/** Accounts that share one `projects/` and one `sessions/` folder by symlink (several
+ *  logins on one machine, one history) each find the same transcript and the same live
+ *  row. That is one session held by one process, not a choice between accounts: a message
+ *  goes into that process, whichever directory names it. Collapsed only when every live
+ *  copy is one file on disk and every live row one registry file, so a real choice (two
+ *  files, or two processes) still refuses, and with nothing live it still refuses, since a
+ *  copy would need an account. The one kept is the account whose folders are its own. */
+function oneThroughLinks(session: string, live: readonly Transcript[]): Transcript | null {
+  if (live.length < 2) return null;
+  if (new Set(live.map((t) => realOf(t.file))).size !== 1) return null;
+  const rows = new Set(live.flatMap((t) => liveRecords(session, t.configDir).map((r) => realOf(r.file))));
+  if (rows.size !== 1) return null;
+  const own = live.find((t) => !linkedFolder(t.configDir, "projects") && !linkedFolder(t.configDir, "sessions"));
+  return own ?? (live[0] as Transcript);
 }
 
 const projectName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
