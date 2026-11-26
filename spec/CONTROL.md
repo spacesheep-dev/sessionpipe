@@ -563,6 +563,13 @@ Nothing live, or more than one live, is acked `refused` with code `ambiguous_hom
 where more than one is live, which ones — all by their directory name and never by path.
 A guess there put a message into an account that was signed out.
 
+Accounts can share one tree by symlink (several logins on one machine that link their
+`projects/` and live-session registry to one config dir's). Each then finds the same
+transcript and the same live record, which is one session in one process, not a choice:
+where every live copy resolves to one file on disk and every live record to one registry
+file, the machine takes that session, filed under the account whose own folders hold it
+(not links). Two files, two processes, or nothing live is still `ambiguous_home`.
+
 ### 6.2 The session's mode
 
 Some decisions below need the permission mode a live session is actually running in. A
