@@ -15,6 +15,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "n
 import path from "node:path";
 import { homeDir } from "../paths.js";
 import { ends, parseLines } from "../readers/files.js";
+import { querySqlite } from "../readers/sqlite.js";
 import { readAntigravity } from "../readers/transcripts.js";
 import { editJson, readJsonFile, removeEmptied, writeBack } from "./claude-shaped.js";
 import type {
@@ -44,7 +45,24 @@ const projectsDir = (env: NodeJS.ProcessEnv) => path.join(gemini(env), "config",
 const dataDirs = (env: NodeJS.ProcessEnv) =>
   ["antigravity", "antigravity-cli", "antigravity-ide"].map((d) => path.join(gemini(env), d));
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SYS_MSG_SENDER_RE = /\[Message\][^\n]*\bsender=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i;
+const MSG_MAX_BYTES = 256 * 1024;
+const MSG_MAX_STAT = 256;
+const MSG_MAX_READ = 32;
+const SUMMARY_SQL =
+  "SELECT parent_conversation_id, agent_name, title FROM conversation_summaries WHERE conversation_id = ? LIMIT 1";
+const PARENT_SQL = "SELECT parent_id FROM conversation_parents WHERE conversation_id = ? LIMIT 1";
 const validTool = (n: unknown): n is string => typeof n === "string" && /^[A-Za-z0-9_.:-]{1,120}$/.test(n);
+
+function validParentId(candidate: unknown, self: string, uuidOnly = false): string | undefined {
+  if (typeof candidate !== "string" || !candidate) return undefined;
+  if (uuidOnly ? !UUID_RE.test(candidate) : !ID_RE.test(candidate)) return undefined;
+  if (candidate === self || (UUID_RE.test(candidate) && candidate.toLowerCase() === self.toLowerCase())) {
+    return undefined;
+  }
+  return candidate;
+}
 
 // One tool event already, so a lean install is the same entry.
 function entry(cmd: HookCommand) {
@@ -114,6 +132,11 @@ export const antigravity: Adapter = {
     const workspaces = agWorkspaces(s.workspacePaths);
     const session: HookResult["session"] = { id: String(id), cwd: workspaces[0] ?? input.cwd };
     if (typeof s.modelName === "string" && s.modelName !== "auto") session.model = s.modelName;
+    const parentId = validParentId(
+      s.parentConversationId ?? s.parent_conversation_id ?? s.parentId ?? s.parent_id,
+      session.id,
+    );
+    if (parentId) session.parent_id = parentId;
     const toolCall = s.toolCall as { name?: unknown; args?: unknown } | undefined;
     const tool = validTool(toolCall?.name) ? toolCall?.name : validTool(s.toolName) ? s.toolName : undefined;
     const ev = (type: string, data: Record<string, unknown>) => ({ type, data: prune(data), harnessEvent: event });
@@ -165,13 +188,16 @@ export const antigravity: Adapter = {
     return readAntigravity(text.split("\n"), fromLine);
   },
 
-  facts(session, transcript, hints): SessionFacts {
-    if (!transcript) return {};
-    return antigravityFacts(transcript, {
+  facts(session, transcript, hints, _state, env = process.env): SessionFacts {
+    const hookParent = validParentId(session.parent_id, session.id);
+    if (!transcript) return hookParent ? { parent_id: hookParent } : {};
+    const out = antigravityFacts(transcript, {
       conversation: session.id,
       workspaces: (hints.workspaces as string[] | undefined) ?? (session.cwd ? [session.cwd] : []),
-      env: process.env,
+      env,
     });
+    if (!out.parent_id && hookParent) out.parent_id = hookParent;
+    return out;
   },
 
   backfill(sinceMs, env = process.env): BackfillRow[] {
@@ -305,6 +331,114 @@ export function antigravityRemoteUrl(
   return null;
 }
 
+const capTitle = (line: string): string => (line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line);
+
+function cleanDelegatedTitle(raw: string): string | undefined {
+  for (const rawLine of raw.split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    line = line.replace(/<\/?[a-zA-Z][a-zA-Z0-9_:-]*(?:\s[^>]*)?>/g, " ");
+    line = line.replace(/^\s*#+\s*/, "").replace(/\*\*|__/g, "");
+    line = line.replace(/\s+/g, " ").trim();
+    line = line.replace(/^You are\s+(?:(?:the|an?)\s+)?/i, "").trim();
+    if (!line) continue;
+    return capTitle(line);
+  }
+  return undefined;
+}
+
+function extractBrainPaths(file: string): { dataDir: string | null; messagesDir: string | null } {
+  const marker = `${path.sep}brain${path.sep}`;
+  const idx = file.lastIndexOf(marker);
+  if (idx > 0) {
+    const dataDir = file.slice(0, idx);
+    const rest = file.slice(idx + marker.length);
+    const nextSep = rest.indexOf(path.sep);
+    const convDir = nextSep >= 0 ? rest.slice(0, nextSep) : rest;
+    const messagesDir = convDir ? path.join(dataDir, "brain", convDir, ".system_generated", "messages") : null;
+    return { dataDir, messagesDir };
+  }
+  const logsDir = path.dirname(file);
+  const sysGenDir = path.dirname(logsDir);
+  if (path.basename(logsDir) === "logs" && path.basename(sysGenDir) === ".system_generated") {
+    return { dataDir: null, messagesDir: path.join(sysGenDir, "messages") };
+  }
+  return { dataDir: null, messagesDir: null };
+}
+
+function readParentFromMessages(
+  messagesDir: string,
+  conversation: string,
+  hasUserInput: boolean,
+): { parentId: string; content: string | undefined } | null {
+  let names: string[];
+  try {
+    names = readdirSync(messagesDir).filter((n) => n.endsWith(".json") && n !== "read.json");
+  } catch {
+    return null;
+  }
+  const files: { name: string; file: string; mtimeMs: number }[] = [];
+  for (const name of names.slice(0, MSG_MAX_STAT)) {
+    const file = path.join(messagesDir, name);
+    try {
+      const st = statSync(file);
+      if (!st.isFile() || st.size <= 0 || st.size > MSG_MAX_BYTES) continue;
+      files.push({ name, file, mtimeMs: st.mtimeMs });
+    } catch {}
+  }
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+  let fallback: { parentId: string; content: string | undefined } | null = null;
+  for (const entry of files.slice(0, MSG_MAX_READ)) {
+    let j: unknown;
+    try {
+      j = JSON.parse(readFileSync(entry.file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!j || typeof j !== "object" || Array.isArray(j)) continue;
+    const rec = j as Record<string, unknown>;
+    const parentId = validParentId(rec.sender, conversation, true);
+    if (!parentId) continue;
+    const rd =
+      rec.renderDetails && typeof rec.renderDetails === "object" && !Array.isArray(rec.renderDetails)
+        ? (rec.renderDetails as Record<string, unknown>)
+        : undefined;
+    const msgTitle = typeof rd?.messageTitle === "string" ? rd.messageTitle.trim() : "";
+    const content = typeof rec.content === "string" ? rec.content : undefined;
+    if (msgTitle === "Message from Parent Agent") return { parentId, content };
+    // Any other messageTitle (e.g. a reply from a child subagent or a task notice) is never a parent.
+    if (msgTitle) continue;
+    if (!hasUserInput && !fallback) fallback = { parentId, content };
+  }
+  return fallback;
+}
+
+function readSummaryDb(
+  dataDir: string,
+  conversation: string,
+  needParent: boolean,
+): { parentId: string | undefined; agentName: string | undefined; title: string | undefined } | null {
+  if (!ID_RE.test(conversation)) return null;
+  const dbFile = path.join(dataDir, "conversation_summaries.db");
+  if (!existsSync(dbFile)) return null;
+  let parentId: string | undefined;
+  let agentName: string | undefined;
+  let title: string | undefined;
+  const rows = querySqlite(dbFile, SUMMARY_SQL, [conversation]);
+  const row = rows?.[0];
+  if (row) {
+    parentId = validParentId(row.parent_conversation_id, conversation);
+    if (typeof row.agent_name === "string" && row.agent_name.trim()) agentName = row.agent_name.trim();
+    if (typeof row.title === "string" && row.title.trim()) title = row.title.trim();
+  }
+  if (needParent && !parentId) {
+    const pRows = querySqlite(dbFile, PARENT_SQL, [conversation]);
+    parentId = validParentId(pRows?.[0]?.parent_id, conversation);
+  }
+  if (!parentId && !agentName && !title) return null;
+  return { parentId, agentName, title };
+}
+
 export function antigravityFacts(
   file: string,
   opts: { conversation: string; workspaces: string[]; env: NodeJS.ProcessEnv },
@@ -315,15 +449,74 @@ export function antigravityFacts(
   const out: SessionFacts = {};
   const url = antigravityRemoteUrl(file, opts);
   if (url) out.url = url;
+  let hasUserInput = false;
+  let parentId: string | undefined;
+  let sysPromptText: string | undefined;
   for (const j of H) {
-    if (j.type !== "USER_INPUT" || typeof j.content !== "string") continue;
-    const m = /<USER_REQUEST>([\s\S]*?)(?:<\/USER_REQUEST>|$)/.exec(j.content);
-    const text = (m ? (m[1] as string) : j.content).trim();
-    const line = (text.split("\n").find((l) => l.trim()) ?? "").trim();
-    if (!line || /^<[a-z_-]+>/i.test(line)) continue;
-    out.title = line.length > 80 ? `${line.slice(0, 80).replace(/\s+\S*$/, "")}…` : line;
-    out.title_source = "first-ask";
-    break;
+    if (j.type === "USER_INPUT") {
+      hasUserInput = true;
+      if (out.title || typeof j.content !== "string") continue;
+      const m = /<USER_REQUEST>([\s\S]*?)(?:<\/USER_REQUEST>|$)/.exec(j.content);
+      const text = (m ? (m[1] as string) : j.content).trim();
+      const line = (text.split("\n").find((l) => l.trim()) ?? "").trim();
+      if (!line || /^<[a-z_-]+>/i.test(line)) continue;
+      out.title = capTitle(line);
+      out.title_source = "first-ask";
+      continue;
+    }
+    if (hasUserInput || parentId) continue;
+    if (j.type !== "SYSTEM_MESSAGE" || typeof j.content !== "string") continue;
+    const m = SYS_MSG_SENDER_RE.exec(j.content);
+    if (!m) continue;
+    const candidate = validParentId(m[1], opts.conversation, true);
+    if (!candidate) continue;
+    parentId = candidate;
+    const cm = /^\[Message\][^\n]*?\bcontent=([\s\S]*?)(?:<\/SYSTEM_MESSAGE>|$)/.exec(j.content.slice(m.index));
+    if (cm?.[1]) sysPromptText = cm[1];
+  }
+  const { dataDir, messagesDir } = extractBrainPaths(file);
+  let msgPromptText: string | undefined;
+  let checkedMessages = false;
+  if (!parentId && messagesDir) {
+    checkedMessages = true;
+    const msg = readParentFromMessages(messagesDir, opts.conversation, hasUserInput);
+    if (msg) {
+      parentId = msg.parentId;
+      msgPromptText = msg.content;
+    }
+  }
+  let dbTitle: string | undefined;
+  let dbAgentName: string | undefined;
+  if (dataDir && (!parentId || !out.title)) {
+    const db = readSummaryDb(dataDir, opts.conversation, !parentId);
+    if (db) {
+      if (!parentId && db.parentId) parentId = db.parentId;
+      dbTitle = db.title;
+      dbAgentName = db.agentName;
+    }
+  }
+  if (parentId) out.parent_id = parentId;
+  if (!out.title) {
+    const summaryLine = dbTitle ? (dbTitle.split(/\r?\n/).find((l) => l.trim()) ?? "").trim() : "";
+    if (summaryLine) {
+      out.title = capTitle(summaryLine);
+      out.title_source = "harness";
+    } else if (out.parent_id) {
+      let promptTitle =
+        (sysPromptText ? cleanDelegatedTitle(sysPromptText) : undefined) ??
+        (msgPromptText ? cleanDelegatedTitle(msgPromptText) : undefined);
+      if (!promptTitle && !checkedMessages && messagesDir) {
+        const msg = readParentFromMessages(messagesDir, opts.conversation, hasUserInput);
+        if (msg?.content) promptTitle = cleanDelegatedTitle(msg.content);
+      }
+      if (promptTitle) {
+        out.title = promptTitle;
+        out.title_source = "first-ask";
+      } else if (dbAgentName) {
+        out.title = capTitle(dbAgentName);
+        out.title_source = "harness";
+      }
+    }
   }
   const times = H.concat(T)
     .map((j) => Date.parse(String(j.created_at ?? j.timestamp ?? "")))
