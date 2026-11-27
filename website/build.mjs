@@ -177,7 +177,9 @@ const marks = {
   plus: lineMark('<circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v7M8.5 12h7"/>'),
   board: lineMark('<rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 9h17M9.5 9v11"/>'),
   folder: lineMark('<path d="M3.5 7.5a2 2 0 0 1 2-2h4.2l2 2h6.8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
-  gauge: lineMark('<path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 14.5l3.2-4.2"/><circle cx="12" cy="14.5" r="1.2"/>'),
+  gauge: lineMark(
+    '<path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 14.5l3.2-4.2"/><circle cx="12" cy="14.5" r="1.2"/>',
+  ),
   split: lineMark('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M13 4.5v15"/>'),
   chat: lineMark('<path d="M5.5 18.5 4 21l3.6-1.4A8.5 8.5 0 1 0 4.4 15"/><path d="M8.5 11h7M8.5 14h4"/>'),
   inbox: lineMark(
