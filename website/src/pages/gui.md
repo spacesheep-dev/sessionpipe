@@ -7,7 +7,10 @@ A separate open-source project ([repository](https://github.com/spacesheep-dev/s
 ## What it does
 
 - **One live board.** Every session, grouped in the order you would look: needs you, working, stale, idle, done.
+- **Connect, group & folder.** Nest related sessions and subagents under one parent across harnesses, group by project, and organize active work into synced custom folders with color dots.
+- **Track usage across agents.** Watch live 5-hour and weekly quota windows and reset countdowns for Claude Code, Codex, and Antigravity in one view, in the sidebar footer, and inside New session.
 - **Answer in place.** A session reads as a chat: allow or deny the open prompt, send the next message, attach images, stop a turn.
+- **Read beside the board.** Open any session in a resizable split panel beside the board with independent scrolling and tabs.
 - **One inbox.** Every open permission, question and error from every machine, newest first.
 - **Search all of it.** ⌘K across every session and this machine's own agent history, sessions from before sessionpipe included, with the network down.
 - **Start a session anywhere.** Pick the machine, the agent and the folder; that machine's own sessionpipe starts it. The GUI runs nothing.

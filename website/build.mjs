@@ -176,6 +176,9 @@ const marks = {
   ),
   plus: lineMark('<circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v7M8.5 12h7"/>'),
   board: lineMark('<rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 9h17M9.5 9v11"/>'),
+  folder: lineMark('<path d="M3.5 7.5a2 2 0 0 1 2-2h4.2l2 2h6.8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
+  gauge: lineMark('<path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 14.5l3.2-4.2"/><circle cx="12" cy="14.5" r="1.2"/>'),
+  split: lineMark('<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M13 4.5v15"/>'),
   chat: lineMark('<path d="M5.5 18.5 4 21l3.6-1.4A8.5 8.5 0 1 0 4.4 15"/><path d="M8.5 11h7M8.5 14h4"/>'),
   inbox: lineMark(
     '<path d="M3.5 13.5h4.5l1.5 2.5h5l1.5-2.5h4.5"/><path d="M5.6 6.2A2 2 0 0 1 7.4 5h9.2a2 2 0 0 1 1.8 1.2l2.1 7.3V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-4.5z"/>',
@@ -755,6 +758,20 @@ const guiShowcase = () => {
 // The tour on /gui/: one band per view, its words beside its window, sides alternating. A view
 // whose stills aren't in public/gui/ is left out.
 const tour = [
+  [
+    "organize",
+    [1200, 750],
+    "Connect, group and folder sessions",
+    "Drag any session onto another — or press M — to connect related work across agents and machines into one tree. Group automatically by project, pin priority runs, and organize active work into custom folders with color dots synced to your phone and iPad.",
+    "The sidebar and board, demo data: nested multi-agent sessions inside custom folders, project groups, and the Move to folder and Move under menu.",
+  ],
+  [
+    "usage",
+    [1200, 750],
+    "Track usage across every agent",
+    "Watch live 5-hour and weekly quota windows and reset countdowns for Claude Code, Codex and Antigravity in one view — plus a live glance line in the sidebar footer and pool-aware quota hints inside New session.",
+    "The Usage page, demo data: live subscription quota bars and reset timers for Antigravity, Codex and Claude Code.",
+  ],
   [
     "session",
     [1200, 750],
