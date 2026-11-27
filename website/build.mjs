@@ -296,6 +296,39 @@ function page({ title, description, body: html, pathname, edit, license, jsonld 
     .replace(/<td align="center">([^<\s]+)<\/td>/g, '<td align="center" class="one">$1</td>')
     .replace(/<th([^>]*)>\s*<\/th>/g, "<td$1></td>");
   const canonical = SITE + pathname;
+  const ogFor = (p) => {
+    if (p === "/gui/" || p.startsWith("/gui/"))
+      return [
+        "/og/gui.png",
+        "sessionpipe-gui: connect and folder sessions across coding agents, track Antigravity, Claude Code and Codex usage, and answer prompts from your laptop or phone.",
+      ];
+    if (p.startsWith("/protocol/") || p.startsWith("/schema/"))
+      return [
+        "/og/protocol.png",
+        "sessionpipe protocol v1: one normalized event envelope for every coding agent's hooks, with per-sink privacy tiers 0 to 3.",
+      ];
+    if (p.startsWith("/docs/") || p.startsWith("/get-started/"))
+      return [
+        "/og/docs.png",
+        "sessionpipe docs: hook every coding agent on your machine in one command with npx sessionpipe install.",
+      ];
+    if (p.startsWith("/receivers/"))
+      return [
+        "/og/receivers.png",
+        "sessionpipe receivers: send your coding-agent event stream to sessionpipe-gui, spacesheep.dev, JSONL, or any HTTPS endpoint.",
+      ];
+    if (p.startsWith("/changelog/"))
+      return [
+        "/og/changelog.png",
+        "sessionpipe changelog: releases of the open protocol, CLI, adapters, and local GUI.",
+      ];
+    return [
+      "/og.png",
+      "sessionpipe: make all your coding agents speak the same language — one open protocol, CLI, and live board.",
+    ];
+  };
+  const [ogPath, ogAlt] = ogFor(pathname);
+  const ogUrl = SITE + ogPath;
   const twin = twins.has(pathname) ? `${pathname}index.md` : null;
   const bar =
     twin && pathname !== "/" && pathname !== "/gui/"
@@ -326,11 +359,13 @@ function page({ title, description, body: html, pathname, edit, license, jsonld 
 <meta property="og:title" content="${title}">
 <meta property="og:description" content="${description}">
 <meta property="og:url" content="${canonical}">
-<meta property="og:image" content="${SITE}/og.png">
+<meta property="og:image" content="${ogUrl}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="sessionpipe: an open protocol, and a client, for what your coding agents are doing.">
+<meta property="og:image:alt" content="${ogAlt}">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="${ogUrl}">
+<meta name="twitter:image:alt" content="${ogAlt}">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
