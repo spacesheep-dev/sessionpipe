@@ -1,29 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 /** sessionpipe-core/service — a per-user background service for a sessionpipe process:
- *  a launchd agent on macOS, a systemd user unit on Linux. The control daemon runs
- *  under it (`org.sessionpipe.control`), and so can a receiver of the person's own (a
- *  board on their machine), with the same files and the same commands. Node only: it
- *  writes files and runs launchctl, systemctl and loginctl, so it is never part of the
- *  root export, which stays Worker- and browser-safe.
+ *  a launchd agent on macOS, a systemd user unit on Linux, a scheduled task at the
+ *  user's logon on Windows (windows.ts). The control daemon runs under it
+ *  (`org.sessionpipe.control`), and so can a receiver of the person's own (a board on
+ *  their machine), with the same files and the same commands. Node only: it writes files
+ *  and runs launchctl, systemctl and loginctl (on Windows schtasks, taskkill and
+ *  PowerShell), so it is never part of the root export, which stays Worker- and
+ *  browser-safe.
  *
- *  Both files restart the process when it exits non-zero, and when it exits
+ *  Each of the three restarts the process when it exits non-zero, and when it exits
  *  UPDATE_EXIT (75, sessionpipe-core/version) to come back on new code. The process is
- *  told which manager that is in SESSIONPIPE_SERVICE (`launchd`, `systemd`). Nothing
- *  here needs root, and a dry run touches nothing: it answers the files it would write
- *  and the commands it would run.
+ *  told which manager that is in SESSIONPIPE_SERVICE (`launchd`, `systemd`; on Windows
+ *  `schtasks:<pid>`, the pid being the launcher's, its parent). Nothing here needs root
+ *  or an administrator, and a dry run touches nothing: it answers the files it would
+ *  write and the commands it would run.
  *
  *  Installing over a service that is there replaces it, and one that is running runs the
  *  new file afterwards. Where the manager refuses the new one, the file that was there
  *  before is put back and that service started again, so a refusal never leaves the
  *  machine with the old one stopped and a file that names something else. */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  folderRemoveScript,
+  launched,
+  launcherText,
+  lookScript,
+  parseProcs,
+  system32,
+  TASK_RUNNING,
+  taskName,
+  taskProcs,
+  taskXml,
+  taskXmlBytes,
+  unsafeWord,
+} from "./windows.js";
 
-/** One service, as both managers need it. */
+export { taskName } from "./windows.js";
+
+/** One service, as each manager needs it. */
 export interface ServiceSpec {
-  /** The launchd label, also the plist's name: `org.sessionpipe.control`. */
+  /** The launchd label, also the plist's name: `org.sessionpipe.control`. On Windows the
+   *  task's name under `\sessionpipe\`, and the launcher's file name. */
   label: string;
   /** The systemd user unit's file name: `sessionpipe-control.service`. */
   unit: string;
@@ -33,10 +53,13 @@ export interface ServiceSpec {
   argv: string[];
   /** More environment for the process, beside SESSIONPIPE_SERVICE. */
   env?: Record<string, string>;
-  /** Where launchd writes its stdout and stderr (journald keeps a unit's). */
+  /** Where launchd writes its stdout and stderr, and the Windows launcher appends them
+   *  (journald keeps a unit's). */
   logPath: string;
   /** The home the files go under; the user's own by default. */
   home?: string;
+  /** Windows: the node that runs the launcher; the one running this by default. */
+  node?: string;
 }
 
 /** A file the service writes, and what is in it. */
@@ -49,7 +72,12 @@ export interface ServiceFile {
 export type Exec = (cmd: string, args: string[]) => string;
 
 const execQuiet: Exec = (cmd, args) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000 });
+  execFileSync(cmd, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 15_000,
+    windowsHide: true,
+  });
 
 /** Whether a command ran and said yes: a look that never throws. */
 const answers = (exec: Exec, cmd: string, args: string[]): boolean => {
@@ -74,8 +102,8 @@ const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** One systemd argument, quoted: backslashes and quotes escaped, `%` doubled (a specifier otherwise). */
 const sd = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
 
-/** The plist and the unit for a service, and where each goes. */
-export function serviceFiles(s: ServiceSpec): { plist: ServiceFile; unit: ServiceFile } {
+/** The plist, the unit and the Windows launcher for a service, and where each goes. */
+export function serviceFiles(s: ServiceSpec): { plist: ServiceFile; unit: ServiceFile; launcher: ServiceFile } {
   const home = s.home ?? os.homedir();
   const env = (manager: string) => ({ SESSIONPIPE_SERVICE: manager, ...s.env });
   const plistEnv = Object.entries(env("launchd"))
@@ -117,6 +145,17 @@ WantedBy=default.target
   return {
     plist: { path: path.join(home, "Library", "LaunchAgents", `${s.label}.plist`), text: plist },
     unit: { path: path.join(home, ".config", "systemd", "user", s.unit), text: unit },
+    launcher: {
+      path: path.join(home, "AppData", "Local", "sessionpipe", "service", `${s.label}.cjs`),
+      text: launcherText({
+        description: s.description,
+        label: s.label,
+        node: s.node ?? process.execPath,
+        argv: s.argv,
+        env: s.env ?? {},
+        log: s.logPath,
+      }),
+    },
   };
 }
 
@@ -151,7 +190,7 @@ export interface ServicePlan {
    *  at what it has (`launchctl print`) between them aren't among them. */
   commands: string[];
   /** Which manager runs it now: null on a platform with none, or where it isn't reachable. */
-  manager: "launchd" | "systemd" | null;
+  manager: "launchd" | "systemd" | "schtasks" | null;
   /** launchd: `gui` when someone is at the screen, else `user` (it starts again at the next login there). */
   domain?: "gui" | "user";
   /** systemd: whether it outlives the login, in words. */
@@ -161,6 +200,8 @@ export interface ServicePlan {
   unreachable?: string;
   /** That file is again the one that was there before: the new one was taken back. */
   restored?: true;
+  /** Windows: why nothing was written at all, in a sentence. */
+  why?: string;
 }
 
 /** launchd would not start a service. `message` names the launchctl commands that do it
@@ -189,6 +230,10 @@ export interface InstallOptions extends ServiceSpec {
   user?: string;
   /** How a wait for launchd passes; this thread sleeps by default. */
   sleep?: (ms: number) => void;
+  /** Windows: the environment of the shell this runs in, which says where Windows is
+   *  (%SystemRoot%) and whose logon starts the task (USERDOMAIN, USERNAME); this
+   *  process's own by default. */
+  shell?: NodeJS.ProcessEnv;
 }
 
 const line = (cmd: string, args: string[]) => [cmd, ...args].join(" ");
@@ -202,12 +247,50 @@ const sleepSync = (ms: number) => {
 const LET_GO_MS = 10_000;
 const LOOK_MS = 100;
 
+const POWERSHELL = ["-NoProfile", "-NonInteractive", "-Command"];
+
+/** The programs the Windows half runs, each by its full path (windows.ts `system32`). */
+const tools = (shell: NodeJS.ProcessEnv) => ({
+  schtasks: system32(shell, "schtasks.exe"),
+  taskkill: system32(shell, "taskkill.exe"),
+  powershell: system32(shell, "WindowsPowerShell", "v1.0", "powershell.exe"),
+});
+
+/** What Task Scheduler has under a label, and what runs for it. */
+interface TaskLook {
+  /** The task's state as Task Scheduler numbers it; null when no task has the label. */
+  state: number | null;
+  /** The processes a task of ours started: what stopping it ends, each with its tree. */
+  roots: number[];
+  /** The process the launcher runs now. */
+  daemon: number | null;
+}
+
+/** A look at the task and at the processes it started (windows.ts `lookScript`); throws
+ *  where PowerShell can't be run, or doesn't answer as the script does. */
+function taskLook(exec: Exec, shell: NodeJS.ProcessEnv, label: string, launcher: string): TaskLook {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "sessionpipe-service-"));
+  const file = path.join(tmp, "processes.json");
+  try {
+    const said = exec(tools(shell).powershell, [...POWERSHELL, lookScript(label, file)]).trim();
+    if (said !== "none" && !/^\d+$/.test(said)) throw new Error(`unexpected answer: ${said.slice(0, 80)}`);
+    const node = launched(textOf(launcher) ?? "")?.node ?? null;
+    return {
+      state: said === "none" ? null : Number(said),
+      ...taskProcs(parseProcs(readFileSync(file, "utf8")), launcher, node),
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 /** Write the service for this platform and start it now. A service already there is
  *  replaced, and runs the new file afterwards (launchd: booted out first, and started
  *  once the old one is gone; systemd: restarted where the unit was active, since
- *  `enable --now` leaves a running unit on the file it was started from). Where the
- *  manager will not have the new one, the file from before is put back and that service
- *  started again. */
+ *  `enable --now` leaves a running unit on the file it was started from; Windows: the
+ *  task ended and what it started stopped, then the task registered again and run).
+ *  Where the manager will not have the new one, the file from before is put back and
+ *  that service started again. */
 export function installService(o: InstallOptions): ServicePlan {
   const f = serviceFiles(o);
   const platform = o.platform ?? process.platform;
@@ -330,6 +413,59 @@ export function installService(o: InstallOptions): ServicePlan {
     }
     return { files: [f.unit], commands, manager: "systemd", linger: ensureLinger(user, run) };
   }
+  if (platform === "win32") {
+    const shell = o.shell ?? process.env;
+    const t = tools(shell);
+    const name = taskName(o.label);
+    const node = o.node ?? process.execPath;
+    // The two paths on the task's own command line are all that conhost reads.
+    const bad = unsafeWord([node, f.launcher.path]);
+    if (bad !== undefined)
+      return {
+        files: [],
+        commands,
+        manager: null,
+        why: `a scheduled task can't carry ${JSON.stringify(bad)} on its command line (a quote, a % or a line end)`,
+      };
+    const old = before(f.launcher);
+    // A look, not a step: what runs for the task now is what replacing it stops. Where
+    // PowerShell can't be asked, schtasks is still told to end the task.
+    let was: TaskLook = { state: TASK_RUNNING, roots: [], daemon: null };
+    if (!o.dryRun)
+      try {
+        was = taskLook(real, shell, o.label, f.launcher.path);
+      } catch {}
+    write(f.launcher);
+    // `schtasks /Create /XML` takes the definition from a file, which goes again after.
+    const definition = path.join(path.dirname(f.launcher.path), `${o.label}.xml`);
+    const user =
+      shell.USERDOMAIN && shell.USERNAME
+        ? `${shell.USERDOMAIN}\\${shell.USERNAME}`
+        : (o.user ?? os.userInfo().username);
+    if (!o.dryRun)
+      writeFileSync(
+        definition,
+        taskXmlBytes(taskXml({ description: o.description, user, node, launcher: f.launcher.path })),
+      );
+    try {
+      // `schtasks /End` ends conhost alone: the launcher and the process it runs go by
+      // their own ids, each with its tree.
+      if (!o.dryRun && was.state !== null) answers(run, t.schtasks, ["/End", "/TN", name]);
+      for (const pid of was.roots) answers(run, t.taskkill, ["/PID", String(pid), "/T", "/F"]);
+      run(t.schtasks, ["/Create", "/TN", name, "/XML", definition, "/F"]);
+      run(t.schtasks, ["/Run", "/TN", name]);
+    } catch {
+      if (old === null) return { files: [f.launcher], commands, manager: null, unreachable: f.launcher.path };
+      // The launcher that was there before goes back, and the task (the one from before,
+      // or the new one, which runs the same file) is run again where schtasks answers.
+      writeFileSync(f.launcher.path, old);
+      answers(run, t.schtasks, ["/Run", "/TN", name]);
+      return { files: [f.launcher], commands, manager: null, unreachable: f.launcher.path, restored: true };
+    } finally {
+      rmSync(definition, { force: true });
+    }
+    return { files: [f.launcher], commands, manager: "schtasks" };
+  }
   return { files: [], commands, manager: null };
 }
 
@@ -337,13 +473,15 @@ export function installService(o: InstallOptions): ServicePlan {
 export interface ServiceState {
   /** The manager that can be asked here; null where this platform has none, and where
    *  the one it has can't be asked from this process (no `launchctl` to run; no systemd
-   *  user manager to reach: a container, WSL without systemd, a shell with no session). */
-  manager: "launchd" | "systemd" | null;
+   *  user manager to reach: a container, WSL without systemd, a shell with no session;
+   *  no PowerShell that answers about Task Scheduler). */
+  manager: "launchd" | "systemd" | "schtasks" | null;
   /** Where its file is, or would be. */
   file: string | null;
   /** The file is there. */
   installed: boolean;
-  /** The manager has the service now (launchd: in either domain; systemd: active). */
+  /** The manager has the service now (launchd: in either domain; systemd: active;
+   *  Task Scheduler: the task is running). */
   loaded: boolean;
   /** The program and arguments the file names; null when there is no file or it has none. */
   argv: string[] | null;
@@ -356,11 +494,14 @@ const unxml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").repla
 const unsd = (s: string) => s.replace(/\\(.)/g, "$1").replace(/%%/g, "%");
 
 /** The program and its arguments a service file names, as `serviceFiles` wrote them: a
- *  plist's ProgramArguments, a unit's ExecStart. Null when the text has neither. */
+ *  plist's ProgramArguments, a unit's ExecStart, what a Windows launcher runs. Null when
+ *  the text has none of them. */
 export function serviceArgv(text: string): string[] | null {
   const plist = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1];
   if (plist !== undefined)
     return [...plist.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => unxml(m[1] as string));
+  const launcher = launched(text);
+  if (launcher) return launcher.argv;
   const unit = /^ExecStart=(.*)$/m.exec(text)?.[1];
   if (unit === undefined) return null;
   return [...unit.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => unsd(m[1] as string));
@@ -368,8 +509,8 @@ export function serviceArgv(text: string): string[] | null {
 
 /** The environment a service file gives its process, as `serviceFiles` wrote it and as
  *  a person may have added to it by hand: a plist's EnvironmentVariables, a unit's
- *  `Environment=` lines (each assignment quoted or bare). SESSIONPIPE_SERVICE is among
- *  them. Null when the text is neither file. */
+ *  `Environment=` lines (each assignment quoted or bare), a Windows launcher's `env`.
+ *  SESSIONPIPE_SERVICE is among them. Null when the text is none of those files. */
 export function serviceEnvironment(text: string): Record<string, string> | null {
   const plist = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(text)?.[1];
   if (plist !== undefined)
@@ -379,6 +520,8 @@ export function serviceEnvironment(text: string): Record<string, string> | null 
         unxml(m[2] as string),
       ]),
     );
+  const launcher = launched(text);
+  if (launcher) return { SESSIONPIPE_SERVICE: "schtasks", ...launcher.env };
   if (!/^ExecStart=/m.test(text)) return null;
   const env: Record<string, string> = {};
   // One line may hold several assignments, and systemd lets the quotes go round all of
@@ -407,7 +550,8 @@ const notRun = (e: unknown): boolean => typeof (e as { code?: unknown } | null)?
 
 /** Whether this platform's manager has the service now. A look only: nothing is
  *  written, started or stopped (`launchctl print`; `systemctl --user is-active`, and
- *  where that says no, `systemctl --user show` to learn whether systemd answered at all). */
+ *  where that says no, `systemctl --user show` to learn whether systemd answered at all;
+ *  on Windows one PowerShell script that reads the task and the process list). */
 export function serviceState(o: UninstallOptions): ServiceState {
   const f = serviceFiles({ ...o, description: "", argv: [], logPath: "" });
   const platform = o.platform ?? process.platform;
@@ -455,6 +599,20 @@ export function serviceState(o: UninstallOptions): ServiceState {
       pid: pidIn(main),
     };
   }
+  if (platform === "win32") {
+    let seen: TaskLook | null = null;
+    try {
+      seen = taskLook(exec, o.shell ?? process.env, o.label, f.launcher.path);
+    } catch {}
+    return {
+      manager: seen ? "schtasks" : null,
+      file: f.launcher.path,
+      installed: existsSync(f.launcher.path),
+      loaded: seen?.state === TASK_RUNNING,
+      argv: argvOf(f.launcher.path),
+      pid: seen?.daemon ?? null,
+    };
+  }
   return { manager: null, file: null, installed: false, loaded: false, argv: null, pid: null };
 }
 
@@ -469,6 +627,8 @@ export interface UninstallOptions {
   exec?: Exec;
   platform?: NodeJS.Platform;
   uid?: string;
+  /** Windows: the environment that says where Windows is; this process's own by default. */
+  shell?: NodeJS.ProcessEnv;
 }
 
 /** Stop the service and remove its file, where this platform has one; nothing where
@@ -500,6 +660,21 @@ export function uninstallService(o: UninstallOptions): { files: string[]; comman
     run("systemctl", ["--user", "disable", "--now", o.unit]);
     remove(f.unit.path);
     run("systemctl", ["--user", "daemon-reload"]);
+  }
+  if (platform === "win32" && existsSync(f.launcher.path)) {
+    const shell = o.shell ?? process.env;
+    const t = tools(shell);
+    let roots: number[] = [];
+    if (!o.dryRun)
+      try {
+        roots = taskLook(real, shell, o.label, f.launcher.path).roots;
+      } catch {}
+    run(t.schtasks, ["/End", "/TN", taskName(o.label)]);
+    for (const pid of roots) run(t.taskkill, ["/PID", String(pid), "/T", "/F"]);
+    run(t.schtasks, ["/Delete", "/TN", taskName(o.label), "/F"]);
+    remove(f.launcher.path);
+    // Best-effort (windows.ts): where the folder can't be removed it stays, empty.
+    run(t.powershell, [...POWERSHELL, folderRemoveScript()]);
   }
   return { files, commands };
 }

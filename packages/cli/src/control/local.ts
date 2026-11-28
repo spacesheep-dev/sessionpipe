@@ -140,7 +140,7 @@ export interface Health {
   accounts: { dir: string; signed_in: boolean | null }[];
   /** The copy the daemon runs: its cli.js by real path, and who starts it again when it
    *  exits to restart (null: nobody, it supervises its own successor). */
-  copy?: { cli: string; via: "launchd" | "systemd" | "supervisor" | null };
+  copy?: { cli: string; via: "launchd" | "systemd" | "schtasks" | "supervisor" | null };
 }
 
 /** The replies that end an ask. */

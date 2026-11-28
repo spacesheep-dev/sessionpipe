@@ -69,7 +69,7 @@ import {
   type Trouble,
 } from "./control/health.js";
 import { ask, type Health, socketPath } from "./control/local.js";
-import { placeService } from "./control/pair.js";
+import { managerName, placeService } from "./control/pair.js";
 import {
   controlFile,
   controlState,
@@ -1358,10 +1358,13 @@ async function checkup(deep: boolean): Promise<{ report: Record<string, unknown>
       value: loaded
         ? "started but not answering"
         : look
-          ? `not loaded: ${look.manager} doesn't have it`
+          ? `not loaded: ${managerName(look.manager as NonNullable<typeof look.manager>)} doesn't have it`
           : "not running",
     });
-    if (look && !loaded) warnings.push(`the background service isn't loaded: ${look.manager} doesn't have it`);
+    if (look && !loaded)
+      warnings.push(
+        `the background service isn't loaded: ${managerName(look.manager as NonNullable<typeof look.manager>)} doesn't have it`,
+      );
     if (loaded)
       todo.push({
         order: 1,

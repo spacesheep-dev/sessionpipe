@@ -210,7 +210,7 @@ describe.runIf(process.platform !== "win32")("the service as its file says it", 
       pid: null,
     });
     // A platform with no manager: nothing to run, and nothing seen but that.
-    expect(serviceSeen({ env: {}, platform: "win32" })).toEqual({
+    expect(serviceSeen({ env: {}, platform: "freebsd" })).toEqual({
       manager: null,
       file: null,
       installed: false,
@@ -218,7 +218,7 @@ describe.runIf(process.platform !== "win32")("the service as its file says it", 
       argv: null,
       pid: null,
     });
-    expect(serviceLook({ env: {}, platform: "win32" })).toBeNull();
+    expect(serviceLook({ env: {}, platform: "freebsd" })).toBeNull();
   });
 });
 

@@ -13,6 +13,7 @@ import {
   discover,
   ensureLinger,
   installService,
+  managerName,
   off,
   type PairOptions,
   pair,
@@ -830,10 +831,79 @@ describe("the service that keeps the daemon running", () => {
     expect(installService({ node: "/n", cli: "/c.js", env, exec, platform: "freebsd" })).toBe(
       "no service manager for this platform yet; run `sessionpipe control run` yourself",
     );
-    on("win32");
+    on("freebsd");
     expect(installService({ node: "/n", cli: "/c.js", env, exec })).toContain("no service manager for this platform");
     expect(existsSync(path.join(tmp, "state"))).toBe(false);
     expect(exec.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("windows: a scheduled task at logon runs the launcher; says so when Task Scheduler won't take it", () => {
+    const launcher = path.join(home, "AppData", "Local", "sessionpipe", "service", "org.sessionpipe.control.cjs");
+    const log = path.join(tmp, "state", "control", "daemon.log");
+    // Task Scheduler stood in: PowerShell has nothing to say, and schtasks takes what it is given.
+    let refuse = "";
+    exec.mockImplementation((cmd, args) => {
+      if (cmd.endsWith("powershell.exe") || args[0] === refuse) throw new Error("ERROR: Access is denied.");
+      return "";
+    });
+    on("win32");
+    let r = installService({ node: "C:\\node\\node.exe", cli: "C:\\sp\\cli.js", env, exec });
+    expect(r).toBe(
+      `scheduled task \\sessionpipe\\org.sessionpipe.control: it starts when you log on to Windows, with no window (log: ${log})`,
+    );
+    on(platform);
+    const text = readFileSync(launcher, "utf8");
+    expect(text).toContain(
+      '"node":"C:\\\\node\\\\node.exe","argv":["C:\\\\node\\\\node.exe","C:\\\\sp\\\\cli.js","control","run"]',
+    );
+    expect(text).toContain(`"log":${JSON.stringify(log)}`);
+    expect(existsSync(log)).toBe(true);
+    expect(exec.mock.calls.map((c) => `${path.win32.basename(c[0])} ${c[1][0]}`)).toEqual([
+      "powershell.exe -NoProfile",
+      "schtasks.exe /End",
+      "schtasks.exe /Create",
+      "schtasks.exe /Run",
+    ]);
+    expect(exec.mock.calls[2]?.[1].slice(0, 3)).toEqual(["/Create", "/TN", "\\sessionpipe\\org.sessionpipe.control"]);
+    expect(managerName("schtasks")).toBe("Task Scheduler");
+    expect(managerName("launchd")).toBe("launchd");
+    // `update` places it the same way, and keeps what the launcher gave the daemon.
+    expect(
+      placeService({ node: "C:\\node2\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" }),
+    ).toBeUndefined();
+    expect(readFileSync(launcher, "utf8")).toContain('"node":"C:\\\\node2\\\\node.exe"');
+    // Refused: the same launcher again has nothing to take back; another one is taken back.
+    refuse = "/Create";
+    const placed = readFileSync(launcher, "utf8");
+    r = installService({ node: "C:\\node2\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" });
+    expect(r).toBe(
+      `wrote ${launcher}, but Task Scheduler didn't take the task; run \`sessionpipe control run\` yourself`,
+    );
+    r = installService({ node: "C:\\node3\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" });
+    expect(r).toBe(
+      `left ${launcher} as it was, but Task Scheduler didn't take the task; run \`sessionpipe control run\` yourself`,
+    );
+    expect(readFileSync(launcher, "utf8")).toBe(placed);
+    expect(() =>
+      placeService({ node: "C:\\node3\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" }),
+    ).toThrow(
+      /^Task Scheduler didn't take the task \(schtasks refused it\); the service file that was there before was put back$/,
+    );
+    rmSync(launcher);
+    expect(() =>
+      placeService({ node: "C:\\node3\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" }),
+    ).toThrow(/^Task Scheduler didn't take the task \(schtasks refused it\)$/);
+    // A node the task's command line can't carry: nothing is written, and why is said.
+    rmSync(launcher);
+    const why =
+      'a scheduled task can\'t carry "C:\\\\100%\\\\node.exe" on its command line (a quote, a % or a line end)';
+    expect(installService({ node: "C:\\100%\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" })).toBe(
+      `${why}; run \`sessionpipe control run\` yourself`,
+    );
+    expect(existsSync(launcher)).toBe(false);
+    expect(() =>
+      placeService({ node: "C:\\100%\\node.exe", cli: "C:\\sp\\cli.js", env, exec, platform: "win32" }),
+    ).toThrow(why);
   });
 
   it("update places the service or throws with why: it never answers words that could be passed over", () => {
@@ -842,11 +912,10 @@ describe("the service that keeps the daemon running", () => {
     expect(placeService({ node: "/n", cli: "/c.js", env, exec, platform: "darwin" })).toBeUndefined();
     expect(readFileSync(plist, "utf8")).toContain("<string>/c.js</string>");
     // Where nothing manages services there is none to place.
-    for (const p of ["win32", "freebsd"] as const)
-      expect(() => placeService({ node: "/n", cli: "/c.js", env, exec, platform: p })).toThrow(
-        "nothing on this computer starts the background service by itself",
-      );
-    on("win32");
+    expect(() => placeService({ node: "/n", cli: "/c.js", env, exec, platform: "freebsd" })).toThrow(
+      "nothing on this computer starts the background service by itself",
+    );
+    on("freebsd");
     expect(() => placeService({ node: "/n", cli: "/c.js", env, exec })).toThrow("nothing on this computer starts");
     on(platform);
     // A sessionpipe pointed away from this computer's files, with nothing stood in: left alone.

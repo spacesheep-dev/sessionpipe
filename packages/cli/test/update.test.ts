@@ -24,6 +24,7 @@ import {
   DAY_MS,
   isDue,
   readUpdate,
+  restartedBy,
   restartVia,
   supervise,
   UPDATE_EXIT,
@@ -907,7 +908,7 @@ describe("the daemon's auto-update", () => {
   it("status says what it does and what it found", () => {
     const now = Date.parse("2026-10-04T12:00:00Z");
     const rec = { checked_at: new Date(now - 3 * 3600_000).toISOString(), latest: "0.6.0" };
-    const on = updateSummary({ off: null, paired: true, rec, platform: "linux" });
+    const on = updateSummary({ off: null, paired: true, rec });
     expect(on.auto).toBe(true);
     expect(on).toMatchObject({ off: null, last_check: rec.checked_at, latest: "0.6.0", last_error: null });
     const noDaemon = updateSummary({ off: null, paired: false, rec: {} });
@@ -926,6 +927,19 @@ describe("who restarts the daemon", () => {
     // A session the daemon started inherits the variable; it isn't launchd's job.
     expect(restartVia({ ...base, ppid: 999, env: { XPC_SERVICE_NAME: "org.sessionpipe.control" } })).toBeNull();
     expect(restartVia({ ...base, env: { XPC_SERVICE_NAME: "application.com.apple.Terminal.123" } })).toBeNull();
+  });
+  it("Task Scheduler: the launcher named itself by its pid, and is this process's parent", () => {
+    const win = { pid: 4242, ppid: 4100, platform: "win32" as NodeJS.Platform };
+    expect(restartVia({ ...win, env: { SESSIONPIPE_SERVICE: "schtasks:4100" } })).toBe("schtasks");
+    // A session the daemon started inherits the variable, and has another parent.
+    expect(restartVia({ ...win, ppid: 4242, env: { SESSIONPIPE_SERVICE: "schtasks:4100" } })).toBeNull();
+    expect(restartVia({ ...win, env: { SESSIONPIPE_SERVICE: "schtasks" } })).toBeNull();
+    expect(restartVia({ ...win, env: {} })).toBeNull();
+    // The words are the launcher's on Windows alone.
+    expect(restartVia({ ...win, platform: "darwin", env: { SESSIONPIPE_SERVICE: "schtasks:4100" } })).toBeNull();
+    expect(restartedBy("schtasks")).toBe("the scheduled task's launcher");
+    expect(restartedBy("supervisor")).toBe("the supervising sessionpipe");
+    expect(restartedBy("systemd")).toBe("systemd");
   });
   it("systemd: the process is our unit's main process (cgroup v2 and v1)", () => {
     const v2 = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/sessionpipe-control.service\n";

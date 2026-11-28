@@ -212,7 +212,8 @@ Tells the receiver, then forgets its token and keys.
 
 {{usage control run}}
 
-The daemon itself, in the foreground: what launchd or systemd starts. One runs per machine; a
+The daemon itself, in the foreground: what launchd, systemd or (on Windows) the scheduled
+task starts. One runs per machine; a
 second one finds the first, says so and exits 0.
 
 {{usage wait}}
